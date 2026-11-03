@@ -116,6 +116,12 @@ drift report, the skills-lock bumper and the Dependabot sweep all use it.
 secret because its gates check that both values exist before minting.
 App names are `<APP_NAME_PREFIX>-<app>`.
 
+The base needs four of them, created in step 6: the three fleet-wide Apps
+and `roster`. `roster` acts only for evals, but `fleet.yml` names its id as
+a bypass actor, so the first apply cannot run without it. `eval-improve`
+and `registry-read` serve only `skills-evals`; `/adopt-evals` creates and
+installs them in steps 33 and 34.
+
 A lost private key cannot be recovered: generate a new one on the App's
 settings page and store it with the `gh secret set` command
 `create-apps.sh` prints for a missing key.
