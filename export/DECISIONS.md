@@ -1773,3 +1773,7 @@ the `agentskills` README plugin-table edit no longer matched its source.
 - **`_agent-guidance`:** `sync.sh`, `bump-consumer-locks.sh`, the fleet-worker
   routine and `test/run-tests.sh` changed with no manifest change.
   `package-lock.json` is unchanged, so the Node install is the same.
+
+### Round 3 (2026-11-03)
+
+The re-sync's failure issue (#14) caught skills-evals' dashboard gaining a `ci_red_runs` placeholder key, which broke the cold-start edit on `dashboard/page/index.html`. The edit's old and new text now carry that key; its intent (hide the two cold-start placeholder rows like the others) is unchanged. _agent-guidance → ba30b6f and skills-evals → c6b38e1 needed nothing else.
