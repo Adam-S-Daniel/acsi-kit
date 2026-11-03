@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# status.sh [--config fleet.env] [--mark <id>] [--unmark <id>]
+# status.sh [--config fleet.env] [--track base|evals|all] [--mark <id>] [--unmark <id>]
 #
 # Where you are in the quick start. Read-only toward GitHub: it makes no write
 # call. For each step in steps.json it decides done or not done from the real
@@ -20,10 +20,15 @@
 # A path inside this kit or any git work tree is refused. It never prompts.
 #
 # Prints one line per step (done, next, todo, optional, or "asked: done"),
-# then "N of M done" and the next step: title, time estimate, kind, what to
-# run and the docs section that explains it. Steps are sequential: the first
-# step not done is next, except that an optional step never blocks the next
-# one. A step done earlier can turn not done when something changes under it
+# then "N of M done", how many steps of each track are done, and the next
+# step: title, time estimate, kind, what to run and the docs section that
+# explains it. Steps are sequential: the first step not done is next, except
+# that an optional step never blocks the next one.
+#
+# Each step has a track (steps.json): base, the guidance, skills, settings,
+# hooks and machines /adopt sets up, or evals, what /adopt-evals adds for the
+# eval loop. --track base or --track evals lists only that track's steps and
+# picks the next step among them; the default, all, lists every step. A step done earlier can turn not done when something changes under it
 # (a merged pull request that breaks a pin); rerun it.
 # Exit 0 whatever the progress; 1 only on its own errors. Never prints a
 # secret or variable value (verify.sh reads names only). Needs: gh, jq.
@@ -34,29 +39,33 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$HERE/lib/common.sh"
 
 STEPS_FILE=$HERE/steps.json
-MARKS=() UNMARKS=()
+MARKS=() UNMARKS=() TRACK=all
 parse_common_args "$@"
 set -- "${REST_ARGS[@]}"
 while [ $# -gt 0 ]; do
   case $1 in
     --mark) [ $# -ge 2 ] || die "--mark needs a step id"; MARKS+=("$2"); shift ;;
     --unmark) [ $# -ge 2 ] || die "--unmark needs a step id"; UNMARKS+=("$2"); shift ;;
+    --track) [ $# -ge 2 ] || die "--track needs base, evals or all"; TRACK=$2; shift ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
 done
+case $TRACK in base|evals|all) ;; *) die "--track wants base, evals or all, not: $TRACK" ;; esac
 require_tools jq
 
 # ------------------------------------------------------------------ steps
 [ -f "$STEPS_FILE" ] || die "steps file not found: $STEPS_FILE"
 jq -e '.steps | type == "array" and length > 0' "$STEPS_FILE" >/dev/null 2>&1 || die "$STEPS_FILE: no steps list"
 IDS=()
-declare -A TITLE KIND RUN LINK MIN CTYPE CARG OPT CTAG
-while IFS=$'\t' read -r id title kind run link minutes ctype opt ctag carg; do
+declare -A TITLE KIND RUN LINK MIN CTYPE CARG OPT CTAG TRK
+while IFS=$'\t' read -r id title kind run link minutes ctype opt ctag trk carg; do
   [ -z "${TITLE[$id]+set}" ] || die "$STEPS_FILE: step id $id appears twice"
   case $ctype in config|verify|files|ask) ;; *) die "$STEPS_FILE: step $id has an unknown check type: $ctype" ;; esac
-  IDS+=("$id") TITLE[$id]=$title KIND[$id]=$kind RUN[$id]=$run LINK[$id]=$link MIN[$id]=$minutes CTYPE[$id]=$ctype CARG[$id]=$carg OPT[$id]=$opt CTAG[$id]=$ctag
+  case $trk in base|evals) ;; *) die "$STEPS_FILE: step $id has an unknown track: $trk (want base or evals)" ;; esac
+  IDS+=("$id") TITLE[$id]=$title KIND[$id]=$kind RUN[$id]=$run LINK[$id]=$link MIN[$id]=$minutes CTYPE[$id]=$ctype CARG[$id]=$carg OPT[$id]=$opt CTAG[$id]=$ctag TRK[$id]=$trk
 done < <(jq -r '.steps[] | [.id, .title, .kind, (.run | gsub("`"; "")), .link, (.minutes | tostring), .check.type, (if .optional then "yes" else "no" end), (.check.record // "-"),
+  (if (.track | type) == "string" and .track != "" then .track else "-" end),
   (if .check.type == "verify" then (.check.groups | join(","))
    elif .check.type == "files" then ([.check.files[] | .repo + ":" + .path] | join(" "))
    else "" end)] | @tsv' "$STEPS_FILE")
@@ -135,8 +144,13 @@ for id in "${IDS[@]}"; do
 done
 
 # ------------------------------------------------------------------ report
-NEXT="" N=0
+NEXT="" N=0 M=0
+declare -A TRACK_DONE=([base]=0 [evals]=0) TRACK_ALL=([base]=0 [evals]=0)
 for id in "${IDS[@]}"; do
+  TRACK_ALL[${TRK[$id]}]=$((TRACK_ALL[${TRK[$id]}] + 1))
+  [ -z "${STEP_DONE[$id]:-}" ] || TRACK_DONE[${TRK[$id]}]=$((TRACK_DONE[${TRK[$id]}] + 1))
+  [ "$TRACK" = all ] || [ "${TRK[$id]}" = "$TRACK" ] || continue
+  M=$((M + 1))
   if [ -n "${STEP_DONE[$id]:-}" ]; then
     N=$((N + 1))
     if [ "${CTYPE[$id]}" = ask ] && [ -n "${ASKED[$id]:-}" ]; then label="asked: done"; else label="done"; fi
@@ -149,9 +163,17 @@ for id in "${IDS[@]}"; do
   fi
   printf '%-11s  %-3s  %s\n' "$label" "$id" "${TITLE[$id]}"
 done
-printf '%d of %d done\n' "$N" "${#IDS[@]}"
+printf '%d of %d done\n' "$N" "$M"
+printf 'base: %d of %d done; evals: %d of %d done\n' "${TRACK_DONE[base]}" "${TRACK_ALL[base]}" "${TRACK_DONE[evals]}" "${TRACK_ALL[evals]}"
+if [ "$TRACK" = evals ] && [ "${TRACK_DONE[base]}" -lt "${TRACK_ALL[base]}" ]; then
+  log "The base track is not done yet: /adopt-evals runs it first (bootstrap/status.sh --track base lists it)."
+fi
 if [ -z "$NEXT" ]; then
-  log "Next: nothing; every required step is done. bootstrap/verify.sh checks the whole setup."
+  case $TRACK in
+    all) log "Next: nothing; every required step is done. bootstrap/verify.sh checks the whole setup." ;;
+    base) log "Next: nothing; every required base step is done. The evals track (bootstrap/status.sh --track evals, or /adopt-evals) adds the eval loop." ;;
+    evals) log "Next: nothing; every required evals step is done. bootstrap/verify.sh checks the whole setup." ;;
+  esac
   exit 0
 fi
 log "Next: $NEXT ${TITLE[$NEXT]} (about ${MIN[$NEXT]} minutes, ${KIND[$NEXT]})"

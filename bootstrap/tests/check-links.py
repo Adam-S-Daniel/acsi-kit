@@ -3,7 +3,7 @@
 
     check-links.py <kit root> [<file.md> ...]
 
-Checks README.md, docs/*.md, .claude/skills/adopt/SKILL.md,
+Checks README.md, docs/*.md, both .claude/skills/*/SKILL.md,
 bootstrap/README.md and starter/README.md (or the files named): each inline
 link or image that is not an absolute URL must name a file or folder that
 exists, and a #fragment must be a heading anchor of the Markdown file it
@@ -25,6 +25,7 @@ if len(sys.argv) > 2:
 else:
     FILES = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md")),
              ROOT / ".claude" / "skills" / "adopt" / "SKILL.md",
+             ROOT / ".claude" / "skills" / "adopt-evals" / "SKILL.md",
              ROOT / "bootstrap" / "README.md", ROOT / "starter" / "README.md"]
 passed = failed = 0
 

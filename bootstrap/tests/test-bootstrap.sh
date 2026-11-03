@@ -539,19 +539,23 @@ run bash "$B/status.sh" --config "$CFGP" --mark 4; rc=$?
 assert_eq "status refuses to mark a step it checks itself" "$rc" 1
 run bash "$B/status.sh" --config "$CFGP" --mark 6; rc=$?
 assert_eq "status refuses to mark a browser step it verifies" "$rc" 1
-# The /adopt skill tells Claude to --mark only what status.sh accepts: every
-# paragraph naming --mark is about ask steps, and every browser step it names
-# as never marked is one status.sh checks itself.
-assert "the /adopt skill marks only ask steps" python3 -I - "$K/.claude/skills/adopt/SKILL.md" "$B/steps.json" <<'PY'
+# The /adopt and /adopt-evals skills tell Claude to --mark only what
+# status.sh accepts: every paragraph naming --mark is about ask steps, and
+# every browser step one names as never marked is one status.sh checks
+# itself, on that skill's track, which the skill passes to status.sh.
+for sk in adopt:base adopt-evals:evals; do
+  assert "the /${sk%%:*} skill marks only ask steps of its track" python3 -I - "$K/.claude/skills/${sk%%:*}/SKILL.md" "$B/steps.json" "${sk#*:}" <<'PY'
 import json, re, sys
 text = open(sys.argv[1], encoding="utf-8").read()
 steps = {s["id"]: s for s in json.load(open(sys.argv[2], encoding="utf-8"))["steps"]}
 paras = [p for p in re.split(r"\n\s*\n", text) if "--mark" in p]
 assert paras and all("`ask`" in p for p in paras), "a --mark instruction outside an ask paragraph"
-named = re.search(r"Apps \(([\d, ]+)\)\s+and the federation step \((\d+)\)", text)
-ids = [i.strip() for i in named.group(1).split(",")] + [named.group(2)]
-assert all(steps[i]["kind"] == "browser" and steps[i]["check"]["type"] != "ask" for i in ids), ids
+named = re.search(r"Apps \(([\d, ]+)\)(?:\s+and the federation step \((\d+)\))?\s+are `verify` steps", text)
+ids = [i.strip() for i in named.group(1).split(",")] + ([named.group(2)] if named.group(2) else [])
+assert all(steps[i]["kind"] == "browser" and steps[i]["check"]["type"] != "ask" and steps[i]["track"] == sys.argv[3] for i in ids), ids
+assert f"status.sh --track {sys.argv[3]}" in text, "the skill does not run status.sh on its track"
 PY
+done
 run env ADOPT_STATE_FILE="$K/state.json" bash "$B/status.sh" --config "$CFGP" --mark 9; rc=$?
 assert_eq "status refuses a state file inside the kit" "$rc" 1
 assert_not "nothing was written inside the kit" test -e "$K/state.json"
@@ -635,6 +639,26 @@ assert "the optional federation step reads as done once its ids are set" grep -q
 bash "$B/status.sh" --config "$CFGP" --unmark 9 >/dev/null 2>&1
 run bash "$B/status.sh" --config "$CFGP"
 assert "--unmark makes a step next again" grep -q '^Next: 9 ' "$OUT"
+# --track: one track's steps, its own next step, and both tracks' counts.
+track_ids() { jq -r --arg t "$1" '[.steps[] | select(.track == $t) | .id] | join(" ")' "$B/steps.json"; }
+listed() { sed -nE 's/^(done|asked: done|next|todo|optional) +([0-9]+) .*/\2/p' "$1" | paste -sd' ' -; }
+nbase=$(track_ids base | wc -w) nevals=$(track_ids evals | wc -w)
+assert_eq "the two tracks split every step" "$((nbase + nevals))" "$(jq '.steps | length' "$B/steps.json")"
+assert "status counts each track's steps done" grep -qE "^base: [0-9]+ of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
+for tr in base evals; do
+  run bash "$B/status.sh" --config "$CFGP" --track "$tr"; rc=$?
+  assert_eq "status --track $tr exits 0" "$rc" 0
+  assert_eq "status --track $tr lists only the $tr steps, in order" "$(listed "$OUT")" "$(track_ids "$tr")"
+  assert "status --track $tr counts only its steps" grep -qE "^[0-9]+ of $(track_ids "$tr" | wc -w) done$" "$OUT"
+  assert "status --track $tr still counts both tracks" grep -qE "^base: [0-9]+ of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
+done
+run bash "$B/status.sh" --config "$CFGP" --track base
+assert "status --track base picks the next base step" grep -q '^Next: 9 ' "$OUT"
+run bash "$B/status.sh" --config "$CFGP" --track evals
+assert "status --track evals picks the next evals step" grep -q '^Next: 19 ' "$OUT"
+assert "status --track evals says the base is not done" has "$OUT" "The base track is not done yet"
+run bash "$B/status.sh" --config "$CFGP" --track some; rc=$?
+assert_eq "status refuses an unknown track" "$rc" 1
 
 # ======================================================== apply-settings.sh
 # A second invented owner whose repo-settings holds a fake engine that logs
@@ -795,6 +819,20 @@ assert_eq "check-steps fails on a bad steps.json" "$rc" 1
 assert "check-steps names the broken anchor" has "$OUT" "has no heading #no-such-heading"
 assert "check-steps names the old guide's field" has "$OUT" "step 4: no fields from the old guide"
 assert "check-steps names the unknown verify group" has "$OUT" "verify group 'rulesets'"
+mk_kit
+jq '(.steps[] | select(.id == "3") | .track) = "both" | (.steps[] | select(.id == "4")) |= del(.track)
+    | (.steps[] | select(.id == "6") | .check.groups) -= ["apps:roster"]
+    | (.steps[] | select(.id == "33") | .check.groups) += ["apps:roster", "installs:roster"]' \
+  "$K/bootstrap/steps.json" > "$T/kit/bootstrap/steps.json"
+kb tests/check-steps.py "$T/kit"; rc=$?
+assert_eq "check-steps fails on bad tracks" "$rc" 1
+assert "check-steps names a track that is not base or evals" has "$OUT" "step 3: track is one of ['base', 'evals']: 'both'"
+assert "check-steps names a step with no track" has "$OUT" "step 4: track is one of ['base', 'evals']: None"
+assert "check-steps names a check both tracks share" has "$OUT" "no check is shared by a base and an evals step: ['installs:roster']"
+assert "check-steps names a base step that needs an evals step" has "$OUT" "step 8 (base): variables needs ['apps:roster']"
+bash "$T/kit/bootstrap/status.sh" --config "$CFGP" >"$OUT" 2>"$ERR"; rc=$?
+assert_eq "status refuses a step with an unknown track" "$rc" 1
+assert "status names the step and its track" has "$ERR" "step 3 has an unknown track: both"
 kb render-quickstart.py --check; rc=$?
 assert_eq "render-quickstart --check fails on a stale table" "$rc" 1
 mk_kit

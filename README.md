@@ -32,7 +32,13 @@ Code 2.1.312 on 2026-10-29, and against its memory and settings docs.)
 
 The [`/adopt` skill](.claude/skills/adopt/SKILL.md) reads where your account
 stands, explains the next step, and runs each script with you, dry run
-first.
+first. It sets up the base: guidance, the skills registries, repo settings,
+git hooks and your machines. The
+[`/adopt-evals` skill](.claude/skills/adopt-evals/SKILL.md) adds evals, then
+or later; from a fresh start it runs the base first, so the whole system is
+still one command. Without evals, nothing measures your skills and guidance,
+improves them or retires them automatically
+([with or without evals](docs/before-you-start.md#with-or-without-evals)).
 
 ## Without Claude
 
@@ -45,10 +51,11 @@ cp bootstrap/fleet.env.example fleet.env   # fill in OWNER, OWNER_TWO, PLAN
 bash bootstrap/status.sh
 ```
 
-The steps are in [docs/quick-start.md](docs/quick-start.md). Hands-on setup
+Add `--track base` to see only the steps without evals. The steps are in
+[docs/quick-start.md](docs/quick-start.md). Hands-on setup
 is one to two days, most of it browser steps; the loop's first merged
-improvement comes one to two weeks later, because it waits on the eval
-budget, not on you ([what it costs](docs/before-you-start.md#what-it-costs)).
+improvement, with evals, comes one to two weeks later, because it waits on
+the eval budget, not on you ([what it costs](docs/before-you-start.md#what-it-costs)).
 
 ## Read more
 

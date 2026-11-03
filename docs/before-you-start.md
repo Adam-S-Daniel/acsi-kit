@@ -14,10 +14,27 @@
 | `node` and `npm` | `_agent-guidance`'s tests and the guidance improve lane. |
 | PowerShell 7 (Windows only) | `wsl-automation`'s scheduled tasks. |
 
+## With or without evals
+
+The kit sets up two tracks. The **base** (`/adopt`) is the fleet guidance
+and its sync, the skills registries, repo settings as code, the git-hook
+checks, each machine's install and the routines that keep the guidance and
+memory current. **Evals** (`/adopt-evals`, now or later) add the eval
+runner routine, its secrets and two more Apps, and the weekly loop in
+`skills-evals` that spends part of your plan's allowance on evals.
+
+Without evals you give up the measuring: your skills and guidance are never
+measured, improved or retired automatically. A change to a skill or a rule
+is only as good as your own review of it, and one that stops helping stays
+until you notice. The advice to get Max and the eval budget below are about
+evals; the base's routines still draw on your plan's allowance like any
+session.
+
 ## What it costs
 
-- **Hands-on setup:** the [quick start](quick-start.md)'s 31 steps come to
-  about 40 commands and browser actions, roughly one to two days. The
+- **Hands-on setup:** the [quick start](quick-start.md)'s 35 steps (28 of
+  them base, 7 evals) come to about 40 commands and browser actions,
+  roughly one to two days. The
   browser steps (creating and installing six GitHub Apps, saving six
   routines) and reviewing six starter pull requests take most of it.
 - **Calendar time:** most of the rest is waiting on the eval budget, not
