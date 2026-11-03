@@ -6,6 +6,7 @@
       "fragment": "section.md",
       "heading": "## A GitHub 404 means \"not authorized\", not \"not there\"",
       "follows": [
+        "## PR descriptions open with a TLDR",
         "## Agent-made GitHub contributions carry a marker",
         "## Automation vs branch protection",
         "## Data exposure in CI and public repos",
@@ -22,6 +23,7 @@
       "fragment": "coverage-row.yml",
       "id": "github-404-means-not-authorized",
       "follows": [
+        "pr-tldr",
         "agent-contribution-markers",
         "automation-vs-branch-protection",
         "data-exposure-in-ci",

@@ -3,8 +3,8 @@
 <#
 .SYNOPSIS
     Wrapper script for Set-WslAutomationScheduledTasks; installs or updates the ccstatusline
-    config sync, Codex Cloud environment sync, usage census publish, waiting feed publish and
-    session miner scheduled tasks.
+    config sync, Codex Cloud environment sync, usage census publish, session miner, memory
+    curation and waiting feed publish scheduled tasks.
 
 .DESCRIPTION
     Thin wrapper that imports the WslAutomation module and calls
@@ -15,8 +15,8 @@
 
 .PARAMETER ScriptsDir
     Directory containing sync-ccstatusline-config.ps1, sync-codex-cloud-environments.ps1,
-    publish-usage-census.sh, publish-waiting-feed.sh and run-session-miner.sh. Defaults to the
-    directory this script lives in.
+    publish-usage-census.sh, run-session-miner.sh, run-memory-curation.sh and
+    publish-waiting-feed.sh. Defaults to the directory this script lives in.
 
 .PARAMETER DistroName
     Name of the WSL distro the tasks run in. Defaults to 'Ubuntu'.
@@ -39,19 +39,28 @@
 .PARAMETER UsageCensusTime
     Time of day (HH:mm) the usage census task's daily trigger fires. Defaults to '12:37'.
 
-.PARAMETER WaitingFeedTaskName
-    Name of the scheduled task that publishes the waiting feed every minute. Defaults to
-    'Claude Waiting Feed Publish'.
-
 .PARAMETER SessionMinerTaskName
-    Name of the scheduled task that runs the session miner. Defaults to 'Session Miner'.
+    Name of the scheduled task that runs the daily session miner from WSL. Defaults to
+    'Session Miner'.
 
 .PARAMETER SessionMinerTime
     Time of day (HH:mm) the session miner task's daily trigger fires. Defaults to '07:17'.
 
+.PARAMETER MemoryCurationTaskName
+    Name of the scheduled task that runs the weekly memory curation from WSL. Defaults to
+    'Memory Curation'.
+
+.PARAMETER MemoryCurationTime
+    Time of day (HH:mm) the memory curation task's weekly (Monday) trigger fires. Defaults to
+    '13:47'.
+
+.PARAMETER WaitingFeedTaskName
+    Name of the scheduled task that publishes the waiting feed every minute. Defaults to
+    'Claude Waiting Feed Publish'.
+
 .PARAMETER WslExePath
-    Path to wsl.exe used as the usage census, waiting feed and session miner tasks' action.
-    Defaults to %SystemRoot%\System32\wsl.exe.
+    Path to wsl.exe used as the usage census, session miner, memory curation and waiting feed
+    tasks' action. Defaults to %SystemRoot%\System32\wsl.exe.
 
 .PARAMETER PwshPath
     Path to pwsh.exe used as the action executable for the pwsh-based tasks. Defaults to an MSI
@@ -102,11 +111,15 @@ param(
 
     [string]$UsageCensusTime = '12:37',
 
-    [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',
-
     [string]$SessionMinerTaskName = 'Session Miner',
 
     [string]$SessionMinerTime = '07:17',
+
+    [string]$MemoryCurationTaskName = 'Memory Curation',
+
+    [string]$MemoryCurationTime = '13:47',
+
+    [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',
 
     [string]$WslExePath = (Join-Path $env:SystemRoot 'System32\wsl.exe'),
 
@@ -153,8 +166,9 @@ try {
         -CcstatuslineTaskName $CcstatuslineTaskName -CcstatuslineIntervalMinutes $CcstatuslineIntervalMinutes `
         -PwshPath $PwshPath -CodexCloudEnvironmentSyncTaskName $CodexCloudEnvironmentSyncTaskName `
         -UsageCensusTaskName $UsageCensusTaskName -UsageCensusTime $UsageCensusTime `
-        -WaitingFeedTaskName $WaitingFeedTaskName -SessionMinerTaskName $SessionMinerTaskName `
-        -SessionMinerTime $SessionMinerTime -WslExePath $WslExePath `
+        -SessionMinerTaskName $SessionMinerTaskName -SessionMinerTime $SessionMinerTime `
+        -MemoryCurationTaskName $MemoryCurationTaskName -MemoryCurationTime $MemoryCurationTime `
+        -WaitingFeedTaskName $WaitingFeedTaskName -WslExePath $WslExePath `
         -LegacyScriptsToArchive $LegacyScriptsToArchive -SkipTaskHistory:$SkipTaskHistory -WhatIf:$WhatIfPreference
 
     exit 0

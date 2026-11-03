@@ -40,7 +40,9 @@ POOLED EVIDENCE (the owner, 2026-10-25), replacing #70's four weekly sweeps.
     (`arm_context.others_digest`) and frozen guidance
     (`context.guidance.digest`), can form the cell, and of those pairs the
     one with the most runs in its smaller arm, on roster models, is chosen;
-    a tie, or no such pair, chooses none and the cell is `insufficient`. So
+    a tie on that count goes to the pair with the newer newest run, and
+    only a full tie, or no such pair, chooses none and the cell is
+    `insufficient`. So
     a without arm from older guidance cannot be pooled against a with arm
     from newer guidance. The arm context cannot be computed from main (it
     is the frozen context a run deployed), so the pair with the most runs
@@ -80,93 +82,96 @@ that has checks (`NO_CHECKS_REASON`, which also keeps the cell from
 `no-benefit`); each cell records, under `skipped`, why its other runs did
 not count. An arm's run mean is the mean of those trials' pass rates. Its
 run judge figure is the mean of its trials' judge figures, and exists only
-when the run judged unconditionally (`judge_conditional` false: run_eval
-skips the judge when the with arm is already ahead on the objective, so
-conditional scores are a sample biased toward no benefit) and every one of
-those trials has a figure. A delta is mean(with run means) - mean(without
+when every one of those trials has a figure. A cell's judge figures are
+usable when no counted run judged conditionally (`judge_conditional` true:
+run_eval skips the judge when the with arm is already ahead on the
+objective, so conditional scores alone are a sample biased toward no
+benefit), or when every counted run of both arms has its figure, so no
+judge call was skipped and nothing was selected out. A delta is mean(with run means) - mean(without
 run means).
 
-THE BOUNDS (`bounds`): at a one-sided `level`, the wider of a deterministic
-percentile bootstrap over run means (`bootstrap_deltas`: each arm resampled
-with replacement within itself, `bootstrap_resamples` times, a fixed seed
-over sorted values) and a Welch t bound with Welch-Satterthwaite df floored
-(at least 1; when its denominator underflows to 0 or is not finite, the
-smaller arm's n - 1, at least 1), over FLOORED variances, so near-identical runs cannot make a
-bound tighter than the trials behind them allow. For an objective delta,
-overall or per check, each arm's variance of the mean is at least
-p(1 - p)/n with p the arm's pooled pass rate and n its scored trials
-(`binomial_floor`, p clipped to [1/(2n), 1 - 1/(2n)]). For a judge delta, it
-is at least the pooled within-run variance of the trial judge figures over
-the number of runs (`judge_floor`), pooled from the runs with two or more
-judged trials. An arm with none (one trial per run, round 5, N1) has no
-floor: the run-level standard error alone bounds its judge delta, and its run
-judge figures must not all be equal (`_judge_spread_ok`); its objective floor
-is still the binomial one with n its scored trials. With the committed margins, the objective
-floor means an objective no-benefit needs hundreds of scored trials per arm
-at a look (twenty runs of three trials at a 0.8 pass rate are not enough);
-judge-carried cells are decided on the judge and its own floor. The t quantile is computed (`t_quantile`, the regularized incomplete
-beta inverted by bisection), so Holm's adjusted levels need no table.
-Levels: benefit uses the two-sided `benefit_confidence` interval's lower
-end; no-benefit the one-sided `retire_confidence` upper bound; a check the
-one-sided `check_confidence` lower bound, Holm-corrected across the
+THE BOUNDS (`confidence_sequence`; the owner, 2026-10-31: decide on confidence
+alone, with no minimum run count and no fixed looks). A two-sided
+normal-mixture confidence sequence (Robbins) over the delta of run means: it
+holds at every run count at once, so a cell is checked after every run
+without the repeated looks inflating its error rate. Its standard error uses
+each arm's MODERATED variance (`moderated_variance`): `prior_strength`
+pseudo-runs at the prior, the run-to-run variance measured across every
+evaluation of the same kind (`run_priors`: every skill's runs, or every
+guidance section's, grouped by skill, fixture, model, arm and content, and
+pooled by `pooled_variance`), plus the cell's own n - 1 at its own sample
+variance. So one run on each arm can decide a large enough difference, and a
+cell's own spread takes over as its runs grow. The objective, judge and
+per-check figures each have their own prior. The normal-mixture boundary
+treats the moderated variance as known, so its anytime guarantee is
+approximate, and it is two-sided, so using one end of it is conservative.
+Levels: benefit uses the `benefit_confidence` sequence's lower end; no-benefit
+the `retire_confidence` sequence's upper end; a check the
+`check_confidence` sequence's lower end, Holm-corrected across the
 fixture's checks (`confident_checks`).
 
 A CELL'S CLASS (`_classify`), first match wins:
 
-  1. `insufficient`: an arm has fewer than `min_runs` counted runs, or the
-     counted runs show fewer than `min_cli_versions` `harness.version`s.
-  2. `cannot-discriminate`: some check fails in every scored trial of BOTH
-     arms, or both arms' pooled pass rate <= `floor_fraction`.
-  3. Zero variance: when every run mean of each arm is identical (the judge
-     figures, for a judge-carried fixture), nothing is decided on it:
-     `ceiling` if it qualifies, else `insufficient`. For a Class A or B
-     fixture a judge figure that does vary may still show `benefit` first,
-     since that only keeps.
-  4. `benefit`: the objective delta's lower bound > 0; or some check
+  1. `insufficient`: an arm has no counted run.
+  2. `cannot-discriminate`: both arms' pooled pass rate <= `floor_fraction`
+     with FLOOR_MIN_RUNS counted runs on each arm (the fixture looks
+     broken); with fewer, `insufficient`. A check both arms fail in every
+     trial no longer stops the cell: it adds the same 0 to both arms
+     (the owner, 2026-11-03: "Judge them by the removal rule").
+  3. `benefit`: the objective delta's lower bound > 0; or some check
      confidently better with the skill (Holm); or, when the objective shows
      no confident gain, the judge delta's lower bound > 0. A judge-carried
      fixture keeps on any of the three too: its judge decides, but its
-     objective checks are evidence of benefit. The judge figure is usable with
-     `min_runs` judged runs per arm, at least two of them per arm with
-     judge figures that differ within the run.
-  5. `ceiling`: both arms' pooled pass rate >= `ceiling_fraction`; for a
-     judge-carried fixture, both arms' mean judge figure >= `judge_ceiling`.
-  6. `no-benefit`: the objective delta's `retire_confidence` upper bound <
+     objective checks are evidence of benefit. The judge figure is usable
+     with one judged run on each arm (see THE NUMBERS for conditional runs).
+  4. (No class.) Both arms at the ceiling (pooled pass rate >=
+     `ceiling_fraction`, or for a judge-carried fixture mean judge figure >=
+     `judge_ceiling`) is judged by rule 5 like any other cell, since the
+     subject has no room to add its margin there; a no-benefit reason says
+     so. It was a terminal `ceiling` class until 2026-11-03, which parked
+     the cell and its subject with no verdict.
+  5. `no-benefit`: the objective delta's `retire_confidence` upper bound <
      `objective_margin`, and the judge delta's < `judge_margin`; the judge
-     figure must be usable and not of zero variance, since rule 4 only
-     reached it when the objective showed no confident gain. A
-     judge-carried fixture needs the judge's bound, and the objective's too
-     whenever it has objective checks (a varying objective with `min_runs`
-     runs per arm); without checks, the judge's alone.
-  7. `insufficient`: the evidence is not tight yet.
+     figure must be usable, since rule 3 only reached it when the objective
+     showed no confident gain. A judge-carried fixture needs the judge's
+     bound, and the objective's too whenever it has objective checks;
+     without checks, the judge's alone. A removal also needs the counted
+     runs to show `min_cli_versions` `harness.version`s; with fewer it is
+     `insufficient`.
+  6. `insufficient`: the evidence is not tight yet.
 
-STATELESS CONFIRMATION AT FIXED LOOKS (`classify_cell`, round-2 review,
-2026-10-25). Nothing is carried from an earlier evaluation. Each arm's
-counted runs are ordered by (timestamp, path). The class is computed at
-every reachable look: each of `retire_looks` <= the smaller arm's counted
-runs, on each arm's first N runs. `benefit` may be declared at any count, on
-the whole pool. Otherwise the largest look decides: a class other than
-`no-benefit` there is the cell's class; `no-benefit` at BOTH of the two
-largest reachable looks is `no-benefit`; `no-benefit` at the largest alone
-(one look reached, or the one before it was not) is `no-benefit-pending`.
-So nothing retires before ten counted runs per arm, and since every look is
-within the current pooling key, new content starts over. Before the first
-look the whole pool's class stands. scripts/compute_gates.py reads no run
-stamped after its `--as-of`, so an evaluation can be repeated as of a
-time. A run is named by `run_key`,
+`classify_cell` classifies a cell over all its counted runs, ordered by
+(timestamp, path). Nothing is carried from an earlier evaluation, and since
+every run is within the current pooling key, new content starts over.
+scripts/compute_gates.py reads no run stamped after its `--as-of`, so an
+evaluation can be repeated as of a time. A run is named by `run_key`,
 `<path>#<fixture>#<role>`.
 
 THE VERDICT (`retirement`), over every fixture on main x every current roster
 arm model: any `benefit` -> `keep`; any `insufficient` or missing cell, or no
-fixture on main -> `insufficient`; any `cannot-discriminate` ->
-`cannot-discriminate`; any `ceiling` -> `ceiling`; any `no-benefit-pending`
--> `retire-pending`; `retire` only when there is at least one cell and
+fixture on main -> `insufficient`; a `cannot-discriminate` cell is left out
+of the verdict (a broken fixture says nothing about the subject), and when
+every cell is one the verdict is `cannot-discriminate`; `retire` only when there is at least one cell and
 every cell is `no-benefit` (no roster model means no cell, never a
 retirement); anything else `insufficient`. scripts/compute_gates.py then lets
 one skill retire per evaluation. A standing retirement's stickiness, and
 holding the one slot while a removal pull request is open, are part 2's: it
 reads the open pull requests from GitHub rather than trusting an earlier
 gates file.
+
+IN-SITU GUIDANCE CELLS (#557; the owner's D5, 2026-11-02, via #546): compared
+WITHIN runs that share the same rest-of-guidance digest, then combined,
+instead of keeping one same-rest group (`_joint_context`). `pool_cells`
+with `strata` groups a cell's current-content runs by `pair_key`;
+`classify_strata` drops a stratum without a counted run on each arm and runs
+`_classify` over the rest with each delta a precision-weighted
+`stratified_estimate` and the counts pooled. The cell's priors are its own
+(`cell_priors`, 20 degrees of freedom before a measured value replaces the
+0.25 fallback; scripts/simulate_stratified_pooling.py). The pooled bounds
+decide, with no separate confirmation beside the rest on main (the owner,
+2026-11-02: remove at 90% confidence that the section does not improve
+results by 0.15 or more, the guidance block of evals/gate-policy.yml).
+Skills and the alone pair are pooled exactly as before.
 
 KNOWN LIMITS, left for a later part:
 
@@ -175,9 +180,12 @@ KNOWN LIMITS, left for a later part:
     harder than it needs to be (Tarone's method would leave them out).
   * Scorer and harness changes are not part of the pooling key: runs scored
     before and after a scorer fix pool together.
-  * An adopted skill's `tested_digest` is its frozen context's deployed copy,
-    not the registry checkout's; when the two differ its runs do not pool
-    (insufficient, never a wrong retire). Real-work fixtures
+  * A run's `tested_digest` is main's copy of the skill when the run fired
+    (skills-evals#559; ADR 0012, addendum "main's copy"), and the gate
+    compares it with main's copy when the gates run. A skill edit in between
+    stops both arms pooling until a new with run lands (insufficient, never
+    a wrong retire); runs made before #559 tested the deployed copy and pool
+    only where it equals main's. Real-work fixtures
     (evals/real-work/, `subject: any`) are not a skill's fixtures on main,
     so their runs are not read.
 """
@@ -186,7 +194,6 @@ from __future__ import annotations
 
 import json
 import math
-import random
 from pathlib import Path
 
 import yaml
@@ -196,10 +203,13 @@ DEFAULT_POLICY = Path(__file__).resolve().parent.parent / "evals" / "gate-policy
 RESULTS_BLOB = ("https://github.com/example-adopter/skills-evals/blob/"
                 "persistent/eval-results/")
 MODES = ("auto", "proposal")
-#: The bootstrap's seed: fixed, so the same runs give the same bounds.
-BOOTSTRAP_SEED = 70
 #: Scored trials an arm of one run needs to count (#70's 3).
 MIN_TRIALS_PER_RUN = 1
+#: Counted runs on each arm before a cell where both arms pass at most
+#: `floor_fraction` is set aside as `cannot-discriminate` (a fixture that
+#: looks broken); under it the cell is `insufficient`, so the planner fires
+#: it again rather than parking it on one unlucky run.
+FLOOR_MIN_RUNS = 3
 #: Trial error types that are the harness's, not the agent's.
 INFRASTRUCTURE_ERRORS = ("scorer_unavailable", "scorer_sandbox_unavailable",
                          # A guidance arm whose delivery was not proved
@@ -207,7 +217,9 @@ INFRASTRUCTURE_ERRORS = ("scorer_unavailable", "scorer_sandbox_unavailable",
                          # that never wrote its block): INCONCLUSIVE, never
                          # the agent's failure.
                          "delivery_failed", "guard_error", "guard_miss",
-                         "guard_contaminated")
+                         "guard_contaminated",
+                         # Its own session's receipt disagreed (#139).
+                         "delivery_unproven", "receipt_contaminated")
 #: The start of a FAILED check's detail that names a scorer failure rather
 #: than anything the agent did: harness/scorers/commands.py's
 #: `ScorerSandboxUnavailable` message, `scorer_sandbox_unavailable exit=<n>`,
@@ -259,14 +271,14 @@ SKILL_KEYS = {
     "benefit_confidence": _LEVEL,
     "retire_confidence": _LEVEL,
     "check_confidence": _LEVEL,
-    "min_runs": ("an integer of at least 2", _count(2)),
     "min_cli_versions": ("an integer of at least 1", _count(1)),
+    "prior_strength": ("a number above 0", _number(0, math.inf, low_open=True,
+                                                   high_open=True)),
     "ceiling_fraction": ("a number above 0 and at most 1",
                          _number(0, 1, low_open=True)),
     "judge_ceiling": ("a number above 0 and at most 10",
                       _number(0, 10, low_open=True)),
     "floor_fraction": ("a number from 0 and below 1", _number(0, 1, high_open=True)),
-    "bootstrap_resamples": ("an integer of at least 100", _count(100)),
 }
 
 
@@ -297,8 +309,7 @@ def _policy_block(block, name: str) -> dict:
     """One block of thresholds (`skills:` or `guidance:`), checked."""
     if not isinstance(block, dict):
         raise GatePolicyError(f"gate policy {name} must be a mapping")
-    unknown = sorted(set(block) - set(SKILL_KEYS)
-                     - {"retire_looks", "retirement_mode"})
+    unknown = sorted(set(block) - set(SKILL_KEYS) - {"retirement_mode"})
     if unknown:
         raise GatePolicyError(f"gate policy {name} has unknown keys {unknown}")
     out = {}
@@ -308,14 +319,6 @@ def _policy_block(block, name: str) -> dict:
         if not valid(block[key]):
             raise GatePolicyError(f"gate policy {name}.{key} must be {words}")
         out[key] = block[key]
-    looks = block.get("retire_looks")
-    if not isinstance(looks, list) or not looks \
-            or not all(_count(out["min_runs"])(n) for n in looks) \
-            or any(a >= b for a, b in zip(looks, looks[1:])):
-        raise GatePolicyError(f"gate policy {name}.retire_looks must be a "
-                              "strictly increasing list of integers, each at "
-                              "least min_runs")
-    out["retire_looks"] = list(looks)
     mode = block.get("retirement_mode")
     out["retirement_mode"] = mode if mode in MODES else "proposal"
     return out
@@ -359,163 +362,211 @@ def _constant(values) -> bool:
     return min(values) == max(values)
 
 
-def _betacf(a: float, b: float, x: float) -> float:
-    """The incomplete beta function's continued fraction (modified Lentz)."""
-    tiny = 1e-300
-    c, d = 1.0, 1.0 - (a + b) * x / (a + 1.0)
-    d = 1.0 / (d if abs(d) > tiny else tiny)
-    h = d
-    for m in range(1, 1000):
-        for numerator in (m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m)),
-                          -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1))):
-            d = 1.0 + numerator * d
-            d = 1.0 / (d if abs(d) > tiny else tiny)
-            c = 1.0 + numerator / c
-            c = c if abs(c) > tiny else tiny
-            h *= d * c
-        if abs(d * c - 1.0) < 1e-15:
-            break
-    return h
-
-
-def _betainc(a: float, b: float, x: float) -> float:
-    """The regularized incomplete beta function I_x(a, b)."""
-    if x <= 0:
-        return 0.0
-    if x >= 1:
-        return 1.0
-    front = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
-                     + a * math.log(x) + b * math.log1p(-x))
-    if x < (a + 1) / (a + b + 2):
-        return front * _betacf(a, b, x) / a
-    return 1.0 - front * _betacf(b, a, 1 - x) / b
-
-
-def t_cdf(t: float, df: int) -> float:
-    """Student's t distribution function."""
-    tail = 0.5 * _betainc(df / 2, 0.5, df / (df + t * t))
-    return 1.0 - tail if t >= 0 else tail
-
-
-def t_quantile(p: float, df: int) -> float:
-    """The `p` quantile (p > 0.5) of Student's t with `df` degrees of
-    freedom, by bisection on `t_cdf`."""
-    low, high = 0.0, 1e7
-    for _ in range(200):
-        mid = (low + high) / 2
-        if t_cdf(mid, df) < p:
-            low = mid
-        else:
-            high = mid
-    return (low + high) / 2
-
-
-def _percentile(ordered: list, p: float) -> float:
-    position = p * (len(ordered) - 1)
-    low = math.floor(position)
-    high = min(low + 1, len(ordered) - 1)
-    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
-
-
-def bootstrap_deltas(a: list, b: list, resamples: int) -> list:
-    """Sorted bootstrap replicates of mean(a) - mean(b): whole values
-    resampled within each list, a fixed seed over the sorted values."""
-    a, b = sorted(a), sorted(b)
-    rng = random.Random(BOOTSTRAP_SEED)
-    return sorted(_mean(rng.choices(a, k=len(a))) - _mean(rng.choices(b, k=len(b)))
-                  for _ in range(resamples))
-
-
 def _variance(values: list) -> float:
-    if _constant(values):
+    if len(values) < 2 or _constant(values):
         return 0.0  # exactly, not the rounding residue of the mean
     mean = _mean(values)
     return math.fsum((v - mean) ** 2 for v in values) / (len(values) - 1)
 
 
-def binomial_floor(p: float | None, n: int) -> float:
-    """p(1 - p)/n for a pooled pass rate `p` over `n` scored trials, p clipped
-    to [1/(2n), 1 - 1/(2n)] so that all passed or none is not zero: the least
-    variance of a mean pass rate those trials allow. The trial, not the
-    check, is the count, since the checks of one trial move together. 0 when
-    n is 0."""
-    if n <= 0 or p is None:
+#: The prior variance when no group has two runs to measure one: a run-mean
+#: standard deviation of 0.25, wider than any group measured on 2026-10-31.
+FALLBACK_PRIOR_VARIANCE = 0.0625
+#: The least prior variance, so a history of identical runs cannot make the
+#: prior claim certainty (a run-mean standard deviation of 0.01).
+MIN_PRIOR_VARIANCE = 1e-4
+#: The prior guard of an in-situ guidance cell (#546, #557, `cell_priors`):
+#: the least degrees of freedom a measured prior needs, and the fallback
+#: below them, the largest variance of a figure from 0 to 1. In
+#: scripts/simulate_stratified_pooling.py a prior measured on a few runs
+#: broke both error targets and these met them; the prior is measured per
+#: cell because one pooled from other, lower-variance cells did not.
+GUIDANCE_PRIOR_MIN_DF = 20
+GUIDANCE_FALLBACK_PRIOR_VARIANCE = 0.25
+
+
+def pooled_variance(groups: list, min_df: int = 1,
+                    fallback: float = FALLBACK_PRIOR_VARIANCE) -> float:
+    """The pooled run-to-run variance over `groups` (each a list of run
+    figures of one model, fixture, arm and content): the sum of squared
+    deviations over the summed degrees of freedom, from every group with two
+    or more runs. `fallback` (default `FALLBACK_PRIOR_VARIANCE`) when none
+    has or they hold fewer than `min_df` degrees of freedom (#546: a prior
+    measured on a few runs can be far too small), and never under
+    `MIN_PRIOR_VARIANCE`."""
+    df = sum(len(g) - 1 for g in groups if len(g) >= 2)
+    if not df or df < min_df:
+        return fallback
+    ss = math.fsum(_variance(g) * (len(g) - 1) for g in groups if len(g) >= 2)
+    return max(ss / df, MIN_PRIOR_VARIANCE)
+
+
+def moderated_variance(values: list, prior: float, strength: float) -> float:
+    """An arm's run-to-run variance, shrunk toward the prior: `strength`
+    pseudo-degrees of freedom at `prior` plus the arm's own n - 1 at its
+    sample variance. One run gives the prior; many runs give their own
+    spread."""
+    own = len(values) - 1
+    return (strength * prior + own * _variance(values)) / (strength + own)
+
+
+def confidence_sequence(a: list, b: list, level: float, prior: float,
+                        strength: float) -> tuple[float, float]:
+    """(lower, upper) of mean(a) - mean(b), two-sided at `level` and valid
+    at every run count however often it is checked: the normal-mixture
+    boundary (Robbins), |d - delta| <= sqrt((I + r) log((I + r) / (r alpha^2))) / I,
+    with I = 1/se^2 the information so far and r = 1/prior the information
+    of one run on each arm. The standard error comes from each arm's
+    `moderated_variance`, so a spread measured across all evaluations stands
+    in for the few runs a cell has. Needs a run on each arm."""
+    if not a or not b:
+        raise ValueError("a confidence sequence needs a run on each arm")
+    se2 = (moderated_variance(a, prior, strength) / len(a)
+           + moderated_variance(b, prior, strength) / len(b))
+    delta = _mean(a) - _mean(b)
+    info, rho, alpha = 1 / se2, 1 / prior, 1 - level
+    half = math.sqrt((info + rho) * math.log((info + rho) / (rho * alpha * alpha))) / info
+    return delta - half, delta + half
+
+
+def confidence_reached(a: list, b: list, prior: float, strength: float,
+                       distance: float) -> float:
+    """The highest level at which `confidence_sequence(a, b, level, ...)`
+    still clears a bound `distance` away from mean(a) - mean(b): solving
+    half(alpha) = distance for alpha, alpha = sqrt((I + r) / r) *
+    exp(-distance^2 I^2 / (2 (I + r))), and the level is 1 - alpha. With
+    `distance` = delta it is the confidence that the delta is above 0; with
+    `distance` = margin - delta, that it is under the margin. 0 when the
+    point estimate is already on the wrong side. Needs a run on each arm."""
+    if not a or not b:
+        raise ValueError("a confidence sequence needs a run on each arm")
+    if distance <= 0:
         return 0.0
-    p = min(max(p, 1 / (2 * n)), 1 - 1 / (2 * n))
-    return p * (1 - p) / n
+    se2 = (moderated_variance(a, prior, strength) / len(a)
+           + moderated_variance(b, prior, strength) / len(b))
+    info, rho = 1 / se2, 1 / prior
+    alpha = math.sqrt((info + rho) / rho) * math.exp(
+        -distance * distance * info * info / (2 * (info + rho)))
+    return max(0.0, 1 - alpha)
 
 
-def judge_floor(figures: list) -> float:
-    """The pooled within-run variance of the judge figures, divided by the
-    number of runs: the least variance of a mean of run judge figures that
-    the trials' own spread allows. `figures` holds each run's trial figures."""
-    ss = math.fsum(math.fsum((x - _mean(run)) ** 2 for x in run) for run in figures)
-    df = sum(len(run) - 1 for run in figures)
-    return ss / df / len(figures) if df > 0 else 0.0
+def confidence_reached_info(info: float, prior: float, distance: float) -> float:
+    """`confidence_reached` from an information I directly (#557): the
+    level at which a sequence with information `info` still clears a bound
+    `distance` away. For a `stratified_estimate`."""
+    if distance <= 0:
+        return 0.0
+    rho = 1 / prior
+    alpha = math.sqrt((info + rho) / rho) * math.exp(
+        -distance * distance * info * info / (2 * (info + rho)))
+    return max(0.0, 1 - alpha)
 
 
-def welch(a: list, b: list, floors: tuple | None = None) -> tuple | None:
-    """(delta, standard error, Welch-Satterthwaite df floored, at least 1),
-    or None when an arm has fewer than two values. `floors`, when given, is
-    each arm's least variance of the mean (`binomial_floor`)."""
-    if len(a) < 2 or len(b) < 2:
-        return None
-    va, vb = _variance(a) / len(a), _variance(b) / len(b)
-    if floors is not None:
-        va, vb = max(va, floors[0]), max(vb, floors[1])
-    se2 = va + vb
-    # Welch-Satterthwaite, unless its denominator underflows (variances
-    # around 1e-100 square to 0) or is not finite: then the smaller arm's
-    # n - 1, the conservative df. Products, not `**`: a float power raises
-    # OverflowError where a product is inf.
-    denominator = va * va / (len(a) - 1) + vb * vb / (len(b) - 1)
-    ratio = se2 * se2 / denominator if denominator > 0 and math.isfinite(denominator) \
-        else math.nan
-    df = (max(1, math.floor(ratio)) if math.isfinite(ratio)
-          else max(1, min(len(a), len(b)) - 1)) if se2 else 1
-    return _mean(a) - _mean(b), math.sqrt(se2), df
+def keep_p(delta: float, info: float, prior: float) -> float:
+    """The two-sided alpha at which a sequence with estimate `delta` and
+    information `info` has its lower end at 0 (`confidence_reached_info`
+    inverted): 1 when `delta` <= 0. A keep test's p-value (#557 follow-up)."""
+    if delta <= 0:
+        return 1.0
+    rho = 1 / prior
+    return min(1.0, math.sqrt((info + rho) / rho) * math.exp(
+        -delta * delta * info * info / (2 * (info + rho))))
 
 
-def bounds(a: list, b: list, level: float, resamples: int,
-           deltas: list | None = None, floors: tuple | None = None) -> tuple[float, float]:
-    """(lower, upper) bounds of mean(a) - mean(b), each one-sided at `level`:
-    the wider of the bootstrap percentiles and the Welch t bounds (over
-    `floors`, when given)."""
-    deltas = deltas if deltas is not None else bootstrap_deltas(a, b, resamples)
-    low, high = _percentile(deltas, 1 - level), _percentile(deltas, level)
-    w = welch(a, b, floors)
-    if w is not None:
-        half = t_quantile(level, w[2]) * w[1]
-        low, high = min(low, w[0] - half), max(high, w[0] + half)
-    return low, high
+def _stratum(a: list, b: list, prior: float, strength: float) -> tuple[float, float]:
+    """(mean(a) - mean(b), its information 1/se^2) from each arm's
+    `moderated_variance`."""
+    se2 = (moderated_variance(a, prior, strength) / len(a)
+           + moderated_variance(b, prior, strength) / len(b))
+    return _mean(a) - _mean(b), 1 / se2
+
+
+def stratified_estimate(strata: list, prior: float, strength: float) -> tuple[float, float]:
+    """(d, I): the precision-weighted delta over `strata`, a list of (a, b)
+    run-figure lists sharing one rest-of-guidance digest each (#546), and its
+    information. Each stratum's weight P_s is its own 1/se^2, so Z = sum
+    P_s d_s, I = sum P_s and d = Z / I. Every stratum needs a run on each
+    arm. P_s is re-estimated at each look, so the boundary fed this (d, I)
+    is approximately anytime-valid, in the same sense as a single cell's."""
+    if not strata:
+        raise ValueError("a stratified estimate needs a stratum")
+    parts = [_stratum(a, b, prior, strength) for a, b in strata]
+    info = math.fsum(p for _, p in parts)
+    return math.fsum(p * d for d, p in parts) / info, info
+
+
+def _half_width(info: float, prior: float, alpha: float) -> float:
+    rho = 1 / prior
+    return math.sqrt((info + rho) * math.log((info + rho) / (rho * alpha * alpha))) / info
+
+
+def stratified_sequence(strata: list, level: float, prior: float,
+                        strength: float) -> tuple[float, float]:
+    """`confidence_sequence` over `stratified_estimate`'s (d, I). One stratum
+    is exactly `confidence_sequence` of its two arms."""
+    if len(strata) == 1:
+        return confidence_sequence(*strata[0], level, prior, strength)
+    delta, info = stratified_estimate(strata, prior, strength)
+    half = _half_width(info, prior, 1 - level)
+    return delta - half, delta + half
 
 
 def confident_checks(with_rates: dict, without_rates: dict, level: float,
-                     resamples: int, floors: dict | None = None) -> list:
+                     priors: dict, strength: float) -> list:
     """Check keys whose with-minus-without delta of per-run pass rates has a
-    lower bound above 0 at one-sided `level`, Holm-corrected across every
-    check in both arms: ordered by the Welch one-sided p-value, the k-th
-    (from 0) is tested at 1 - (1 - level) / (m - k) and the procedure stops
-    at the first that fails. `floors` maps a check to its two arms' binomial
-    floors. A check of zero variance on both arms is never confident, nor
-    one with fewer than two runs per arm."""
-    floors = floors or {}
+    lower bound above 0, Holm-corrected across every check in both arms:
+    ordered by the delta over its standard error, the k-th (from 0) is
+    tested at two-sided level 1 - (1 - level) / (m - k) and the procedure
+    stops at the first that fails. `priors` maps a check to its prior
+    variance."""
     keys = sorted(set(with_rates) & set(without_rates))
     alpha, m = 1 - level, len(keys)
     ranked = []
     for key in keys:
         a, b = with_rates[key], without_rates[key]
-        w = welch(a, b, floors.get(key))
-        if w is None or (_constant(a) and _constant(b)):
-            p = 1.0
-        else:
-            p = 1 - t_cdf(w[0] / w[1], w[2])
-        ranked.append((p, key))
+        if not a or not b:
+            continue
+        prior = priors.get(key, FALLBACK_PRIOR_VARIANCE)
+        se = math.sqrt(moderated_variance(a, prior, strength) / len(a)
+                       + moderated_variance(b, prior, strength) / len(b))
+        ranked.append((-(_mean(a) - _mean(b)) / se, key))
     confident = []
-    for k, (p, key) in enumerate(sorted(ranked)):
-        if p == 1.0 or bounds(with_rates[key], without_rates[key],
-                              1 - alpha / (m - k), resamples,
-                              floors=floors.get(key))[0] <= 0:
+    for k, (_, key) in enumerate(sorted(ranked)):
+        prior = priors.get(key, FALLBACK_PRIOR_VARIANCE)
+        if confidence_sequence(with_rates[key], without_rates[key],
+                               1 - alpha / (m - k), prior, strength)[0] <= 0:
+            break
+        confident.append(key)
+    return confident
+
+
+def stratified_confident_checks(strata: list, level: float, priors: dict,
+                                strength: float) -> list:
+    """`confident_checks` over strata (#546): `strata` is a list of
+    (with_rates, without_rates) per rest-of-guidance stratum. A check's
+    figure is `stratified_estimate` over the strata where it has a run on
+    each arm; Holm's m counts every check in both arms of any stratum, as
+    `confident_checks` counts them. One stratum is exactly
+    `confident_checks`."""
+    if len(strata) == 1:
+        return confident_checks(*strata[0], level, priors, strength)
+    keys = sorted({k for w, o in strata for k in set(w) & set(o)})
+    alpha, m = 1 - level, len(keys)
+    per_key, ranked = {}, []
+    for key in keys:
+        parts = [(w[key], o[key]) for w, o in strata
+                 if key in w and key in o and w[key] and o[key]]
+        if not parts:
+            continue
+        per_key[key] = parts
+        prior = priors.get(key, FALLBACK_PRIOR_VARIANCE)
+        delta, info = stratified_estimate(parts, prior, strength)
+        ranked.append((-delta * math.sqrt(info), key))
+    confident = []
+    for k, (_, key) in enumerate(sorted(ranked)):
+        prior = priors.get(key, FALLBACK_PRIOR_VARIANCE)
+        if stratified_sequence(per_key[key], 1 - alpha / (m - k), prior,
+                               strength)[0] <= 0:
             break
         confident.append(key)
     return confident
@@ -532,6 +583,12 @@ class MalformedSummary(ValueError):
 def check_key(check_id) -> str:
     """A check id as a string key: a fixture may write any YAML value as one."""
     return json.dumps(check_id, sort_keys=True)
+
+
+#: The reason run_eval records when it skips a pair's judge because the with
+#: arm is strictly ahead on the objective (harness/run_eval.py
+#: `JUDGE_SKIPPED`).
+JUDGE_SKIP_WITH_AHEAD = "objective-decided"
 
 
 def trial_record(summary: dict) -> dict:
@@ -571,9 +628,15 @@ def trial_record(summary: dict) -> dict:
         figure = judge.get("dimensions_mean") if pairwise else judge.get("overall")
         if figure is not None and not (_is_number(figure) and 0 <= figure <= 10):
             raise MalformedSummary("judge figure is not a number from 0 to 10")
-    return {**out, "scored": True, "infrastructure": False, "errored": False,
-            "checks": {check_key(c.get("id")): c["passed"] for c in checks},
-            "judge": figure, "pairwise": pairwise}
+    record = {**out, "scored": True, "infrastructure": False, "errored": False,
+              "checks": {check_key(c.get("id")): c["passed"] for c in checks},
+              "judge": figure, "pairwise": pairwise}
+    if isinstance(judge, dict) and judge.get("status") == "skipped" \
+            and judge.get("reason") == JUDGE_SKIP_WITH_AHEAD:
+        # run_eval's conditional judge skipped this pair because its with arm
+        # was strictly ahead on the objective (#557 reads it; nothing else).
+        record["judge_skipped_with_ahead"] = True
+    return record
 
 
 def run_numbers(trials: list, judge_unconditional: bool, check_ids=(),
@@ -581,8 +644,9 @@ def run_numbers(trials: list, judge_unconditional: bool, check_ids=(),
     """One arm of one run, reduced: whether it counts (`skip_reason` None:
     `MIN_TRIALS_PER_RUN` scored or agent-errored trials, and no scored trial
     without check results when the fixture has checks, `has_checks`), its
-    run mean, its run judge figure (only when `judge_unconditional` and every
-    one of those trials has one) and whether those figures differ, its
+    run mean, its run judge figure (when every one of those trials has one;
+    `judge_conditional` records whether the call was conditional, which
+    `_classify` weighs) and whether those figures differ, its
     per-check pass rates and its pooled counts. An agent-errored trial scores
     0 on every check of `check_ids` (the cell's checks) and has no judge
     figure; an infrastructure error is left out."""
@@ -599,8 +663,7 @@ def run_numbers(trials: list, judge_unconditional: bool, check_ids=(),
         skip = None
     rates = [sum(t["checks"].values()) / len(t["checks"]) for t in scored if t["checks"]]
     figures = [t["judge"] for t in scored]
-    judged = (judge_unconditional and len(scored) >= MIN_TRIALS_PER_RUN
-              and None not in figures)
+    judged = len(scored) >= MIN_TRIALS_PER_RUN and None not in figures
     per_check: dict = {}
     for t in scored:
         for key, passed in t["checks"].items():
@@ -609,6 +672,7 @@ def run_numbers(trials: list, judge_unconditional: bool, check_ids=(),
     cost = _finite_sum(costs)
     return {"scored_trials": len(scored), "errored_trials": len(errored),
             "counted": skip is None, "skip_reason": skip,
+            "judge_conditional": not judge_unconditional,
             "run_mean": _mean(rates) if rates else None,
             "judge_mean": _mean(figures) if judged else None,
             "judge_spread": bool(judged and not _constant(figures)),
@@ -656,12 +720,7 @@ def _arm_summary(runs: list) -> dict:
             "pass_rate": passed / total if total else None,
             "run_means": means, "mean_of_run_means": _mean(means) if means else None,
             "judge_runs": len(judged), "judge_run_means": judged,
-            "judge_floor": judge_floor([r["numbers"]["judge_figures"] for r in runs
-                                        if r["numbers"]["judge_figures"] is not None]),
-            "judge_spread_runs": sum(1 for r in runs if r["numbers"]["judge_spread"]),
-            "judge_multi_trial_runs": sum(
-                1 for r in runs if r["numbers"]["judge_figures"] is not None
-                and len(r["numbers"]["judge_figures"]) >= 2),
+            "judge_conditional_runs": sum(r["numbers"]["judge_conditional"] for r in runs),
             "judge_figure": _mean(judged) if judged else None}
 
 
@@ -673,159 +732,286 @@ def _pooled(runs: list, field: str) -> dict:
     return out
 
 
-#: Runs per arm whose judge figures must differ within the run.
-JUDGE_SPREAD_RUNS = 2
+def run_priors(runs: list) -> dict:
+    """The prior variances, measured across every run given (all skills or
+    all guidance sections of one evaluation): runs grouped by skill,
+    fixture, model, role, guidance pair and content (fixture digest, and the
+    tested digest for a with arm), and each figure's run-to-run variance
+    pooled over the groups (`pooled_variance`). {"objective", "judge",
+    "check"}: the run mean, the run judge figure, and a check's per-run pass
+    rate (pooled over every check)."""
+    groups: dict = {}
+    for run in runs:
+        numbers = run_numbers(run["trials"], run.get("judge_conditional") is False)
+        if not numbers["counted"]:
+            continue
+        key = (run["skill"], run["fixture"], run["model"], run["role"], run.get("pair"),
+               run["fixture_digest"], run.get("fleet_hooks_digest"),
+               run["tested_digest"] if run["role"] == "with" else None)
+        group = groups.setdefault(key, {"objective": [], "judge": [], "check": {}})
+        if numbers["run_mean"] is not None:
+            group["objective"].append(numbers["run_mean"])
+        if numbers["judge_mean"] is not None:
+            group["judge"].append(numbers["judge_mean"])
+        for check, rate in numbers["check_rates"].items():
+            group["check"].setdefault(check, []).append(rate)
+    judge = pooled_variance([g["judge"] for g in groups.values()])
+    return {"objective": pooled_variance([g["objective"] for g in groups.values()]),
+            # The judge scale is 0 to 10: its fallback scales with it.
+            "judge": judge * 100 if judge == FALLBACK_PRIOR_VARIANCE else judge,
+            "check": pooled_variance([v for g in groups.values()
+                                      for v in g["check"].values()])}
 
 
-def _judge_spread_ok(arm: dict) -> bool:
-    """Whether an arm's judge figures can bound a delta (N1, round 5). With
-    runs of two or more judged trials, `JUDGE_SPREAD_RUNS` of them must
-    differ within the run, so the floor (`judge_floor`, their pooled
-    within-run variance) is not zero. With only one-trial runs there is no
-    within-run spread to pool: the run-level standard error alone bounds
-    the delta, so the run judge figures must not all be equal."""
-    if arm["judge_multi_trial_runs"]:
-        return arm["judge_spread_runs"] >= JUDGE_SPREAD_RUNS
-    return len(set(arm["judge_run_means"])) > 1
+def _judge_usable(arms: dict) -> bool:
+    """Whether two arm summaries' judge figures can be used (see the comment
+    in `_classify`)."""
+    conditional = any(arms[a]["judge_conditional_runs"] for a in arms)
+    complete = all(arms[a]["judge_runs"] == arms[a]["runs"] for a in arms)
+    return bool(arms["with"]["judge_run_means"] and arms["without"]["judge_run_means"]) \
+        and (complete or not conditional)
 
 
 def _classify(with_runs: list, without_runs: list, policy: dict,
-              judge_carried: bool) -> dict:
-    """Rules 1 to 7 of the module docstring, over counted runs."""
+              judge_carried: bool, priors: dict, strata: list | None = None) -> dict:
+    """Rules 1 to 6 of the module docstring, over counted runs. With
+    `strata` (#557: a list of (with runs, without runs), one per
+    rest-of-guidance stratum, whose union is the two arms), the counts
+    (rules 2 and 4) stay pooled over the arms, the deltas and the per-check
+    keep are `stratified_estimate`s over the strata, and the judge is
+    usable only when it is usable in EVERY stratum (a skipped conditional
+    call is a sample biased toward no benefit, so dropping that stratum's
+    judge would be too)."""
     arms = {"with": _arm_summary(with_runs), "without": _arm_summary(without_runs)}
     cli = sorted({v for r in with_runs + without_runs for v in r["cli_versions"]})
     out = {**arms, "cli_versions": cli, "objective": None, "judge": None,
-           "confident_checks": []}
+           "confident_checks": [], "priors": priors, "keep_tests": []}
 
     def done(cls, reason):
         return {**out, "class": cls, "reason": reason}
 
     least = min(arms["with"]["runs"], arms["without"]["runs"])
-    if least < policy["min_runs"]:
-        return done("insufficient", f"an arm has {least} counted runs, under "
-                    f"{policy['min_runs']}")
-    if len(cli) < policy["min_cli_versions"]:
-        return done("insufficient", f"{len(cli)} CLI version(s), under "
-                    f"{policy['min_cli_versions']}")
+    if least < 1:
+        return done("insufficient", "an arm has no counted run")
 
     with_n, with_passed = _pooled(with_runs, "check_n"), _pooled(with_runs, "check_passed")
     without_n = _pooled(without_runs, "check_n")
     without_passed = _pooled(without_runs, "check_passed")
-    for key in sorted(set(with_n) & set(without_n)):
-        if not with_passed[key] and not without_passed[key]:
-            return done("cannot-discriminate", f"check {key} fails in every "
-                        "scored trial of both arms")
+    # A check both arms fail in every scored trial adds the same 0 to both
+    # arms, so it does not stop the cell: the delta still decides (the owner,
+    # 2026-11-03, "Judge them by the removal rule"). Only a cell where both
+    # arms pass almost nothing is set aside, once FLOOR_MIN_RUNS on each arm
+    # show it is not one unlucky run: that fixture looks broken.
     rates = [arms[a]["pass_rate"] for a in arms]
     if all(r is not None and r <= policy["floor_fraction"] for r in rates):
-        return done("cannot-discriminate", "both arms' pass rate at or below "
-                    f"{policy['floor_fraction']}")
+        if least >= FLOOR_MIN_RUNS:
+            return done("cannot-discriminate", "both arms' pass rate at or below "
+                        f"{policy['floor_fraction']} over {least}+ runs each: the "
+                        "fixture looks broken")
+        return done("insufficient", "both arms' pass rate at or below "
+                    f"{policy['floor_fraction']}; {FLOOR_MIN_RUNS} runs on each arm "
+                    "decide whether the fixture is broken")
 
-    resamples = policy["bootstrap_resamples"]
-    benefit_level = (1 + policy["benefit_confidence"]) / 2
+    strength = policy["prior_strength"]
     objective_ceiling = all(r is not None and r >= policy["ceiling_fraction"]
                             for r in rates)
     wj, oj = arms["with"]["judge_run_means"], arms["without"]["judge_run_means"]
-    judge_ok = (min(len(wj), len(oj)) >= policy["min_runs"]
-                and all(_judge_spread_ok(arms[a]) for a in arms))
+    # A conditional judge call is skipped when its pair's objective already
+    # favors the with arm, so conditional figures are a sample biased toward
+    # no benefit: unless every counted run of BOTH arms has its figure, in
+    # which case none was skipped and nothing was selected out (2026-10-31).
+    if strata is None:
+        judge_ok = _judge_usable(arms)
+    else:
+        judge_ok = bool(wj and oj) and all(
+            _judge_usable({"with": _arm_summary(w), "without": _arm_summary(o)})
+            for w, o in strata)
     judge_ceiling = judge_ok and all(arms[a]["judge_figure"] >= policy["judge_ceiling"]
                                      for a in arms)
-
-    def delta(a, b, floors=None):
-        deltas = bootstrap_deltas(a, b, resamples)
-        return {"delta": _mean(a) - _mean(b),
-                "benefit_lower": bounds(a, b, benefit_level, resamples, deltas,
-                                        floors)[0],
-                "retire_upper": bounds(a, b, policy["retire_confidence"],
-                                       resamples, deltas, floors)[1]}
-
-    judge_floors = (arms["with"]["judge_floor"], arms["without"]["judge_floor"])
-    judge_words = (f"the judge figure needs {policy['min_runs']} unconditionally "
-                   f"judged runs per arm, {JUDGE_SPREAD_RUNS} of them with judge "
-                   "figures that differ within the run (an arm of one-trial runs: "
-                   "run judge figures that are not all equal)")
     wm, om = arms["with"]["run_means"], arms["without"]["run_means"]
-    floors = tuple(binomial_floor(arms[a]["pass_rate"], arms[a]["scored_trials"])
-                   for a in ("with", "without"))
-    objective_varies = (min(len(wm), len(om)) >= policy["min_runs"]
-                        and not (_constant(wm) and _constant(om)))
+    objective_ok = bool(wm and om)
+
+    def figures(runs, field):
+        return [r["numbers"][field] for r in runs if r["numbers"][field] is not None]
+
+    def delta(a, b, prior, margin, field="run_mean"):
+        parts = None if strata is None else [
+            (figures(w, field), figures(o, field)) for w, o in strata]
+        parts = parts and [(x, y) for x, y in parts if x and y]
+        if parts and len(parts) > 1:
+            d, info = stratified_estimate(parts, prior, strength)
+            return {"delta": d, "strata": len(parts),
+                    "benefit_lower": stratified_sequence(
+                        parts, policy["benefit_confidence"], prior, strength)[0],
+                    "retire_upper": stratified_sequence(
+                        parts, policy["retire_confidence"], prior, strength)[1],
+                    "helps_confidence": confidence_reached_info(info, prior, d),
+                    "no_help_confidence": confidence_reached_info(info, prior,
+                                                                  margin - d)}
+        if parts:
+            a, b = parts[0]
+        d = _mean(a) - _mean(b)
+        return {"delta": d,
+                "benefit_lower": confidence_sequence(
+                    a, b, policy["benefit_confidence"], prior, strength)[0],
+                "retire_upper": confidence_sequence(
+                    a, b, policy["retire_confidence"], prior, strength)[1],
+                # The levels the two bounds reach, for display (the explorer
+                # page): confident above 0, and confident under the margin.
+                "helps_confidence": confidence_reached(a, b, prior, strength, d),
+                "no_help_confidence": confidence_reached(a, b, prior, strength,
+                                                         margin - d)}
 
     def objective_benefit():
-        """The objective delta and the per-check keep (Holm): the reason a
-        varying objective shows benefit, or None."""
-        out["objective"] = delta(wm, om, floors)
+        """The objective delta and the per-check keep (Holm): the reason the
+        objective shows benefit, or None."""
+        out["objective"] = delta(wm, om, priors["objective"], policy["objective_margin"])
         if out["objective"]["benefit_lower"] > 0:
             return "objective delta's lower bound is above 0"
-        by_check = [{k: [r["numbers"]["check_rates"][k] for r in runs
-                         if k in r["numbers"]["check_rates"]]
-                     for k in {k for r in runs for k in r["numbers"]["check_rates"]}}
-                    for runs in (with_runs, without_runs)]
-        check_floors = {k: (binomial_floor(with_passed[k] / with_n[k], with_n[k]),
-                            binomial_floor(without_passed[k] / without_n[k], without_n[k]))
-                        for k in set(with_n) & set(without_n)}
-        out["confident_checks"] = confident_checks(*by_check, policy["check_confidence"],
-                                                   resamples, check_floors)
+        def by_check(runs):
+            return {k: [r["numbers"]["check_rates"][k] for r in runs
+                        if k in r["numbers"]["check_rates"]]
+                    for k in {k for r in runs for k in r["numbers"]["check_rates"]}}
+        check_priors = {k: priors["check"] for k in set(with_n) & set(without_n)}
+        if strata is None:
+            out["confident_checks"] = confident_checks(
+                by_check(with_runs), by_check(without_runs), policy["check_confidence"],
+                check_priors, strength)
+        else:
+            out["confident_checks"] = stratified_confident_checks(
+                [(by_check(w), by_check(o)) for w, o in strata],
+                policy["check_confidence"], check_priors, strength)
         if out["confident_checks"]:
             return "a check is confidently better with the skill"
         return None
 
+    def no_benefit(cls_reason):
+        """`no-benefit`, unless the runs span too few CLI versions to remove."""
+        if len(cli) < policy["min_cli_versions"]:
+            return done("insufficient", f"no benefit on the numbers, but {len(cli)} "
+                        f"CLI version(s), under the {policy['min_cli_versions']} "
+                        "a removal needs")
+        if objective_ceiling or judge_ceiling:
+            # At the ceiling the subject has no room to add the margin on
+            # this task; it is judged like any other cell, and says so.
+            cls_reason += "; both arms are at the ceiling"
+        return done("no-benefit", cls_reason)
+
+    def with_ahead_skips_only():
+        """Every counted run of both arms either has its judge figure, or has
+        none only because every scored trial records a with-ahead skip."""
+        for run in with_runs + without_runs:
+            if run["numbers"]["judge_mean"] is not None:
+                continue
+            judged = [t for t in run["trials"] if t.get("scored") or t.get("errored")]
+            if not judged or not all(t.get("judge_skipped_with_ahead") for t in judged):
+                return False
+        return True
+
+    def route(a_lists, prior):
+        """(d, I) of one route: stratified over the strata that have a figure
+        on each arm, else the two pooled arms."""
+        parts = [(x, y) for x, y in a_lists if x and y]
+        if len(parts) > 1:
+            return stratified_estimate(parts, prior, strength)
+        return _stratum(*parts[0], prior, strength)
+
+    def lists(field):
+        if strata is None:
+            return [(figures(with_runs, field), figures(without_runs, field))]
+        return [(figures(w, field), figures(o, field)) for w, o in strata]
+
+    def check_lists():
+        def by_check(runs):
+            return {k: [r["numbers"]["check_rates"][k] for r in runs
+                        if k in r["numbers"]["check_rates"]]
+                    for k in {k for r in runs for k in r["numbers"]["check_rates"]}}
+        pairs = ([(with_runs, without_runs)] if strata is None else strata)
+        return [(by_check(w), by_check(o)) for w, o in pairs]
+
+    # The keep tests (#557 follow-up): one p-value per route that can return
+    # `benefit` here, for `retirement`'s per-subject family. Computed for
+    # every such route whatever the cell's class, and never setting
+    # out["judge"], so a route the class did not need is still tested.
+    tests = []
+    if objective_ok:
+        tests.append({"route": "objective",
+                      "p": keep_p(*route(lists("run_mean"), priors["objective"]),
+                                  priors["objective"])})
+    per_check = check_lists()
+    keys = sorted({k for w, o in per_check for k in set(w) & set(o)})
+    ranked = []
+    for key in keys:
+        parts = [(w[key], o[key]) for w, o in per_check if key in w and key in o]
+        if any(x and y for x, y in parts):
+            d, info = route(parts, priors["check"])
+            ranked.append((-d * math.sqrt(info), key, d, info))
+    if ranked:
+        _, _, d, info = min(ranked)
+        tests.append({"route": "checks",
+                      "p": min(1.0, len(keys) * keep_p(d, info, priors["check"]))})
+    judge_route = (judge_ok or (not judge_carried and strata is not None
+                                and with_ahead_skips_only())) and bool(wj and oj)
+    if judge_route:
+        tests.append({"route": "judge",
+                      "p": keep_p(*route(lists("judge_mean"), priors["judge"]),
+                                  priors["judge"])})
+    out["keep_tests"] = tests
+
+    judge_words = ("the judge figure needs a judged run on each arm, and every "
+                   "counted run judged when any judge call was conditional")
     if judge_carried:
         # Decided on the judge, but a judge-carried fixture with objective
         # checks keeps on them too, and is no-benefit only when they are.
-        reason = objective_benefit() if objective_varies else None
+        reason = objective_benefit() if objective_ok else None
         if reason:
             return done("benefit", reason)
         if not judge_ok:
             return done("insufficient", judge_words)
-        if _constant(wj) and _constant(oj):
-            return (done("ceiling", "zero variance at the judge ceiling") if judge_ceiling
-                    else done("insufficient", "zero variance: nothing to decide on"))
-        out["judge"] = delta(wj, oj, judge_floors)
+        out["judge"] = delta(wj, oj, priors["judge"], policy["judge_margin"],
+                             "judge_mean")
         if out["judge"]["benefit_lower"] > 0:
             return done("benefit", "judge delta's lower bound is above 0")
-        if judge_ceiling:
-            return done("ceiling", "both arms' judge figure at or above "
-                        f"{policy['judge_ceiling']}")
         if out["judge"]["retire_upper"] >= policy["judge_margin"]:
             return done("insufficient", "the interval is not tight enough yet")
-        if wm or om:
-            if not objective_varies:
-                return done("insufficient", "the objective checks decide nothing yet: "
-                            "too few runs with them, or zero variance")
-            if out["objective"]["retire_upper"] >= policy["objective_margin"]:
-                return done("insufficient", "the objective interval is not tight "
-                            "enough yet")
-            return done("no-benefit", "the judge and objective deltas' upper bounds "
-                        "are under their margins")
-        return done("no-benefit", "judge delta's upper bound is under its margin")
+        if objective_ok and out["objective"]["retire_upper"] >= policy["objective_margin"]:
+            return done("insufficient", "the objective interval is not tight enough yet")
+        return no_benefit("the deltas' upper bounds are under their margins")
 
-    if min(len(wm), len(om)) < policy["min_runs"]:
-        return done("insufficient", "too few runs with objective checks")
-    judge_usable = judge_ok and not (_constant(wj) and _constant(oj))
-    if _constant(wm) and _constant(om):
-        # Nothing is decided on the objective; a judge figure that varies may
-        # still show a benefit, which only keeps.
-        if judge_usable:
-            out["judge"] = delta(wj, oj, judge_floors)
-            if out["judge"]["benefit_lower"] > 0:
-                return done("benefit", "judge delta's lower bound is above 0")
-        return (done("ceiling", "zero variance at the ceiling") if objective_ceiling
-                else done("insufficient", "zero variance: nothing to decide on"))
+    if not objective_ok:
+        return done("insufficient", "no run with objective checks on an arm")
     reason = objective_benefit()
     if reason:
         return done("benefit", reason)
-    if judge_usable:
-        out["judge"] = delta(wj, oj, judge_floors)
+    if judge_ok:
+        out["judge"] = delta(wj, oj, priors["judge"], policy["judge_margin"],
+                             "judge_mean")
         if out["judge"]["benefit_lower"] > 0:
             return done("benefit", "judge delta's lower bound is above 0")
-    if objective_ceiling:
-        return done("ceiling", "both arms' pass rate at or above "
-                    f"{policy['ceiling_fraction']}")
-    if not judge_usable:
-        return done("insufficient", f"the judge is needed: {judge_words}, and not "
-                    "of zero variance")
+    if not judge_ok and strata is not None and with_ahead_skips_only():
+        # In-situ guidance (#557, T3's review): every missing judge figure is
+        # a conditional skip made because the with arm was strictly ahead on
+        # the objective, so no figure was lost for any other reason and the
+        # objective alone decides a removal. The judged runs left are a
+        # sample biased toward no benefit, so they may still keep, never
+        # remove.
+        if wj and oj:
+            judged = delta(wj, oj, priors["judge"], policy["judge_margin"], "judge_mean")
+            if judged["benefit_lower"] > 0:
+                out["judge"] = judged
+                return done("benefit", "judge delta's lower bound is above 0, on the "
+                            "runs the conditional judge was called for")
+        if out["objective"]["retire_upper"] < policy["objective_margin"]:
+            return no_benefit("the objective delta's upper bound is under its margin, and "
+                              "every skipped judge call was skipped because the with arm "
+                              "was ahead")
+        return done("insufficient", "the interval is not tight enough yet")
+    if not judge_ok:
+        return done("insufficient", "the objective interval is not tight enough "
+                    f"yet, and the judge is needed to remove: {judge_words}")
     if out["objective"]["retire_upper"] < policy["objective_margin"] \
             and out["judge"]["retire_upper"] < policy["judge_margin"]:
-        return done("no-benefit", "every delta's upper bound is under its margin")
+        return no_benefit("every delta's upper bound is under its margin")
     return done("insufficient", "the interval is not tight enough yet")
 
 
@@ -836,8 +1022,8 @@ def run_key(run: dict) -> str:
 
 
 def classify_cell(with_runs: list, without_runs: list, policy: dict,
-                  judge_carried: bool) -> dict:
-    """A cell's class under stateless confirmation (module docstring)."""
+                  judge_carried: bool, priors: dict) -> dict:
+    """A cell's class over all its counted runs (module docstring)."""
     prime(with_runs + without_runs)
     counted, skipped = [], {}
     for runs in (with_runs, without_runs):
@@ -849,35 +1035,120 @@ def classify_cell(with_runs: list, without_runs: list, policy: dict,
             else:
                 skipped[reason] = skipped.get(reason, 0) + 1
         counted.append(keep)
-    full = _classify(*counted, policy, judge_carried)
-    available = min(map(len, counted))
-    looks = []
-    for n in (n for n in policy["retire_looks"] if n <= available):
-        result = _classify(counted[0][:n], counted[1][:n], policy, judge_carried)
-        looks.append({"n": n, "class": result["class"], "reason": result["reason"]})
-    if full["class"] == "benefit" or not looks:
-        cls, reason = full["class"], full["reason"]
-        if cls == "no-benefit":
-            cls, reason = "insufficient", "no-benefit is declared only at a look"
-    elif looks[-1]["class"] != "no-benefit":
-        cls = looks[-1]["class"]
-        reason = f"at the {looks[-1]['n']}-run look: {looks[-1]['reason']}"
-    elif len(looks) >= 2 and looks[-2]["class"] == "no-benefit":
-        cls = "no-benefit"
-        reason = f"no-benefit at the {looks[-2]['n']}- and {looks[-1]['n']}-run looks"
-    else:
-        cls = "no-benefit-pending"
-        reason = (f"no-benefit at the {looks[-1]['n']}-run look; it must also be "
-                  "no-benefit at the next look")
+    full = _classify(*counted, policy, judge_carried, priors)
+    cls, reason = full["class"], full["reason"]
     errored = sum(r["numbers"]["errored_trials"] for r in with_runs + without_runs)
-    if cls in ("no-benefit", "no-benefit-pending") and (errored or NO_CHECKS_REASON in skipped):
+    if cls == "no-benefit" and (errored or NO_CHECKS_REASON in skipped):
         # An agent's errors can only help keep: dropping or scoring around
         # them would compare only the trials that went well.
         cls, reason = "insufficient", (f"{cls} on the numbers, but the cell has "
                                        f"{errored} agent-errored trial(s) or a run "
                                        "skipped as anomalous, so it cannot retire")
-    return {**full, "class": cls, "reason": reason, "full_class": full["class"],
-            "looks": looks, "judge_carried": judge_carried, "skipped": skipped}
+    return {**full, "class": cls, "reason": reason, "judge_carried": judge_carried,
+            "skipped": skipped}
+
+
+#: A skill cell's prior guard (#557 follow-up), softer than guidance's:
+#: 10 degrees of freedom before a measured value replaces the fallback, and
+#: fallbacks just above the measured mid-range spread (objective 0.0063,
+#: judge 0.76; checks keep guidance's 0.25, they only keep). Chosen by
+#: simulation against the integrator's two bars: false removals at a true
+#: judge gain of 1.5 at or under 4% (3.4%, against 4.8% on the pooled
+#: prior) and the high cohort (4 skills + 3 sections) within the 50-point
+#: budget (0.96x); the full guidance guard cost 1.18x.
+SKILL_PRIOR_GUARD = {"min_df": 10, "objective": 0.01, "judge": 1.0, "check": 0.25}
+GUIDANCE_PRIOR_GUARD = {"min_df": GUIDANCE_PRIOR_MIN_DF,
+                        "objective": GUIDANCE_FALLBACK_PRIOR_VARIANCE,
+                        "judge": GUIDANCE_FALLBACK_PRIOR_VARIANCE * 100,
+                        "check": GUIDANCE_FALLBACK_PRIOR_VARIANCE}
+
+
+def cell_priors(runs: list, guard: dict | None = None) -> dict:
+    """The prior variances of ONE in-situ guidance cell (#557), measured over
+    its own runs only: a prior pooled across cells is anti-conservative when
+    other cells sit near the ceiling. Groups are (role, rest of guidance,
+    fixture digest, and the tested digest for a with arm), over counted
+    runs as `run_priors` counts them, each figure pooled with
+    `GUIDANCE_PRIOR_MIN_DF` degrees of freedom needed before the measured
+    value replaces `GUIDANCE_FALLBACK_PRIOR_VARIANCE` (x100 for the judge's
+    0-to-10 scale, applied exactly when the fallback is). `guard` replaces
+    those (`SKILL_PRIOR_GUARD` for a skill cell)."""
+    guard = guard or GUIDANCE_PRIOR_GUARD
+    groups: dict = {}
+    for run in runs:
+        numbers = run_numbers(run["trials"], run.get("judge_conditional") is False)
+        if not numbers["counted"]:
+            continue
+        key = (run["role"], run.get("pair_key"), run["fixture_digest"],
+               run["tested_digest"] if run["role"] == "with" else None)
+        group = groups.setdefault(key, {"objective": [], "judge": [], "check": {}})
+        if numbers["run_mean"] is not None:
+            group["objective"].append(numbers["run_mean"])
+        if numbers["judge_mean"] is not None:
+            group["judge"].append(numbers["judge_mean"])
+        for check, rate in numbers["check_rates"].items():
+            group["check"].setdefault(check, []).append(rate)
+
+    def guarded(lists, figure):
+        df = sum(len(v) - 1 for v in lists if len(v) >= 2)
+        if df < guard["min_df"]:
+            return guard[figure]
+        return pooled_variance(lists)
+
+    return {"objective": guarded([g["objective"] for g in groups.values()], "objective"),
+            "judge": guarded([g["judge"] for g in groups.values()], "judge"),
+            "check": guarded([v for g in groups.values() for v in g["check"].values()],
+                             "check")}
+
+
+def classify_strata(strata: dict, policy: dict, judge_carried: bool) -> dict:
+    """An in-situ guidance cell's class over its rest-of-guidance strata
+    (#557). `strata` maps a rest digest to {"with": runs, "without": runs}.
+
+    A stratum is USED when it has a counted run on each arm. The class is
+    `_classify` over the used strata (counts pooled, deltas stratified),
+    with `cell_priors` over the used strata's runs. A run skipped as
+    anomalous ANYWHERE in the cell's current-content runs, used or not,
+    keeps it from `no-benefit`, as in `classify_cell`; an agent-errored
+    trial scores 0 on every check of its arm and does not block.
+    There is no separate confirmation beside the rest on main (the owner,
+    2026-11-02): the pooled bounds decide."""
+    every = [r for s in strata.values() for role in ("with", "without") for r in s[role]]
+    prime(every)
+    counted, skipped = {}, {}
+    for rest, arms in strata.items():
+        counted[rest] = {}
+        for role in ("with", "without"):
+            keep = []
+            for run in sorted(arms[role], key=_order):
+                reason = run["numbers"]["skip_reason"]
+                if reason is None:
+                    keep.append(run)
+                else:
+                    skipped[reason] = skipped.get(reason, 0) + 1
+            counted[rest][role] = keep
+    used = sorted(rest for rest, arms in counted.items() if arms["with"] and arms["without"])
+    used_runs = [r for rest in used for role in ("with", "without") for r in strata[rest][role]]
+    # Re-prime the used runs alone, so a check seen only in a dropped
+    # stratum is not part of the cell's checks.
+    prime(used_runs)
+    pairs = [(counted[rest]["with"], counted[rest]["without"]) for rest in used]
+    with_runs = sorted((r for w, _ in pairs for r in w), key=_order)
+    without_runs = sorted((r for _, o in pairs for r in o), key=_order)
+    full = _classify(with_runs, without_runs, policy, judge_carried, cell_priors(used_runs),
+                     strata=pairs or None)
+    cls, reason = full["class"], full["reason"]
+    # An agent-errored trial already scores 0 on every check of its arm
+    # (`run_numbers`), so it counts as a bad result, never as one left out;
+    # unlike `classify_cell` it does not also block removal, which at the
+    # run counts a guidance verdict needs would block a cell for good
+    # (#557, T3's planner review). A run skipped as anomalous still does.
+    if cls == "no-benefit" and NO_CHECKS_REASON in skipped:
+        cls, reason = "insufficient", (f"{cls} on the numbers, but the cell has a run "
+                                       "skipped as anomalous, so it cannot retire")
+    return {**full, "class": cls, "reason": reason, "judge_carried": judge_carried,
+            "skipped": skipped, "strata": used, "used_runs": used_runs,
+            "errored_trials": sum(r["numbers"]["errored_trials"] for r in every)}
 
 
 # ---------------------------------------------------------------------------
@@ -895,7 +1166,10 @@ def _joint_context(with_runs: list, without_runs: list, models: list):
     the non-subject skills (`arm_context.others_digest`) and the frozen
     guidance (`context.guidance.digest`). A candidate is a with group and a
     without group of one pair key, scored by its smaller arm's run count; the
-    best candidate is the cell's, and a tie or no candidate chooses none. No
+    best candidate is the cell's; a tie on that count goes to the candidate
+    with the newer newest run (the owner, 2026-11-01: an equal tie had dropped a
+    cell back to insufficient), and only a full tie, or no candidate, chooses
+    none. No
     single run's self-report chooses either (round 4), and the two arms can
     no longer be pooled from different guidance or skill sets."""
     def groups(runs):
@@ -903,15 +1177,18 @@ def _joint_context(with_runs: list, without_runs: list, models: list):
         for run in runs:
             if run["model"] in models and run["arm_context_digest"] and run.get("pair_key"):
                 key = (run["arm_context_digest"], run["pair_key"])
-                counts[key] = counts.get(key, 0) + 1
+                n, newest = counts.get(key, (0, ""))
+                counts[key] = (n + 1, max(newest, run["timestamp"]))
         return counts
-    candidates = sorted(((min(n_with, n_without), with_ctx, without_ctx, pair)
-                         for (with_ctx, pair), n_with in groups(with_runs).items()
-                         for (without_ctx, other), n_without in groups(without_runs).items()
+    candidates = sorted(((min(n_with, n_without), max(new_with, new_without),
+                          with_ctx, without_ctx, pair)
+                         for (with_ctx, pair), (n_with, new_with) in groups(with_runs).items()
+                         for (without_ctx, other), (n_without, new_without)
+                         in groups(without_runs).items()
                          if pair == other), reverse=True)
-    if not candidates or (len(candidates) > 1 and candidates[0][0] == candidates[1][0]):
+    if not candidates or (len(candidates) > 1 and candidates[0][:2] == candidates[1][:2]):
         return None, None, None
-    return candidates[0][1:]
+    return candidates[0][2:]
 
 
 def pooled_fixture(run: dict, skill: str, expected: dict) -> str:
@@ -926,13 +1203,30 @@ def pooled_fixture(run: dict, skill: str, expected: dict) -> str:
     return target if digest is not None and run["fixture_digest"] == digest else name
 
 
-def pool_cells(runs: list, skill: str, models: list, expected: dict) -> dict:
+def pool_cells(runs: list, skill: str, models: list, expected: dict,
+               strata: bool = False) -> dict:
     """Which arm runs each (fixture, model) cell of `skill` holds, each arm
     pooled by its own key against the content on main (module docstring).
     `expected` maps each fixture on main ("" for a flat one) to its
     {"fixture_digest", "tested_digest"}, either None when unknown. A run's
     fixture is `pooled_fixture`'s. The one place runs are grouped; swap it
-    to change the window."""
+    to change the window.
+
+    `newest_on_model` is the newest timestamp of ANY run of the cell's
+    fixture on its model, whatever its role or digests (None with no run).
+    It is output only and decides nothing here: the planner counts a fire
+    that landed a run, pooled or not, as a fire that produced something,
+    so a stale-digest run is not mistaken for an empty fire.
+    `run_stamps_on_model` is every such timestamp, sorted, also output only:
+    the planner asks whether a run landed inside a given fire's window,
+    which the newest stamp alone cannot answer once a later run lands.
+
+    `strata` (#557, in-situ guidance only): no `_joint_context`; each cell
+    holds every current-content run on its model, grouped by `pair_key`
+    (the rest of the guidance the run ran beside) under `strata`, and its
+    own key {tested_digest, fixture_digest}."""
+    if strata:
+        return _pool_strata(runs, skill, models, expected)
     own = [r for r in runs if r["skill"] == skill]
     cells = {}
     for fixture, main in sorted(expected.items()):
@@ -948,14 +1242,45 @@ def pool_cells(runs: list, skill: str, models: list, expected: dict) -> dict:
         key = {"tested_digest": tested, "fixture_digest": fdig,
                "with_context": with_context, "without_context": without_context}
         for model in models:
+            stamps = sorted(r["timestamp"] for r in mine if r["model"] == model)
             cells[(fixture, model)] = {
-                "key": key, "on_model": sum(1 for r in mine if r["model"] == model),
+                "key": key, "on_model": len(stamps),
+                "newest_on_model": stamps[-1] if stamps else None,
+                "run_stamps_on_model": stamps,
                 "with": [r for r in current_with if r["model"] == model
                          and r["arm_context_digest"] == with_context
                          and r.get("pair_key") == pair],
                 "without": [r for r in current_without if r["model"] == model
                             and r["arm_context_digest"] == without_context
                             and r.get("pair_key") == pair]}
+    return cells
+
+
+def _pool_strata(runs: list, skill: str, models: list, expected: dict) -> dict:
+    own = [r for r in runs if r["skill"] == skill]
+    cells = {}
+    for fixture, main in sorted(expected.items()):
+        mine = [r for r in own if pooled_fixture(r, skill, expected) == fixture]
+        tested, fdig = main.get("tested_digest"), main.get("fixture_digest")
+        for model in models:
+            groups: dict = {}
+            for run in mine:
+                if run["model"] != model or not run.get("pair_key") or fdig is None \
+                        or run["fixture_digest"] != fdig:
+                    continue
+                if run["role"] == "with" and (tested is None or run["tested_digest"] != tested):
+                    continue
+                groups.setdefault(run["pair_key"], {"with": [], "without": []})[
+                    run["role"]].append(run)
+            stamps = [r["timestamp"] for r in mine if r["model"] == model]
+            cells[(fixture, model)] = {
+                "key": {"tested_digest": tested, "fixture_digest": fdig},
+                "on_model": len(stamps),
+                "newest_on_model": max(stamps) if stamps else None,
+                "run_stamps_on_model": sorted(stamps),
+                "strata": groups,
+                "with": [r for g in groups.values() for r in g["with"]],
+                "without": [r for g in groups.values() for r in g["without"]]}
     return cells
 
 
@@ -973,54 +1298,107 @@ def _run_entry(run: dict) -> dict:
 
 
 def retirement(index: dict, models: list, skill: str, policy: dict,
-               expected: dict) -> dict:
+               expected: dict, priors: dict | None = None, strata: bool = False,
+               family: bool = True) -> dict:
     """The verdict for `skill` over every fixture on main (`expected`, see
-    `pool_cells`) x roster model cell."""
+    `pool_cells`) x roster model cell. `priors`, when given, applies to every
+    cell; by default each cell measures its own (`cell_priors` with
+    `SKILL_PRIOR_GUARD`; #557 follow-up).
+
+    `strata` (#557, in-situ guidance): cells are pooled by rest of guidance
+    and classified by `classify_strata` (which measures its own per-cell
+    priors; `priors` is not used); a cell's `runs` and `runs_used` are its
+    used strata's runs.
+
+    `family` (#557 follow-up; default on): the 85% keep is applied per
+    SUBJECT, not per cell. Every cell's keep tests (`_classify`) form one
+    family of FIXED size m = fixtures on main x roster models x 3 routes
+    (objective, checks, judge), known before any run; a subject keeps only
+    when some `benefit` cell has a test with p <= (1 - benefit_confidence)
+    / m (Holm's first step, which is all "any keep" needs). Otherwise every
+    `benefit` cell is `insufficient`, so the planner keeps measuring it. A
+    union over anytime-valid sequences with plug-in variances: as
+    approximate as one cell's bound. The verdict records `keep_family` (m)
+    and `keep_alpha`. The alone pair passes `family=False`."""
     cells, used = [], set()
     for (fixture, model), pool in sorted(pool_cells(index.get("runs", []), skill,
-                                                    models, expected).items()):
+                                                    models, expected, strata).items()):
         arms = {"with": pool["with"], "without": pool["without"]}
         runs = arms["with"] + arms["without"]
         prime(runs)
-        used.update(run_key(r) for r in runs)
+        if not strata:
+            used.update(run_key(r) for r in runs)
         missing = sorted(k for k, v in pool["key"].items() if v is None)
         if not pool["on_model"]:
-            cell = {"class": "missing", "reason": "no run on this model", "looks": []}
+            cell = {"class": "missing", "reason": "no run on this model"}
         elif missing:
-            cell = {"class": "insufficient", "looks": [],
+            cell = {"class": "insufficient",
                     "reason": f"pooling key incomplete: {', '.join(missing)}"}
+        elif strata:
+            carried = any(r["judge_carried"] for r in runs)
+            cell = classify_strata(pool["strata"], policy, carried)
+            mine = cell.pop("used_runs")
+            arms = {role: [r for r in mine if r["role"] == role] for role in arms}
+            runs = arms["with"] + arms["without"]
+            pool = {**pool, "key": {**pool["key"], "strata": cell.pop("strata")}}
         else:
             carried = any(r["judge_carried"] for r in runs)
-            cell = classify_cell(arms["with"], arms["without"], policy, carried)
+            # A skill cell's priors are its own (#557 follow-up): the pooled
+            # cross-skill prior sat below the measured spread. `priors`, when
+            # given (the alone pair's, a test's), applies to every cell.
+            cell = classify_cell(arms["with"], arms["without"], policy, carried,
+                                 priors if priors is not None
+                                 else cell_priors(runs, SKILL_PRIOR_GUARD))
+        if strata:
+            used.update(run_key(r) for r in runs)
         cells.append({"fixture": fixture or None, "model": model, "key": pool["key"],
-                      **cell,
+                      "newest_on_model": pool["newest_on_model"],
+                      "run_stamps_on_model": pool["run_stamps_on_model"], **cell,
                       "cost_usd": _finite_sum([r["numbers"]["cost_usd"] for r in runs]),
                       "cost_unknown_trials": sum(r["numbers"]["cost_unknown_trials"]
                                                  for r in runs),
                       "runs": {role: [_run_entry(r) for r in sorted(arms[role], key=_order)]
                                for role in arms}})
-    classes = {c["class"] for c in cells}
+    if family and expected:
+        m = len(expected) * max(1, len(models)) * 3
+        alpha = 1 - policy["benefit_confidence"]
+        passing = any(c["class"] == "benefit" and any(t["p"] <= alpha / m
+                                                       for t in c.get("keep_tests", []))
+                      for c in cells)
+        if not passing:
+            for c in cells:
+                if c["class"] == "benefit":
+                    c["cell_reason"] = c["reason"]
+                    c["class"], c["reason"] = "insufficient", (
+                        f"benefit in this cell alone ({c['reason']}), not across the "
+                        f"subject's {m} keep tests at {policy['benefit_confidence']:.0%} "
+                        "each (Holm)")
+    # A cell whose fixture looks broken says nothing about the subject, so
+    # the verdict is decided by the other cells (the owner, 2026-11-03).
+    classes = {c["class"] for c in cells} - {"cannot-discriminate"}
     if not expected:
         verdict, reason = "insufficient", "no fixture on main"
     elif "benefit" in classes:
         verdict, reason = "keep", "a cell shows benefit"
     elif classes & {"insufficient", "missing"}:
         verdict, reason = "insufficient", "a cell is insufficient or missing"
-    elif "cannot-discriminate" in classes:
-        verdict, reason = "cannot-discriminate", "a cell cannot discriminate"
-    elif "ceiling" in classes:
-        verdict, reason = "ceiling", "a cell is at the ceiling"
-    elif "no-benefit-pending" in classes:
-        verdict, reason = ("retire-pending", "every cell shows no benefit, but a cell "
-                           "has yet to show it at two looks")
-    elif cells and classes == {"no-benefit"}:
-        verdict, reason = "retire", "every cell shows no benefit"
+    elif cells and not classes:
+        verdict, reason = ("cannot-discriminate", "every cell's fixture looks broken: "
+                           "both arms pass almost nothing")
+    elif classes == {"no-benefit"}:
+        verdict, reason = "retire", ("every cell shows no benefit" if all(
+            c["class"] == "no-benefit" for c in cells) else
+            "every cell shows no benefit, apart from fixtures that look broken")
     else:
         # No cell (no roster model) or a class this verdict does not know:
         # never a retirement without evidence.
         verdict, reason = "insufficient", "no cell shows no benefit"
-    return {"verdict": verdict, "reason": reason, "cells": cells,
-            "runs_used": sorted(used)}
+    out = {"verdict": verdict, "reason": reason, "cells": cells,
+           "runs_used": sorted(used)}
+    if family and expected:
+        out.update(keep_family=len(expected) * max(1, len(models)) * 3,
+                   keep_alpha=1 - policy["benefit_confidence"])
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1046,10 +1424,15 @@ def guidance_verdict(index: dict, models: list, section: str, policy: dict,
     THE TWIST: a section whose in-situ verdict is `retire` while some alone
     cell shows `benefit` teaches the behavior, but the rest of the guidance
     already covers it. Its verdict is `shorten-or-merge`, never a removal.
-    Every other in-situ verdict stands as it is."""
+    Every other in-situ verdict stands as it is.
+
+    The in-situ cells are pooled by rest of guidance (#557, `retirement`
+    with `strata`). The alone cells pool as before."""
     runs = index.get("runs", [])
+    priors = run_priors(runs)
     out = {pair: retirement({"runs": [r for r in runs if r.get("pair") == pair]},
-                            models, section, policy, expected)
+                            models, section, policy, expected, priors,
+                            strata=pair == "in_situ", family=pair == "in_situ")
            for pair in GUIDANCE_PAIRS}
     in_situ, alone = out["in_situ"], out["alone"]
     verdict, reason = in_situ["verdict"], in_situ["reason"]
@@ -1061,4 +1444,5 @@ def guidance_verdict(index: dict, models: list, section: str, policy: dict,
             "cells": in_situ["cells"],
             "alone": {"verdict": alone["verdict"], "reason": alone["reason"],
                       "cells": alone["cells"]},
-            "runs_used": sorted(set(in_situ["runs_used"]) | set(alone["runs_used"]))}
+            "runs_used": sorted(set(in_situ["runs_used"]) | set(alone["runs_used"])),
+            **{k: in_situ[k] for k in ("keep_family", "keep_alpha") if k in in_situ}}

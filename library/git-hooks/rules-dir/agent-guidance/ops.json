@@ -15,8 +15,8 @@
     {
       "op": "replace",
       "file": "templates/agent-checks/agent-checks",
-      "old": "#    \"checks\":[\"secret-file\",\"skill-shell\"],\"failed\":[\"secret-file\"]}\n",
-      "new": "#    \"checks\":[\"rules-dir\",\"secret-file\",\"skill-shell\"],\"failed\":[\"secret-file\"]}\n"
+      "old": "#    \"checks\":[\"secret-file\",\"skill-shell\"],\"failed\":[\"secret-file\"],\n",
+      "new": "#    \"checks\":[\"rules-dir\",\"secret-file\",\"skill-shell\"],\"failed\":[\"secret-file\"],\n"
     },
     {
       "op": "append-lines",
@@ -39,8 +39,8 @@
     {
       "op": "replace",
       "file": "test/test_agent_check_lane.py",
-      "old": "        self.assertLessEqual({\"secret-file\", \"skill-shell\", \"repo-local\"}, ids)\n",
-      "new": "        self.assertLessEqual({\"rules-dir\", \"secret-file\", \"skill-shell\", \"repo-local\"}, ids)\n"
+      "old": "        self.assertLessEqual({\"secret-file\", \"skill-shell\", \"repo-local\", \"pr-tldr\"}, ids)\n",
+      "new": "        self.assertLessEqual({\"rules-dir\", \"secret-file\", \"skill-shell\", \"repo-local\", \"pr-tldr\"}, ids)\n"
     },
     {
       "op": "replace",

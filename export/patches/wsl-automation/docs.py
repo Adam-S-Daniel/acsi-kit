@@ -5,15 +5,18 @@ restic backup, the manual `wsl --export` backup and the session keeper left
 out (DECISIONS X10), their sections go ("Why staging", "Lock protocol",
 install step 3, the backup, manual export, keeper and both launcher task
 sections, "Keeper semantics"), and the sentences in kept sections that named
-them are reworded. The kit's additions get their own sections: the session
-miner task and the Linux and macOS schedule.
+them are reworded. The task health publish goes too, with its script
+(DECISIONS "Re-pin (2026-11-03)"). The kit's session miner section replaces
+the source's (the kit's wrapper replaces the source's), and the Linux and
+macOS schedule gets its own section. The memory curation section stays.
 
 AGENTS.md's repo-specific half keeps every measured lesson that still applies
 to a kept task: there is no WSL lifecycle event (with the at-logon
 measurement folded in), the post-wake transition window, the interactive
 prompt hang, ASCII-only PowerShell, the user principal, PowerShell from WSL
-and the CI shape. The sections that only explain the backup or the keeper
-go. A short section on the Linux and macOS schedule is added.
+and the CI shape, plus the memory curation and local trigger time notes.
+The sections that only explain the backup, the keeper (the stub `.git`
+guard runs only in the keeper) or the task health publish go. A short section on the Linux and macOS schedule is added.
 
 This patch runs on the substituted tree, so its anchors are the exported
 text. Every anchor must occur exactly once.
@@ -79,6 +82,8 @@ scheduled jobs available natively on Linux and macOS:
   "Waiting feed task" below).
 - A daily session miner run that turns this machine's Claude Code transcripts
   into short, redacted lesson records (see "Session miner task" below).
+- A weekly memory curation run that tidies Claude Code's private memory notes
+  in both Claude homes on this machine (see "Memory curation task" below).
 - A sync of the WSL ccstatusline layout to Windows, and a twice-daily sync of
   Codex Cloud environments.
 - A scheduled-task installer that wires all of the above into Windows Task
@@ -283,7 +288,8 @@ seam - and all filesystem paths used by the tests live under Pester's
 `TestDrive:`. The bash scripts have their own tests (`bash tests/<name>.test.sh`),
 which put stubs on `PATH` instead of running Windows programs or reaching the
 network; `tests/unix-schedule.test.sh` covers the Linux and macOS runner and
-installer, and `tests/run-session-miner.test.sh` the session miner wrapper.
+installer, `tests/run-session-miner.test.sh` the session miner wrapper, and
+`tests/run-memory-curation.test.sh` the memory curation wrapper.
 
 ## Requirements
 
@@ -301,6 +307,7 @@ installer, and `tests/run-session-miner.test.sh` the session miner wrapper.
 - For the waiting feed: `curl`, `jq`, `flock` and coreutils `timeout` in the
   distro, and a signed-in Claude Code there.
 - For the session miner: python3 with PyYAML and the setup in its section.
+- For the memory curation: a signed-in Claude Code and python3 in the distro.
 - On Linux or macOS instead: bash, git, `flock` and coreutils `timeout`
   (`brew install flock coreutils` on macOS).
 """
@@ -313,16 +320,16 @@ def readme(text: str, where: str) -> str:
     text = T.sub_once(
         text,
         "Every task action that runs a repo script (backup, keeper, ccstatusline sync,\n"
-        "Codex Cloud sync, usage census, and waiting feed) first updates",
+        "Codex Cloud sync, usage census, session miner, memory curation, waiting feed, and task health) first updates",
         "Every task action runs a repo script (ccstatusline sync, Codex Cloud sync,\n"
-        "usage census, waiting feed, and session miner), and first updates",
+        "usage census, session miner, memory curation, and waiting feed), and first updates",
         where,
     )
     text = T.sub_once(
         text,
         "task code. The two on-demand launcher actions invoke their CLIs directly and have\n"
         "no repo script to update. All six run from",
-        "task code. All five run from",
+        "task code. All six run from",
         where,
     )
     text = T.sub_once(
@@ -333,8 +340,8 @@ def readme(text: str, where: str) -> str:
     )
     text = T.sub_once(
         text,
-        "| Bash in WSL: usage census (daily) |",
-        "| Bash in WSL: usage census and session miner (daily) |",
+        "| Bash in WSL: task health (daily) | `scripts/update-task-checkout.sh` | every run | 300 s overall |\n",
+        "",
         where,
     )
 
@@ -345,6 +352,7 @@ def readme(text: str, where: str) -> str:
         "### Launcher task (default name: `Claude Code Session Launcher`)",
         "### Codex remote control launcher task (default name: `Codex Remote Control Launcher`)",
         "## Keeper semantics",
+        "### Task health publish task (default name: `Task Health Publish`)",
     ):
         text = drop_section(text, heading, where)
 
@@ -380,7 +388,13 @@ def readme(text: str, where: str) -> str:
         where,
     )
 
-    text = insert_before(text, "### Legacy scripts", README_MINER, where)
+    text = replace_section(text, "### Session miner task (default name: `Session Miner`)", README_MINER, where)
+    text = T.sub_once(
+        text,
+        "Monday at 13:47 (`-MemoryCurationTime`), an hour after the session miner. It\n",
+        "Monday at 13:47 (`-MemoryCurationTime`). It\n",
+        where,
+    )
     text = insert_before(text, "## Task history", README_UNIX, where)
     s, _ = _section(text, "## Testing", where)
     text = text[:s] + README_TESTING
@@ -471,6 +485,8 @@ def agents(text: str, where: str) -> str:
         "### The keeper restores lost Claude sessions from a snapshot",
         "### `wsl --export --vhd` and throwaway distros",
         "### The keeper restarts a dead WSL user manager, and linger stays on",
+        "### A stub `~/repos/.git` breaks every worktree Project thread",
+        "### Task health is published for the cloud audit",
     ):
         text = drop_section(text, heading, where)
     text = replace_section(
@@ -494,7 +510,7 @@ def agents(text: str, where: str) -> str:
         "for the backup and the keeper, 5 min for ccstatusline).\n",
         "Task Scheduler Id 329 terminates it at *exactly* `ExecutionTimeLimit` later (5\n"
         "min for ccstatusline and the waiting feed, 15 min for the census and the Codex\n"
-        "Cloud sync, 30 min for the session miner).\n",
+        "Cloud sync, 30 min for the session miner, 3h for the memory curation).\n",
         where,
     )
     text = T.sub_once(text, "— a stuck prompt, not a slow export.", "— a stuck prompt, not a slow run.", where)
@@ -551,6 +567,7 @@ def apply(root: Path, ctx) -> None:
     for rel in ("README.md", "AGENTS.md"):
         text = (root / rel).read_text(encoding="utf-8")
         for gone in ("restic", "Keeper", "keeper task", "the keeper", "backup.lock", "Invoke-WslBackup",
-                     "wt.exe", "-BackupDir", "Test-WslActivity", "Repair-WslUserRuntime"):
+                     "wt.exe", "-BackupDir", "Test-WslActivity", "Repair-WslUserRuntime",
+                     "task-health", "Task Health", "task health", "Test-ClaudeStubGitDir"):
             if gone in text:
                 raise T.PatchError(f"{rel}: still mentions {gone!r}")

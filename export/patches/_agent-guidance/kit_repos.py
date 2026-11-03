@@ -57,6 +57,20 @@ REPOS_YML_LINES = [
     ("    - ai-usage-dashboard\n    - claude-memory-map\n", ""),
     ("    - fastmail-actions\n", ""),
     ("    - rss-inator\n", ""),
+    # The source owner's security-alerts snapshot repo (re-pin 2026-11-03).
+    ("    # collect.yml snapshots the fleet's security alerts daily (cron), and the\n"
+     "    # daily triage routine reads that snapshot, so a silent cron failure there\n"
+     "    # starves the routine. Added 2026-11-03 (_agent-guidance#423).\n"
+     "    - security-alerts\n", ""),
+    # The sync's exclusion of the kit's own repo (re-pin 2026-11-03). The kit
+    # is the adopter's setup tool, not a repo of the adopter's fleet.
+    ("#\n"
+     "#   \u2022 acsi-kit, the public adoption kit. Adopters clone it and run Claude\n"
+     "#     Code in the clone, so a managed AGENTS.md there (and the hooks the sync\n"
+     "#     delivers with it) would load this fleet's rules into their setup\n"
+     "#     session. Its agent-checks workflow and .githooks/ are copied by hand\n"
+     "#     instead, as for verify-actions-lock.\n"
+     "exclude:\n  - acsi-kit\n", "exclude: []\n"),
 ]
 
 

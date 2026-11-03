@@ -16,7 +16,9 @@ loop with no human in the loop"; ADR 0003's 2026-10-26 addendum).
     arms, no errored arm and the committed digest, skip onboarding and
     browser-testing, flip `draft:` and append a schedule entry that the
     weekly planner still loads;
-  * the workflow, parsed with PyYAML, keeps its trust boundary.
+  * the workflow, parsed with PyYAML, keeps its trust boundary, and its
+    scaffold lane stays paused (the owner, 2026-11-03, skills-evals#656): no job
+    mines, picks or fires; `pick` and `supply_plan` stay tested as code.
 
 Offline and deterministic: throwaway Git repositories, synthetic results
 trees, the allowance state passed in. example.com only.
@@ -139,7 +141,11 @@ class PickTests(unittest.TestCase):
         # baseline addendum), never in scaffold mode.
         bare = "${{ inputs.mode == 'eval' && inputs.arms == 'bare' && ' bare' || '' }}"
         self.assertIn(bare, doc["run-name"])
-        rendered = doc["run-name"].replace(bare, "")
+        # Likewise ` trigger`, for a trigger-only improve fire (skills-evals#662).
+        trigger = ("${{ inputs.mode == 'improve' && inputs.trigger_only == 'true' "
+                   "&& ' trigger' || '' }}")
+        self.assertIn(trigger, doc["run-name"])
+        rendered = doc["run-name"].replace(bare, "").replace(trigger, "")
         rendered = rendered.replace("${{ inputs.mode }}", "scaffold")
         # A scaffold fire sends no model, so the folded title ends in a space.
         rendered = rendered.replace("${{ inputs.model }}", "")
@@ -244,6 +250,13 @@ class PromotionTests(unittest.TestCase):
     onboarding draft and a reviewed schedule, and a results tree beside it."""
 
     AS_OF = "20261020T000000Z"
+    SHA = "a" * 40
+
+    def context_block(self, guidance=SHA):
+        return ("context:\n  repository: example-org/example-site\n"
+                f"  revision: {self.SHA}\n  guidance_revision: {guidance}\n"
+                "  budget:\n    guidance_bytes: 1\n    skill_catalog_bytes: 1\n"
+                "    skill_payload_bytes: 1\n")
 
     def setUp(self):
         self.root = Path(tempfile.mkdtemp(prefix="fixture-supply-promote-"))
@@ -253,7 +266,8 @@ class PromotionTests(unittest.TestCase):
         evals = self.root / "evals"
         self.write("evals/reviewed-skill/fixture.yaml", "subject: reviewed-skill\nprompt: Hi.\n")
         self.write("evals/toy-skill/fixture.yaml",
-                   "# A draft skill fixture.\nsubject: toy-skill\ndraft: true\nprompt: Hi.\n")
+                   "# A draft skill fixture.\nsubject: toy-skill\ndraft: true\nprompt: Hi.\n"
+                   + self.context_block())
         self.write("evals/real-work/toy-7/fixture.yaml",
                    "subject: any\ndraft: true\nprompt: Fix it.\n")
         self.write("evals/onboarding/first-run/fixture.yaml",
@@ -330,7 +344,8 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(found, [("evals/toy-skill", 2)])
         self.assertEqual(scaffold.promote(self.root, found, self.AS_OF), ["evals/toy-skill"])
         self.assertEqual((self.root / "evals/toy-skill/fixture.yaml").read_text(encoding="utf-8"),
-                         "# A draft skill fixture.\nsubject: toy-skill\ndraft: false\nprompt: Hi.\n")
+                         "# A draft skill fixture.\nsubject: toy-skill\ndraft: false\nprompt: Hi.\n"
+                         + self.context_block())
         committed = planner.committed_fixtures(self.root)
         self.assertEqual(planner.scheduled_fixtures(self.schedule, committed),
                          ["evals/reviewed-skill", "evals/toy-skill"])
@@ -340,6 +355,28 @@ class PromotionTests(unittest.TestCase):
             f"{scaffold.PROMOTED_NOTE} on 2026-10-20 by scaffold_real_work.py promote: 2 "))
         # Promoted, it is no longer a draft, so a second pass finds nothing.
         self.assertEqual(scaffold.promotable(self.root, self.tree, self.AS_OF), [])
+
+    def test_a_draft_without_a_provable_context_is_not_promoted(self):
+        # An orchestrator-scenario-like `subject: any` draft with no context,
+        # one with a null guidance_revision, one with an invalid context, and
+        # a draft with a valid context, all with two clean runs.
+        self.write("evals/orchestrator-scenarios/no-context/fixture.yaml",
+                   "subject: any\ndraft: true\nprompt: Review it.\n")
+        self.write("evals/orchestrator-scenarios/null-guidance/fixture.yaml",
+                   "subject: any\ndraft: true\nprompt: Review it.\n"
+                   + self.context_block(guidance="null"))
+        self.write("evals/orchestrator-scenarios/bad-context/fixture.yaml",
+                   "subject: any\ndraft: true\nprompt: Review it.\ncontext: {}\n")
+        self.write("evals/orchestrator-scenarios/valid/fixture.yaml",
+                   "subject: any\ndraft: true\nprompt: Review it.\n" + self.context_block())
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "scenarios")
+        for name in ("no-context", "null-guidance", "bad-context", "valid"):
+            digest = self.digest(f"evals/orchestrator-scenarios/{name}")
+            for day in ("02", "03"):
+                self.run_result(name, f"202610{day}T000000Z", digest=digest)
+        self.assertEqual(scaffold.promotable(self.root, self.tree, self.AS_OF),
+                         [("evals/orchestrator-scenarios/valid", 2)])
 
     def test_one_clean_run_is_not_enough(self):
         self.run_result("toy-skill", "20261002T000000Z", digest=self.digest("evals/toy-skill"))
@@ -384,14 +421,27 @@ class SupplyWorkflowShapeTests(unittest.TestCase):
         self.assertEqual(self.doc["permissions"], {})
         self.assertNotIn("concurrency", self.doc)
         self.assertEqual({name: job["permissions"] for name, job in self.jobs.items()}, {
-            "plan": {"contents": "read", "actions": "read"},
-            "dispatch": {"contents": "read", "actions": "write"},
             "promote": {"contents": "read", "pull-requests": "read"}})
         for name, job in self.jobs.items():
             with self.subTest(job=name):
                 self.assertNotIn("concurrency", job)
                 self.assertIn("github.ref == format('refs/heads/{0}', "
                               "github.event.repository.default_branch)", job["if"])
+
+    def test_the_scaffold_lane_is_paused(self):
+        # The owner, 2026-11-03 (skills-evals#656): fixture requests built from
+        # real fleet work replace it. Nothing here mines, picks or fires.
+        self.assertEqual(sorted(self.jobs), ["promote"])
+        text = json.dumps(self.jobs)
+        for gone in ("mode=scaffold", "gh workflow run", "scaffold_real_work.py pick",
+                     "mine_real_work.py", "REGISTRY_READ_APP_PEM", "actions: write"):
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, text)
+        header = self.text.split("\non:", 1)[0]
+        for cited in ("THE SCAFFOLD LANE IS PAUSED", "the owner, 2026-11-03", "skills-evals#656",
+                      "real", "fixture_pr_gate.py", "fixture_queue.py"):
+            with self.subTest(cited=cited):
+                self.assertIn(cited, header)
 
     def test_every_uses_is_locked(self):
         uses = [s["uses"] for job in self.jobs.values() for s in job["steps"] if "uses" in s]
@@ -407,21 +457,6 @@ class SupplyWorkflowShapeTests(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertNotIn("${{", block)
 
-    def test_dispatch_reuses_the_fire_workflow_one_at_a_time(self):
-        job = self.jobs["dispatch"]
-        self.assertEqual(job["strategy"]["max-parallel"], 1)
-        block = self.step("dispatch", "gh workflow run")["run"]
-        self.assertIn("gh workflow run routine-eval-fire.yml", block)
-        self.assertIn("--raw-field mode=scaffold", block)
-        self.assertIn("sleep 60", block)
-
-    def test_constants_match_the_script(self):
-        listing = self.step("plan", "gh api --paginate")["run"]
-        self.assertIn(f"-{scaffold.REFIRE_AFTER_DAYS} days", listing)
-        pick = self.step("plan", "scaffold_real_work.py pick")["run"]
-        self.assertIn(f"--max {scaffold.MAX_IN_FLIGHT}", pick)
-        self.assertIn("display_title", listing)
-
     def test_the_app_key_reaches_only_promotes_mint_step(self):
         holders = [(name, s.get("id")) for name, job in self.jobs.items()
                    for s in job["steps"] if "ROSTER_APP_PRIVATE_KEY" in json.dumps(s)]
@@ -433,23 +468,28 @@ class SupplyWorkflowShapeTests(unittest.TestCase):
         self.assertTrue(mint["continue-on-error"])
         self.assertEqual(mint["with"]["permission-contents"], "write")
 
-    def test_the_miner_reads_the_fleet_with_the_read_only_registry_token(self):
-        holders = [(name, s.get("id")) for name, job in self.jobs.items()
-                   for s in job["steps"] if "REGISTRY_READ_APP_PEM" in json.dumps(s)]
-        self.assertEqual(holders, [("plan", "fleet-token")])
-        mint = next(s for s in self.jobs["plan"]["steps"] if s.get("id") == "fleet-token")
-        self.assertEqual(mint["with"]["repositories"], "acsi-agentskills-private")
-        self.assertEqual(mint["with"]["permission-contents"], "read")
-        self.assertNotIn("continue-on-error", mint)
-        step = self.step("plan", "mine_real_work.py mine")
-        self.assertEqual(step["env"]["GH_TOKEN"], "${{ steps.fleet-token.outputs.token }}")
+    def test_contextualize_runs_between_promote_and_the_mint_without_credentials(self):
+        steps = self.jobs["promote"]["steps"]
+        ids = [s.get("id") for s in steps]
+        self.assertLess(ids.index("promote"), ids.index("contextualize"))
+        self.assertLess(ids.index("contextualize"), ids.index("app-token"))
+        step = steps[ids.index("contextualize")]
+        self.assertNotIn("env", step)
+        self.assertIn("scripts/contextualize_fixtures.py", step["run"])
+        self.assertIn("--apply", step["run"])
+        for s in steps[:ids.index("contextualize")]:
+            if s.get("uses", "").startswith("actions/checkout@"):
+                with self.subTest(step=s["name"]):
+                    self.assertIs(s["with"]["persist-credentials"], False)
+        mint = steps[ids.index("app-token")]
+        self.assertIn("steps.contextualize.outputs.count != '0'", mint["if"])
 
     def test_promotion_pushes_only_what_promote_writes_and_arms_that_sha(self):
         step = self.step("promote", "app_gh pr merge")
         self.assertEqual(step["env"]["APP_TOKEN"], "${{ steps.app-token.outputs.token }}")
         self.assertEqual(step["env"]["GH_TOKEN"], "${{ github.token }}")
         block = step["run"]
-        self.assertIn("evals/scheduled.yml|evals/*/fixture.yaml) ;;", block)
+        self.assertIn("evals/scheduled.yml|evals/unscheduled.yml|evals/*/fixture.yaml) ;;", block)
         self.assertIn('push -q origin "HEAD:refs/heads/${branch}"', block)
         self.assertIn('branch="fixture-promotion/${RUN_ID}"', block)
         self.assertIn('--auto --merge --match-head-commit "$sha"', block)

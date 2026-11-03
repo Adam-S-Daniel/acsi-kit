@@ -55,7 +55,7 @@ jobs:
         uses: Adam-S-Daniel/verify-actions-lock@v1.1.0
       - name: ShellCheck
         if: steps.salient.outputs.run == 'true'
-        run: shellcheck scripts/update-task-checkout.sh tests/update-task-checkout.test.sh scripts/sync-codex-cloud-environments.sh tests/sync-codex-cloud-environments.test.sh scripts/publish-usage-census.sh tests/publish-usage-census.test.sh scripts/publish-waiting-feed.sh tests/publish-waiting-feed.test.sh scripts/run-session-miner.sh tests/run-session-miner.test.sh scripts/unix/run-task.sh scripts/unix/install-schedule.sh tests/unix-schedule.test.sh
+        run: shellcheck scripts/update-task-checkout.sh tests/update-task-checkout.test.sh scripts/sync-codex-cloud-environments.sh tests/sync-codex-cloud-environments.test.sh scripts/publish-usage-census.sh tests/publish-usage-census.test.sh scripts/run-session-miner.sh tests/run-session-miner.test.sh scripts/run-memory-curation.sh tests/run-memory-curation.test.sh scripts/publish-waiting-feed.sh tests/publish-waiting-feed.test.sh scripts/unix/run-task.sh scripts/unix/install-schedule.sh tests/unix-schedule.test.sh
       - name: Codex Cloud environment sync behavior test
         if: steps.salient.outputs.run == 'true'
         run: bash tests/sync-codex-cloud-environments.test.sh
@@ -65,12 +65,15 @@ jobs:
       - name: Usage census wrapper behavior test
         if: steps.salient.outputs.run == 'true'
         run: bash tests/publish-usage-census.test.sh
-      - name: Waiting feed publish behavior test
-        if: steps.salient.outputs.run == 'true'
-        run: bash tests/publish-waiting-feed.test.sh
       - name: Session miner wrapper behavior test
         if: steps.salient.outputs.run == 'true'
         run: bash tests/run-session-miner.test.sh
+      - name: Memory curation wrapper behavior test
+        if: steps.salient.outputs.run == 'true'
+        run: bash tests/run-memory-curation.test.sh
+      - name: Waiting feed publish behavior test
+        if: steps.salient.outputs.run == 'true'
+        run: bash tests/publish-waiting-feed.test.sh
       - name: Linux and macOS scheduling behavior test
         if: steps.salient.outputs.run == 'true'
         run: bash tests/unix-schedule.test.sh
@@ -207,7 +210,7 @@ jobs:
           $PSVersionTable.PSVersion
           (Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1).Version
           $cfg = New-PesterConfiguration
-          $cfg.Run.Path = './tests/AgentWorkspaceTrust.Tests.ps1'
+          $cfg.Run.Path = @('./tests/AgentWorkspaceTrust.Tests.ps1')
           $cfg.Run.Exit = $true
           $cfg.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $cfg

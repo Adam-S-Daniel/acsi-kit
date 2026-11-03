@@ -36,6 +36,7 @@ NOW = datetime(2026, 9, 4, 12, 0, 0, tzinfo=timezone.utc)   # ISO week 2026-W36
 NOW_TEXT = "2026-09-04T12:00:00Z"
 ALLOW = frozenset({"workflow-path-audit", "finding-unknowns"})
 REGISTRY_URL = "https://github.com/example-adopter/acsi-agentskills"
+PRIVATE_REGISTRY_URL = "https://github.com/example-adopter/acsi-agentskills-private"
 SECRET_PATH = "/home/example/repos/private-client-work"
 ARN = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abcd1234"
 
@@ -64,7 +65,7 @@ def write_transcript(path: Path, entries: list, mtime: datetime = NOW) -> Path:
 
 
 def skill_call(skill, call_id="toolu_01", when="2026-09-03T10:00:00Z",
-               model=None, message_id=None):
+               model=None, message_id=None, usage=None, **top_level):
     message = {"role": "assistant",
                "content": [{"type": "tool_use", "id": call_id, "name": "Skill",
                             "input": {"skill": skill}}]}
@@ -72,7 +73,10 @@ def skill_call(skill, call_id="toolu_01", when="2026-09-03T10:00:00Z",
         message["model"] = model
     if message_id is not None:
         message["id"] = message_id
-    return {"type": "assistant", "timestamp": when, "message": message}
+    if usage is not None:
+        message["usage"] = usage
+    return {"type": "assistant", "timestamp": when, "message": message,
+            **top_level}
 
 
 def typed(text, when="2026-09-03T10:00:00Z", as_items=False):
@@ -150,6 +154,21 @@ class CountingTests(unittest.TestCase):
         self.assertEqual(self.skills([skill_call("zz-unlisted-skill")]),
                          {"other": {"2026-W36": 1}})
 
+    def test_a_private_plugin_prefix_counts_under_other_even_for_an_allowlisted_name(self):
+        private = frozenset({"example-private-plugin"})
+        entries = [skill_call("example-private-plugin:workflow-path-audit", "toolu_p"),
+                   typed("<command-name>/example-private-plugin:workflow-path-audit"
+                         "</command-name>"),
+                   skill_call("acsi-coding-anywhere:workflow-path-audit", "toolu_pub"),
+                   skill_call("workflow-path-audit", "toolu_bare")]
+        write_transcript(self.projects / "-home-example-proj" / "s0.jsonl", entries)
+        tally = census.census_all(self.projects, NOW, 8, ALLOW, None, private)[1]
+        self.assertEqual(tally["invocations"], {"other": {"2026-W36": 1},
+                                                "workflow-path-audit": {"2026-W36": 2}})
+        self.assertEqual(census.skill_key("example-private-plugin:x", frozenset({"x"}),
+                                          private), "other")
+        self.assertEqual(census.skill_key("example-private-plugin:x", frozenset({"x"})), "x")
+
     def test_hostile_names_never_become_keys(self):
         entries = [skill_call(value, f"toolu_{i}") for i, value in enumerate(HOSTILE)]
         entries += [skill_call({"skill": "workflow-path-audit"}, "toolu_dict"),
@@ -216,7 +235,8 @@ class CountingTests(unittest.TestCase):
             "from": "2026-07-13T00:00:00Z",          # Monday of 2026-W29
             "to": NOW_TEXT, "sessions_scanned": 5}])
         empty = {"repo": None, "surface": "local", "blocked": None,
-                 "overridden": None, "outcome": None, "kind": "skill"}
+                 "overridden": None, "outcome": None, "runner": None,
+                 "kind": "skill"}
         self.assertEqual(doc["rows"], [
             {**empty, "week": "2026-07-20", "name": "workflow-path-audit",
              "invocations": 1, "sessions": 1},
@@ -236,6 +256,9 @@ def make_allowlist_root(root: Path) -> Path:
         (evals / name).mkdir(parents=True)
         (evals / name / "fixture.yaml").write_text(
             f"skill: {name}\nregistry: {REGISTRY_URL}\n{extra}", encoding="utf-8")
+    (evals / "zz-private-skill").mkdir()
+    (evals / "zz-private-skill" / "fixture.yaml").write_text(
+        f"skill: zz-private-skill\nregistry: {PRIVATE_REGISTRY_URL}\n", encoding="utf-8")
     (evals / "guidance").mkdir()
     (evals / "guidance" / "fixture.yaml").write_text("subject: guidance\n",
                                                      encoding="utf-8")
@@ -259,9 +282,34 @@ class AllowlistTests(unittest.TestCase):
         self.assertEqual(census.skill_allowlist(root),
                          {"workflow-path-audit", "zz-skipped-skill"})
 
+    def test_a_private_registry_fixture_is_not_allowlisted(self):
+        allow = census.skill_allowlist(make_allowlist_root(self.tmp / "repo"))
+        self.assertNotIn("zz-private-skill", allow)
+        self.assertIn("workflow-path-audit", allow)
+
+    def test_a_private_skill_call_counts_under_other_not_by_name(self):
+        root = make_allowlist_root(self.tmp / "repo")
+        projects = self.tmp / "projects"
+        write_transcript(projects / "p" / "s.jsonl", [
+            skill_call("zz-private-skill", call_id="toolu_01"),
+            skill_call("workflow-path-audit", call_id="toolu_02")])
+        out, weekly_out = self.tmp / "latest.json", self.tmp / "weekly-local.json"
+        argv = ["model_usage_census.py", "--projects", str(projects), "--out", str(out),
+                "--weekly-out", str(weekly_out), "--now", NOW_TEXT, "--hook-logs", "",
+                "--skill-allowlist-root", str(root)]
+        with mock.patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
+            self.assertEqual(census.main(), 0)
+        text = weekly_out.read_text(encoding="utf-8")
+        self.assertNotIn("zz-private-skill", text)
+        rows = [(r["name"], r["invocations"]) for r in json.loads(text)["rows"]
+                if r["kind"] == "skill"]
+        self.assertEqual(sorted(rows), [("other", 1), ("workflow-path-audit", 1)])
+
     def test_the_committed_evals_tree_loads(self):
         allow = census.skill_allowlist(example_evals.checkout())
         self.assertIn("workflow-path-audit", allow)
+        # The committed private-registry fixtures never become public keys.
+        self.assertNotIn("acsi-writing-style", allow)
         self.assertTrue(all(census.SKILL_KEY_RE.fullmatch(name) for name in allow))
 
     def test_an_unreadable_allowlist_fails_closed(self):
@@ -312,7 +360,8 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("invocations", plain_status)
         self.assertIn("3 skill invocations", status)
         doc = json.loads(weekly_out.read_text(encoding="utf-8"))
-        self.assertEqual([(r["name"], r["invocations"], r["sessions"]) for r in doc["rows"]],
+        self.assertEqual([(r["name"], r["invocations"], r["sessions"]) for r in doc["rows"]
+                          if r["kind"] == "skill"],
                          [("finding-unknowns", 1, 1), ("other", 1, 1),
                           ("workflow-path-audit", 1, 1)])
         self.assertEqual(skill_usage.load(weekly_out), doc)
@@ -400,7 +449,8 @@ class PublisherTests(unittest.TestCase):
                          "usage/latest.json\nusage/weekly-local.json")
         doc = json.loads(self.git("show", f"{self.BRANCH}:usage/weekly-local.json",
                                   cwd=self.origin))
-        self.assertEqual([(r["name"], r["invocations"]) for r in doc["rows"]],
+        self.assertEqual([(r["name"], r["invocations"]) for r in doc["rows"]
+                          if r["kind"] == "skill"],
                          [("other", 1), ("workflow-path-audit", 1)])
         printed = proc.stdout + proc.stderr
         for forbidden in ("workflow-path-audit", "123456789012", str(self.tmp)):
@@ -490,6 +540,386 @@ class SkillUsageReaderTests(unittest.TestCase):
         stale = NOW + timedelta(days=15)
         self.assertIsNone(skill_usage.weight(self.DOC, "workflow-path-audit", stale))
         self.assertIsNone(skill_usage.weight(self.DOC, "finding-unknowns", stale))
+
+
+class GuidanceRowTests(unittest.TestCase):
+    """`kind: "guidance"` rows: which memory a session loaded."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="guidance-usage-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    @staticmethod
+    def session(uuid, texts=None, when="2026-09-03T10:00:00Z"):
+        entries = [{"type": "user", "uuid": uuid, "timestamp": when,
+                    "message": {"role": "user", "content": "hello"}}]
+        if texts is not None:
+            files = [{"path": f"/example/M{i}.md", "type": "User", "content": t}
+                     for i, t in enumerate(texts)]
+            entries.append({"type": "attachment", "timestamp": when,
+                            "attachment": {"type": "instructions", "files": files}})
+        return entries
+
+    def states(self, *sessions, roots=1):
+        dirs = []
+        for r in range(roots):
+            root = self.tmp / f"root{r}"
+            for index, entries in enumerate(sessions):
+                write_transcript(root / "-proj" / f"s{index}.jsonl", entries)
+            dirs.append(root)
+        return census.census_all(dirs, NOW, 8, ALLOW)[1]["guidance"]
+
+    def write(self, doc):
+        path = self.tmp / "weekly-local.json"
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        return path
+
+    def test_each_state_is_classified(self):
+        got = self.states(
+            self.session("u1", ["x\n<!-- c -->guidance-marker: fleet-full"]),
+            self.session("u2", ["# Notes\n## Working in these repos"]),
+            self.session("u3", ["guidance-marker: fleet-stub"]),
+            self.session("u4", ["Fleet guidance is delivered once per session"]),
+            self.session("u5", ["just project notes"]),
+            self.session("u6", None))
+        self.assertEqual(got, {"full": {"2026-W36": 2}, "stub-only": {"2026-W36": 2},
+                               "neither": {"2026-W36": 1}, "unknown": {"2026-W36": 1}})
+
+    def test_full_wins_over_stub_across_files(self):
+        got = self.states(self.session("u1", ["guidance-marker: fleet-stub",
+                                              "guidance-marker: fleet-full"]))
+        self.assertEqual(got, {"full": {"2026-W36": 1}})
+
+    def test_a_session_under_two_roots_counts_once(self):
+        got = self.states(self.session("u1", ["guidance-marker: fleet-full"]), roots=2)
+        self.assertEqual(got, {"full": {"2026-W36": 1}})
+
+    def test_subagent_transcripts_are_not_counted(self):
+        root = self.tmp / "root0"
+        write_transcript(root / "-proj" / "s0.jsonl",
+                         self.session("u1", ["guidance-marker: fleet-full"]))
+        write_transcript(root / "-proj" / "s0" / "subagents" / "agent-a.jsonl",
+                         self.session("u2", None))
+        got = census.census_all([root], NOW, 8, ALLOW)[1]["guidance"]
+        self.assertEqual(got, {"full": {"2026-W36": 1}})
+
+    def test_week_is_that_of_the_first_timestamped_entry(self):
+        entries = self.session("u1", ["guidance-marker: fleet-full"],
+                               when="2026-08-30T23:59:59Z")   # Sunday: W35
+        entries.append({"type": "user", "uuid": "u2", "timestamp": "2026-08-31T00:00:00Z",
+                        "message": {"role": "user", "content": "later"}})
+        self.assertEqual(self.states(entries), {"full": {"2026-W35": 1}})
+        self.assertEqual(self.states(self.session("u9", None, when="2026-08-31T00:00:00Z")),
+                         {"unknown": {"2026-W36": 1}})
+
+    def test_rows_have_the_published_shape_and_do_not_change_weights(self):
+        tally = census.census_all(
+            [self.tmp / "none"], NOW, 8, ALLOW)[1]
+        tally["guidance"] = {"full": {"2026-W36": 3}, "unknown": {"2026-W36": 1}}
+        doc = census.build_weekly_document(tally, NOW)
+        self.assertEqual(doc["rows"], [
+            skill_usage.guidance_row("2026-W36", "full", 3),
+            skill_usage.guidance_row("2026-W36", "unknown", 1)])
+        self.assertEqual(doc["rows"][0], {
+            "week": "2026-08-31", "kind": "guidance", "name": "full", "repo": None,
+            "surface": "local", "invocations": None, "sessions": 3, "blocked": None,
+            "overridden": None, "outcome": None, "runner": None})
+        base = {**doc, "rows": [skill_usage.row("2026-W36", "skill", "finding-unknowns", 2, 1)]}
+        both = {**doc, "rows": base["rows"] + doc["rows"]}
+        self.assertEqual(skill_usage.weight(both, "finding-unknowns", NOW),
+                         skill_usage.weight(base, "finding-unknowns", NOW))
+        self.assertEqual(skill_usage.weight(both, "full", NOW), 0)
+        self.assertEqual(skill_usage.load(self.write(both)), both)
+
+
+def cloud_record(session, ts="2026-09-03T10:00:00Z", state="full",
+                 check="match", **extra):
+    """An invented cloud guidance record, with every field the hook writes."""
+    return {"v": 1, "ts": ts, "kind": "guidance-load", "session": session,
+            "surface": "cli", "remote": True, "cli": "9.9.9-fake", "state": state,
+            "repos": 3, "guidance_version": "fakevers", "check_expected": True,
+            "check_reported": check, "registry_sha": None, "uploaded": None, **extra}
+
+
+class CloudGuidanceTests(unittest.TestCase):
+    """The cloud guidance reader: `--cloud-guidance` and the carry-forward."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cloud-guidance-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.branch = self.tmp / "branch"
+
+    def put(self, month, lines):
+        path = self.branch / "events" / month / "cloud-guidance.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join((l if isinstance(l, str) else json.dumps(l)) + "\n"
+                                for l in lines), encoding="utf-8")
+        return path
+
+    def tally(self):
+        return census.cloud_guidance_tally(self.branch, NOW, 8)
+
+    def doc(self, cloud=None):
+        return census.build_weekly_document(
+            {"invocations": {}, "sessions": {}, "sessions_scanned": 0}, NOW, 8, None,
+            self.tally() if cloud is None else cloud)
+
+    def cloud_rows(self, doc):
+        return [(r["kind"], r["name"], r["week"], r["sessions"]) for r in doc["rows"]
+                if r["surface"] == "cloud"]
+
+    def test_a_session_in_two_month_files_counts_once_at_its_earliest_ts(self):
+        self.put("2026-08", [cloud_record("aaaa", "2026-08-31T09:00:00Z", "stub-only")])
+        self.put("2026-09", [cloud_record("aaaa", "2026-09-02T09:00:00Z", "full"),
+                             cloud_record("bbbb", "2026-09-02T10:00:00Z", "full")])
+        tally = self.tally()
+        self.assertEqual(tally["records_scanned"], 2)
+        self.assertEqual(tally["guidance"], {"stub-only": {"2026-W36": 1},
+                                             "full": {"2026-W36": 1}})
+
+    def test_a_session_twice_in_one_file_counts_once(self):
+        self.put("2026-09", [cloud_record("aaaa", "2026-09-02T09:00:00Z", "full"),
+                             cloud_record("aaaa", "2026-09-01T09:00:00Z", "neither")])
+        tally = self.tally()
+        self.assertEqual(tally["records_scanned"], 1)
+        self.assertEqual(tally["guidance"], {"neither": {"2026-W36": 1}})
+        self.assertEqual(tally["checks"], {"match": {"2026-W36": 1}})
+
+    def test_hostile_state_and_check_values_publish_only_as_invalid_or_unknown(self):
+        hostile = ["/home/example/fake-path", "fake prose about nothing", "e" * 64, 7,
+                   ["full"], {"s": "match"}, None, True, "FULL", "full\n", ""]
+        self.put("2026-09", [cloud_record(f"s{i}", state=v, check=v)
+                             for i, v in enumerate(hostile)])
+        doc = self.doc()
+        self.assertEqual(self.cloud_rows(doc), [
+            ("guidance", "invalid", "2026-08-31", len(hostile)),
+            ("guidance-check", "unknown", "2026-08-31", len(hostile))])
+        blob = json.dumps(doc)
+        for leaked in ("fake-path", "fake prose", "e" * 64):
+            self.assertNotIn(leaked, blob)
+
+    def test_a_missing_check_value_counts_as_unknown(self):
+        record = cloud_record("aaaa")
+        del record["check_reported"], record["state"]
+        self.put("2026-09", [record, cloud_record("bbbb", check="absent"),
+                             cloud_record("cccc", check="mismatch"),
+                             cloud_record("dddd", check="none")])
+        self.assertEqual(self.cloud_rows(self.doc()), [
+            ("guidance", "full", "2026-08-31", 3),
+            ("guidance", "invalid", "2026-08-31", 1),
+            ("guidance-check", "absent", "2026-08-31", 1),
+            ("guidance-check", "mismatch", "2026-08-31", 1),
+            ("guidance-check", "none", "2026-08-31", 1),
+            ("guidance-check", "unknown", "2026-08-31", 1)])
+
+    def test_records_before_the_window_or_unusable_are_dropped(self):
+        self.put("2026-07", [
+            cloud_record("old", "2026-07-12T23:59:59Z"),          # before W29's Monday
+            cloud_record("edge", "2026-07-13T00:00:00Z"),         # the window's first instant
+            cloud_record("late", "2026-09-14T00:00:00Z"),         # a later week than NOW's
+            cloud_record("nots", ts=None), cloud_record("badts", ts="not a time"),
+            cloud_record(None), cloud_record(""), cloud_record(7),
+            "not json", "[1, 2]", ""])
+        self.assertEqual(self.tally()["records_scanned"], 1)
+        self.assertEqual(list(self.tally()["guidance"]["full"]), ["2026-W29"])
+
+    def test_the_source_starts_on_a_week_boundary_at_the_earliest_record(self):
+        self.put("2026-08", [cloud_record("aaaa", "2026-08-27T15:30:00Z")])  # Thursday
+        source = [s for s in self.doc()["sources"] if s["surface"] == "cloud"]
+        self.assertEqual(source, [{
+            "surface": "cloud", "scope": "guidance-records",
+            "from": "2026-08-24T00:00:00Z", "to": NOW_TEXT, "records_scanned": 1}])
+
+    def test_the_source_never_starts_before_the_window_and_is_absent_when_unread(self):
+        self.put("2026-07", [cloud_record("aaaa", "2026-07-13T00:00:00Z")])
+        self.assertEqual([s["from"] for s in self.doc()["sources"]
+                          if s["surface"] == "cloud"], ["2026-07-13T00:00:00Z"])
+        empty = census.cloud_guidance_tally(self.tmp / "nothing", NOW, 8)
+        self.assertEqual(empty["records_scanned"], 0)
+        self.assertEqual([s["from"] for s in self.doc(empty)["sources"]
+                          if s["surface"] == "cloud"], ["2026-07-13T00:00:00Z"])
+        unread = census.build_weekly_document(
+            {"invocations": {}, "sessions": {}, "sessions_scanned": 0}, NOW, 8)
+        self.assertEqual([s["surface"] for s in unread["sources"]], ["local"])
+
+    def test_no_identifying_field_reaches_a_cloud_row(self):
+        self.put("2026-09", [cloud_record("fake-session-id")])
+        blob = json.dumps(self.doc())
+        for leaked in ("fake-session-id", "9.9.9-fake", "fakevers"):
+            self.assertNotIn(leaked, blob)
+        row = [r for r in self.doc()["rows"] if r["surface"] == "cloud"][0]
+        self.assertEqual(tuple(sorted(row)), tuple(sorted(skill_usage.ROW_FIELDS)))
+        self.assertIsNone(row["invocations"])
+
+    def test_the_reader_writes_nothing_and_skips_a_linked_file(self):
+        path = self.put("2026-09", [cloud_record("aaaa")])
+        outside = self.tmp / "outside.jsonl"
+        outside.write_text(json.dumps(cloud_record("zzzz")) + "\n", encoding="utf-8")
+        (self.branch / "events" / "2026-08").mkdir()
+        (self.branch / "events" / "2026-08" / "cloud-guidance.jsonl").symlink_to(outside)
+        snapshot = {p: (p.stat().st_mtime_ns, p.read_bytes() if p.is_file() else None)
+                    for p in self.tmp.rglob("*")}
+        self.assertEqual(self.tally()["records_scanned"], 1)
+        self.assertEqual({p: (p.stat().st_mtime_ns, p.read_bytes() if p.is_file() else None)
+                          for p in self.tmp.rglob("*")}, snapshot)
+        self.assertTrue(path.is_file())
+
+    def test_the_cli_flag_adds_cloud_rows_and_the_model_output_is_unchanged(self):
+        self.put("2026-09", [cloud_record("aaaa")])
+        projects = self.tmp / "projects"
+        write_transcript(projects / "-home-example-proj" / "s.jsonl", [
+            skill_call("workflow-path-audit", model="claude-opus-5", message_id="m1")])
+        outs = {}
+        for name, extra in (("plain", []), ("cloud", ["--cloud-guidance", str(self.branch)])):
+            latest, weekly = self.tmp / f"{name}-latest.json", self.tmp / f"{name}-weekly.json"
+            argv = ["model_usage_census.py", "--projects", str(projects), "--out", str(latest),
+                    "--weekly-out", str(weekly), "--hook-logs", "", "--now", NOW_TEXT, *extra]
+            with mock.patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
+                self.assertEqual(census.main(), 0)
+            outs[name] = (latest.read_bytes(), json.loads(weekly.read_text(encoding="utf-8")))
+        self.assertEqual(outs["plain"][0], outs["cloud"][0])
+        self.assertEqual(self.cloud_rows(outs["plain"][1]), [])
+        self.assertEqual(self.cloud_rows(outs["cloud"][1]), [
+            ("guidance", "full", "2026-08-31", 1), ("guidance-check", "match", "2026-08-31", 1)])
+        self.assertEqual(skill_usage.load(self.tmp / "cloud-weekly.json"), outs["cloud"][1])
+
+    def test_a_guidance_check_row_must_have_null_invocations(self):
+        row = skill_usage.guidance_check_row("2026-W36", "match", 2)
+        doc = {"generated_at": NOW_TEXT, "schema": 1, "sources": [], "rows": [row]}
+        path = self.tmp / "w.json"
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        self.assertEqual(skill_usage.load(path), doc)
+        path.write_text(json.dumps({**doc, "rows": [{**row, "invocations": 1}]}),
+                        encoding="utf-8")
+        self.assertIsNone(skill_usage.load(path))
+
+    def test_surface_orders_otherwise_equal_rows(self):
+        rows = [skill_usage.guidance_row("2026-W36", "full", 1, "cloud"),
+                skill_usage.guidance_row("2026-W36", "full", 1)]
+        doc = skill_usage.document(rows, NOW, NOW - timedelta(weeks=8), 0)
+        self.assertEqual([r["surface"] for r in doc["rows"]], ["cloud", "local"])
+
+    def previous(self, to):
+        cloud = {"from": datetime(2026, 8, 24, tzinfo=timezone.utc), "records_scanned": 3}
+        rows = [skill_usage.guidance_row("2026-W35", "full", 3, "cloud"),
+                skill_usage.guidance_check_row("2026-W35", "match", 3)]
+        before = datetime.fromisoformat(to.replace("Z", "+00:00"))
+        return skill_usage.document(rows + [skill_usage.row("2026-W35", "skill", "x", 9, 9)],
+                                    before, before - timedelta(weeks=8), 5, None, cloud)
+
+    def test_carry_forward_copies_cloud_rows_and_source_verbatim(self):
+        previous = self.previous("2026-08-30T12:00:00Z")      # 5 days old
+        new = skill_usage.document(
+            [skill_usage.row("2026-W36", "skill", "y", 1, 1)], NOW, NOW - timedelta(weeks=8), 7)
+        before = json.dumps(new["rows"])
+        self.assertEqual(skill_usage.carry(previous, new),
+                         {"cloud": 2, "skill copies": None, "cloud skill copies": None})
+        self.assertEqual([r for r in new["rows"] if r["surface"] == "cloud"],
+                         [r for r in previous["rows"] if r["surface"] == "cloud"])
+        self.assertEqual([s for s in new["sources"] if s["surface"] == "cloud"],
+                         [s for s in previous["sources"] if s["surface"] == "cloud"])
+        self.assertEqual(sum(1 for r in new["rows"] if r["kind"] == "skill"), 1)
+        self.assertNotEqual(json.dumps(new["rows"]), before)
+
+    def test_a_carried_source_older_than_14_days_is_dropped(self):
+        for to, carried in (("2026-08-21T12:00:00Z", 2), ("2026-08-20T11:59:59Z", None)):
+            new = skill_usage.document([], NOW, NOW - timedelta(weeks=8), 7)
+            self.assertEqual(skill_usage.carry(self.previous(to), new)["cloud"], carried, to)
+            self.assertEqual(any(s["surface"] == "cloud" for s in new["sources"]),
+                             bool(carried))
+            self.assertEqual(any(r["surface"] == "cloud" for r in new["rows"]),
+                             bool(carried))
+
+    def test_nothing_is_carried_from_a_missing_or_cloudless_document(self):
+        local = skill_usage.document([], NOW, NOW - timedelta(weeks=8), 7)
+        for previous in (None, {}, local):
+            new = skill_usage.document([], NOW, NOW - timedelta(weeks=8), 7)
+            self.assertEqual(skill_usage.carry(previous, new),
+                             {"cloud": None, "skill copies": None,
+                              "cloud skill copies": None})
+            self.assertEqual(new["sources"], local["sources"])
+
+
+class CloudUseTests(unittest.TestCase):
+    """`weight` adds cloud `skill-digest` uses; `counted_from` and `zero_use`
+    say whether a surface was counted back to the window's start."""
+
+    # NOW is in W36; a 4-week window starts Monday 2026-08-10.
+    GEN = "2026-09-04T06:00:00Z"
+    LOCAL_SOURCE = {"surface": "local", "scope": "transcripts",
+                    "from": "2026-07-01T00:00:00Z", "to": GEN, "sessions_scanned": 5}
+
+    @staticmethod
+    def cloud_source(floor):
+        return skill_usage.digest_source(floor, NOW, 3, skill_usage.SURFACE_CLOUD)
+
+    def doc(self, rows=(), cloud_from=datetime(2026, 7, 20, tzinfo=timezone.utc),
+            local=True, generated=GEN):
+        sources = [dict(self.LOCAL_SOURCE)] if local else []
+        if cloud_from is not None:
+            sources.append(self.cloud_source(cloud_from))
+        return {"generated_at": generated, "schema": 1, "sources": sources,
+                "rows": list(rows)}
+
+    def cloud_row(self, name="finding-unknowns", n=2, week="2026-08-31"):
+        return skill_usage.digest_row(week, name, None, "unknown:gone", n, 1,
+                                      skill_usage.SURFACE_CLOUD)
+
+    def test_weight_adds_cloud_digest_invocations(self):
+        doc = self.doc([skill_usage.row("2026-W36", "skill", "finding-unknowns", 3, 1),
+                        self.cloud_row(n=2)])
+        self.assertEqual(skill_usage.weight(doc, "finding-unknowns", NOW), 5)
+
+    def test_weight_ignores_local_digest_rows_and_other_windows(self):
+        doc = self.doc([skill_usage.row("2026-W36", "skill", "finding-unknowns", 3, 1),
+                        skill_usage.digest_row("2026-08-31", "finding-unknowns", None,
+                                               "unknown:gone", 3, 1),
+                        self.cloud_row(n=7, week="2026-08-03"),
+                        self.cloud_row(name="workflow-path-audit", n=9)])
+        self.assertEqual(skill_usage.weight(doc, "finding-unknowns", NOW), 3)
+
+    def test_counted_from_local(self):
+        self.assertEqual(skill_usage.counted_from(self.doc(), skill_usage.SURFACE_LOCAL),
+                         datetime(2026, 7, 1, tzinfo=timezone.utc))
+
+    def test_counted_from_cloud_is_a_week_after_the_source_from(self):
+        self.assertEqual(skill_usage.counted_from(self.doc(), skill_usage.SURFACE_CLOUD),
+                         datetime(2026, 7, 27, tzinfo=timezone.utc))
+
+    def test_counted_from_is_none_when_unknown(self):
+        self.assertIsNone(skill_usage.counted_from(
+            self.doc(cloud_from=None), skill_usage.SURFACE_CLOUD))
+        self.assertIsNone(skill_usage.counted_from(
+            self.doc(local=False), skill_usage.SURFACE_LOCAL))
+        self.assertIsNone(skill_usage.counted_from(self.doc(), "other"))
+        bad = self.doc()
+        bad["sources"][0]["from"] = "yesterday"
+        self.assertIsNone(skill_usage.counted_from(bad, skill_usage.SURFACE_LOCAL))
+
+    def test_zero_use_is_unknown_without_a_fresh_document(self):
+        self.assertIsNone(skill_usage.zero_use(None, "finding-unknowns", NOW))
+        stale = self.doc(generated="2026-08-01T00:00:00Z")
+        self.assertIsNone(skill_usage.zero_use(stale, "finding-unknowns", NOW))
+
+    def test_zero_use_is_unknown_when_a_surface_is_not_covered(self):
+        missing = self.doc(cloud_from=None)
+        self.assertIsNone(skill_usage.zero_use(missing, "finding-unknowns", NOW))
+        # Cloud counted from 2026-08-17 + 7 days, after the window start 08-10.
+        recent = self.doc(cloud_from=datetime(2026, 8, 17, tzinfo=timezone.utc))
+        self.assertIsNone(skill_usage.zero_use(recent, "finding-unknowns", NOW))
+
+    def test_zero_use_true_when_covered_and_unused(self):
+        doc = self.doc([self.cloud_row(name="workflow-path-audit")])
+        self.assertIs(skill_usage.zero_use(doc, "finding-unknowns", NOW), True)
+
+    def test_zero_use_false_for_a_cloud_only_use(self):
+        doc = self.doc([self.cloud_row()])
+        self.assertIs(skill_usage.zero_use(doc, "finding-unknowns", NOW), False)
+
+    def test_zero_use_local_surface_ignores_a_missing_cloud_source(self):
+        doc = self.doc(cloud_from=None)
+        self.assertIs(skill_usage.zero_use(
+            doc, "finding-unknowns", NOW, surfaces=(skill_usage.SURFACE_LOCAL,)), True)
 
 
 if __name__ == "__main__":

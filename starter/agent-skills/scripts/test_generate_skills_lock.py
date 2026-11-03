@@ -4669,10 +4669,12 @@ def test_every_test_this_repo_cites_by_name_exists():
         path = REPO_ROOT / name
         if path.suffix == ".py":
             defined.add(path.stem)
-            # Indentation allowed: a test defined as a method on a class is
-            # cited by its bare name just like a top-level one.
-            defined |= set(re.findall(r"^\s*def (test_[a-z0-9_]+)",
-                                      path.read_text(encoding="utf-8"), re.M))
+        # Indentation allowed: a test defined as a method on a class is
+        # cited by its bare name just like a top-level one. Shell files count
+        # too: a hook can embed a Python heredoc whose own `def test_...`
+        # helper is a real function, not a citation.
+        defined |= set(re.findall(r"^\s*def (test_[a-z0-9_]+)",
+                                  path.read_text(encoding="utf-8"), re.M))
     assert "test_every_test_this_repo_cites_by_name_exists" in defined, (
         "the scan found no test names at all, so it would pass on anything")
 
@@ -9707,6 +9709,256 @@ def test_a_record_that_cannot_be_written_is_reported_rather_than_fatal(
             if path.name.endswith(".tmp")] == [], verdict
 
 
+# --------------------------------------------------------------------------
+# which commit each install came from (_agent-guidance#398)
+#
+# Every record entry carries `ref`, the 40-hex commit its source resolved to,
+# and the record carries `sources`, the distinct (registry, ref) pairs behind
+# those entries. Refs are informational: a missing or bad one only drops the
+# ref, never an install, and an unchanged record is not rewritten at all.
+# --------------------------------------------------------------------------
+
+_COMMIT = re.compile(r"[0-9a-f]{40}")
+
+
+def _record_path(home: Path) -> Path:
+    return home / ".claude" / "skills" / _RECORD
+
+
+def test_installed_entries_carry_the_commit_their_source_resolved_to(
+        tmp_path, registry):
+    root, sha = registry
+    project = tmp_path / "project"
+    make_project(project, root, sha)
+    home = tmp_path / "home"
+
+    proc = _run_hook(home, project, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    assert _verdict(proc).endswith("— OK"), _verdict(proc)
+    record = _record(home)
+    assert record["version"] == 1
+    assert [(entry["name"], entry["ref"]) for entry in record["installed"]] == [
+        ("alpha", sha), ("beta", sha)]
+    registry_url = record["installed"][0]["registry"]
+    assert record["sources"] == [{"registry": registry_url, "ref": sha}]
+
+
+def test_a_branch_ref_is_recorded_as_the_commit_it_resolved_to(tmp_path, registry):
+    root, sha = registry
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".git").mkdir()
+    proc = run_generator("--repo", str(root),
+                         "--registry", root.resolve().as_uri(),
+                         "--ref", "main", "--bundles", "acsi",
+                         "-o", str(project / "skills.lock"))
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads((project / "skills.lock").read_text(
+        encoding="utf-8"))["ref"] == "main"
+    home = tmp_path / "home"
+
+    proc = _run_hook(home, project, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    assert _verdict(proc).endswith("— OK"), _verdict(proc)
+    record = _record(home)
+    assert {entry["ref"] for entry in record["installed"]} == {sha}
+    assert [row["ref"] for row in record["sources"]] == [sha]
+
+
+def test_an_identical_run_does_not_rewrite_the_record(tmp_path, registry):
+    """Same lock, same bytes: the record's inode and mtime must not move.
+
+    A fixed old mtime is stamped after run 1, so the assertion cannot pass by
+    two writes landing in the same timestamp tick.
+    """
+    root, sha = registry
+    project = tmp_path / "project"
+    make_project(project, root, sha)
+    home = tmp_path / "home"
+    first = _run_hook(home, project, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert first.returncode == 0, first.stderr
+    record_path = _record_path(home)
+    before_bytes = record_path.read_bytes()
+    os.utime(record_path, ns=(1_000_000_000, 1_000_000_000))
+    before = os.stat(record_path)
+
+    second = _run_hook(home, project, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert second.returncode == 0, second.stderr
+    assert _verdict(second).endswith("— OK"), _verdict(second)
+    after = os.stat(record_path)
+    assert after.st_mtime_ns == before.st_mtime_ns == 1_000_000_000
+    assert after.st_ino == before.st_ino
+    assert record_path.read_bytes() == before_bytes
+    assert [path.name for path in (home / ".claude" / "skills").iterdir()
+            if path.name.endswith(".tmp")] == []
+
+
+def test_a_kept_entry_carries_its_ref_forward(tmp_path, registry):
+    """`alpha` leaves the lock edited, so it is kept, not removed: its ref stays."""
+    root, sha = registry
+    home, project = _install_then_relock(tmp_path, registry, {"beta"})
+    with open(home / ".claude" / "skills" / "alpha" / "SKILL.md", "a",
+              encoding="utf-8", newline="") as handle:
+        handle.write("edited by hand\n")
+
+    proc = _run_hook(home, project, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    assert (home / ".claude" / "skills" / "alpha" / "SKILL.md").is_file()
+    record = _record(home)
+    assert [(entry["name"], entry["ref"]) for entry in record["installed"]] == [
+        ("alpha", sha), ("beta", sha)]
+    assert [row["ref"] for row in record["sources"]] == [sha]
+
+
+def test_a_failed_source_contributes_no_ref(tmp_path, federated):
+    primary, primary_sha, extra, _extra_sha = federated
+    project = tmp_path / "project"
+    lock_path = _federated_project(project, federated)
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    lock["sources"][0]["ref"] = "0" * 40
+    lock_path.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
+    home = tmp_path / "home"
+
+    proc = _run_hook(home, project, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    assert _verdict(proc).startswith("skills: 1/2 "), _verdict(proc)
+    record = _record(home)
+    assert [(entry["name"], entry["ref"]) for entry in record["installed"]] == [
+        ("alpha", primary_sha)]
+    assert record["sources"] == [
+        {"registry": record["installed"][0]["registry"], "ref": primary_sha}]
+    assert extra.resolve().as_uri() not in json.dumps(record)
+
+
+@pytest.mark.parametrize("shape", ["nested", "fifo"])
+def test_a_hostile_previous_record_neither_hangs_nor_survives(
+        tmp_path, registry, shape):
+    """A previous record the readers must not trust: deep JSON, or a FIFO.
+
+    Opening a FIFO blocks until a writer appears, so every reader of the record
+    has to refuse one without opening it for a blocking read; the bounded
+    `timeout` is what turns a regression into a failure rather than a hang.
+    """
+    if shape == "fifo" and not hasattr(os, "mkfifo"):
+        pytest.skip("no FIFOs on this platform")
+    home, project = _install_then_relock(tmp_path, registry, {"beta"})
+    record_path = _record_path(home)
+    record_path.unlink()
+    if shape == "fifo":
+        os.mkfifo(record_path)
+    else:
+        record_path.write_text("[" * 100_000, encoding="utf-8")
+
+    proc = _run_hook(home, project, {"SKILLS_BOOTSTRAP_FORCE": "1"}, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    assert verdict.startswith("skills: 1/1 "), verdict
+    assert f"could not read the install record {_hook_path(record_path)}" in verdict
+    assert record_path.is_file() and not record_path.is_symlink()
+    record = _record(home)
+    assert [(entry["name"], entry["ref"]) for entry in record["installed"]] == [
+        ("beta", registry[1])]
+
+
+def _extract_record_writer() -> str:
+    """RECORD_PY, the hook's install-record writer, lifted out to run alone.
+
+    Anchored on its own heredoc delimiter, which no other block shares.
+    """
+    text = HOOK.read_text(encoding="utf-8")
+    start = text.index("\n", text.index("<<'RECORD_PY'")) + 1
+    end = text.index("\nRECORD_PY\n", start)
+    block = text[start:end] + "\n"
+    assert "installed_refs.nul" in block and "os.replace" in block, (
+        "the extracted block is not the install-record writer")
+    return block
+
+
+def _run_record_writer(tmp_path: Path, keep=(), installed=(), refs=None,
+                       previous: Optional[dict] = None) -> dict:
+    """Run RECORD_PY over hand-built streams; return the record it wrote.
+
+    `refs` is written verbatim as bytes, so a test can hand it a truncated or
+    malformed stream; None leaves the stream absent.
+    """
+    work = tmp_path / "writer"
+    stream_dir = work / "tmp"
+    stream_dir.mkdir(parents=True)
+    record_path = work / "skills" / _RECORD
+    record_path.parent.mkdir()
+
+    def frame(rows):
+        return "".join(field + "\0" for row in rows for field in row)
+
+    (stream_dir / "keep.nul").write_text(frame(keep), encoding="utf-8", newline="")
+    (stream_dir / "installed.nul").write_text(frame(installed), encoding="utf-8",
+                                              newline="")
+    if refs is not None:
+        (stream_dir / "installed_refs.nul").write_bytes(refs)
+    if previous is not None:
+        record_path.write_text(json.dumps(previous), encoding="utf-8")
+    script = work / "record-writer.py"
+    script.write_text(_extract_record_writer(), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-I", str(script)],
+        env={"RECORD_PATH": str(record_path), "TMP_DIR": str(stream_dir),
+             "PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(record_path.read_text(encoding="utf-8"))
+
+
+_REG = "https://example.com/registry.git"
+_D1, _D2 = "1" * 64, "2" * 64
+_C1, _C2 = "a" * 40, "b" * 40
+
+
+def test_a_kept_entry_loses_its_ref_when_the_digest_differs(tmp_path):
+    record = _run_record_writer(
+        tmp_path,
+        keep=[("alpha", _REG, "acsi", _D1), ("gamma", _REG, "acsi", _D1)],
+        previous={"version": 1, "installed": [
+            {"name": "alpha", "registry": _REG, "bundle": "acsi",
+             "digest": _D1, "ref": _C1},
+            {"name": "gamma", "registry": _REG, "bundle": "acsi",
+             "digest": _D2, "ref": _C2}]})
+    assert [(entry["name"], entry["ref"]) for entry in record["installed"]] == [
+        ("alpha", _C1), ("gamma", None)]
+    assert record["sources"] == [{"registry": _REG, "ref": _C1}]
+
+
+@pytest.mark.parametrize("refs", [
+    None,
+    b"",
+    b"alpha\0" + _C1.encode(),                 # truncated: no final NUL
+    b"alpha\0",                                # short: name without ref
+    b"alpha\0not-a-commit\0",
+    b"alpha\0" + _C1.upper().encode() + b"\0",
+    b"\xff\xfe\0\0",                           # not UTF-8 at all
+], ids=["missing", "empty", "truncated", "short", "not-hex", "upper-hex",
+        "not-utf8"])
+def test_a_bad_refs_stream_drops_refs_and_nothing_else(tmp_path, refs):
+    record = _run_record_writer(
+        tmp_path,
+        installed=[("alpha", _REG, "acsi", _D1), ("beta", _REG, "acsi", _D2)],
+        refs=refs)
+    assert [(entry["name"], entry["digest"], entry["ref"])
+            for entry in record["installed"]] == [
+        ("alpha", _D1, None), ("beta", _D2, None)]
+    assert record["sources"] == []
+
+
+def test_a_good_refs_stream_is_read_as_name_ref_pairs(tmp_path):
+    """The positive control for the test above: the same writer, a good stream."""
+    record = _run_record_writer(
+        tmp_path,
+        installed=[("alpha", _REG, "acsi", _D1), ("beta", _REG, "acsi", _D2)],
+        refs=f"alpha\0{_C1}\0beta\0{_C1}\0".encode())
+    assert [entry["ref"] for entry in record["installed"]] == [_C1, _C1]
+    assert record["sources"] == [{"registry": _REG, "ref": _C1}]
+
+
 def test_another_repos_lock_does_not_reap_this_ones_skills(tmp_path):
     """Two repos, one ~/.claude/skills — the reason the scope is per-source.
 
@@ -10305,6 +10557,645 @@ def test_two_locks_naming_one_skill_at_different_digests_install_neither(tmp_pat
     # Neither won, and the pre-existing copy did not win by default either.
     assert not stale.exists(), verdict
     assert not (home / ".claude" / "skills" / "alpha").exists(), verdict
+
+
+# --------------------------------------------------------------------------
+# ADR 0022: the newer pin of ONE registry installs
+#
+# Case (b) above is right when two locks pin DIFFERENT registries, and wrong in
+# its commonest real shape: the registry edits a skill, its own lock re-pins at
+# once, and every consumer lock lags until a bumper re-pins it. For that window
+# every session attaching the registry and a consumer installed NEITHER copy.
+# When every row is the same `<bundle>/<skill>` from the same registry and one
+# pin descends from every other in that registry's own history, the descendant's
+# row installs, verified against its own lock's digest. Everything the hook
+# cannot prove stays case (b), to the byte.
+# --------------------------------------------------------------------------
+
+# A fixed, plausible base time, so committer dates -- which bound the ancestry
+# fetch -- are deterministic rather than wall-clock.
+_PIN_EPOCH = 1_760_000_000
+_ALPHA_V1 = {"SKILL.md": "---\nname: alpha\n---\nalpha body, first cut\n"}
+_ALPHA_V2 = {"SKILL.md": "---\nname: alpha\n---\nalpha body, second cut\n"}
+_ALPHA_V3 = {"SKILL.md": "---\nname: alpha\n---\nalpha body, third cut\n"}
+
+
+def _init_history_registry(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test")
+    return root
+
+
+def _commit_at(root: Path, skills: dict, when: int, message: str = "edit") -> tuple:
+    """Write `skills` into the registry, commit at `when`, return (sha, digests).
+
+    `digests` covers EVERY skill in the tree at that commit, measured from the
+    working tree the commit was just made from, so a lock built from it names
+    exactly the bytes that commit holds.
+    """
+    for key, files in skills.items():
+        bundle, name = key.split("/", 1)
+        for relpath, contents in files.items():
+            _write(root / gsl.layout_dir(gsl.DEFAULT_LAYOUT, bundle) / name / relpath,
+                   contents)
+    stamp = f"{when} +0000"
+    env = dict(os.environ, GIT_COMMITTER_DATE=stamp, GIT_AUTHOR_DATE=stamp)
+    for args in (("add", "-A"), ("commit", "-q", "--allow-empty", "-m", message)):
+        subprocess.run(["git", *_GIT_VERBATIM, "-C", str(root), *args], check=True,
+                       env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    sha = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], check=True,
+                         capture_output=True, text=True).stdout.strip()
+    digests = {f"{path.parent.parent.name}/{path.name}": gsl.digest_skill_dir(path)
+               for path in sorted((root / "plugins").glob("*/skills/*")) if path.is_dir()}
+    return sha, digests
+
+
+def _pin_repo(parent: Path, name: str, registry: Path, sha: str, digests: dict) -> Path:
+    """A child repo whose hand-written lock pins `registry` at `sha`.
+
+    Its `bundles` are exactly the bundles its skill keys name.
+    """
+    repo = parent / name
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / ".git").mkdir(exist_ok=True)
+    (repo / "skills.lock").write_text(json.dumps({
+        "registry": registry.resolve().as_uri(), "ref": sha,
+        "bundles": sorted({key.split("/", 1)[0] for key in digests}),
+        "skills": {key: gsl.LOCK_DIGEST_PREFIX + value for key, value in digests.items()},
+    }, indent=2) + "\n", encoding="utf-8")
+    return repo
+
+
+def _linear_registry(root: Path) -> list:
+    """Three commits on main, alpha changing in each: [(sha, digests)] * 3.
+
+    A FOURTH, unpinned commit then adds an unrelated skill, so the default
+    branch has moved on past every pin while its alpha is still the third's --
+    the shape a lagging pair of locks meets in practice. The newest pin's alpha
+    is therefore what the registry ships today; the second's is not.
+    """
+    _init_history_registry(root)
+    pins = [
+        _commit_at(root, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B}, _PIN_EPOCH),
+        _commit_at(root, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000),
+        _commit_at(root, {"acsi/alpha": _ALPHA_V3}, _PIN_EPOCH + 2000),
+    ]
+    _commit_at(root, {"acsi/gamma": SKILL_C}, _PIN_EPOCH + 3000, "unrelated")
+    return pins
+
+
+def _diverged_registry(root: Path) -> tuple:
+    """A base commit, then alpha edited on two branches that never meet."""
+    _init_history_registry(root)
+    base = _commit_at(root, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B}, _PIN_EPOCH)
+    _git(root, "checkout", "-q", "-b", "side")
+    side = _commit_at(root, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    _git(root, "checkout", "-q", "main")
+    main = _commit_at(root, {"acsi/alpha": _ALPHA_V3}, _PIN_EPOCH + 2000)
+    return base, side, main
+
+
+def _installed_body(home: Path, name: str) -> str:
+    return (home / ".claude" / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("behind_first", [True, False],
+                         ids=["behind-lock-sorts-first", "newer-lock-sorts-first"])
+def test_a_lock_behind_another_on_one_registry_installs_the_newer_pin(tmp_path, behind_first):
+    """The lag window, closed: the registry's own history orders the two pins.
+
+    Both lock orders, because the winner must be decided by ancestry and never
+    by which repo sorts first -- that would be exactly the invented tiebreak ADR
+    0005 refused. The OK verdict is part of the contract: a resolved contest is
+    not a problem, and it is named in a note rather than hidden.
+    """
+    registry = tmp_path / "registry"
+    _, (old_sha, old), (new_sha, new) = _linear_registry(registry)
+    parent = tmp_path / "repos"
+    behind, newer = ("repo-a", "repo-b") if behind_first else ("repo-b", "repo-a")
+    _pin_repo(parent, behind, registry, old_sha, old)
+    _pin_repo(parent, newer, registry, new_sha, new)
+    home = tmp_path / "home"
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    assert verdict.startswith("skills: 2/2 "), verdict
+    assert "— OK" in verdict and "DEGRADED" not in verdict, verdict
+    assert "different digests" not in verdict, verdict
+    assert (f"installed the newer pin of 1 skill where one lock is behind another "
+            f"on the same registry (alpha from {newer} over {behind})") in verdict, verdict
+    assert _installed_body(home, "alpha") == _ALPHA_V3["SKILL.md"], verdict
+    assert (home / ".claude" / "skills" / "beta" / "SKILL.md").is_file(), verdict
+    recorded = {entry["name"]: entry["digest"] for entry in _record(home)["installed"]}
+    assert recorded["alpha"] == new["acsi/alpha"], recorded
+
+
+def test_three_locks_on_one_registry_install_the_unique_newest_pin(tmp_path):
+    """Several contestants: the winner is the ONE pin every other descends to."""
+    registry = tmp_path / "registry"
+    pins = _linear_registry(registry)
+    parent = tmp_path / "repos"
+    for name, (sha, digests) in zip(("repo-a", "repo-b", "repo-c"), (pins[1], pins[2], pins[0])):
+        _pin_repo(parent, name, registry, sha, digests)
+    home = tmp_path / "home"
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    assert verdict.startswith("skills: 2/2 "), verdict
+    assert "DEGRADED" not in verdict, verdict
+    assert "alpha from repo-b over repo-a, repo-c" in verdict, verdict
+    assert _installed_body(home, "alpha") == _ALPHA_V3["SKILL.md"], verdict
+
+
+def _assert_alpha_conflicts_as_before(proc, home: Path, stale: Path, total: int) -> str:
+    """Case (b)'s outcome, to the byte this suite already pins for it."""
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    assert verdict.startswith(f"skills: 1/{total} "), verdict
+    assert "DEGRADED" in verdict, verdict
+    assert "1 destination name claimed at different digests by different locks, " \
+           "none installed (alpha (" in verdict, verdict
+    assert "newer pin" not in verdict, verdict
+    assert not stale.exists(), verdict
+    assert not (home / ".claude" / "skills" / "alpha").exists(), verdict
+    assert (home / ".claude" / "skills" / "beta" / "SKILL.md").is_file(), verdict
+    return verdict
+
+
+def test_diverged_pins_of_one_registry_still_install_neither(tmp_path):
+    """Neither pin descends from the other: nothing orders them, so (b) holds."""
+    registry = tmp_path / "registry"
+    _base, (side_sha, side), (main_sha, main) = _diverged_registry(registry)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, side_sha, side)
+    _pin_repo(parent, "repo-b", registry, main_sha, main)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+
+
+def test_three_locks_with_two_incomparable_newest_pins_install_neither(tmp_path):
+    """The base descends to both tips, but no single pin descends from all."""
+    registry = tmp_path / "registry"
+    (base_sha, base), (side_sha, side), (main_sha, main) = _diverged_registry(registry)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, base_sha, base)
+    _pin_repo(parent, "repo-b", registry, side_sha, side)
+    _pin_repo(parent, "repo-c", registry, main_sha, main)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=4)
+
+
+def test_pins_of_two_registries_with_one_history_still_install_neither(tmp_path):
+    """Same commits, different registry URLs: ancestry WOULD order them, and
+    it must not be consulted. A clone is the sharpest form of "a different
+    registry", because every other part of the shape matches."""
+    registry = tmp_path / "registry"
+    _, (old_sha, old), (new_sha, new) = _linear_registry(registry)
+    mirror = tmp_path / "mirror"
+    subprocess.run(["git", "clone", "-q", str(registry), str(mirror)], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha, old)
+    _pin_repo(parent, "repo-b", mirror, new_sha, new)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    # beta's two rows agree on the digest, which is all case (a) asks, so it is
+    # one install; alpha's two rows are case (b) and count twice, as always.
+    assert verdict.startswith("skills: 1/3 "), verdict
+    assert "claimed at different digests" in verdict, verdict
+    assert "newer pin" not in verdict, verdict
+    assert not stale.exists(), verdict
+    assert not (home / ".claude" / "skills" / "alpha").exists(), verdict
+
+
+def test_ancestry_the_bounded_fetch_cannot_reach_installs_neither(tmp_path):
+    """UNDETERMINED is a conflict, never a pick.
+
+    The newer pin really does descend from the older one, but a commit between
+    them is dated a month before the older pin, so the `--shallow-since` window
+    stops there and the older pin never arrives. "Could not show it" must read
+    exactly like "it is not so".
+    """
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    old_sha, old = _commit_at(registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B},
+                              _PIN_EPOCH)
+    _commit_at(registry, {"acsi/beta": {"notes.md": "skewed\n"}}, _PIN_EPOCH - 30 * 86400)
+    new_sha, new = _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    assert subprocess.run(["git", "-C", str(registry), "merge-base", "--is-ancestor",
+                           old_sha, new_sha]).returncode == 0
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha, old)
+    _pin_repo(parent, "repo-b", registry, new_sha, new)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    # beta differs between the pins too (the skewed commit edited it), so both
+    # names are contests this run cannot resolve.
+    assert verdict.startswith("skills: 0/4 "), verdict
+    assert "2 destination names claimed at different digests" in verdict, verdict
+    assert "newer pin" not in verdict, verdict
+    assert not stale.exists(), verdict
+    for name in ("alpha", "beta"):
+        assert not (home / ".claude" / "skills" / name).exists(), verdict
+    assert "left in conflict" in _bootstrap_log(home)
+
+
+def test_the_winning_pin_is_still_verified_against_its_own_lock(tmp_path):
+    """The tiebreak picks a ROW, not a trust level.
+
+    The newer lock's digest for alpha is tampered. Its bytes must fail the
+    ordinary digest check and be removed -- and the older lock's bytes, which
+    WOULD verify against the older lock, must not be installed in their place.
+    """
+    registry = tmp_path / "registry"
+    _, (old_sha, old), (new_sha, new) = _linear_registry(registry)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha, old)
+    _pin_repo(parent, "repo-b", registry, new_sha, dict(new, **{"acsi/alpha": "0" * 64}))
+    home = tmp_path / "home"
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    assert verdict.startswith("skills: 1/2 "), verdict
+    assert "1 digest mismatch (alpha)" in verdict, verdict
+    # Not claimed as an install either: the note is for a VERIFIED winner.
+    assert "newer pin" not in verdict, verdict
+    assert not (home / ".claude" / "skills" / "alpha").exists(), verdict
+    assert "alpha" not in {entry["name"] for entry in _record(home)["installed"]}
+
+
+def test_a_pull_request_commit_descending_from_the_honest_pin_does_not_win(tmp_path):
+    """Descent is not merge. The adversarial round's reproducer.
+
+    GitHub serves every object in a fork network by SHA through the upstream
+    URL, so a lock can pin an UNMERGED pull-request commit whose parent is the
+    honest pin: it fetches, the honest pin is its ancestor, and on descent alone
+    it won with an OK verdict. The winner must also be reachable from the
+    registry's default branch. Here the commit lives only at
+    `refs/pull/1/head`, so the outcome is case (b), exactly as before ADR 0022.
+    """
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    honest_sha, honest = _commit_at(
+        registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B}, _PIN_EPOCH)
+    _git(registry, "checkout", "-q", "-b", "contrib")
+    pr_sha, pr = _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    _git(registry, "checkout", "-q", "main")
+    _git(registry, "update-ref", "refs/pull/1/head", pr_sha)
+    _git(registry, "branch", "-q", "-D", "contrib")
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "honest", registry, honest_sha, honest)
+    _pin_repo(parent, "zcontrib", registry, pr_sha, pr)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+    assert "default branch" in _bootstrap_log(home)
+
+
+def test_one_skill_name_from_two_bundles_of_one_registry_installs_neither(tmp_path):
+    """Same name, two bundles: two different skills, not two pins of one.
+
+    Ancestry would order the pins, so only the key check keeps this case (b).
+    """
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    old_sha, old = _commit_at(registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B},
+                              _PIN_EPOCH)
+    new_sha, new = _commit_at(registry, {"other/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha,
+              {key: old[key] for key in ("acsi/alpha", "acsi/beta")})
+    _pin_repo(parent, "repo-b", registry, new_sha,
+              {key: new[key] for key in ("other/alpha", "acsi/beta")})
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+
+
+def test_one_pin_naming_two_digests_for_a_contested_name_installs_neither(tmp_path):
+    """Two locks at the newest pin disagree with EACH OTHER: nothing to order.
+
+    The two rows share one fetch slot, so ancestry cannot choose between them,
+    and taking whichever sorted first would be the invented tiebreak again.
+    """
+    registry = tmp_path / "registry"
+    _, (old_sha, old), (new_sha, new) = _linear_registry(registry)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, new_sha, new)
+    _pin_repo(parent, "repo-b", registry, new_sha, dict(new, **{"acsi/alpha": "0" * 64}))
+    _pin_repo(parent, "repo-c", registry, old_sha, old)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=4)
+
+
+def test_two_locks_at_the_newest_pin_install_it_once(tmp_path):
+    """Agreeing winners are one install, as case (a) is: 2/2, not 3/3."""
+    registry = tmp_path / "registry"
+    _, (old_sha, old), (new_sha, new) = _linear_registry(registry)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, new_sha, new)
+    _pin_repo(parent, "repo-b", registry, new_sha, new)
+    _pin_repo(parent, "repo-c", registry, old_sha, old)
+    home = tmp_path / "home"
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    assert verdict.startswith("skills: 2/2 "), verdict
+    assert "DEGRADED" not in verdict, verdict
+    assert "alpha from repo-a, repo-b over repo-c" in verdict, verdict
+    assert _installed_body(home, "alpha") == _ALPHA_V3["SKILL.md"], verdict
+
+
+def test_a_lock_listing_a_contested_name_twice_is_a_dup_as_before(tmp_path):
+    """Case (c) wins over everything: one lock's authoring error decides it.
+
+    Repo-a lists `alpha` from two bundles, and repo-b pins a descendant with a
+    third digest. The outcome is `dup`, reported as shared rows, not as a
+    cross-lock conflict and not as a resolved newer pin.
+    """
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    old_sha, old = _commit_at(registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B,
+                                         "other/alpha": _ALPHA_V3}, _PIN_EPOCH)
+    new_sha, new = _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha, old)
+    _pin_repo(parent, "repo-b", registry, new_sha,
+              {key: new[key] for key in ("acsi/alpha", "acsi/beta")})
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    assert verdict.startswith("skills: 1/4 "), verdict
+    assert "3 lock rows share a destination name, none installed (" in verdict, verdict
+    assert "claimed at different digests" not in verdict, verdict
+    assert "newer pin" not in verdict, verdict
+    assert not stale.exists(), verdict
+    assert not (home / ".claude" / "skills" / "alpha").exists(), verdict
+
+
+def test_a_contest_wider_than_the_window_installs_neither(tmp_path):
+    """A forged ancient date must not buy a full-history fetch.
+
+    The older pin really is an ancestor, but its committer date sits 100 days
+    before the newer pin, past the 90-day window, so the hook does not fetch
+    across the gap and the outcome is case (b).
+    """
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    old_sha, old = _commit_at(registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B},
+                              _PIN_EPOCH - 100 * 86400)
+    new_sha, new = _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha, old)
+    _pin_repo(parent, "repo-b", registry, new_sha, new)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+    assert "window" in _bootstrap_log(home)
+
+
+def _routed_lock(parent: Path, name: str, registry: Path, sha: str, key: str,
+                 layout: str, digest: str) -> Path:
+    """A lock that routes `key`'s bundle through a `sources[]` entry with its own
+    `layout`, at the same registry and ref as its primary."""
+    repo = parent / name
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / ".git").mkdir(exist_ok=True)
+    uri = registry.resolve().as_uri()
+    (repo / "skills.lock").write_text(json.dumps({
+        "registry": uri, "ref": sha, "bundles": ["zz"],
+        "sources": [{"registry": uri, "ref": sha, "bundles": [key.split("/", 1)[0]],
+                     "layout": layout}],
+        "skills": {key: gsl.LOCK_DIGEST_PREFIX + digest},
+    }, indent=2) + "\n", encoding="utf-8")
+    return repo
+
+
+def test_a_lock_routing_a_skill_through_another_layout_does_not_win(tmp_path):
+    """One key, two directories: the adversarial round's layout redirect.
+
+    A lock's own `layout` decides where a key lives, and fetch dedupe is only
+    (url, ref). So a lock can pin a newer, merged commit of the honest registry,
+    route `acsi` through `layout: tests/fixtures`, and name the digest of an
+    unrelated `tests/fixtures/alpha`. It descends, it is on the default branch,
+    and on those checks alone it installed a different directory as `alpha`
+    under an OK verdict. The rows must also agree on the path.
+    """
+    evil = {"SKILL.md": "---\nname: alpha\n---\nfixture body, not the skill\n"}
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    old_sha, old = _commit_at(registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B},
+                              _PIN_EPOCH)
+    for relpath, contents in evil.items():
+        _write(registry / "tests" / "fixtures" / "alpha" / relpath, contents)
+    new_sha, _new = _commit_at(registry, {}, _PIN_EPOCH + 1000)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "honest", registry, old_sha, old)
+    _routed_lock(parent, "redirect", registry, new_sha, "acsi/alpha", "tests/fixtures",
+                 gsl.digest_skill_dir(registry / "tests" / "fixtures" / "alpha"))
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+
+
+def test_another_bundle_routed_onto_the_same_path_still_conflicts(tmp_path):
+    """Same directory, different key: still two skills to this hook.
+
+    `other/alpha` routed through `layout: plugins/acsi/skills` names the very
+    path `acsi/alpha` does, so only the key check keeps it out of a contest.
+    """
+    registry = tmp_path / "registry"
+    _, (old_sha, old), (new_sha, new) = _linear_registry(registry)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha, old)
+    _routed_lock(parent, "repo-b", registry, new_sha, "other/alpha",
+                 "plugins/acsi/skills", new["acsi/alpha"])
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+
+
+def test_a_newer_pin_the_registry_later_reverted_does_not_win(tmp_path):
+    """Merged is not current: the newer pin must match the default branch NOW.
+
+    A is honest, B changed alpha, C reverted that change and is the default
+    branch's tip. B descends from A and is on the default branch, but its alpha
+    is bytes the registry withdrew, so the outcome is case (b).
+    """
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    a_sha, a = _commit_at(registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B},
+                          _PIN_EPOCH)
+    b_sha, b = _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    _commit_at(registry, {"acsi/alpha": _ALPHA_V1}, _PIN_EPOCH + 2000, "revert")
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, a_sha, a)
+    _pin_repo(parent, "repo-b", registry, b_sha, b)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+    assert "differs from the default branch tip" in _bootstrap_log(home)
+
+
+def test_a_descendant_dated_before_its_ancestor_does_not_win(tmp_path):
+    """Dates must run forward; a pin dated before another is not believed newer."""
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    old_sha, old = _commit_at(registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B},
+                              _PIN_EPOCH + 5000)
+    new_sha, new = _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha, old)
+    _pin_repo(parent, "repo-b", registry, new_sha, new)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+    assert "dated before another pin" in _bootstrap_log(home)
+
+
+def test_an_unmerged_pin_matching_the_default_branch_still_does_not_win(tmp_path):
+    """Reachability is a rule of its own, not a shadow of the content check.
+
+    The pull-request commit's alpha is byte-for-byte what the default branch
+    later merged by another route, so the tree comparison alone would pass it.
+    It is still not a commit the registry merged, so it does not win.
+    """
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    honest_sha, honest = _commit_at(
+        registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B}, _PIN_EPOCH)
+    _git(registry, "checkout", "-q", "-b", "contrib")
+    pr_sha, pr = _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    _git(registry, "checkout", "-q", "main")
+    _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 2000, "same change, merged")
+    _git(registry, "update-ref", "refs/pull/1/head", pr_sha)
+    _git(registry, "branch", "-q", "-D", "contrib")
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "honest", registry, honest_sha, honest)
+    _pin_repo(parent, "zcontrib", registry, pr_sha, pr)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+    assert "not on the registry's default branch" in _bootstrap_log(home)
+
+
+@pytest.mark.parametrize("attributes, rule", [
+    (".gitattributes", "plugins/acsi/skills/alpha/*.md text eol=crlf\n"),
+    ("plugins/acsi/skills/.gitattributes", "alpha/*.md text eol=crlf\n"),
+], ids=["root", "parent-directory"])
+def test_a_newer_pin_whose_gitattributes_the_registry_reverted_does_not_win(
+        tmp_path, attributes, rule):
+    """Same tree, different bytes: the adversarial round's `.gitattributes` case.
+
+    Both places a `.gitattributes` above the skill can sit -- the root, and a
+    parent directory partway down -- so the walk over parents is exercised past
+    its first step, not only at the root.
+
+    The winner's alpha tree equals the default branch's, but the winner also
+    carries a root `.gitattributes` that re-encodes alpha on checkout, which
+    the registry later reverted. Its lock names the digest of those converted
+    bytes, so on the tree comparison alone it installed bytes today's default
+    branch would not produce. Every `.gitattributes` above the skill must match.
+    """
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    old_sha, old = _commit_at(registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B},
+                              _PIN_EPOCH)
+    _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    _write(registry / attributes, rule)
+    new_sha, _ = _commit_at(registry, {}, _PIN_EPOCH + 2000, "attributes")
+    # Re-check-out so the digest the newer lock names is the CONVERTED bytes'.
+    for path in (registry / "plugins").glob("*/skills/*/SKILL.md"):
+        path.unlink()
+    _git(registry, "checkout", "-q", "--", ".")
+    alpha_dir = registry / gsl.layout_dir(gsl.DEFAULT_LAYOUT, "acsi") / "alpha"
+    assert b"\r\n" in (alpha_dir / "SKILL.md").read_bytes()
+    new = {"acsi/alpha": gsl.digest_skill_dir(alpha_dir), "acsi/beta": old["acsi/beta"]}
+    _git(registry, "rm", "-q", attributes)
+    # Back to the stored bytes first, so the revert changes ONLY the attributes
+    # file: alpha's tree at the tip must stay exactly the newer pin's.
+    _git(registry, "checkout", "-q", "--", "plugins")
+    _commit_at(registry, {}, _PIN_EPOCH + 3000, "revert attributes")
+    trees = subprocess.run(
+        ["git", "-C", str(registry), "rev-parse", f"{new_sha}:plugins/acsi/skills/alpha",
+         "HEAD:plugins/acsi/skills/alpha"], check=True, capture_output=True, text=True
+    ).stdout.split()
+    assert len(trees) == 2 and trees[0] == trees[1], trees
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha, old)
+    _pin_repo(parent, "repo-b", registry, new_sha, new)
+    home = tmp_path / "home"
+    stale = _seed_installed(home, "alpha")
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    _assert_alpha_conflicts_as_before(proc, home, stale, total=3)
+    assert "differs from the default branch tip" in _bootstrap_log(home)
+
+
+def test_an_unchanged_root_gitattributes_does_not_stop_the_newer_pin(tmp_path):
+    """The attributes check compares, it does not forbid: a `.gitattributes`
+    both sides share leaves the ordinary lag case winning."""
+    registry = tmp_path / "registry"
+    _init_history_registry(registry)
+    _write(registry / ".gitattributes", "*.png binary\n")
+    old_sha, old = _commit_at(registry, {"acsi/alpha": _ALPHA_V1, "acsi/beta": SKILL_B},
+                              _PIN_EPOCH)
+    new_sha, new = _commit_at(registry, {"acsi/alpha": _ALPHA_V2}, _PIN_EPOCH + 1000)
+    _commit_at(registry, {"acsi/gamma": SKILL_C}, _PIN_EPOCH + 2000, "unrelated")
+    parent = tmp_path / "repos"
+    _pin_repo(parent, "repo-a", registry, old_sha, old)
+    _pin_repo(parent, "repo-b", registry, new_sha, new)
+    home = tmp_path / "home"
+
+    proc = _run_hook(home, parent, {"SKILLS_BOOTSTRAP_FORCE": "1"})
+    assert proc.returncode == 0, proc.stderr
+    verdict = _verdict(proc)
+    assert verdict.startswith("skills: 2/2 "), verdict
+    assert "DEGRADED" not in verdict, verdict
+    assert "alpha from repo-b over repo-a" in verdict, verdict
+    assert _installed_body(home, "alpha") == _ALPHA_V2["SKILL.md"], verdict
 
 
 def test_a_project_with_its_own_lock_ignores_its_child_repos_locks(tmp_path):
@@ -12462,11 +13353,12 @@ def test_committed_sessionstart_matcher_includes_fork():
     assert matching[0]["matcher"] == "startup|resume|fork"
 
 
-def _documented_setup_script(project: Path) -> str:
+def _documented_setup_script(project: Path, user_claude: Path) -> str:
     """The cloud setup script from docs/multi-repo-delivery.md, runnable.
 
-    It hardcodes `project=/home/user` on purpose (its comments say why), so
-    the only edit is pointing that one line at a temp dir.
+    It hardcodes `project=/home/user` and `user_claude=/root/.claude` on
+    purpose (its comments say why), so the only edits point those two lines
+    at temp dirs.
     """
     document = (REPO_ROOT / "docs" / "multi-repo-delivery.md").read_text(
         encoding="utf-8"
@@ -12475,13 +13367,18 @@ def _documented_setup_script(project: Path) -> str:
     scripts = [b for b in blocks if b.startswith("#!/bin/bash\n")
                and "wiring: wrote" in b]
     assert len(scripts) == 1, "expected exactly one documented setup script"
-    line = "\nproject=/home/user\n"
-    assert scripts[0].count(line) == 1
-    return scripts[0].replace(line, f"\nproject={project}\n")
+    script = scripts[0]
+    for line, value in (("\nproject=/home/user\n", f"\nproject={project}\n"),
+                        ("\nuser_claude=/root/.claude\n",
+                         f"\nuser_claude={user_claude}\n")):
+        assert script.count(line) == 1, line
+        script = script.replace(line, value)
+    return script
 
 
 def _run_setup_script(tmp_path: Path, apt_exit: int):
     project = tmp_path / "project"
+    user_claude = tmp_path / "root" / ".claude"
     stubs = tmp_path / "stubs"
     stubs.mkdir()
     calls = tmp_path / "apt-calls"
@@ -12492,13 +13389,14 @@ def _run_setup_script(tmp_path: Path, apt_exit: int):
     )
     apt.chmod(0o755)
     script = tmp_path / "setup.sh"
-    script.write_text(_documented_setup_script(project), encoding="utf-8")
+    script.write_text(_documented_setup_script(project, user_claude),
+                      encoding="utf-8")
     env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}")
     proc = subprocess.run([BASH, str(script)], capture_output=True,
                           text=True, env=env, timeout=60)
     recorded = calls.read_text(encoding="utf-8").splitlines() \
         if calls.exists() else []
-    return proc, recorded, project / ".claude" / "settings.json"
+    return proc, recorded, user_claude / "settings.json"
 
 
 # The script runs only as a Linux cloud environment's setup script, as root,
@@ -12529,8 +13427,8 @@ def test_setup_script_sessionstart_matcher_includes_fork(script_name):
     document = (REPO_ROOT / "docs" / "multi-repo-delivery.md").read_text(
         encoding="utf-8"
     )
-    start = 'cat > "$project/.claude/settings.json" <<\'JSON\'\n'
-    end = "\nJSON\necho \"wiring: wrote $project/.claude/settings.json\""
+    start = 'cat > "$user_claude/settings.json" <<\'JSON\'\n'
+    end = "\nJSON\necho \"wiring: wrote $user_claude/settings.json\""
     assert document.count(start) == 1
     json_text = document.split(start, 1)[1].split(end, 1)[0]
     settings = json.loads(json_text)
@@ -12542,3 +13440,77 @@ def test_setup_script_sessionstart_matcher_includes_fork(script_name):
     ]
     assert len(matching) == 1
     assert matching[0]["matcher"] == "startup|resume|fork"
+
+
+def _documented_settings() -> dict:
+    document = (REPO_ROOT / "docs" / "multi-repo-delivery.md").read_text(
+        encoding="utf-8"
+    )
+    start = 'cat > "$user_claude/settings.json" <<\'JSON\'\n'
+    return json.loads(document.split(start, 1)[1].split("\nJSON\n", 1)[0])
+
+
+def _documented_commands():
+    for groups in _documented_settings()["hooks"].values():
+        for group in groups:
+            for hook in group["hooks"]:
+                yield hook["command"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="cloud-only Linux setup script")
+@pytest.mark.parametrize("command", list(_documented_commands()))
+def test_setup_script_hooks_run_only_child_repos(tmp_path, command):
+    # The wiring is user scope, so it fires in single-repo sessions too. There
+    # the project dir is the repo, whose own settings already run its hooks;
+    # looking only in children keeps each hook to one run per session.
+    name = re.search(r"/hooks/([\w-]+\.sh)", command).group(1)
+    project = tmp_path / "project"
+    marker = tmp_path / "ran"
+    for repo in (project, project / "child"):
+        hooks = repo / ".claude" / "hooks"
+        hooks.mkdir(parents=True)
+        (hooks / name).write_text(
+            f'echo "$(basename "$(dirname "$(dirname "$(dirname "$0")")")")" >> "{marker}"\n',
+            encoding="utf-8",
+        )
+    inner = re.fullmatch(r"bash -c '(.*)'", command, re.S).group(1)
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(project))
+    proc = subprocess.run([BASH, "-c", inner], env=env, capture_output=True,
+                          text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    assert marker.read_text(encoding="utf-8").split() == ["child"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="cloud-only Linux setup script")
+@pytest.mark.parametrize("command", list(_documented_commands()))
+def test_setup_script_hooks_exit_zero_with_no_child_hook(tmp_path, command):
+    inner = re.fullmatch(r"bash -c '(.*)'", command, re.S).group(1)
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=str(tmp_path))
+    proc = subprocess.run([BASH, "-c", inner], env=env, capture_output=True,
+                          text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="cloud-only Linux setup script")
+def test_setup_script_removes_only_its_own_project_settings(tmp_path):
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    old = project / ".claude" / "settings.json"
+    old.write_text('{"x": "skills-bootstrap.sh"}', encoding="utf-8")
+    proc, _, settings = _run_setup_script(tmp_path, apt_exit=0)
+    assert proc.returncode == 0, proc.stderr
+    assert not old.exists()
+    assert settings.exists()
+    other = tmp_path / "other"
+    (other / "project" / ".claude").mkdir(parents=True)
+    keep = other / "project" / ".claude" / "settings.json"
+    keep.write_text('{"model": "x"}', encoding="utf-8")
+    proc, _, _ = _run_setup_script(other, apt_exit=0)
+    assert proc.returncode == 0, proc.stderr
+    assert keep.read_text(encoding="utf-8") == '{"model": "x"}'
+
+
+def test_setup_script_doubles_the_skill_listing_budget():
+    # At the default 1% the listing drops descriptions for the skills listed
+    # last, which then cannot trigger; 0.02 keeps every description.
+    assert _documented_settings()["skillListingBudgetFraction"] == 0.02

@@ -63,8 +63,10 @@ open_pr() {
   if [ -n "$url" ]; then
     skip "pull request already open: $url"
   else
+    # The body opens with a TLDR heading: the starter's agent-checks pr-tldr
+    # rule fails a pull request whose description does not.
     run_write_stdin "$GH" pr create --repo "$repo" --base "$default" --head "$branch" \
-      --title "$title" --body-file - < <(printf '%s\n' "$body")
+      --title "$title" --body-file - < <(printf '## TLDR\n\n%s\n' "$body")
     did "opened a pull request for $branch in $repo"
   fi
 }

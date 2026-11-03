@@ -40,8 +40,9 @@ a pull request with the result.
   ```
 
 - **`.github/workflows/actions.lock`** was written by `gh actions-lock`. The
-  export added the entry for `scheduled-run-health-reusable.yml` (DECISIONS
-  C4) using tags this file already locks. Confirm, with network access:
+  export removed the entry of the left-out `health-reusable-parity.yml`
+  (DECISIONS C4); every tag it named is still locked for other workflows.
+  Confirm, with network access:
 
   ```bash
   gh actions-lock --no-narrow && git diff --exit-code .github/workflows/actions.lock
@@ -85,6 +86,10 @@ a pull request with the result.
   `tests/test_repo_settings.py`, before the first apply.
 
 ## `wsl-automation`
+
+- **`.github/workflows/scheduled-run-health.yml`** calls `_agent-guidance`'s
+  reusable at a placeholder sha (DECISIONS C4), as in `repo-settings` above;
+  the same `sed` command fixes it.
 
 - **`skills.lock`**: as for `_agent-guidance` above.
 
@@ -135,7 +140,8 @@ a pull request with the result.
 - **The routine trigger id** is not in any file (DECISIONS C7):
   `routine-eval-fire.yml` reads the variable `ROUTINE_TRIGGER_ID` from the
   `routine-fire` environment, beside the secret `EVAL_ROUTINE_FIRE_BEARER`.
-  Create the routine from `docs/routine-prompt.md`, then store both:
+  Create the routine with the stub prompt in `docs/routine/eval-runner-prompt.md`,
+  then store both:
 
   ```bash
   bash bootstrap/set-secrets.sh --only routine-fire

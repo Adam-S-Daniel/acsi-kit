@@ -211,11 +211,11 @@ TEST_EDITS = {
         ('        "example-adopter/claude-memory-map": ["test", "agent-checks"],\n', ""),
         ('        "example-adopter/fastmail-actions": ["pester", "agent-checks"],\n        "example-adopter/GHA-bench": ["test"],\n', ""),
         ('        "example-adopter/ai-usage-dashboard": ["node-test", "pester", "agent-checks"],\n', ""),
-        ('        "example-adopter/verify-actions-lock": ["test", "self-verify", "agent-checks"],\n        "example-adopter/security-alerts": ["agent-checks", "unit"],\n', ""),
+        ('        "example-adopter/verify-actions-lock": ["test", "self-verify", "agent-checks"],\n        "example-adopter/acsi-kit": ["test", "agent-checks"],\n        "example-adopter/security-alerts": ["agent-checks", "unit"],\n', ""),
         ('        "example-adopter/retired-agentskills": ["pytest-windows"],\n', ""),
         ('                "example-adopter/_agent-guidance",\n                "example-adopter/GHA-bench",\n                "example-adopter/security-alerts",\n',
          '                "example-adopter/_agent-guidance",\n'),
-        ("        self.assertEqual(checked, 22)\n",
+        ("        self.assertEqual(checked, 23)\n",
          "        self.assertEqual(checked, 8)  # the kit's fleet (DECISIONS C11)\n"),
         ('        self.assertEqual(t["declared"]["extra_rulesets"][0], EXTRA_CFG)\n',
          '        # fleet.yml names the App id by variable (DECISIONS C12); rendered,\n'
@@ -241,7 +241,7 @@ TEST_EDITS = {
         ('''        self.assertEqual(set(by_value), {("all",), (), ("labels",)})
         self.assertEqual(by_value[()], self.WERE_FALSE)
         self.assertEqual(by_value[("labels",)], self.LABELS_ONLY)
-        self.assertEqual(len(by_value[("all",)]), 19)''',
+        self.assertEqual(len(by_value[("all",)]), 20)''',
          '''        self.assertEqual(set(by_value), {("all",), ("labels",)})
         self.assertEqual(by_value.get((), set()), self.WERE_FALSE)
         self.assertEqual(by_value[("labels",)], self.LABELS_ONLY)

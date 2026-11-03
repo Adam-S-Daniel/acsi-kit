@@ -45,9 +45,11 @@ def _sub(root: Path, rel: str, pairs) -> None:
 PLUGINS = {
     "acsi-anything-anywhere": (
         "the owner's skills for any Claude surface, coding or not: the claude.ai web and iOS apps, "
-        "Claude in Chrome, the Claude Desktop app, and Claude Code. Writing ADRs and resolving task ambiguity.",
+        "Claude in Chrome, the Claude Desktop app, and Claude Code. Writing ADRs and resolving task ambiguity. "
+        "It also installs the fleet guidance into Claude Code's user memory at session start.",
         "Skills for any Claude surface, coding or not: the claude.ai web and iOS apps, "
-        "Claude in Chrome, the Claude Desktop app, and Claude Code.",
+        "Claude in Chrome, the Claude Desktop app, and Claude Code. It also installs the fleet guidance "
+        "into Claude Code's user memory at session start.",
         ["adr", "documentation", "requirements", "ambiguity", "planning"],
         ["skills", "writing", "planning"],
     ),

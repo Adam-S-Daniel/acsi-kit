@@ -1,0 +1,2 @@
+  - path: evals/review-bash-ci-reliability/empty-repo-discovery
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."

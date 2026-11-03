@@ -62,7 +62,7 @@ is defined). The same contract holds, and the keys are just as
 untrusted: a `Skill` tool call's `input.skill` and a typed
 `<command-name>` are free strings, so a name becomes a key ONLY when it is
 in `skill_allowlist()` — skills that already appear by name in this public
-repo, as a fixture or a non-coverage row for a non-private registry — and
+repo, as a fixture or a non-coverage row whose registry is not private — and
 matches `SKILL_KEY_RE`. Every other Skill tool call counts under `other`; a
 typed slash command that is not an allowlisted skill (`/clear`, `/model`)
 is not a skill invocation and is not counted at all.
@@ -74,6 +74,16 @@ id is published only when shaped like one, a repository only when it is
 public (`public_repos()`); everything else is `other`, and an `all` row per
 week counts every run, so the totals do not depend on either allowlist.
 
+CLOUD GUIDANCE records are read only when `--cloud-guidance DIR` names a
+checkout of the private `persistent/usage-events` branch: every
+`events/*/cloud-guidance.jsonl` under it, read-only, one record per cloud
+session. Their coverage is unknown: nothing says how
+many cloud sessions ran without writing one. The records are as untrusted as
+transcripts and `state` and `check_reported` cross a private-to-public
+boundary, so each is mapped through a fixed enum (anything else is `invalid`
+for `state`, `unknown` for `check_reported`); no session id, CLI version,
+repository count or guidance version is copied.
+
 PRIVATE EVENTS are the exception, and the only one: `--events-out` writes
 one JSON line per skill invocation, with its timestamp, session id and title,
 repository and branch. That file is NEVER published publicly:
@@ -82,10 +92,50 @@ repository and branch. That file is NEVER published publicly:
 `evals/usage/CENSUS.md`, "Private usage events"). Nothing from it reaches
 the two public files.
 
+Each private skill record also says which copy of the skill the session
+loaded (`LoadedCopies`): `digest` (the lock digest of `harness/skill_digest.py`,
+bare hex, or null), `digest_null_reason` (null, or one of
+`DIGEST_NULL_REASONS`), `base_kind` (one of `BASE_KINDS`) and `registry`
+(`owner/repo` or null). They come from the `isMeta` entry that links to the
+call (`sourceToolUseID` for a Skill call, `parentUuid` for a typed command)
+and whose first line is `Base directory for this skill: <path>`; the path
+itself is never recorded. None of the four reaches a public file. A
+plugin-cache record also carries `ref` (#562, 2026-11-02): the
+`gitCommitSha` that `<.claude>/plugins/installed_plugins.json` records for
+that install (the marketplace clone's commit, shared by every plugin it
+installed, which is harmless here), 40 hex or null; every other kind has
+`ref: null`, and lines stored before #562 have no `ref` at all.
+
+LOADED SKILL COPIES (#562) become public `skill-digest` rows only through
+`skill_digest_plan` and `digest_rows`, with `--event-store DIR` (a checkout
+of the private branch, read-only): one row per (week, skill, registry,
+copy) over this run's counted uses of allowlisted skills, never `other`.
+Each use's copy is resolved once across the store (a non-null digest beats
+null; two different non-null digests are `unknown:conflict`), and a 12-hex
+prefix is published only for a `private: false` registry whose mirror
+(`--registry-mirror OWNER/REPO=PATH`) shows that the digest was the
+content of that skill's path at some commit on one of its branches (and, for
+a plugin-cache record with a 40-hex `ref`, that the commit is on a branch
+there). An unpublished local edit, such as a dirty skill in a checkout,
+reads `unknown:unverified-commit`. A full digest, a path, a ref, a session
+id and a fork's name never leave the private side.
+
+CLOUD SKILL COPIES (#562 PR B, _agent-guidance ADR 0036) come from the
+shards cloud sessions' Stop hook writes to the same branch,
+`events/<YYYY-MM>/cloud-skills/<16 hex>.jsonl` (`cloud_skill_records`: every
+field checked, a malformed line skipped), and become `skill-digest` rows with
+`surface: "cloud"` by the same chain (`cloud_digest_plan`). An id also in
+this run's records or a machine file counts once, as local. No cloud `skill`
+rows are written, and cloud coverage is records seen, never complete. Readers
+add the cloud `skill-digest` rows' invocations to the skill rows
+(`harness/skill_usage.weight`, `zero_use`).
+
 Usage:
     python3 scripts/model_usage_census.py --out usage/latest.json \
         [--weekly-out usage/weekly-local.json] [--events-out events.jsonl] \
-        [--hook-logs PATH[:PATH...]]
+        [--hook-logs PATH[:PATH...]] [--cloud-guidance DIR] \
+        [--event-store DIR [--registry-mirror OWNER/REPO=PATH ...]
+         | --event-store DIR --digest-plan-out FILE]
 """
 
 from __future__ import annotations
@@ -98,8 +148,8 @@ import re
 import socket
 import subprocess
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "harness"))
@@ -107,6 +157,7 @@ sys.path.insert(0, str(REPO_ROOT / "harness"))
 # module wanted from scripts/, and nothing there may shadow anything else.
 sys.path.append(str(REPO_ROOT / "scripts"))
 from timeweeks import iso_week, parse_ts, window_start, window_weeks  # noqa: E402
+import skill_digest  # noqa: E402
 import skill_usage  # noqa: E402
 
 DEFAULT_PROJECTS = Path.home() / ".claude" / "projects"
@@ -188,6 +239,44 @@ def published_key(model) -> str | None:
     return OTHER_KEY
 
 
+#: Effort levels Claude Code records; any other non-empty value is `other`.
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
+def _effort(entry: dict) -> str | None:
+    """The turn's effort level from the entry's top level, allowlisted."""
+    value = entry.get("perTurnEffort")
+    if value is None:
+        value = entry.get("effort")
+    if value is None or value == "":
+        return None
+    if isinstance(value, str) and value in EFFORT_LEVELS:
+        return value
+    return OTHER_KEY
+
+
+def _context_tokens(message: dict) -> int | None:
+    """Input plus cached input tokens on the turn: how full the context was.
+    Only non-negative ints count; None when none of the three is valid."""
+    usage = message.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    total = None
+    for field in ("input_tokens", "cache_read_input_tokens",
+                  "cache_creation_input_tokens"):
+        value = usage.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            total = (total or 0) + value
+    return total
+
+
+def _turn_facts(entry: dict, message: dict) -> dict:
+    """What one assistant entry says about its turn, for a skill record."""
+    return {"model": published_key(message.get("model")),
+            "effort": _effort(entry),
+            "context_tokens": _context_tokens(message)}
+
+
 def _turn_key(entry: dict, message: dict):
     """What identifies one API turn across the several entries it writes.
 
@@ -218,7 +307,9 @@ def skill_allowlist(root: Path = REPO_ROOT) -> frozenset[str]:
 
     A name qualifies when this public repo already carries it: a skill
     fixture `scripts/eval_coverage.py` counts under `root/evals`, or a row
-    of `root/evals/non-coverage.yml` for a registry that is not private.
+    of `root/evals/non-coverage.yml`, in either case only when its registry
+    is not private (a private skill's name must not become a public key; its
+    calls count under `other`).
     Both are read by eval_coverage's own `count_fixtures`/`load_skips`, so
     "is a fixture" means the same here as in the coverage census. Raises
     `eval_coverage.CensusRefusal` or ValueError when either cannot be read;
@@ -232,10 +323,30 @@ def skill_allowlist(root: Path = REPO_ROOT) -> frozenset[str]:
     skips: dict = {}
     eval_coverage.load_skips(Path(root) / "evals" / "non-coverage.yml",
                              registries, private=False, into=skips)
-    names = {skill for _registry, skill in fixtures}
+    names = {skill for registry, skill in fixtures
+             if registry not in eval_coverage.PRIVATE_REGISTRIES}
     names |= {skill for registry, skill in skips
               if registry not in eval_coverage.PRIVATE_REGISTRIES}
     return frozenset(name for name in names if SKILL_KEY_RE.fullmatch(name))
+
+
+def private_plugins() -> frozenset[str]:
+    """The plugin names harness/registries.yml lists for a private registry.
+    Needs PyYAML, so the import is lazy."""
+    import eval_coverage
+    import run_eval
+    return frozenset(plugin for entry in run_eval._load_registries_config()
+                     if entry["name"] in eval_coverage.PRIVATE_REGISTRIES
+                     for plugin in entry.get("plugins", ()))
+
+
+def _private_prefix(raw, private: frozenset[str]) -> bool:
+    """True when `raw` is prefixed (`plugin:skill`) by a private plugin. This
+    guards prefixed invocations only: a bare name resolves by the allowlist."""
+    if not isinstance(raw, str) or ":" not in raw:
+        return False
+    plugin = raw[1:] if raw.startswith("/") else raw
+    return plugin.rsplit(":", 1)[0] in private
 
 
 def _skill_name(raw) -> str | None:
@@ -246,9 +357,13 @@ def _skill_name(raw) -> str | None:
     return name.rsplit(":", 1)[-1]
 
 
-def skill_key(raw, allowlist: frozenset[str]) -> str:
-    """The key a Skill tool call's `input.skill` is counted under."""
+def skill_key(raw, allowlist: frozenset[str],
+              private: frozenset[str] = frozenset()) -> str:
+    """The key a Skill tool call's `input.skill` is counted under. A name
+    prefixed by a `private` registry's plugin counts under `other`."""
     name = _skill_name(raw)
+    if _private_prefix(raw, private):
+        return OTHER_KEY
     if name in allowlist and SKILL_KEY_RE.fullmatch(name):
         return name
     return OTHER_KEY
@@ -277,9 +392,14 @@ def _typed_command(message: dict) -> str | None:
     return None
 
 
-def _typed_skill(message: dict, allowlist: frozenset[str]) -> str | None:
-    """The allowlisted skill a user entry's slash command names, or None."""
-    name = _skill_name(_typed_command(message))
+def _typed_skill(message: dict, allowlist: frozenset[str],
+                 private: frozenset[str] = frozenset()) -> str | None:
+    """The allowlisted skill a user entry's slash command names, or None
+    (also None for a command prefixed by a `private` plugin)."""
+    command = _typed_command(message)
+    name = _skill_name(command)
+    if _private_prefix(command, private):
+        return None
     if name in allowlist and SKILL_KEY_RE.fullmatch(name):
         return name
     return None
@@ -293,7 +413,7 @@ def _typed_skill(message: dict, allowlist: frozenset[str]) -> str | None:
 #: Longest kept value of a free string in a private record.
 EVENT_TEXT_CAP = 200
 #: A host name that may name a file in the private store.
-MACHINE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+MACHINE_RE = re.compile(r"(?!cloud-)[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _GITHUB_REMOTE_RE = re.compile(
     r"(?:https://(?:[^@/\s]+@)?github\.com/|ssh://git@github\.com/|git@github\.com:)"
     r"([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]{1,100}?)(?:\.git)?/?")
@@ -347,25 +467,427 @@ def _event_ts(when: datetime) -> str:
 
 
 def _skill_event(entry: dict, when: datetime, event_id, name: str,
-                 cache: dict, machine: str, root: str) -> dict:
+                 cache: dict, machine: str, root: str,
+                 model: str | None = None, effort: str | None = None,
+                 context_tokens: int | None = None) -> dict:
     """One private record of a skill invocation. `session_title` is filled
-    in when the whole transcript has been read."""
+    in when the whole transcript has been read. `model` is the sanitized
+    key of the model running at the call, or None when unknown; `effort`
+    and `context_tokens` come from the same assistant turn, None when
+    unknown. `cli` is the Claude Code version the transcript line recorded
+    (its use-time value), None when the line has none."""
     ts = _event_ts(when)
     session = _text(entry.get("sessionId"))
     if not _text(event_id):
         # No tool-use id or entry uuid: an id that is still stable across runs.
         event_id = hashlib.sha256(f"{session}\n{ts}\n{name}".encode("utf-8")).hexdigest()
     return {"v": 1, "id": _text(event_id), "ts": ts, "kind": "skill",
-            "name": name[:EVENT_TEXT_CAP], "surface": "local", "root": root,
+            "name": name[:EVENT_TEXT_CAP], "model": model,
+            "effort": effort, "context_tokens": context_tokens, "surface": "local", "root": root,
+            "cli": _text(entry.get("version")),
             "machine": machine,
             "session_id": session, "session_title": None,
             "cwd_repo": cwd_repo(entry.get("cwd"), cache),
-            "branch": _text(entry.get("gitBranch"))}
+            "branch": _text(entry.get("gitBranch")),
+            **_NOT_LOADED}
+
+
+# --- Which skill copy a local session loaded (private records only) --------
+# Claude Code answers a Skill call, or a typed skill command, with a user entry
+# marked `isMeta` whose text starts `Base directory for this skill: <path>`.
+# That path names the copy the session loaded; the census hashes it with the
+# lock digest (harness/skill_digest.py) and says where it lives. Only the
+# digest, a reason, a kind and an `owner/repo` are recorded, never the path,
+# and only in the private events: nothing here reaches a public file.
+
+#: Why a skill record's `digest` is null (null when it has one).
+DIGEST_NULL_REASONS = ("no-base-dir", "builtin", "outside-known-roots", "gone",
+                       "changed-since-load", "refused-by-registry-rules",
+                       "too-large", "bad-name")
+#: Where the loaded copy lives.
+BASE_KINDS = ("plugin-cache", "user-skills", "repo", "builtin", "account-plugin",
+              "account-sync", "unknown")
+#: Claude Code's built-in prompt skills, measured to write no base-directory
+#: message.
+BUILTIN_SKILLS = frozenset({"schedule", "update-config", "loop", "simplify",
+                            "artifact-design", "workflow-authoring"})
+#: A skill directory name; also what the base directory's basename must be.
+SKILL_DIR_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_BASE_DIR_LINE = "Base directory for this skill: "
+_OWNER_REPO_RE = re.compile(r"([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]{1,100})")
+_HTTPS_GITHUB_RE = re.compile(
+    r"https://github\.com/([A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}?)(?:\.git)?")
+_DRIVE_PATH_RE = re.compile(r"([A-Za-z]):\\(.*)", re.DOTALL)
+_WSL_UNC_RE = re.compile(r"\\\\wsl(?:\.localhost|\$)\\[^\\]+(\\.*)?",
+                         re.DOTALL | re.IGNORECASE)
+_NOT_LOADED = {"digest": None, "digest_null_reason": "no-base-dir",
+               "base_kind": "unknown", "registry": None, "ref": None}
+#: A commit sha as `installed_plugins.json` and git write it.
+_COMMIT_RE = re.compile(r"[0-9a-f]{40}")
+
+
+def _owner_repo(value) -> str | None:
+    """`value` when it is an `owner/repo` string, else None."""
+    match = _OWNER_REPO_RE.fullmatch(value) if isinstance(value, str) else None
+    return value if match and match.group(2) not in (".", "..") else None
+
+
+def base_dir_line(message: dict) -> str | None:
+    """The path after `Base directory for this skill: ` when that is the
+    FIRST line of the entry's text (a string, or a first `text` item), else
+    None. A line quoted further down in prose does not count."""
+    content = message.get("content")
+    if isinstance(content, list):
+        first = content[0] if content else None
+        content = (first.get("text") if isinstance(first, dict)
+                   and first.get("type") == "text" else None)
+    if not isinstance(content, str):
+        return None
+    line = content.split("\n", 1)[0]
+    if not line.startswith(_BASE_DIR_LINE):
+        return None
+    return line[len(_BASE_DIR_LINE):] or None
+
+
+def native_path(raw: str) -> str:
+    """`C:\\x\\y` -> `/mnt/c/x/y`, `\\\\wsl.localhost\\<distro>\\x` (or
+    `\\\\wsl$\\...`) -> `/x`; anything else unchanged."""
+    match = _DRIVE_PATH_RE.fullmatch(raw)
+    if match:
+        return f"/mnt/{match.group(1).lower()}/" + match.group(2).replace("\\", "/")
+    match = _WSL_UNC_RE.fullmatch(raw)
+    if match:
+        return (match.group(1) or "\\").replace("\\", "/")
+    return raw
+
+
+def _path_shape(real: str) -> tuple[str, str | None, str | None]:
+    """(kind by path alone, the `.claude` directory, the marketplace)."""
+    parts = PurePosixPath(real).parts
+    if "local-agent-mode-sessions" in parts:
+        return "account-plugin", None, None
+    for index, part in enumerate(parts):
+        if part != ".claude":
+            continue
+        claude, rest = str(PurePosixPath(*parts[:index + 1])), parts[index + 1:]
+        if len(rest) == 7 and rest[:2] == ("plugins", "cache") and rest[5] == "skills":
+            return "plugin-cache", claude, rest[2]
+        if len(rest) > 2 and rest[:2] == ("skills", "synced"):
+            return "account-sync", claude, None
+        if len(rest) == 2 and rest[0] == "skills":
+            return "user-skills", claude, None
+    return "unknown", None, None
+
+
+def _latest_change(root: str, skip: frozenset) -> float:
+    """The latest max(st_mtime, st_ctime) of `root` and every entry under it
+    (links not followed, `skip` left out). DigestTooLarge past the digest's
+    file cap; OSError when the tree cannot be read."""
+    def fail(error):
+        raise error
+    info = os.lstat(root)
+    latest, count = max(info.st_mtime, info.st_ctime), 0
+    for directory, subdirs, names in os.walk(root, followlinks=False, onerror=fail):
+        for name in subdirs + names:
+            path = os.path.join(directory, name)
+            if path in skip:
+                continue
+            count += 1
+            if count > 2 * skill_digest.MAX_FILES:
+                raise skill_digest.DigestTooLarge("too many entries")
+            info = os.lstat(path)
+            latest = max(latest, info.st_mtime, info.st_ctime)
+    return latest
+
+
+class LoadedCopies:
+    """Resolves which skill copy each private record's session loaded.
+
+    One instance per census run: each base directory is walked and hashed
+    at most once, each checkout asked for its ignored files and remote once;
+    the change guard is then compared per record. Every lookup root (the
+    `.claude` directory, the checkout) comes from the base directory itself.
+    """
+
+    def __init__(self):
+        self._trees: dict = {}
+        self._toplevels: dict = {}
+        self._json: dict = {}
+
+    def resolve(self, name: str, base: str | None, when: datetime) -> dict:
+        """The five loaded-copy keys (`ref` only for plugin-cache) of a record invoking `name` at `when`
+        whose base-directory message named `base` (None: no such message)."""
+        out = dict(_NOT_LOADED, digest_null_reason=None)
+        bare = name.split(":", 1)[1] if ":" in name else name
+        if not SKILL_DIR_NAME_RE.fullmatch(bare):
+            return dict(out, digest_null_reason="bad-name")
+        if base is None:
+            if bare in BUILTIN_SKILLS:
+                return dict(out, base_kind="builtin", digest_null_reason="builtin")
+            return dict(out, digest_null_reason="no-base-dir")
+        path = native_path(base)
+        if not os.path.isabs(path):
+            return dict(out, digest_null_reason="outside-known-roots")
+        if "bundled-skills" in PurePosixPath(path).parts:
+            return dict(out, base_kind="builtin", digest_null_reason="builtin")
+        real = os.path.realpath(path)
+        if os.path.basename(os.path.normpath(path)) != bare \
+                or os.path.basename(real) != bare:
+            return dict(out, digest_null_reason="no-base-dir")
+        kind, claude, marketplace = _path_shape(real)
+        if not os.path.isdir(real):
+            return dict(out, base_kind=kind, digest_null_reason="gone")
+        checkout = None
+        if kind in ("user-skills", "unknown"):
+            checkout = self._toplevel(real)
+            if checkout is not None:
+                kind = "repo"
+        if kind == "unknown":
+            return dict(out, digest_null_reason="outside-known-roots")
+        out["base_kind"] = kind
+        if kind == "plugin-cache":
+            out["registry"] = self._marketplace_repo(claude, marketplace)
+            out["ref"] = self._install_ref(claude, os.path.dirname(os.path.dirname(real)))
+        elif kind == "repo":
+            out["registry"] = self._origin_repo(checkout)
+        tree = self._tree(real, checkout)
+        reason = tree.get("reason")
+        if reason is None and tree["latest"] > when.timestamp():
+            reason = "changed-since-load"
+        if reason is None:
+            reason = self._digest(tree)
+        if reason is not None:
+            return dict(out, digest_null_reason=reason)
+        out["digest"] = tree["digest"]
+        if kind == "user-skills":
+            out["registry"] = self._bootstrap_repo(claude, bare, tree["digest"])
+        return out
+
+    def _tree(self, real: str, checkout: str | None) -> dict:
+        """{"latest", "skip"} or {"reason"} for one base directory, cached."""
+        if real not in self._trees:
+            try:
+                skip = (skill_digest.git_ignored(checkout) if checkout is not None
+                        else frozenset())
+                self._trees[real] = {"path": real, "skip": skip,
+                                     "latest": _latest_change(real, skip)}
+            except skill_digest.DigestTooLarge:
+                self._trees[real] = {"reason": "too-large"}
+            except OSError:
+                self._trees[real] = {"reason": "gone"}
+        return self._trees[real]
+
+    @staticmethod
+    def _digest(tree: dict) -> str | None:
+        """Hash the tree once; None, or the null reason."""
+        if "digest" not in tree:
+            try:
+                tree["digest"] = skill_digest.lock_digest(tree["path"], tree["skip"])
+            except skill_digest.DigestRefused:
+                tree["reason"] = "refused-by-registry-rules"
+            except skill_digest.DigestTooLarge:
+                tree["reason"] = "too-large"
+            except (OSError, UnicodeError):
+                tree["reason"] = "gone"
+            if "reason" in tree:
+                tree["digest"] = None
+        return tree.get("reason")
+
+    def _toplevel(self, real: str) -> str | None:
+        """The work tree `real` is inside, or None."""
+        if real not in self._toplevels:
+            top = None
+            try:
+                proc = subprocess.run(
+                    ["git", "-C", real, "-c", "core.fsmonitor=false",
+                     "rev-parse", "--show-toplevel"],
+                    capture_output=True, text=True, timeout=10,
+                    stdin=subprocess.DEVNULL)
+                if proc.returncode == 0 and proc.stdout.strip():
+                    top = os.path.realpath(proc.stdout.strip())
+            except (OSError, subprocess.SubprocessError):
+                top = None
+            self._toplevels[real] = top
+        return self._toplevels[real]
+
+    def _origin_repo(self, checkout: str) -> str | None:
+        """`owner/repo` of the checkout's github.com `origin`, else None."""
+        key = ("origin", checkout)
+        if key not in self._json:
+            url = None
+            try:
+                proc = subprocess.run(
+                    ["git", "-C", checkout, "config", "--get", "remote.origin.url"],
+                    capture_output=True, text=True, timeout=10,
+                    stdin=subprocess.DEVNULL)
+                if proc.returncode == 0:
+                    url = proc.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                url = None
+            self._json[key] = github_repo(url)
+        return self._json[key]
+
+    def _load(self, path: str):
+        """A JSON file's content, or None when it cannot be read."""
+        if path not in self._json:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    self._json[path] = json.load(handle)
+            except (OSError, ValueError):
+                self._json[path] = None
+        return self._json[path]
+
+    def _marketplace_repo(self, claude: str, marketplace: str) -> str | None:
+        """The github `owner/repo` that `<claude>/plugins/known_marketplaces.json`
+        names for `marketplace`, else None."""
+        known = self._load(os.path.join(claude, "plugins", "known_marketplaces.json"))
+        entry = known.get(marketplace) if isinstance(known, dict) else None
+        source = entry.get("source") if isinstance(entry, dict) else None
+        if isinstance(source, dict) and source.get("source") == "github":
+            return _owner_repo(source.get("repo"))
+        return None
+
+    def _install_ref(self, claude: str, version_root: str) -> str | None:
+        """The `gitCommitSha` that `<claude>/plugins/installed_plugins.json`
+        (version 2: {"plugins": {key: [{"installPath", "gitCommitSha"}]}})
+        records for the install whose `installPath` resolves to
+        `version_root`, when it is 40 lowercase hex; else None (#562)."""
+        record = self._load(os.path.join(claude, "plugins", "installed_plugins.json"))
+        plugins = record.get("plugins") if isinstance(record, dict) else None
+        for installs in plugins.values() if isinstance(plugins, dict) else ():
+            for entry in installs if isinstance(installs, list) else ():
+                path = entry.get("installPath") if isinstance(entry, dict) else None
+                if not isinstance(path, str) or os.path.realpath(path) != version_root:
+                    continue
+                sha = entry.get("gitCommitSha")
+                return sha if isinstance(sha, str) and _COMMIT_RE.fullmatch(sha) else None
+        return None
+
+    def _bootstrap_repo(self, claude: str, name: str, digest: str) -> str | None:
+        """The registry the skills-bootstrap hook's install record names for
+        `name`, only when its digest is this copy's and its URL is a plain
+        `https://github.com/<owner>/<repo>`; else None."""
+        record = self._load(os.path.join(claude, "skills",
+                                         ".skills-bootstrap-installed.json"))
+        installed = record.get("installed") if isinstance(record, dict) else None
+        for entry in installed if isinstance(installed, list) else ():
+            if not (isinstance(entry, dict) and entry.get("name") == name):
+                continue
+            recorded, url = entry.get("digest"), entry.get("registry")
+            if not (isinstance(recorded, str) and isinstance(url, str)
+                    and skill_digest.normalize(recorded) == digest):
+                return None
+            match = _HTTPS_GITHUB_RE.fullmatch(url)
+            return _owner_repo(match.group(1)) if match else None
+        return None
+
+
+#: Signature strings that tell a session's loaded memory files apart. They
+#: mirror the marker lines in _agent-guidance's agents-md/base.md (the full
+#: fleet guidance) and agents-md/stub.md (the repo stub), plus the two
+#: headings older versions carried before the markers existed.
+GUIDANCE_FULL_MARKERS = ("guidance-marker: fleet-full", "## Working in these repos")
+GUIDANCE_STUB_MARKERS = ("guidance-marker: fleet-stub",
+                         "Fleet guidance is delivered once per session")
+GUIDANCE_FULL, GUIDANCE_STUB, GUIDANCE_NEITHER, GUIDANCE_UNKNOWN = (
+    "full", "stub-only", "neither", "unknown")
+
+
+def _instruction_texts(entry: dict) -> list[str] | None:
+    """The memory-file texts of an `attachment` entry of type `instructions`,
+    or None when the entry is not one."""
+    attachment = entry.get("attachment")
+    if not isinstance(attachment, dict) or attachment.get("type") != "instructions":
+        return None
+    files = attachment.get("files")
+    return [f["content"] for f in files if isinstance(f, dict)
+            and isinstance(f.get("content"), str)] if isinstance(files, list) else []
+
+
+def guidance_state(texts: list[str] | None) -> str:
+    """Classify a session by the memory texts it loaded; None means no
+    instructions entry was found (an older CLI may not write one)."""
+    if texts is None:
+        return GUIDANCE_UNKNOWN
+    if any(m in t for t in texts for m in GUIDANCE_FULL_MARKERS):
+        return GUIDANCE_FULL
+    if any(m in t for t in texts for m in GUIDANCE_STUB_MARKERS):
+        return GUIDANCE_STUB
+    return GUIDANCE_NEITHER
 
 
 def _bump(counts: dict, key: str, week: str) -> None:
     counts.setdefault(key, {})
     counts[key][week] = counts[key].get(week, 0) + 1
+
+
+# --- Cloud guidance records (`--cloud-guidance`) ----------------------------
+# One line per cloud session, appended by _agent-guidance's guidance-load hook
+# to events/<YYYY-MM>/cloud-guidance.jsonl on the private branch: {"v","ts",
+# "kind":"guidance-load","session","state","check_expected","check_reported",
+# "cli","repos","guidance_version","registry_sha",...}. Only `session`, `ts`,
+# `state` and `check_reported` are read.
+
+CLOUD_GUIDANCE_FILE = "cloud-guidance.jsonl"
+GUIDANCE_INVALID = "invalid"
+GUIDANCE_STATES = (GUIDANCE_FULL, GUIDANCE_STUB, GUIDANCE_NEITHER, GUIDANCE_UNKNOWN)
+CHECK_UNKNOWN = "unknown"
+CHECK_RESULTS = ("match", "mismatch", "none", "absent")
+
+
+def _enum(value, allowed: tuple, otherwise: str) -> str:
+    """`value` when it is one of the fixed strings in `allowed`, else
+    `otherwise`; never anything else, whatever the record held."""
+    return value if isinstance(value, str) and value in allowed else otherwise
+
+
+def cloud_guidance_tally(root, now: datetime, weeks: int = DEFAULT_WEEKS) -> dict:
+    """Weekly counts from `root`/events/*/cloud-guidance.jsonl, READ-ONLY.
+
+    Returns {"guidance": {state: {iso_week: n}}, "checks": {result:
+    {iso_week: n}}, "records_scanned": n, "earliest": datetime | None}.
+    A record counts only with a string `session` and a parseable `ts` inside
+    the census window (not before the Monday of its oldest week, not in a
+    later week than `now`'s); a session counts once across every file, at the
+    earliest `ts`, the first line winning a tie (files in sorted order).
+    Malformed lines, unreadable files and linked files are skipped without a
+    trace. `records_scanned` is the number of distinct sessions counted.
+    """
+    wanted = set(window_weeks(now, weeks))
+    start = datetime.fromisoformat(skill_usage.week_monday(window_weeks(now, weeks)[-1])
+                                   ).replace(tzinfo=timezone.utc)
+    first: dict[str, tuple[datetime, dict]] = {}
+    for path in sorted(Path(root).glob(f"{EVENTS_DIR}/*/{CLOUD_GUIDANCE_FILE}")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(record, dict) or not isinstance(record.get("session"), str) \
+                    or not record["session"] or not isinstance(record.get("ts"), str):
+                continue
+            when = parse_ts(record["ts"])
+            when = None if when is None else when.astimezone(timezone.utc)
+            if when is None or when < start or iso_week(when) not in wanted:
+                continue
+            kept = first.get(record["session"])
+            if kept is None or when < kept[0]:
+                first[record["session"]] = (when, record)
+    tally = {"guidance": {}, "checks": {}, "records_scanned": len(first),
+             "earliest": min((when for when, _ in first.values()), default=None)}
+    for when, record in first.values():
+        week = iso_week(when)
+        _bump(tally["guidance"], _enum(record.get("state"), GUIDANCE_STATES,
+                                       GUIDANCE_INVALID), week)
+        _bump(tally["checks"], _enum(record.get("check_reported"), CHECK_RESULTS,
+                                     CHECK_UNKNOWN), week)
+    return tally
 
 
 def census_counts(projects_dir: Path, now: datetime,
@@ -389,6 +911,8 @@ def census_counts(projects_dir: Path, now: datetime,
 #: The shape of a check id that may be a published key.
 HOOK_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
 HOOK_EVENTS = ("pre-commit", "pre-push")
+#: The runner digest a log line may carry: 12 lowercase hex, nothing else.
+RUNNER_RE = re.compile(r"[0-9a-f]{12}")
 #: The per-week row that counts every run, whatever its checks.
 HOOK_ALL = "all"
 #: Public repositories that are not skill registries but run the hooks.
@@ -421,6 +945,28 @@ def public_repos() -> frozenset[str]:
     return frozenset(repos)
 
 
+def public_registry_entries() -> list[dict]:
+    """The `private: false` entries of harness/registries.yml as
+    {"repo": canonical owner/repo, "layout": glob}, in file order (#562).
+    Not ALWAYS_PUBLIC_REPOS: those hold no skills, so no loaded copy can
+    come from them. Needs PyYAML, so the import is lazy."""
+    import run_eval
+    out = []
+    for entry in run_eval._load_registries_config():
+        repo = github_repo(entry["url"])
+        if entry["private"] is False and repo:
+            out.append({"repo": repo, "layout": entry["layout"]})
+    return out
+
+
+def public_registries() -> dict[str, str]:
+    """{lowercase owner/repo: canonical owner/repo} of the `private: false`
+    registries: a record's `registry` is compared case-insensitively and
+    published only in the canonical form, so a fork or any other repository
+    never matches (#562)."""
+    return {entry["repo"].lower(): entry["repo"] for entry in public_registry_entries()}
+
+
 def _id_list(value) -> list | None:
     if not isinstance(value, list) or len(value) > _HOOK_LIST_CAP:
         return None
@@ -444,8 +990,11 @@ def _hook_run(line: str) -> dict | None:
             or failed is None
             or not (repo is None or (isinstance(repo, str) and 0 < len(repo) <= 200))):
         return None
+    runner = entry.get("runner")
+    if not (isinstance(runner, str) and RUNNER_RE.fullmatch(runner)):
+        runner = None
     return {"when": when, "event": entry["event"], "repo": repo,
-            "checks": checks, "failed": failed}
+            "checks": checks, "failed": failed, "runner": runner}
 
 
 def _hook_key(check: str) -> str:
@@ -454,7 +1003,8 @@ def _hook_key(check: str) -> str:
 
 def hook_tally(paths, now: datetime, weeks: int, repos: frozenset[str],
                events: list | None = None, machine: str = "") -> dict | None:
-    """{"rows": {(iso_week, name, repo): [runs, blocked]}, "runs_scanned": n}
+    """{"rows": {(iso_week, name, repo, runner): [runs, blocked]},
+    "runs_scanned": n}
     over the census window, or None when no file in `paths` could be read.
 
     A malformed line is skipped. A line seen twice (the same bytes in two
@@ -490,14 +1040,15 @@ def hook_tally(paths, now: datetime, weeks: int, repos: frozenset[str],
                 ran = {_hook_key(check) for check in run["checks"]} | failed
                 for name, hit in [((HOOK_ALL, None), bool(failed))] + \
                         [((key, repo), key in failed) for key in ran]:
-                    counts = rows.setdefault((week, *name), [0, 0])
+                    counts = rows.setdefault((week, *name, run["runner"]), [0, 0])
                     counts[0] += 1
                     counts[1] += int(hit)
                 if events is not None:
                     events.append({"v": 1, "id": digest, "ts": _event_ts(run["when"]),
                                    "kind": "hook", "event": run["event"],
                                    "repo": run["repo"], "checks": run["checks"],
-                                   "failed": run["failed"], "surface": "local",
+                                   "failed": run["failed"], "runner": run["runner"],
+                                   "surface": "local",
                                    "root": root_kind(path), "machine": machine})
     return {"rows": rows, "runs_scanned": len(seen)} if read else None
 
@@ -516,7 +1067,8 @@ def root_kind(path) -> str:
 
 def census_all(projects_dir, now: datetime, weeks: int = DEFAULT_WEEKS,
                allowlist: frozenset[str] | None = None,
-               events: list | None = None) -> tuple[dict, dict]:
+               events: list | None = None,
+               private: frozenset[str] = frozenset()) -> tuple[dict, dict]:
     """(model counts, skill tally) from ONE walk of the transcripts.
 
     `projects_dir` is one transcript root or a list of them (WSL, Windows,
@@ -543,7 +1095,8 @@ def census_all(projects_dir, now: datetime, weeks: int = DEFAULT_WEEKS,
     counts: dict[str, dict[str, int]] = {}
     skills: dict[str, dict[str, int]] = {}
     sessions: dict[str, dict[str, int]] = {}
-    tally = {"invocations": skills, "sessions": sessions, "sessions_scanned": 0}
+    tally = {"invocations": skills, "sessions": sessions, "sessions_scanned": 0,
+             "guidance": {}}
     #: (st_dev, st_ino) of every transcript already processed. A symlink or a
     #: hard-linked copy is the SAME underlying file reachable via a second
     #: path in the walk — reading it twice double-counts every turn in it.
@@ -557,6 +1110,7 @@ def census_all(projects_dir, now: datetime, weeks: int = DEFAULT_WEEKS,
     record = events is not None and allowlist is not None
     machine = machine_name() if record else ""
     repos: dict = {}
+    copies = LoadedCopies() if record else None
     #: ("t"|"c"|"u", id) of every turn, Skill call and typed entry counted
     #: under an earlier root.
     claimed: set[tuple[str, str]] = set()
@@ -564,17 +1118,24 @@ def census_all(projects_dir, now: datetime, weeks: int = DEFAULT_WEEKS,
         if root.is_dir():
             claimed |= _census_root(root, wanted, oldest, counts, tally, seen_files,
                                     claimed, allowlist, events if record else None,
-                                    repos, machine)
+                                    repos, machine, private, copies)
     return counts, tally
 
 
 def _census_root(root: Path, wanted: set, oldest: datetime, counts: dict,
                  tally: dict, seen_files: set, claimed: set, allowlist,
-                 events: list | None, repos: dict, machine: str) -> set:
+                 events: list | None, repos: dict, machine: str,
+                 private: frozenset[str] = frozenset(),
+                 copies: LoadedCopies | None = None) -> set:
     """Walk one transcript root into `counts` and `tally`; return the ids it
     counted. See census_all."""
     skills, sessions = tally["invocations"], tally["sessions"]
     record = events is not None
+    # #562: (key, ISO week, record) of every counted use that has a record,
+    # in memory only. The key is the one this run counted the use under, so
+    # the skill-digest rows group exactly as the skill rows do; the record's
+    # own `name` is the raw, capped string and can differ.
+    counted = tally.setdefault("counted", []) if record else None
     kind_of_root = root_kind(root)
     this_root: set[tuple[str, str]] = set()
 
@@ -603,7 +1164,15 @@ def _census_root(root: Path, wanted: set, oldest: datetime, counts: dict,
         seen = this_root if kind_of_root == "cowork" else set()
         invoked: set[tuple[str, str]] = set()   # (skill, week) in this file
         file_events: list[dict] = []
+        pending_model: list[dict] = []  # typed-command events awaiting a model
+        # Each record's base-directory message: a Skill call links only by
+        # `sourceToolUseID`, a typed command only by `parentUuid`.
+        loads: list[dict] = []
+        by_call: dict[str, dict] = {}
+        by_parent: dict[str, dict] = {}
         title = None
+        first_when = first_uuid = None
+        texts: list[str] | None = None
         tally["sessions_scanned"] += 1
         try:
             with open(transcript, encoding="utf-8", errors="replace") as f:
@@ -618,6 +1187,14 @@ def _census_root(root: Path, wanted: set, oldest: datetime, counts: dict,
                     if not isinstance(entry, dict):
                         continue
                     kind = entry.get("type")
+                    if first_when is None:
+                        first_when = parse_ts(entry.get("timestamp"))
+                        first_uuid = entry.get("uuid")
+                    if kind == "attachment":
+                        found = _instruction_texts(entry)
+                        if found is not None:
+                            texts = (texts or []) + found
+                        continue
                     if record and kind in ("summary", "custom-title"):
                         text = entry.get("summary" if kind == "summary" else "customTitle")
                         title = _text(text) or title
@@ -627,6 +1204,21 @@ def _census_root(root: Path, wanted: set, oldest: datetime, counts: dict,
                     message = entry.get("message")
                     if not isinstance(message, dict):
                         continue
+                    if record and kind == "user" and entry.get("isMeta") is True:
+                        for table, key in ((by_call, entry.get("sourceToolUseID")),
+                                           (by_parent, entry.get("parentUuid"))):
+                            load = table.get(key) if isinstance(key, str) else None
+                            if load is not None and load["base"] is None:
+                                load["base"] = base_dir_line(message)
+                    # "<synthetic>" marks a message Claude Code wrote itself
+                    # (an interrupt or an API error), not a model's turn.
+                    if kind == "assistant" and pending_model \
+                            and message.get("model") != "<synthetic>":
+                        facts = _turn_facts(entry, message)
+                        if facts["model"] is not None:
+                            for pending in pending_model:
+                                pending.update(facts)
+                            pending_model.clear()
                     when = parse_ts(entry.get("timestamp"))
                     if when is None:
                         continue
@@ -635,7 +1227,7 @@ def _census_root(root: Path, wanted: set, oldest: datetime, counts: dict,
                         continue
                     if kind == "user":
                         if allowlist is not None:
-                            typed = _typed_skill(message, allowlist)
+                            typed = _typed_skill(message, allowlist, private)
                             uuid = entry.get("uuid")
                             if typed is not None and isinstance(uuid, str) and uuid \
                                     and not fresh(("u", uuid)):
@@ -645,10 +1237,18 @@ def _census_root(root: Path, wanted: set, oldest: datetime, counts: dict,
                                 invoked.add((typed, week))
                                 if record:
                                     raw = _typed_command(message)
-                                    file_events.append(_skill_event(
+                                    event = _skill_event(
                                         entry, when, entry.get("uuid"),
                                         raw[1:] if raw.startswith("/") else raw,
-                                        repos, machine, kind_of_root))
+                                        repos, machine, kind_of_root)
+                                    file_events.append(event)
+                                    counted.append((typed, week, event))
+                                    pending_model.append(event)
+                                    load = {"event": event, "when": when,
+                                            "base": None}
+                                    loads.append(load)
+                                    if isinstance(uuid, str) and uuid:
+                                        by_parent.setdefault(uuid, load)
                         continue
                     if allowlist is not None and isinstance(message.get("content"), list):
                         for item in message["content"]:
@@ -662,13 +1262,20 @@ def _census_root(root: Path, wanted: set, oldest: datetime, counts: dict,
                                 continue
                             given = item.get("input")
                             raw = given.get("skill") if isinstance(given, dict) else None
-                            name = skill_key(raw, allowlist)
+                            name = skill_key(raw, allowlist, private)
                             _bump(skills, name, week)
                             invoked.add((name, week))
                             if record and _text(raw):
-                                file_events.append(_skill_event(
+                                event = _skill_event(
                                     entry, when, call, raw, repos, machine,
-                                    kind_of_root))
+                                    kind_of_root,
+                                    **_turn_facts(entry, message))
+                                file_events.append(event)
+                                counted.append((name, week, event))
+                                load = {"event": event, "when": when, "base": None}
+                                loads.append(load)
+                                if isinstance(call, str) and call:
+                                    by_call.setdefault(call, load)
                     key = published_key(message.get("model"))
                     if key is None:
                         continue
@@ -680,8 +1287,20 @@ def _census_root(root: Path, wanted: set, oldest: datetime, counts: dict,
             continue
         for name, week in invoked:
             _bump(sessions, name, week)
+        # One guidance state per session, in the week of its first timestamped
+        # entry; a session stored twice (Cowork, or under two roots) counts once.
+        # A subagent transcript loads no memory of its own, so it would only
+        # inflate `unknown`.
+        if first_when is not None and iso_week(first_when) in wanted \
+                and "subagents" not in transcript.parts \
+                and not (isinstance(first_uuid, str) and first_uuid
+                         and not fresh(("g", first_uuid))):
+            _bump(tally["guidance"], guidance_state(texts), iso_week(first_when))
         for event in file_events:
             event["session_title"] = title
+        for load in loads:
+            load["event"].update(copies.resolve(
+                load["event"]["name"], load["base"], load["when"]))
         if record:
             events.extend(file_events)
         if seen is not this_root:
@@ -703,22 +1322,53 @@ def _document(counts: dict, now: datetime, weeks: int) -> dict:
     }
 
 
+def window_from(now: datetime, weeks: int) -> datetime:
+    """The Monday (UTC) of the oldest week of the census window."""
+    return datetime.fromisoformat(skill_usage.week_monday(window_weeks(now, weeks)[-1])
+                                  ).replace(tzinfo=timezone.utc)
+
+
 def build_weekly_document(tally: dict, now: datetime,
-                          weeks: int = DEFAULT_WEEKS, hooks: dict | None = None) -> dict:
+                          weeks: int = DEFAULT_WEEKS, hooks: dict | None = None,
+                          cloud: dict | None = None, digests: tuple | None = None) -> dict:
     """`usage/weekly-local.json`, built by `harness/skill_usage.py`, which
     owns its schema. The window starts at the Monday of its oldest week.
-    `hooks` is `hook_tally()`'s result; None adds no hook rows or source."""
+    `hooks` is `hook_tally()`'s result; None adds no hook rows or source.
+    `cloud` is `cloud_guidance_tally()`'s; None adds no cloud rows or source.
+    `digests` is (plan, rows) from `skill_digest_plan` and `digest_rows`;
+    None adds no skill-digest rows or source (#562)."""
     rows = [skill_usage.row(week, "skill", name, n,
                             tally["sessions"].get(name, {}).get(week, 0))
             for name, by_week in tally["invocations"].items()
             for week, n in by_week.items()]
+    rows += [skill_usage.guidance_row(week, state, n)
+             for state, by_week in tally.get("guidance", {}).items()
+             for week, n in by_week.items()]
     if hooks is not None:
-        rows += [skill_usage.hook_row(week, name, repo, runs, blocked)
-                 for (week, name, repo), (runs, blocked) in hooks["rows"].items()]
-    oldest = skill_usage.week_monday(window_weeks(now, weeks)[-1])
-    window_from = datetime.fromisoformat(oldest).replace(tzinfo=timezone.utc)
-    return skill_usage.document(rows, now, window_from, tally["sessions_scanned"],
-                                None if hooks is None else hooks["runs_scanned"])
+        rows += [skill_usage.hook_row(week, name, repo, runs, blocked, runner)
+                 for (week, name, repo, runner), (runs, blocked) in hooks["rows"].items()]
+    start = window_from(now, weeks)
+    cloud_source = None
+    if cloud is not None:
+        rows += [skill_usage.guidance_row(week, state, n, skill_usage.SURFACE_CLOUD)
+                 for state, by_week in cloud["guidance"].items()
+                 for week, n in by_week.items()]
+        rows += [skill_usage.guidance_check_row(week, result, n)
+                 for result, by_week in cloud["checks"].items()
+                 for week, n in by_week.items()]
+        # The Monday of the earliest record's week: no coverage is claimed
+        # before the first record.
+        earliest = cloud["earliest"]
+        record_week = (None if earliest is None else datetime.fromisoformat(
+            skill_usage.week_monday(iso_week(earliest))).replace(tzinfo=timezone.utc))
+        cloud_source = {"from": max(start, record_week or start),
+                        "records_scanned": cloud["records_scanned"]}
+    doc = skill_usage.document(rows, now, start, tally["sessions_scanned"],
+                               None if hooks is None else hooks["runs_scanned"],
+                               cloud_source)
+    if digests is not None:
+        add_digest_rows(doc, *digests, now)
+    return doc
 
 
 #: Where the private store keeps records: events/<YYYY-MM>/<machine>.jsonl.
@@ -785,6 +1435,367 @@ def merge_events(events_path, store) -> int:
     return added
 
 
+# --- Loaded skill copies, public rows (#562, 2026-11-02) ---------------------
+# The private store says which copy each use loaded; the public file may say
+# only a 12-hex prefix of it, and only when that content was once on a public
+# branch of a `private: false` registry. Everything here runs on the owner's
+# machine; the plan file is private scratch, removed with the publisher's
+# temp directory.
+
+_DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
+#: The marker for an id whose stored lines predate #563 (no `digest` key).
+PRE_RECORD = "pre-record"
+
+
+def _stored_copy(record: dict):
+    """(has a `digest` key, the copy or None). A line whose digest is not 64
+    lowercase hex, or whose null reason is not a known one, is malformed and
+    yields (True, None): it is skipped, so it can neither block the census
+    nor publish a reason it made up."""
+    if "digest" not in record:
+        return False, None
+    digest, reason = record.get("digest"), record.get("digest_null_reason")
+    if digest is None:
+        if reason not in DIGEST_NULL_REASONS:
+            return True, None
+    elif isinstance(digest, str) and _DIGEST_HEX_RE.fullmatch(digest):
+        reason = None
+    else:
+        return True, None
+    ref = record.get("ref")
+    return True, {"digest": digest, "reason": reason,
+                  "registry": _owner_repo(record.get("registry")),
+                  "ref": ref if isinstance(ref, str) and _COMMIT_RE.fullmatch(ref) else None,
+                  "ts": parse_ts(record.get("ts")) if isinstance(record.get("ts"), str) else None}
+
+
+def _resolve_copies(copies: list) -> dict:
+    """One id's copy from its well-formed lines, in file and line order: a
+    non-null digest beats null; two different non-null digests are a
+    `conflict`; the registry and refs come from the lines carrying the
+    winning digest (registries that disagree leave it None, which publishes
+    as unlisted); with only nulls, the earliest `ts` decides (ties: order)."""
+    known = [c for c in copies if c["digest"] is not None]
+    if len({c["digest"] for c in known}) > 1:
+        return {"digest": None, "reason": "conflict", "registry": None, "refs": []}
+    if known:
+        registries = {c["registry"] for c in known}
+        return {"digest": known[0]["digest"], "reason": None,
+                "registry": registries.pop() if len(registries) == 1 else None,
+                "refs": sorted({c["ref"] for c in known if c["ref"]})}
+    far = datetime.max.replace(tzinfo=timezone.utc)
+    first = min(range(len(copies)), key=lambda i: (copies[i]["ts"] or far, i))
+    return {"digest": None, "reason": copies[first]["reason"],
+            "registry": copies[first]["registry"], "refs": []}
+
+
+def _jsonl_dicts(path: Path):
+    """The JSON objects of `path`'s lines, in order; an unreadable file
+    yields nothing and a line that is not a JSON object is skipped."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+    for raw in text.splitlines():
+        try:
+            record = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            yield record
+
+
+def _machine_skill_records(store):
+    """(path, record) for every skill line, with a non-empty string `id`, of
+    the machine files `store`/events/*/<machine>.jsonl, READ-ONLY: links and
+    `cloud-*` files (MACHINE_RE on the stem) are skipped."""
+    for path in sorted(Path(store).glob(f"{EVENTS_DIR}/*/*.jsonl")):
+        if path.is_symlink() or not path.is_file() or not MACHINE_RE.fullmatch(path.stem):
+            continue
+        for record in _jsonl_dicts(path):
+            if record.get("kind") == "skill" and isinstance(record.get("id"), str) \
+                    and record["id"]:
+                yield path, record
+
+
+def machine_skill_ids(store) -> set:
+    """The ids of every skill line in the store's machine files."""
+    return {record["id"] for _, record in _machine_skill_records(store)}
+
+
+# --- Cloud shards (#562 PR B; _agent-guidance ADR 0036) ----------------------
+# A cloud session's Stop hook writes one line per skill use to
+# events/<YYYY-MM>/cloud-skills/<16 hex>.jsonl on the private branch, from the
+# main transcript and subagent transcripts. A session with push access could
+# write anything there, so every field of every line is checked against a
+# fixed shape, and a line that fails any check is skipped whole.
+
+CLOUD_SKILLS_DIR = "cloud-skills"
+#: The shard's file stem and every line's `session`: sha256(session id)[:16].
+CLOUD_SESSION_RE = re.compile(r"[0-9a-f]{16}")
+#: A Skill tool_use id, or a typed command's entry uuid.
+CLOUD_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,128}")
+#: The hook writes the literal `invalid` for any other name (reason bad-name).
+CLOUD_NAME_RE = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?::[A-Za-z0-9][A-Za-z0-9._-]{0,127})?")
+CLOUD_CLI_RE = re.compile(r"[0-9][0-9A-Za-z.+-]{0,31}")
+#: UTC with `Z`, as the hook builds it with strftime (milliseconds optional).
+CLOUD_TS_RE = re.compile(
+    r"(20[0-9]{2}|2100)-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z")
+#: Exactly these keys: a line with any other key, or without one, is skipped.
+CLOUD_KEYS = frozenset({"v", "id", "ts", "kind", "surface", "session", "cli", "name",
+                        "base_kind", "registry", "ref", "digest", "digest_null_reason"})
+
+
+def _cloud_line_ok(record: dict, month: str, session: str) -> bool:
+    """Whether a shard line has exactly the ADR 0036 shape. `month` and
+    `session` are the shard's own (directory and stem): a line filed under
+    another month or session is malformed."""
+    if set(record) != CLOUD_KEYS:
+        return False
+    ts, digest, reason = record["ts"], record["digest"], record["digest_null_reason"]
+    cli, registry, ref = record["cli"], record["registry"], record["ref"]
+    if not (type(record["v"]) is int and record["v"] == 1
+            and record["kind"] == "skill" and record["surface"] == "cloud"
+            and record["session"] == session
+            and isinstance(record["id"], str) and CLOUD_ID_RE.fullmatch(record["id"])
+            and isinstance(record["name"], str) and CLOUD_NAME_RE.fullmatch(record["name"])
+            and isinstance(ts, str) and CLOUD_TS_RE.fullmatch(ts) and ts[:7] == month
+            and parse_ts(ts) is not None
+            and (cli is None or isinstance(cli, str) and CLOUD_CLI_RE.fullmatch(cli))
+            and isinstance(record["base_kind"], str) and record["base_kind"] in BASE_KINDS
+            and (registry is None or _owner_repo(registry) is not None)
+            and (ref is None or isinstance(ref, str) and _COMMIT_RE.fullmatch(ref))):
+        return False
+    if digest is None:
+        return isinstance(reason, str) and reason in DIGEST_NULL_REASONS
+    return isinstance(digest, str) and bool(_DIGEST_HEX_RE.fullmatch(digest)) and reason is None
+
+
+def cloud_skill_records(store) -> list[dict]:
+    """Every well-formed line of `store`/events/<YYYY-MM>/cloud-skills/<16
+    hex>.jsonl, READ-ONLY, files in sorted order and lines in file order. A
+    month directory, `cloud-skills` directory or shard that is a link, a
+    month or stem of another shape, and every malformed line are skipped."""
+    out = []
+    for path in sorted(Path(store).glob(f"{EVENTS_DIR}/*/{CLOUD_SKILLS_DIR}/*.jsonl")):
+        month = path.parent.parent
+        if (not _MONTH_RE.fullmatch(month.name) or not CLOUD_SESSION_RE.fullmatch(path.stem)
+                or month.is_symlink() or path.parent.is_symlink() or path.is_symlink()
+                or not path.is_file()):
+            continue
+        out += [record for record in _jsonl_dicts(path)
+                if _cloud_line_ok(record, month.name, path.stem)]
+    return out
+
+
+def store_digests(store) -> dict:
+    """{id: resolved copy, or PRE_RECORD} over every skill line of the
+    machine files `store`/events/*/<machine>.jsonl and the cloud shards
+    (`cloud_skill_records`), READ-ONLY. Machine files in sorted order, then
+    shards, lines in file order; malformed lines are skipped. An id stored in
+    both resolves across both. An id none of whose lines has a `digest` key
+    is PRE_RECORD (a shard line always has one)."""
+    lines: dict = {}
+    records = [record for _, record in _machine_skill_records(store)]
+    for record in records + cloud_skill_records(store):
+        has_key, copy = _stored_copy(record)
+        entry = lines.setdefault(record["id"], {"keyless": False, "copies": []})
+        if not has_key:
+            entry["keyless"] = True
+        elif copy is not None:
+            entry["copies"].append(copy)
+    return {key: (_resolve_copies(entry["copies"]) if entry["copies"] else PRE_RECORD)
+            for key, entry in lines.items() if entry["copies"] or entry["keyless"]}
+
+
+def skill_digest_plan(counted: list, stored: dict, start: datetime,
+                      public: dict, cloud: dict | None = None) -> dict:
+    """The private plan for the `skill-digest` rows: {"from", "uses",
+    "registries"}, plus "cloud" (`cloud_digest_plan`'s) when `cloud` is given. `counted` is census_all's tally["counted"] (this run's
+    uses, a multiset: a resumed transcript can repeat an id and both count, as
+    in the skill rows); `stored` is store_digests'. A use under `other` gets
+    no row. A stored id is final; an id the store lacks takes this run's
+    record. `from` is the later of the window start and the Monday after the
+    week of the latest PRE_RECORD use, so for every week on or after it the
+    rows' invocations equal the skill rows'. `registries` names the public
+    registries (canonical) a use with a digest points at: the mirrors the
+    publisher must clone."""
+    floor, uses = start, []
+    for key, week, event in counted:
+        if key == OTHER_KEY:
+            continue
+        copy = stored.get(event.get("id"))
+        monday = datetime.fromisoformat(skill_usage.week_monday(week)).replace(tzinfo=timezone.utc)
+        if copy == PRE_RECORD:
+            floor = max(floor, monday + timedelta(days=7))
+            continue
+        if copy is None:
+            _, own = _stored_copy(event)
+            copy = (_resolve_copies([own]) if own is not None else
+                    {"digest": None, "reason": "no-base-dir", "registry": None, "refs": []})
+        session = event.get("session_id")
+        uses.append({"week": monday, "name": key,
+                     "session": session if isinstance(session, str) else None, **copy})
+    uses = [dict(use, week=use["week"].date().isoformat())
+            for use in uses if use["week"] >= floor]
+    every = uses + (cloud["uses"] if cloud is not None else [])
+    registries = sorted({public[use["registry"].lower()] for use in every
+                         if use["digest"] is not None and use["registry"]
+                         and use["registry"].lower() in public})
+    plan = {"from": floor.strftime(skill_usage.STAMP), "uses": uses,
+            "registries": registries}
+    if cloud is not None:
+        plan["cloud"] = cloud
+    return plan
+
+
+def cloud_digest_plan(records: list, local_ids: set, stored: dict, start: datetime,
+                      now: datetime, allowlist: frozenset[str],
+                      private: frozenset[str] = frozenset()) -> dict | None:
+    """The cloud part of the plan: {"from", "uses"}, or None when the store
+    holds no shard line at all (no record, no claim: before the hook ships,
+    cloud copies are unknown, not zero). One use per distinct id
+    of `records` (`cloud_skill_records`') whose `ts` is in the window
+    [`start`, `now`] and whose name is keyed to an allowlisted skill
+    (`skill_key`; `other` gets no row). An id in `local_ids` (this run's
+    records, or any machine file) is a local use, a teleported session, so
+    it counts once, there. A use's copy is the store's resolution of its id
+    (`stored`), so lines of one id resolve together. `from` is the later of
+    `start` and the Monday of the earliest valid line's week: the records
+    promise nothing before the first one, and after it only what was
+    uploaded (records seen, never complete)."""
+    if not records:
+        return None
+    floor, uses, seen = start, [], set(local_ids)
+    earliest = min((when for when in (parse_ts(r["ts"]) for r in records) if when <= now),
+                   default=None)
+    if earliest is not None:
+        floor = max(start, datetime.fromisoformat(skill_usage.week_monday(
+            iso_week(earliest))).replace(tzinfo=timezone.utc))
+    for record in records:
+        when = parse_ts(record["ts"])
+        if record["id"] in seen or when < floor or when > now:
+            continue
+        seen.add(record["id"])
+        key = skill_key(record["name"], allowlist, private)
+        copy = stored.get(record["id"])
+        if key == OTHER_KEY or not isinstance(copy, dict):
+            continue
+        uses.append({"week": skill_usage.week_monday(iso_week(when)), "name": key,
+                     "session": record["session"], **copy})
+    return {"from": floor.strftime(skill_usage.STAMP), "uses": uses}
+
+
+class MirrorCheck:
+    """Whether a digest was ever on a public branch of a registry, read from
+    local mirrors ({canonical owner/repo: path}); cached per run: the skill's
+    path per (registry, name), its content history per (registry, path), and
+    each ref. `unread` turns True when a mirror a use needed was missing or
+    git failed, for the publisher's fixed `registry: not read` note."""
+
+    def __init__(self, entries: list[dict], mirrors: dict):
+        self.entries = {entry["repo"]: entry for entry in entries}
+        self.mirrors = dict(mirrors)
+        self.unread = False
+        self._paths: dict = {}
+        self._history: dict = {}
+        self._refs: dict = {}
+
+    def verified(self, repo: str, name: str, digest: str, refs: list) -> bool:
+        mirror = self.mirrors.get(repo)
+        if mirror is None:
+            self.unread = True
+            return False
+        try:
+            if (repo, name) not in self._paths:
+                try:
+                    self._paths[(repo, name)] = skill_digest.skill_relpath(
+                        mirror, self.entries[repo]["layout"], name)
+                except ValueError:
+                    self._paths[(repo, name)] = None
+            relpath = self._paths[(repo, name)]
+            if relpath is None:
+                return False
+            if (repo, relpath) not in self._history:
+                self._history[(repo, relpath)] = skill_digest.content_digests(mirror, relpath)
+        except OSError:
+            self.unread = True
+            self._paths[(repo, name)] = None
+            return False
+        if digest not in self._history[(repo, relpath)]:
+            return False
+        # The issue's plugin-cache check, where the store has a 40-hex ref:
+        # the installed commit must be in the mirror itself, on a branch.
+        for ref in refs:
+            if (repo, ref) not in self._refs:
+                self._refs[(repo, ref)] = skill_digest.commit_on_branch(mirror, ref)
+            if not self._refs[(repo, ref)]:
+                return False
+        return True
+
+
+def digest_rows(plan: dict, entries: list[dict], mirrors: dict) -> tuple[list, bool]:
+    """(the `skill-digest` rows of `plan`, local and, when the plan has a
+    cloud part, cloud; whether a mirror was not read). A use's public digest
+    is, in order: `unknown:<reason>` with no digest;
+    `unknown:unlisted-registry` (repo null) for a registry that is not
+    `private: false`, a fork among them; `unknown:unverified-commit` when the
+    mirror does not show the content on a public branch; else the prefix."""
+    check = MirrorCheck(entries, mirrors)
+    public = {entry["repo"].lower(): entry["repo"] for entry in entries}
+    groups: dict = {}
+    parts = [(skill_usage.SURFACE_LOCAL, plan["uses"])]
+    if "cloud" in plan:
+        parts.append((skill_usage.SURFACE_CLOUD, plan["cloud"]["uses"]))
+    for surface, uses in parts:
+        for use in uses:
+            repo = public.get((use["registry"] or "").lower())
+            if use["digest"] is None:
+                shown = f"unknown:{use['reason']}"
+            elif repo is None:
+                shown = "unknown:unlisted-registry"
+            elif check.verified(repo, use["name"], use["digest"], use["refs"]):
+                shown = use["digest"][:12]
+            else:
+                shown = "unknown:unverified-commit"
+            group = groups.setdefault((surface, use["week"], use["name"], repo, shown),
+                                      [0, set()])
+            group[0] += 1
+            group[1].add(use["session"])
+    rows = [skill_usage.digest_row(week, name, repo, shown, n, len(sessions), surface)
+            for (surface, week, name, repo, shown), (n, sessions) in groups.items()]
+    return rows, check.unread
+
+
+def add_digest_rows(doc: dict, plan: dict, rows: list, now: datetime) -> None:
+    """Add `rows` (`digest_rows`') to `doc`, with one `skill-records` source
+    per surface the plan covers: local always, cloud when it has a part."""
+    local = [r for r in rows if r["surface"] == skill_usage.SURFACE_LOCAL]
+    skill_usage.add_rows(doc, local, skill_usage.digest_source(
+        parse_ts(plan["from"]), now, len(plan["uses"])))
+    if "cloud" in plan:
+        skill_usage.add_rows(
+            doc, [r for r in rows if r["surface"] == skill_usage.SURFACE_CLOUD],
+            skill_usage.digest_source(parse_ts(plan["cloud"]["from"]), now,
+                                      len(plan["cloud"]["uses"]), skill_usage.SURFACE_CLOUD))
+
+
+def apply_digest_plan(plan_path, weekly_path, mirrors: dict) -> bool:
+    """Add the plan's `skill-digest` rows and their `skill-records` sources
+    to the weekly file at `weekly_path`, in place; return whether a mirror
+    was not read. The publisher's second step, after it cloned the mirrors
+    the plan names."""
+    with open(plan_path, encoding="utf-8") as f:
+        plan = json.load(f)
+    with open(weekly_path, encoding="utf-8") as f:
+        doc = json.load(f)
+    rows, unread = digest_rows(plan, public_registry_entries(), mirrors)
+    add_digest_rows(doc, plan, rows, parse_ts(doc["generated_at"]))
+    _write_json(Path(weekly_path), doc)
+    return unread
+
+
 def write_events(path: Path, events: list) -> None:
     """JSON lines, sorted by timestamp (then id). PRIVATE: see the docstring."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -818,6 +1829,23 @@ def main() -> int:
                         help="agent-checks run logs, separated by the OS path "
                              "separator; missing files are skipped (default: "
                              "agent-checks' own default path)")
+    parser.add_argument("--cloud-guidance", type=Path, default=None,
+                        help="checkout of the private persistent/usage-events "
+                             "branch; its events/*/cloud-guidance.jsonl are read "
+                             "(never written) into cloud guidance rows")
+    parser.add_argument("--event-store", type=Path, default=None,
+                        help="checkout of the private persistent/usage-events "
+                             "branch (an empty directory when it does not exist); "
+                             "its machine files are read (never written) into "
+                             "the skill-digest rows (#562); needs --weekly-out")
+    parser.add_argument("--registry-mirror", action="append", default=[],
+                        metavar="OWNER/REPO=PATH",
+                        help="a bare clone of a private: false registry, for "
+                             "verifying loaded-copy digests; repeatable")
+    parser.add_argument("--digest-plan-out", type=Path, default=None,
+                        help="with --event-store: write the PRIVATE plan here "
+                             "and leave the skill-digest rows out, for the "
+                             "publisher to add after cloning the mirrors it names")
     parser.add_argument("--skill-allowlist-root", type=Path, default=REPO_ROOT,
                         help="repo whose evals/ fixtures and non-coverage.yml "
                              "name the publishable skills (default: this "
@@ -855,21 +1883,37 @@ def main() -> int:
     if now is None:
         print("--now is not an ISO-8601 instant", file=sys.stderr)
         return 2
+    if args.event_store is not None and args.weekly_out is None:
+        print("--event-store needs --weekly-out", file=sys.stderr)
+        return 2
     allowlist = None
-    repos = frozenset()
+    repos = private = frozenset()
+    entries: list = []
     if args.weekly_out is not None or args.events_out is not None:
         import eval_coverage
         try:
             allowlist = skill_allowlist(args.skill_allowlist_root)
             repos = public_repos()
+            private = private_plugins()
+            entries = public_registry_entries()
         except (eval_coverage.CensusRefusal, ValueError, OSError):
             # No detail: a refusal message can carry a path, and this line
             # reaches a scheduled task's status report. Nothing is written.
             print("skill allowlist could not be read from the evals "
                   "directory; nothing published", file=sys.stderr)
             return 2
-    events = [] if args.events_out is not None else None
-    counts, tally = census_all(roots, now, args.weeks, allowlist, events)
+    public = {entry["repo"].lower(): entry["repo"] for entry in entries}
+    mirrors = {}
+    for value in args.registry_mirror:
+        repo, sep, path = value.partition("=")
+        if not sep or not path or repo.lower() not in public:
+            # No value echoed: this line reaches the publisher's output.
+            print("a --registry-mirror does not name a public registry", file=sys.stderr)
+            return 2
+        mirrors[public[repo.lower()]] = path
+    # The digest rows need this run's records even when none is written out.
+    events = [] if args.events_out is not None or args.event_store is not None else None
+    counts, tally = census_all(roots, now, args.weeks, allowlist, events, private)
     hooks = None
     if allowlist is not None:
         paths = ([default_hook_log()] if args.hook_logs is None
@@ -884,8 +1928,30 @@ def main() -> int:
     status = (f"census: {len(document['counts'])} models, {total} assistant turns, "
               f"{args.weeks} weeks -> {args.out}")
     if args.weekly_out is not None:
+        cloud = (cloud_guidance_tally(args.cloud_guidance, now, args.weeks)
+                 if args.cloud_guidance is not None and args.cloud_guidance.is_dir()
+                 else None)
+        digests = None
+        if args.event_store is not None:
+            stored, start = store_digests(args.event_store), window_from(now, args.weeks)
+            local_ids = {e["id"] for e in events if isinstance(e.get("id"), str)}
+            cloud_plan = cloud_digest_plan(
+                cloud_skill_records(args.event_store),
+                local_ids | machine_skill_ids(args.event_store), stored, start, now,
+                allowlist, private)
+            plan = skill_digest_plan(tally.get("counted", []), stored, start, public,
+                                     cloud_plan)
+            if args.digest_plan_out is not None:
+                # PRIVATE: session ids and full digests. Owner-only, in the
+                # publisher's temp directory, never published.
+                args.digest_plan_out.parent.mkdir(parents=True, exist_ok=True)
+                fd = os.open(args.digest_plan_out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(plan, f, sort_keys=True)
+            else:
+                digests = (plan, digest_rows(plan, entries, mirrors)[0])
         _write_json(args.weekly_out,
-                    build_weekly_document(tally, now, args.weeks, hooks))
+                    build_weekly_document(tally, now, args.weeks, hooks, cloud, digests))
         calls = sum(sum(by_week.values()) for by_week in tally["invocations"].values())
         status += f"; {calls} skill invocations -> {args.weekly_out}"
     if args.events_out is not None:

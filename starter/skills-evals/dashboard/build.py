@@ -23,12 +23,16 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PLACEHOLDER_ID = "none"
+HB_FIXED_WINDOW = timedelta(days=7)
+EVALS_URL = "https://github.com/example-adopter/skills-evals"  # fixture_queue.py numbers every issue and PR in this repo
+FQ_KINDS = {"needs-fixtures": "new fixtures", "needs-harder-fixtures": "harder fixtures", "needs-trigger-set": "trigger set"}
 
 
 def iso(dt):
@@ -259,8 +263,11 @@ def roster(cfg):
 OUTCOME_KEYS = ["prs_opened", "prs_merged", "prs_closed_unmerged", "prs_reverted", "agent_prs_merged", "ci_red_after"]
 
 # Each producer names what it read in its own field: the transcript census counts sessions,
-# the local hook log counts git hook runs, the CI report counts repos.
-SCANNED_KEYS = [("sessions_scanned", "sessions"), ("runs_scanned", "git hook runs"), ("repos_scanned", "repos")]
+# the local hook log counts git hook runs, the CI report counts repos, the cloud guidance
+# records count cloud sessions.
+# #562 (2026-11-02): the loaded-copy records count skill uses.
+SCANNED_KEYS = [("sessions_scanned", "sessions"), ("runs_scanned", "git hook runs"), ("repos_scanned", "repos"),
+                ("records_scanned", "cloud sessions"), ("events_scanned", "skill uses")]
 
 
 def scanned(s):
@@ -271,8 +278,13 @@ def scanned(s):
 
 
 def usage(er):
-    """Concatenate every usage/weekly-*.json (schema 1); counts stay exact."""
-    rows, sources = [], []
+    """Concatenate every usage/weekly-*.json (schema 1); counts stay exact.
+
+    Returns (rows, sources, digests). A `skill-digest` row (#562) is a second
+    view of the same skill uses, by loaded copy, so it goes to `digests` and
+    never to `rows`, where a sum over skills would count every use twice.
+    This is the one place it is split off, so the page needs no filter."""
+    rows, sources, digests = [], [], []
     for path in sorted(glob.glob(os.path.join(er, "usage", "weekly-*.json"))):
         name = os.path.basename(path)
         d = load(path)
@@ -280,10 +292,16 @@ def usage(er):
             sys.exit(f"{name}: schema {d.get('schema')!r}, expected 1; update build.py and the Impact tab")
         for s in d.get("sources", []):
             count, unit = scanned(s)
-            sources.append({"key": f"{name}|{s.get('scope')}", "file": name, "surface": s.get("surface"),
+            # Scope alone repeats once a scope has a source per surface (#562).
+            sources.append({"key": f"{name}|{s.get('scope')}|{s.get('surface')}", "file": name, "surface": s.get("surface"),
                             "scope": s.get("scope"), "from": s.get("from"), "to": s.get("to"),
                             "scanned": count, "scanned_unit": unit, "generated_at": d.get("generated_at")})
         for r in d.get("rows", []):
+            if r["kind"] == "skill-digest":
+                digests.append({"week": r["week"], "name": r["name"], "repo": r.get("repo") or "(no public repo)",
+                                "surface": r.get("surface"), "digest": r.get("digest"),
+                                "invocations": r.get("invocations", 0), "sessions": r.get("sessions")})
+                continue
             o = r.get("outcome") or {}
             # A git hook row named "all" is that week's total across checks; its own kind keeps
             # per-check sums from counting it twice.
@@ -299,7 +317,10 @@ def usage(er):
         rows = [{"week": None, "kind": PLACEHOLDER_ID, "name": "No usage counts yet", "repo": None, "surface": None,
                  "invocations": 0, "sessions": None, "blocked": None, "overridden": None,
                  **{k: None for k in OUTCOME_KEYS}}]
-    return rows, sources
+    if not digests:
+        digests = [{"week": None, "name": "No loaded-copy counts yet", "repo": None, "surface": None,
+                    "digest": PLACEHOLDER_ID, "invocations": 0, "sessions": None}]
+    return rows, sources, digests
 
 
 # --- Overview tab: threads, routines, check-ins, waiting -------------------------
@@ -308,12 +329,20 @@ THREAD_STATES = {"done": "Done", "working": "Working", "review_ready": "Ready fo
                  "blocked": "Waiting on you", "failed": "Failed", "stopped": "Stopped"}
 
 
-def threads(dump, site):
-    """Rows from a list_threads dump (its `sessions` list, all pages joined)."""
+def threads(dump, site, branches=None):
+    """Rows from a list_threads dump (its `sessions` list, all pages joined).
+
+    `session` (the id after `cse_`/`session_`) and `branch` (the thread's own git
+    branch, from `thread_branches.json`) let the page tell which thread opened a PR.
+    """
     titles = site.get("thread_titles", {})
+    branches = branches or {}
+    sess = lambda s: re.sub(r"^(cse|session)_", "", s.get("session_id") or "")
     rows = [{"title": titles.get(s["thread_id"], s["title"]),
              "state": THREAD_STATES.get(s.get("state"), s.get("state")),
              "last_active": s.get("last_activity_at"),
+             "session": sess(s),
+             "branch": branches.get(sess(s), ""),
              "link": site["thread_url"] + s["thread_id"]} for s in dump]
     rows.sort(key=lambda r: r["last_active"] or "", reverse=True)
     return rows or [{"title": "No threads yet", "state": None, "last_active": None, "link": None,
@@ -358,7 +387,7 @@ RUN_RESULT = {"success": "Succeeded", "failure": "Failed", "cancelled": "Cancell
               "skipped": "Skipped"}
 
 
-def routines(cfg, triggers, workflow_runs, now):
+def routines(cfg, triggers, workflow_runs, now, workflow_states=None):
     """One row per routine. Config gives the words; the last and next run and health come from reads."""
     rows = []
     for r in cfg:
@@ -373,7 +402,10 @@ def routines(cfg, triggers, workflow_runs, now):
             next_run = t.get("next_run_at")
             enabled = t.get("enabled", True)
         elif src.get("kind") == "workflow":
-            runs = workflow_runs.get(src["repo"] + ":" + src["workflow"]) or []
+            key = src["repo"] + ":" + src["workflow"]
+            runs = workflow_runs.get(key) or []
+            # A workflow turned off in GitHub (disabled_manually, disabled_inactivity) reads as Paused.
+            enabled = (workflow_states or {}).get(key, "active") == "active"
             runs = sorted(runs, key=lambda x: x.get("created_at") or "", reverse=True)
             if runs:
                 last_run = runs[0].get("created_at")
@@ -391,6 +423,8 @@ def routines(cfg, triggers, workflow_runs, now):
             health = "Failing"
         elif last_result == "Cancelled":
             health = "Check"
+        elif not last_run and next_run and parse(next_run) > now:
+            health = "Not run yet"
         elif r.get("expect_every_hours") and (
                 not last_run or now - parse(last_run) > timedelta(hours=2 * r["expect_every_hours"])):
             health = "Late"
@@ -401,6 +435,59 @@ def routines(cfg, triggers, workflow_runs, now):
                      "health": health, "note": r.get("note", ""), "id": src.get("id") or src.get("workflow"),
                      "link": r.get("link")})
     return rows
+
+
+WORKFLOW_STATE = {"queued": "Queued", "waiting": "Queued", "pending": "Queued", "requested": "Queued",
+                  "in_progress": "Running"}
+CONCLUSION_STATE = {"success": "Succeeded", "failure": "Failed", "timed_out": "Failed",
+                    "startup_failure": "Failed", "cancelled": "Cancelled", "skipped": "Skipped",
+                    "neutral": "Skipped", "action_required": "Needs approval"}
+ROUTINE_STATE = {"SUCCEEDED": "Succeeded", "FAILED": "Failed", "PENDING": "Running", "RUNNING": "Running"}
+STREAM_DAYS = 7
+STREAM_CAP = 500
+PROBLEM_STATES = ("Failed", "Cancelled", "Needs approval")
+
+
+def run_stream(dump, now):
+    """Recent workflow runs and scheduled-task runs, newest first, for the console tab."""
+    cutoff = now - timedelta(days=STREAM_DAYS)
+    seen = {}
+
+    def add(key, at, row):
+        when = parse(at)
+        if key and when and when >= cutoff and key not in seen:
+            seen[key] = {"key": key, "at": iso(when), **row}
+
+    for w in dump.get("workflow_runs") or []:
+        if w.get("status") == "completed":
+            c = w.get("conclusion") or ""
+            state = CONCLUSION_STATE.get(c, c.replace("_", " ").capitalize() or "Done")
+            start, end = parse(w.get("created_at")), parse(w.get("updated_at"))
+            dur = int((end - start).total_seconds()) if start and end else None
+        else:
+            state = WORKFLOW_STATE.get(w.get("status"), str(w.get("status") or "").replace("_", " ").capitalize())
+            dur = None
+        add(w.get("html_url"), w.get("created_at"), {
+            "kind": "workflow", "source": (w.get("repo") or "").split("/")[-1], "name": w.get("workflow"),
+            "title": w.get("display_title") or w.get("workflow"), "state": state,
+            "duration_s": max(dur, 0) if dur is not None else None, "link": w.get("html_url")})
+    for r in dump.get("routine_runs") or []:
+        status = str(r.get("status") or "").replace("ROUTINE_RUN_STATUS_", "")
+        done = status not in ("PENDING", "RUNNING") and r.get("finished_at")
+        dur = int((parse(r["finished_at"]) - parse(r["fired_at"])).total_seconds()) if done and r.get("fired_at") else None
+        add(f"{r.get('trigger_id')}@{r.get('fired_at')}", r.get("fired_at"), {
+            "kind": "routine", "source": "scheduled task", "name": r.get("name"), "title": r.get("name"),
+            "state": ROUTINE_STATE.get(status, status.replace("_", " ").capitalize()),
+            "duration_s": max(dur, 0) if dur is not None else None,
+            "link": "https://claude.ai/scheduled-task/" + str(r.get("trigger_id"))})
+    # Problems stay for the whole window; the cap trims only the rest, so a busy week cannot hide a failure.
+    rows = sorted(seen.values(), key=lambda r: r["at"], reverse=True)
+    problems = [r for r in rows if r["state"] in PROBLEM_STATES]
+    keep = {id(r) for r in problems} | {id(r) for r in [r for r in rows if r["state"] not in PROBLEM_STATES][:STREAM_CAP]}
+    rows = [r for r in rows if id(r) in keep]
+    return rows or [{"key": PLACEHOLDER_ID, "at": None, "kind": None, "source": None,
+                     "name": "No runs in the last 7 days", "title": None, "state": None,
+                     "duration_s": None, "link": None}]
 
 
 def checkins(trigger_list, channel_id, now):
@@ -493,6 +580,332 @@ def loop(cfg, status, site):
         {"gap": PLACEHOLDER_ID, "title": "No loop gaps yet", "status": "", "owner": "", "link": None}]
 
 
+# --- Cost and benefit tab --------------------------------------------------------
+
+# A cost week starts Monday 17:00 UTC (the account's weekly reset) and is labeled by that date.
+COST_START = datetime(2026, 10, 19, 17, 0, tzinfo=timezone.utc)
+WEEK = timedelta(days=7)
+DEFAULT_POINTS_PER_USD = 0.07
+BAR_DUE = "2026-12-15"
+BAR_JUDGED_AT = datetime(2026, 12, 16, tzinfo=timezone.utc)
+BAR_MIN_CHANGES = 3
+BAR_MAX_BUILD_POINTS = 10
+# The run-level `usage.reasons.meter` of an API-billed summary (harness/run_eval.py `_API_BILLED`);
+# a test holds this copy to the harness's.
+API_BILLED = "API-billed run: the subscription's account meter does not apply"
+# Loop PR head-branch prefix -> kind of change.
+LOOP_KINDS = {"eval-improve/": "edit", "draft-skill/": "new skill", "retire-skill/": "removal",
+              "eval-guidance-improve/": "guidance edit", "retire-guidance/": "guidance removal"}
+
+
+def load_jsonl(path):
+    """Rows of a JSON-lines file; a missing file is empty and a damaged line is skipped."""
+    if not os.path.exists(path):
+        return []
+    rows = []
+    with open(path) as f:
+        for line in f:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("v", 1) == 1:
+                rows.append(row)
+    return rows
+
+
+def week_starts(start, now):
+    out = [start]
+    while out[-1] + WEEK <= now:
+        out.append(out[-1] + WEEK)
+    return out if now >= start else []
+
+
+def week_of(t, starts):
+    """Index of the week holding instant t, or None outside the weeks."""
+    if t is None or not starts or t < starts[0] or t >= starts[-1] + WEEK:
+        return None
+    return int((t - starts[0]) / WEEK)
+
+
+def spread(amount, a, b, starts):
+    """{week index: share} of `amount` spread uniformly over [a, b]; an empty span is one instant (a)."""
+    if not amount or amount <= 0:
+        return {}
+    if b <= a:
+        i = week_of(a, starts)
+        return {} if i is None else {i: amount}
+    out = {}
+    for i, s in enumerate(starts):
+        overlap = (min(b, s + WEEK) - max(a, s)).total_seconds()
+        if overlap > 0:
+            out[i] = amount * overlap / (b - a).total_seconds()
+    return out
+
+
+def session_spend(samples, starts):
+    """({week index: dollars}, {week indexes holding backfilled spend}) from session_costs rows.
+
+    Per session, spend between two samples is the rise in cumulative cost (never negative), spread over
+    the time between them. A session's cost before its first sample is spread from its creation to
+    min(last update, first sample), so it is an estimate."""
+    usd, estimated = {}, set()
+    by = {}
+    for r in samples:
+        at = parse(r.get("at"))
+        if r.get("cost_usd") is None or not r.get("session_id") or at is None:
+            continue
+        by.setdefault(r["session_id"], []).append((at, float(r["cost_usd"]), r))
+    for rows in by.values():
+        rows.sort(key=lambda x: x[0])
+        at0, cost0, first = rows[0]
+        created = parse(first.get("created_at")) or at0
+        updated = parse(first.get("updated_at")) or at0
+        for i, share in spread(cost0, created, min(updated, at0), starts).items():
+            usd[i] = usd.get(i, 0) + share
+            if share > 0:
+                estimated.add(i)
+        for (a, ca, _), (b, cb, _) in zip(rows, rows[1:]):
+            for i, share in spread(max(0, cb - ca), a, b, starts).items():
+                usd[i] = usd.get(i, 0) + share
+    return usd, estimated
+
+
+def points_per_usd(rows, build_usd, starts, now):
+    """(points per dollar, basis, weeks used): the account meter's reading over all API-equivalent spend.
+
+    For each complete cost week with an account reading (the largest `account_week_after`, a percent, so
+    points, among plan runs fired in it): reading divided by that week's thread spend plus plan-run dollars,
+    summed over the weeks. Without such a week, the default."""
+    points = usd = weeks = 0
+    for i, s in enumerate(starts):
+        if s + WEEK > now:
+            continue
+        mine = [r for r in rows if week_of(parse(r["fired_at"]), starts) == i]
+        seen = [r["account_week_after"] for r in mine if r.get("account_week_after") is not None]
+        if not seen:
+            continue
+        points += max(seen)
+        usd += build_usd.get(i, 0) + sum(r["cost_usd"] or 0 for r in mine)
+        weeks += 1
+    if not weeks or usd <= 0:
+        return DEFAULT_POINTS_PER_USD, f"default {DEFAULT_POINTS_PER_USD}: no complete week with an account reading yet", 0
+    return points / usd, (f"account meter \u00f7 all API-equivalent spend over {weeks} complete weeks; assumes nearly "
+                          "all account use is this project, so it is an upper bound on points per dollar"), weeks
+
+
+def api_billed_usd(er, starts):
+    """{week index: dollars} of API-billed eval runs (eval.yml's `results/` tree).
+
+    The marker is the run-level `usage.reasons.meter` that harness/run_eval.py writes into every summary
+    of an API-billed run; the week is the summary's `usage.started_at`. Trial summaries are skipped:
+    their arm's summary already carries their sum."""
+    out = {}
+    for path in sorted(glob.glob(os.path.join(er, "results", "**", "summary.json"), recursive=True)):
+        if "trial-" in path:
+            continue
+        try:
+            d = json.load(open(path))
+        except ValueError:
+            continue
+        usage_ = d.get("usage") if isinstance(d, dict) else None
+        if not isinstance(usage_, dict) or (usage_.get("reasons") or {}).get("meter") != API_BILLED:
+            continue
+        i = week_of(parse(usage_.get("started_at") or usage_.get("ended_at")), starts)
+        spent = cost(d)
+        if i is not None and spent:
+            out[i] = out.get(i, 0) + spent
+    return out
+
+
+def loop_changes(prs):
+    """Merged loop PRs: {repo, number, url, kind, subject, merged_at}; unmerged ones are not changes."""
+    out, seen = [], set()
+    for p in prs:
+        ref, merged = p.get("head_ref") or "", parse(p.get("merged_at"))
+        kind = next((k for pre, k in LOOP_KINDS.items() if ref.startswith(pre)), None)
+        key = (p.get("repo"), p.get("number"))
+        if not kind or merged is None or key in seen:
+            continue
+        seen.add(key)
+        out.append({"repo": p.get("repo"), "number": p.get("number"), "url": p.get("url"), "kind": kind,
+                    "subject": ref.split("/", 1)[1].split("/")[0], "merged_at": merged})
+    return out
+
+
+def decided_count(explorer):
+    """Skills plus guidance sections whose verdict is a decided one (anything but none or insufficient)."""
+    rows = list(explorer.get("skills") or []) + list((explorer.get("guidance") or {}).get("sections") or [])
+    return sum(1 for r in rows if r.get("verdict") not in (None, "insufficient"))
+
+
+def week_uses(change, label, usage_rows):
+    """Uses in one cost week of a change's subject: a skill's invocations, or the sessions that loaded guidance."""
+    if change["kind"].startswith("guidance"):
+        return sum(r.get("sessions") or 0 for r in usage_rows
+                   if r["kind"] == "guidance" and r["name"] == "full" and r["week"] == label)
+    return sum(r.get("invocations") or 0 for r in usage_rows
+               if r["kind"] == "skill" and r["name"] == change["subject"] and r["week"] == label)
+
+
+def r2(v):
+    return None if v is None else round(v, 2)
+
+
+def cost_benefit(er, plan_rows, usage_rows, decisions, samples, owner_msgs, prs, explorer, now, start=COST_START):
+    """(weeks rows, summary rows) for the Cost and benefit tab."""
+    plan = [r for r in plan_rows if r.get("run_id") != PLACEHOLDER_ID]
+    usage_rows = [r for r in usage_rows if r["kind"] != PLACEHOLDER_ID]
+    starts = week_starts(start, now)
+    build_usd, build_est = session_spend(samples, starts)
+    ppu, basis, _ = points_per_usd(plan, build_usd, starts, now)
+    api = api_billed_usd(er, starts)
+    changes = [c for c in loop_changes(prs) if week_of(c["merged_at"], starts) is not None]
+    verdicts = decided_count(explorer)
+    msgs = {m["message_id"]: m for m in owner_msgs if m.get("message_id") and parse(m.get("sent_at"))}
+    weeks, run_usd = [], 0
+    for i, s in enumerate(starts):
+        label, end = s.date().isoformat(), s + WEEK
+        mine = [r for r in plan if week_of(parse(r["fired_at"]), starts) == i]
+        run_meter_points = sum(r["meter_points"] or 0 for r in mine)
+        week_run_usd = sum(r["cost_usd"] or 0 for r in mine)
+        run_usd += week_run_usd
+        run_points_est = week_run_usd * ppu
+        build_points = build_usd.get(i, 0) * ppu
+        api_usd = api.get(i, 0)
+        weeks.append({
+            "week": label, "run_count": len(mine), "run_points_est": run_points_est, "run_meter_points": run_meter_points, "api_usd": api_usd,
+            "build_usd": build_usd.get(i, 0), "build_points": build_points, "build_estimated": i in build_est,
+            "total_points": run_points_est + build_points + api_usd * ppu,
+            "changes": sum(1 for c in changes if week_of(c["merged_at"], starts) == i),
+            "real_work_reach": sum(week_uses(c, label, usage_rows) for c in changes if c["merged_at"] < end),
+            "owner_messages": sum(1 for m in msgs.values() if week_of(parse(m["sent_at"]), starts) == i),
+            "decisions": sum(1 for d in decisions
+                             if week_of(parse(d["date"] + "T17:00:00Z"), starts) == i),
+            "verdicts": verdicts if i == len(starts) - 1 else None})
+    complete = [w for w, s in zip(weeks, starts) if s + WEEK <= now]
+    last = complete[-1] if complete else None
+    total_usd = run_usd + sum(build_usd.values()) + sum(api.values())
+    reached = 0
+    for c in changes:
+        if any(week_uses(c, s.date().isoformat(), usage_rows) for s in starts if c["merged_at"] < s + WEEK):
+            reached += 1
+    bar_changes = reached >= BAR_MIN_CHANGES
+    bar_build = last is not None and last["build_points"] < BAR_MAX_BUILD_POINTS
+    due = f"Due {BAR_DUE}"
+    status = lambda ok: "Met" if ok else "Not met"
+    summary = [
+        {"key": "cost_per_verdict", "label": "Cost per decided verdict", "value": total_usd / verdicts if verdicts else None,
+         "target": None, "status": None,
+         "note": f"API-equivalent dollars since {start.date()}: ${total_usd:,.2f} over {verdicts} decided verdicts"},
+        {"key": "decision_yield", "label": "Decision yield", "value": f"{len(changes)} of {verdicts}",
+         "target": None, "status": None,
+         "note": "Loop changes merged since " + str(start.date()) + " out of decided verdicts"
+                 + ("" if verdicts else " (no decided verdicts yet)")},
+        {"key": "real_work_reach", "label": "Real-work reach, latest complete week",
+         "value": last["real_work_reach"] if last else None, "target": None, "status": None,
+         "note": "Uses of changed skills and guidance in the week of " + last["week"] if last else "No complete week yet"},
+        {"key": "bar_changes", "label": "Changes used in real work", "value": reached,
+         "target": f"at least {BAR_MIN_CHANGES}", "status": status(bar_changes),
+         "note": f"{due}. Merged loop changes whose subject was used at least once after the merge"},
+        {"key": "bar_build", "label": "Build cost, latest complete week", "value": r2(last["build_points"]) if last else None,
+         "target": f"< {BAR_MAX_BUILD_POINTS} points a week", "status": status(bar_build),
+         "note": f"{due}. " + ("Build spend in the week of " + last["week"] if last else "No complete week yet")},
+        {"key": "points_per_usd", "label": "Points per dollar", "value": round(ppu, 4), "target": None,
+         "status": None, "note": basis},
+    ]
+    if now >= BAR_JUDGED_AT:
+        summary.append({"key": "bar_verdict", "label": "Dec 15 bar", "target": None, "status": None,
+                        "value": "Met: keep the eval system" if bar_changes and bar_build
+                        else "Missed: cut back to guidance-only evals", "note": f"Both bars were due {BAR_DUE}"})
+    if not weeks:
+        weeks = [{"week": PLACEHOLDER_ID, "run_count": None, "run_points_est": None, "run_meter_points": None, "api_usd": None, "build_usd": None,
+                  "build_points": None, "build_estimated": None, "total_points": None, "changes": None,
+                  "real_work_reach": None, "owner_messages": None, "decisions": None, "verdicts": None}]
+    for w in weeks:
+        for k in ("run_points_est", "run_meter_points", "api_usd", "build_usd", "build_points", "total_points"):
+            w[k] = r2(w[k])
+    for row in summary:
+        if isinstance(row["value"], float):
+            row["value"] = r2(row["value"]) if row["key"] != "points_per_usd" else row["value"]
+    return weeks, summary
+
+
+def half_built(dump, now):
+    """(issue rows, summary rows) for the Overview banner: open half-built or broken findings, plus those fixed in 7 days."""
+    dump = dump if isinstance(dump, dict) else {}
+    checked = parse(dump.get("checked_at"))
+    order = {"high": 0, "medium": 1, "low": 2, "unknown": 3}
+    rows = []
+    for it in dump.get("items") or []:
+        closed = parse(it.get("closed_at"))
+        is_open = it.get("state") == "open"
+        if not is_open and (closed is None or now - closed > HB_FIXED_WINDOW):
+            continue
+        opened = parse(it.get("created_at"))
+        rows.append({
+            "key": f"{it.get('repo')}#{it.get('number')}", "repo": it.get("repo"), "number": it.get("number"),
+            "url": it.get("url"), "title": it.get("title"), "state": "open" if is_open else "closed",
+            "kind": it.get("kind") or "unknown", "severity": it.get("severity") or "unknown",
+            "finding_id": it.get("finding_id"),
+            "needs_owner": "needs you" if "needs-owner" in (it.get("labels") or []) else "", "opened": opened.date().isoformat() if opened else None,
+            "age_days": max((now - opened).days, 0) if opened else None, "closed_at": None if is_open else iso(closed)})
+    # High severity first, then what needs the owner, then the rest by severity; oldest first within each.
+    rows.sort(key=lambda r: (r["state"] != "open", r["severity"] != "high", not r["needs_owner"],
+                             order.get(r["severity"], 3), -(r["age_days"] or 0)))
+    opened_ = [r for r in rows if r["state"] == "open"]
+    count = lambda field, v: sum(1 for r in opened_ if r[field] == v)
+    status = "not-checked" if checked is None else "attention" if opened_ else "clear"
+    summary = [{"key": "all", "open": len(opened_), "high": count("severity", "high"), "broken": count("kind", "broken"),
+                "partial": count("kind", "partial"), "implied_only": count("kind", "implied-only"),
+                "idle": count("kind", "idle"), "needs_owner": count("needs_owner", "needs you"), "fixed_7d": len(rows) - len(opened_),
+                "checked_at": iso(checked) if checked else None, "incomplete": bool(dump.get("incomplete")), "status": status}]
+    return rows or [{"key": PLACEHOLDER_ID, "repo": None, "number": None, "url": None, "title": None, "state": None,
+                     "kind": None, "severity": None, "finding_id": None, "needs_owner": "", "opened": None, "age_days": None,
+                     "closed_at": None}], summary
+
+
+def fixture_queue(explorer, now):
+    """(request rows, summary rows) for the Self-improvement loop tab: each fixture request followed to its PRs and fixtures."""
+    queue = explorer.get("fixture_queue") if isinstance(explorer, dict) else None
+    queue = queue if isinstance(queue, dict) else None
+    q = queue or {}
+    fixtures = q.get("fixtures") or []
+    rows = []
+    for req in q.get("requests") or []:
+        mine = [f for f in fixtures if str(f.get("request")) == str(req.get("issue"))]
+        prs = req.get("prs") or []
+        latest = max(prs, key=lambda p: p.get("number") or 0) if prs else None
+        opened = parse(req.get("opened_at"))
+        is_open = req.get("state") == "open"
+        rows.append({
+            "key": str(req.get("issue")), "issue_url": f"{EVALS_URL}/issues/{req.get('issue')}",
+            "kind": FQ_KINDS.get(req.get("kind"), req.get("kind") or "unknown"), "subject": req.get("subject"),
+            "state": req.get("state"), "opened": opened.date().isoformat() if opened else None,
+            "age_days": (now - opened).total_seconds() / 86400 if opened and is_open else None,
+            "closed_at": req.get("closed_at"), "prs": len(prs),
+            "pr_url": f"{EVALS_URL}/pull/{latest['number']}" if latest else "",
+            "merged": any(p.get("state") == "merged" or p.get("merged_at") for p in prs),
+            "fixtures": len(mine), "real_work": sum(1 for f in mine if f.get("origin_kind") == "real-work"),
+            "runs": sum(f.get("runs") or 0 for f in mine), "cost_usd": sum(f.get("cost_usd") or 0 for f in mine),
+            "opened_at": req.get("opened_at")})
+    # Open requests first, oldest first within each group.
+    rows.sort(key=lambda r: (r["state"] != "open", r["opened_at"] or ""))
+    for r in rows:
+        del r["opened_at"]
+    findings = q.get("findings") or []
+    totals = q.get("totals") or {}
+    summary = [{"key": "all", **{k: totals.get(k) for k in (
+        "requests_open", "requests_closed", "prs_merged", "fixtures_real_work", "fixtures_invented",
+        "fixture_runs", "cost_points", "cost_usd")},
+        "findings": len(findings), "findings_high": sum(1 for f in findings if f.get("severity") == "high"),
+        "status": "not-reported" if queue is None else "attention" if findings else "ok",
+        "generated_at": q.get("generated_at")}]
+    return rows or [{"key": PLACEHOLDER_ID, "issue_url": None, "kind": None, "subject": None, "state": None, "opened": None,
+                     "age_days": None, "closed_at": None, "prs": None, "pr_url": "", "merged": None, "fixtures": None,
+                     "real_work": None, "runs": None, "cost_usd": None}], summary
+
+
 # --- main ----------------------------------------------------------------------
 
 def build(results, inputs, config, now):
@@ -506,10 +919,11 @@ def build(results, inputs, config, now):
     out["eval_allowance"] = allowance(results, now)
     out["budget"] = budget()
     out["roster"] = roster(load(os.path.join(config, "roster.json"), {}))
-    out["usage_rows"], out["usage_sources"] = usage(results)
-    out["threads"] = threads(thread_dump, site)
+    out["usage_rows"], out["usage_sources"], out["usage_digests"] = usage(results)
+    out["threads"] = threads(thread_dump, site, inp("thread_branches.json", {}))
     out["routines"] = routines(load(os.path.join(config, "routines.json")), trigger_dump,
-                               inp("workflow_runs.json", {}), now)
+                               inp("workflow_runs.json", {}), now, inp("workflow_states.json", {}))
+    out["run_stream"] = run_stream(inp("run_stream.json", {}), now)
     out["checkins"] = checkins(inp("trigger_list.json", []), site.get("project_channel_id"), now)
     out["waiting"] = waiting(snap, inp("needs_owner.json", []), inp("waiting_reviews.json", []),
                              inp("open_pr_heads.json", {}), thread_dump, inp("link_states.json", {}), site)
@@ -517,6 +931,13 @@ def build(results, inputs, config, now):
     out["gate"] = snap["gate"]
     out["decisions"] = snap["decisions"]
     loop_cfg = os.path.join(config, "loop.json")
+    explorer = load(os.path.join(results, "explorer", "latest.json"), {})
+    out["cost_benefit_weeks"], out["cost_benefit_summary"] = cost_benefit(
+        results, out["eval_runs"], out["usage_rows"], snap["decisions"],
+        load_jsonl(os.path.join(inputs, "session_costs.jsonl")),
+        load_jsonl(os.path.join(inputs, "owner_messages.jsonl")), inp("loop_prs.json", []), explorer, now)
+    out["half_built_issues"], out["half_built_summary"] = half_built(inp("half_built_issues.json", {}), now)
+    out["fixture_requests"], out["fixture_queue_summary"] = fixture_queue(explorer, now)
     if os.path.exists(loop_cfg):
         (out["loop_stages"], out["loop_grid"], out["loop_lanes"],
          out["loop_gaps"]) = loop(load(loop_cfg), inp("loop_status.json", {"gaps": []}), site)

@@ -6,10 +6,11 @@ The owner's decisions: the thresholds (2026-10-10, #70) and pooled evidence
 of the same day: the run is the unit, the arms are independent samples pooled
 by their own keys, cells come from the fixtures on main and pool only runs of
 the content on main up to `--as-of`, duplicate runs count once, a run with an
-errored trial does not count, floors under every standard error, zero
-variance decides nothing, `cannot-discriminate`, a stricter retire side with
-Holm-corrected checks, stateless confirmation at the two largest looks, and
-one retirement per evaluation. harness/gates.py classifies each cell and
+errored trial does not count, `cannot-discriminate`, a stricter retire side
+with Holm-corrected checks, and one retirement per evaluation. Since the owner's
+2026-10-31 decision a cell is decided on confidence alone (85% to keep, 95%
+to remove): an anytime-valid confidence sequence over moderated run-to-run
+variances, with no minimum run count and no fixed looks. harness/gates.py classifies each cell and
 takes the verdict; scripts/compute_gates.py writes the artifact.
 
 Hermetic: canned trial summaries, results trees, a fixture tree and a registry
@@ -20,13 +21,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
-import random
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+
+import yaml
 from pathlib import Path
 from unittest import mock
 
@@ -44,12 +47,17 @@ import run_eval  # noqa: E402
 
 POLICY_FILE = ROOT / "evals" / "gate-policy.yml"
 POLICY = gates.parse_gate_policy(POLICY_FILE.read_text(encoding="utf-8"))["skills"]
-#: The committed objective margin, under a floor of p(1 - p) over the scored
-#: trials, needs hundreds of trials per arm before an objective delta can be
-#: no-benefit (`test_the_committed_margin_needs_more_than_twenty_runs_of_three`).
+#: With no run history the committed objective margin needs dozens of runs
+#: per arm before an objective delta can be no-benefit
+#: (`test_with_no_history_the_committed_margin_takes_forty_eight_runs`).
 #: The cell rules are tested at a wider margin; the compute_gates tests use
 #: the committed policy on judge-carried fixtures.
-TEST_POLICY = {**POLICY, "objective_margin": 0.4}
+#: The removal rule these mechanics tests were written against (before the owner's
+#: 2026-11-02 change to 0.15 / 90% / judge 1.5, #557), pinned so they keep
+#: testing the mechanics whatever the committed numbers are.
+LEGACY_POLICY = {**POLICY, "objective_margin": 0.05, "judge_margin": 0.5,
+                 "retire_confidence": 0.95}
+TEST_POLICY = {**LEGACY_POLICY, "objective_margin": 0.4}
 CLIS = ["1.0.0 (Claude Code)", "1.0.1 (Claude Code)"]
 T = 100
 #: Runs that differ a little from run to run, the same on both arms.
@@ -129,8 +137,12 @@ def series(role, patterns, judges=None, *, total=T, start=0, pairwise=False,
     return out
 
 
-def cell(with_runs, without_runs, *, carried=False, policy=TEST_POLICY):
-    return gates.classify_cell(with_runs, without_runs, policy, carried)
+def cell(with_runs, without_runs, *, carried=False, policy=TEST_POLICY, priors=None):
+    """`classify_cell` with the priors `retirement` would measure over the
+    cell's own runs, unless `priors` gives them."""
+    if priors is None:
+        priors = gates.run_priors(with_runs + without_runs)
+    return gates.classify_cell(with_runs, without_runs, policy, carried, priors)
 
 
 def flat_cell(n=10, **kw):
@@ -141,13 +153,17 @@ def flat_cell(n=10, **kw):
 class PolicyTests(unittest.TestCase):
 
     def test_committed_policy_loads_with_its_numbers(self):
+        # The owner, 2026-10-31: decide on confidence alone, 85% to keep and 95%
+        # to remove.
+        # The owner, 2026-11-02 (#557): skills take the guidance removal rule,
+        # 90% that the skill does not help by 0.15 (judge 1.5); keep at 85%.
+        # The owner, 2026-11-03: removals are proposals until the stats fixes land.
         self.assertEqual(POLICY, {
-            "objective_margin": 0.05, "judge_margin": 0.5, "benefit_confidence": 0.90,
-            "retire_confidence": 0.975, "check_confidence": 0.90, "min_runs": 5,
-            "min_cli_versions": 2, "ceiling_fraction": 0.90, "judge_ceiling": 9.0,
-            "floor_fraction": 0.10, "bootstrap_resamples": 2000,
-            "retire_looks": [5, 10, 20],
-            "retirement_mode": "auto"})
+            "objective_margin": 0.15, "judge_margin": 1.5, "benefit_confidence": 0.85,
+            "retire_confidence": 0.90, "check_confidence": 0.85,
+            "min_cli_versions": 2, "prior_strength": 4, "ceiling_fraction": 0.90,
+            "judge_ceiling": 9.0, "floor_fraction": 0.10,
+            "retirement_mode": "proposal"})
 
     def _text(self, **changes):
         values = {**POLICY, **changes}
@@ -169,115 +185,201 @@ class PolicyTests(unittest.TestCase):
 
     def test_bad_values_are_refused(self):
         for key, bad in (("ceiling_fraction", 1.5), ("retire_confidence", 1),
-                         ("benefit_confidence", 0.4), ("min_runs", 1),
-                         ("min_runs", 2.5), ("bootstrap_resamples", "true"),
-                         ("judge_ceiling", 11), ("objective_margin", -0.1),
-                         ("floor_fraction", 1), ("retire_looks", "[10, 5]"),
-                         ("retire_looks", "[3, 10]"), ("retire_looks", "[]")):
+                         ("benefit_confidence", 0.4), ("min_cli_versions", 0),
+                         ("min_cli_versions", 2.5), ("prior_strength", 0),
+                         ("prior_strength", -1), ("prior_strength", "true"),
+                         ("prior_strength", ".inf"), ("judge_ceiling", 11),
+                         ("objective_margin", -0.1), ("floor_fraction", 1)):
             with self.assertRaises(gates.GatePolicyError, msg=f"{key}={bad}"):
                 gates.parse_gate_policy(self._text(**{key: bad}))
 
+    def test_a_fractional_prior_strength_loads(self):
+        self.assertEqual(gates.parse_gate_policy(self._text(prior_strength=0.5))
+                         ["skills"]["prior_strength"], 0.5)
 
     def test_missing_and_unknown_keys_are_refused(self):
         with self.assertRaises(gates.GatePolicyError):
             gates.parse_gate_policy(self._text(judge_margin=None))
         with self.assertRaises(gates.GatePolicyError):
+            gates.parse_gate_policy(self._text(prior_strength=None))
+        with self.assertRaises(gates.GatePolicyError):
             gates.parse_gate_policy(self._text() + "  sweeps: 4\n")
+        # The keys of the fixed-look design (before 2026-10-31) are unknown.
+        for retired in ("  min_runs: 5\n", "  retire_looks: [5, 10, 20]\n",
+                        "  bootstrap_resamples: 2000\n"):
+            with self.subTest(retired=retired), self.assertRaises(gates.GatePolicyError):
+                gates.parse_gate_policy(self._text() + retired)
         with self.assertRaises(gates.GatePolicyError):
             gates.parse_gate_policy("- not a mapping\n")
 
 
+def boundary(a, b, level, prior, strength):
+    """The normal-mixture half-width of `confidence_sequence`'s docstring,
+    written out apart from it."""
+    def moderated(values):
+        mean = sum(values) / len(values)
+        own = sum((v - mean) ** 2 for v in values)
+        return (strength * prior + own) / (strength + len(values) - 1)
+    info = 1 / (moderated(a) / len(a) + moderated(b) / len(b))
+    rho, alpha = 1 / prior, 1 - level
+    return ((info + rho) * math.log((info + rho) / (rho * alpha ** 2))) ** 0.5 / info
+
+
 class StatisticsTests(unittest.TestCase):
 
-    def test_t_quantiles_match_the_standard_table(self):
-        for p, df, value in ((0.95, 1, 6.314), (0.95, 5, 2.015), (0.95, 30, 1.697),
-                             (0.975, 5, 2.571), (0.975, 10, 2.228), (0.995, 3, 5.841)):
-            self.assertAlmostEqual(gates.t_quantile(p, df), value, places=3)
+    def test_pooled_variance_by_hand(self):
+        # (1, 2, 3): squares 2 on 2 df; (4, 6): 2 on 1 df. 4 over 3.
+        self.assertAlmostEqual(gates.pooled_variance([[1, 2, 3], [4, 6]]), 4 / 3, places=15)
+        # A one-run group measures nothing and adds no degree of freedom.
+        self.assertAlmostEqual(gates.pooled_variance([[1, 2, 3], [5]]), 1.0, places=15)
 
-    def test_bootstrap_is_deterministic_and_order_free(self):
-        rng = random.Random(1)
-        a = [rng.random() for _ in range(9)]
-        b = [rng.random() for _ in range(7)]
-        first = gates.bootstrap_deltas(a, b, 2000)
-        self.assertEqual(first, gates.bootstrap_deltas(a, b, 2000))
-        self.assertEqual(first, gates.bootstrap_deltas(a[::-1], b[::-1], 2000))
-        self.assertEqual(gates.bounds(a, b, 0.95, 2000), gates.bounds(a, b, 0.95, 2000))
+    def test_pooled_variance_falls_back_and_is_floored(self):
+        for groups in ([], [[0.5]], [[0.5], [0.7]]):
+            with self.subTest(groups=groups):
+                self.assertEqual(gates.pooled_variance(groups), gates.FALLBACK_PRIOR_VARIANCE)
+        # Identical runs cannot make the prior claim certainty.
+        self.assertEqual(gates.pooled_variance([[0.8, 0.8, 0.8]]), gates.MIN_PRIOR_VARIANCE)
+        self.assertEqual(gates.pooled_variance([[0.8, 0.801]]), gates.MIN_PRIOR_VARIANCE)
+        self.assertEqual((gates.FALLBACK_PRIOR_VARIANCE, gates.MIN_PRIOR_VARIANCE),
+                         (0.25 ** 2, 0.01 ** 2))
 
-    def test_welch_by_hand(self):
-        # a: mean 3.5, sample variance 3.5; b: mean 2, variance 0. se =
-        # sqrt(3.5 / 6); Welch df = 5 exactly; delta 1.5.
-        delta, se, df = gates.welch([1, 2, 3, 4, 5, 6], [2] * 6)
-        self.assertEqual((delta, df), (1.5, 5))
-        self.assertAlmostEqual(se, (3.5 / 6) ** 0.5, places=12)
-        low, high = gates.bounds([1, 2, 3, 4, 5, 6], [2] * 6, 0.95, 2000)
-        self.assertAlmostEqual(low, 1.5 - 2.0150484 * (3.5 / 6) ** 0.5, places=6)
-        self.assertAlmostEqual(high, 1.5 + 2.0150484 * (3.5 / 6) ** 0.5, places=6)
+    def test_moderated_variance_by_hand(self):
+        # One run is the prior exactly.
+        self.assertEqual(gates.moderated_variance([0.3], 0.04, 4), 0.04)
+        # (1, 2, 3): variance 1 on 2 df, beside 4 pseudo-runs at 0.04.
+        self.assertAlmostEqual(gates.moderated_variance([1, 2, 3], 0.04, 4),
+                               (4 * 0.04 + 2 * 1) / 6, places=15)
+        # A weaker prior weighs less.
+        self.assertAlmostEqual(gates.moderated_variance([1, 2, 3], 0.04, 0.5),
+                               (0.5 * 0.04 + 2 * 1) / 2.5, places=15)
 
-    def test_welch_df_falls_back_when_its_denominator_underflows(self):
-        # Round 4, B3: variances near 1e-200 square to 0.0, and the
-        # Welch-Satterthwaite ratio divided by zero. The fallback is the
-        # smaller arm's n - 1.
-        a, b = [0.0, 1e-100, 2e-100], [0.0, 1e-100, 2e-100, 3e-100, 0.0]
-        delta, se, df = gates.welch(a, b)
-        self.assertEqual(df, 2)
-        self.assertGreater(se, 0)
-        self.assertEqual(gates.welch(b, a)[2], 2)
-        # A denominator that overflows to infinity takes the same fallback.
-        self.assertEqual(gates.welch([0.0, 1e85, -1e85], [0.0, 1e85, -1e85, 5.0])[2], 2)
+    def test_many_runs_approach_their_own_variance(self):
+        values = [0.0, 1.0] * 500
+        own = 0.25 * 1000 / 999
+        moderated = gates.moderated_variance(values, gates.FALLBACK_PRIOR_VARIANCE, 4)
+        self.assertLess(abs(moderated - own), 0.001)
+        self.assertLess(abs(gates.moderated_variance(values[:10], 0.0625, 4) - own),
+                        abs(gates.moderated_variance(values[:4], 0.0625, 4) - own))
 
-    def test_welch_df_is_floored_with_a_minimum_of_one(self):
-        # Unequal variances: df = 1.83, floored to 1.
-        self.assertEqual(gates.welch([0, 10], [0, 1, 0, 1, 0, 1])[2], 1)
+    def test_the_confidence_sequence_by_hand(self):
+        a, b = [0.9, 0.7], [0.5]
+        # a: variance 0.02 on 1 df, moderated (4 * 0.04 + 0.02) / 5 = 0.036;
+        # b: the prior, 0.04. se^2 = 0.036 / 2 + 0.04 / 1 = 0.058.
+        info = 1 / 0.058
+        half = ((info + 25) * math.log((info + 25) / (25 * 0.1 ** 2))) ** 0.5 / info
+        self.assertAlmostEqual(half, boundary(a, b, 0.9, 0.04, 4), places=12)
+        low, high = gates.confidence_sequence(a, b, 0.9, 0.04, 4)
+        self.assertAlmostEqual(low, 0.3 - half, places=12)
+        self.assertAlmostEqual(high, 0.3 + half, places=12)
 
-    def test_the_binomial_floor_by_hand(self):
-        # p = 0.8 over 30 scored trials: p(1 - p)/n = 0.16/30.
-        self.assertAlmostEqual(gates.binomial_floor(0.8, 30), 0.16 / 30, places=15)
-        # p is clipped to [1/(2n), 1 - 1/(2n)]: all passed is not zero.
-        self.assertAlmostEqual(gates.binomial_floor(1.0, 30),
-                               (1 / 60) * (1 - 1 / 60) / 30, places=15)
-        self.assertEqual(gates.binomial_floor(None, 0), 0.0)
+    def test_the_confidence_sequence_is_two_sided_and_symmetric(self):
+        a, b = [0.9, 0.7, 0.8], [0.5, 0.6]
+        low, high = gates.confidence_sequence(a, b, 0.85, 0.01, 4)
+        self.assertAlmostEqual((low + high) / 2, 0.25, places=12)
+        back = gates.confidence_sequence(b, a, 0.85, 0.01, 4)
+        self.assertAlmostEqual(back[0], -high, places=12)
+        self.assertAlmostEqual(back[1], -low, places=12)
+        # A higher level is wider on both ends.
+        wide = gates.confidence_sequence(a, b, 0.95, 0.01, 4)
+        self.assertLess(wide[0], low)
+        self.assertGreater(wide[1], high)
 
-    def test_the_judge_floor_by_hand(self):
-        # Within-run deviations: (7, 7, 7.5) has sum of squares 1/6 on 2 df,
-        # (7, 7, 7) none on 2: pooled variance (2/6)/10 over five runs.
-        figures_ = [[7, 7, 7.5]] * 2 + [[7, 7, 7]] * 3
-        self.assertAlmostEqual(gates.judge_floor(figures_), (2 / 6) / 10 / 5, places=15)
+    def test_the_confidence_sequence_narrows_with_more_runs(self):
+        widths = []
+        for k in (1, 2, 4, 8, 16, 32):
+            low, high = gates.confidence_sequence([0.6, 0.8] * k, [0.5, 0.7] * k,
+                                                  0.95, 0.01, 4)
+            self.assertAlmostEqual((low + high) / 2, 0.1, places=12)
+            widths.append(high - low)
+        self.assertEqual(widths, sorted(widths, reverse=True))
+        self.assertEqual(len(set(widths)), len(widths))
 
-    def test_the_floor_raises_each_arms_standard_error(self):
-        a, b = [0.8] * 9 + [0.81], [0.8] * 10
-        bare = gates.welch(a, b)
-        floored = gates.welch(a, b, floors=(0.16 / 300, 0.16 / 300))
-        self.assertAlmostEqual(floored[1], (2 * 0.16 / 300) ** 0.5, places=12)
-        self.assertGreater(floored[1], bare[1])
-        # Welch-Satterthwaite over the floored variances: two equal arms of
-        # ten values each give 18.
-        self.assertEqual(floored[2], 18)
+    def test_one_run_per_arm_decides_a_large_difference_on_a_tight_prior(self):
+        # sd 0.1 measured elsewhere: 1.0 against 0.0 is a confident gain.
+        self.assertGreater(gates.confidence_sequence([1.0], [0.0], 0.85, 0.01, 4)[0], 0)
+        # With no history (the fallback, sd 0.25) it is not.
+        self.assertLess(gates.confidence_sequence(
+            [1.0], [0.0], 0.85, gates.FALLBACK_PRIOR_VARIANCE, 4)[0], 0)
 
-    def test_reported_bounds_are_at_least_as_wide_as_the_bootstrap(self):
-        a = [0.9, 0.7, 1.0, 0.6, 0.8, 0.9]
-        b = [0.5, 0.8, 0.4, 0.7, 0.6, 0.3]
-        deltas = gates.bootstrap_deltas(a, b, 2000)
-        boot = (gates._percentile(deltas, 0.05), gates._percentile(deltas, 0.95))
-        low, high = gates.bounds(a, b, 0.95, 2000)
-        self.assertLess(low, boot[0])
-        self.assertGreaterEqual(high, boot[1])
+    def test_constant_arms_have_a_finite_bound(self):
+        # No zero-variance rule (2026-10-31): the prior stands in.
+        low, high = gates.confidence_sequence([0.8] * 5, [0.8] * 5, 0.95, 0.01, 4)
+        self.assertAlmostEqual(high, boundary([0.8] * 5, [0.8] * 5, 0.95, 0.01, 4),
+                               places=12)
+        self.assertAlmostEqual(low, -high, places=12)
+
+    def test_the_confidence_sequence_needs_a_run_on_each_arm(self):
+        for a, b in (([], [0.5]), ([0.5], []), ([], [])):
+            with self.subTest(a=a, b=b), self.assertRaises(ValueError):
+                gates.confidence_sequence(a, b, 0.95, 0.01, 4)
 
     def test_holm_correction_across_checks(self):
-        a, b = [1, 2 / 3, 1, 2 / 3, 1], [2 / 3, 1 / 3, 2 / 3, 1, 1 / 3]
-        self.assertEqual(gates.confident_checks({"x": a}, {"x": b}, 0.90, 2000), ["x"])
+        # Alone, x's lower bound at 0.85 is above 0; as the first of twenty
+        # checks it is tested at 1 - 0.15 / 20 and is not.
+        a, b = [1.0] * 5, [0.7] * 5
+        priors = {"x": 0.04, "y": 0.04, **{f"n{i}": 0.04 for i in range(19)}}
+        self.assertGreater(gates.confidence_sequence(a, b, 0.85, 0.04, 4)[0], 0)
+        self.assertLessEqual(gates.confidence_sequence(a, b, 1 - 0.15 / 20, 0.04, 4)[0], 0)
+        self.assertEqual(gates.confident_checks({"x": a}, {"x": b}, 0.85, priors, 4), ["x"])
         null = {f"n{i}": [0.5, 0.6, 0.5, 0.6, 0.5] for i in range(19)}
         self.assertEqual(gates.confident_checks({"x": a, **null}, {"x": b, **null},
-                                                0.90, 2000), [])
+                                                0.85, priors, 4), [])
+        # Step-down: y, the stronger, is tested first at 1 - 0.15 / 2, then x
+        # at 0.85. Both are confident, in that order.
+        y = [0.4] * 5
+        self.assertEqual(gates.confident_checks({"x": a, "y": a}, {"x": b, "y": y},
+                                                0.85, priors, 4), ["y", "x"])
 
-    def test_a_zero_variance_check_is_never_confident(self):
+    def test_a_constant_check_can_be_confident(self):
         self.assertEqual(gates.confident_checks({"x": [1.0] * 5}, {"x": [0.0] * 5},
-                                                0.90, 2000), [])
+                                                0.85, {"x": 0.01}, 4), ["x"])
 
-    def test_a_checks_floor_can_withhold_confidence(self):
-        a, b = [1, 2 / 3, 1, 2 / 3, 1], [2 / 3, 1 / 3, 2 / 3, 1, 1 / 3]
-        wide = {"x": (0.05, 0.05)}
-        self.assertEqual(gates.confident_checks({"x": a}, {"x": b}, 0.90, 2000,
-                                                floors=wide), [])
+    def test_a_check_without_a_prior_takes_the_fallback(self):
+        a, b = [1.0] * 5, [0.8] * 5
+        self.assertEqual(gates.confident_checks({"x": a}, {"x": b}, 0.85, {"x": 0.01}, 4),
+                         ["x"])
+        self.assertEqual(gates.confident_checks({"x": a}, {"x": b}, 0.85, {}, 4), [])
+        self.assertLessEqual(gates.confidence_sequence(
+            a, b, 0.85, gates.FALLBACK_PRIOR_VARIANCE, 4)[0], 0)
+
+    def test_a_check_in_one_arm_only_is_not_tested(self):
+        self.assertEqual(gates.confident_checks({"x": [1.0] * 5}, {"y": [0.0] * 5},
+                                                0.85, {"x": 0.01, "y": 0.01}, 4), [])
+
+    def test_run_priors_pool_by_skill_fixture_model_arm_and_content(self):
+        # One trial of one check per run, so a run's mean is its check's rate.
+        def runs(role, rates, start, **kw):
+            return [arm_run(role, [trial(p, 1, offset=0, overall=j)], start + i, **kw)
+                    for i, (p, j) in enumerate(rates)]
+        index = (runs("with", [(1, 7.0), (0, 8.0)], 0)                 # 0.5 on 1 df
+                 + runs("without", [(1, 6.0), (1, 6.0), (0, 9.0)], 2)  # 1/3 on 2 df
+                 # Other content of the with arm: its own group, 0.5 on 1 df.
+                 + runs("with", [(1, 7.0), (0, 7.0)], 5, tested="t2")
+                 # One run on another model or skill measures nothing.
+                 + runs("with", [(0, 1.0)], 7, model="model-b")
+                 + runs("with", [(1, 1.0)], 8, skill="other")
+                 # A run that does not count is not read.
+                 + [arm_run("with", [trial(infra=True)], 9)])
+        priors = gates.run_priors(index)
+        # Objective squares: 0.5 + 2/3 + 0.5 over 1 + 2 + 1 df.
+        self.assertAlmostEqual(priors["objective"], (0.5 + 2 / 3 + 0.5) / 4, places=15)
+        self.assertAlmostEqual(priors["check"], priors["objective"], places=15)
+        # Judge squares: 0.5 + 6 + 0 over the same 4 df.
+        self.assertAlmostEqual(priors["judge"], (0.5 + 6 + 0) / 4, places=15)
+        # Pooled together, the two with-arm contents would be one group.
+        merged = gates.run_priors([{**r, "tested_digest": "t1"} for r in index])
+        self.assertNotAlmostEqual(merged["objective"], priors["objective"])
+
+    def test_run_priors_with_no_history_are_the_fallback(self):
+        priors = gates.run_priors([])
+        self.assertEqual(priors, {"objective": gates.FALLBACK_PRIOR_VARIANCE,
+                                  "judge": gates.FALLBACK_PRIOR_VARIANCE * 100,
+                                  "check": gates.FALLBACK_PRIOR_VARIANCE})
+        # A conditionally judged run's figures are measured too: run-to-run
+        # spread is not what the conditional skip biases.
+        runs = series("with", FLAT[:4], FLAT_JUDGE, conditional=True)
+        self.assertNotEqual(gates.run_priors(runs)["judge"], gates.FALLBACK_PRIOR_VARIANCE * 100)
+        self.assertEqual(gates.run_priors(runs)["objective"], gates.MIN_PRIOR_VARIANCE)
 
 
 class TrialTests(unittest.TestCase):
@@ -362,11 +464,15 @@ class TrialTests(unittest.TestCase):
                          gates.NO_CHECKS_REASON)
         self.assertIsNone(gates.run_numbers([empty] * 3, True)["skip_reason"])
 
-    def test_the_judge_counts_only_when_every_trial_was_judged_unconditionally(self):
+    def test_the_judge_counts_only_when_every_trial_was_judged(self):
         judged = [gates.trial_record(trial(overall=f)) for f in (7.0, 7.1, 7.2)]
         self.assertAlmostEqual(gates.run_numbers(judged, True)["judge_mean"], 7.1)
         self.assertTrue(gates.run_numbers(judged, True)["judge_spread"])
-        self.assertIsNone(gates.run_numbers(judged, False)["judge_mean"])
+        self.assertFalse(gates.run_numbers(judged, True)["judge_conditional"])
+        # A conditional run keeps its figure and says it was conditional;
+        # _classify decides whether the cell may use it.
+        self.assertAlmostEqual(gates.run_numbers(judged, False)["judge_mean"], 7.1)
+        self.assertTrue(gates.run_numbers(judged, False)["judge_conditional"])
         one_skipped = judged[:2] + [gates.trial_record(trial(skipped=True))]
         self.assertIsNone(gates.run_numbers(one_skipped * 2, True)["judge_mean"])
         same = [gates.trial_record(trial(overall=7.0))] * 3
@@ -379,25 +485,23 @@ class CellTests(unittest.TestCase):
         self.assertEqual(cell(series("with", GAIN[:5]), series("without", LOSS[:5]))["class"],
                          "benefit")
 
-    def test_flat_runs_are_no_benefit_only_at_two_looks(self):
-        runs = flat_cell(5)
-        result = cell(runs[:5], runs[5:])
-        self.assertEqual((result["class"], [lk["class"] for lk in result["looks"]]),
-                         ("no-benefit-pending", ["no-benefit"]))
-        runs = flat_cell(10)
-        result = cell(runs[:10], runs[10:])
-        self.assertEqual((result["class"], [lk["n"] for lk in result["looks"]]),
-                         ("no-benefit", [5, 10]))
+    def test_flat_runs_are_no_benefit_once_the_interval_is_tight(self):
+        # No fixed looks (2026-10-31): two runs per arm leave the judge's
+        # upper bound above its margin, three do not.
+        runs = flat_cell(2)
+        result = cell(runs[:2], runs[2:])
+        self.assertEqual(result["class"], "insufficient")
+        self.assertGreaterEqual(result["judge"]["retire_upper"], TEST_POLICY["judge_margin"])
+        runs = flat_cell(3)
+        result = cell(runs[:3], runs[3:])
+        self.assertEqual(result["class"], "no-benefit", result["reason"])
+        self.assertNotIn("looks", result)
 
-    def test_the_committed_margin_needs_more_than_twenty_runs_of_three(self):
-        runs = flat_cell(20)
-        result = cell(runs[:20], runs[20:], policy=POLICY)
-        self.assertEqual((result["class"], result["looks"][-1]["n"]), ("insufficient", 20))
-
-    def test_one_flipped_check_in_thirty_identical_trials_is_not_no_benefit(self):
+    def test_near_identical_runs_are_bounded_by_the_least_prior(self):
         # Ten runs per arm, every trial passing 8 of 10 checks; one with-arm
-        # trial passes one more. The run means barely vary, so without a
-        # floor the bound is tight and this would be no-benefit.
+        # trial passes one more. The run means barely vary, so the measured
+        # prior is floored at MIN_PRIOR_VARIANCE, and that floor is what
+        # stands in for the missing spread: the bound is the one it gives.
         def runs(role):
             out = []
             for r in range(10):
@@ -408,12 +512,26 @@ class CellTests(unittest.TestCase):
                 out.append(arm_run(role, trials, r))
             return out
         result = cell(runs("with"), runs("without"), policy=POLICY)
-        self.assertEqual(result["class"], "insufficient")
-        self.assertEqual(result["looks"][-1]["n"], 10)
+        self.assertEqual(result["priors"]["objective"], gates.MIN_PRIOR_VARIANCE)
+        wm, om = result["with"]["run_means"], result["without"]["run_means"]
+        self.assertAlmostEqual(result["objective"]["retire_upper"] - result["objective"]["delta"],
+                               boundary(wm, om, POLICY["retire_confidence"],
+                                        gates.MIN_PRIOR_VARIANCE, POLICY["prior_strength"]),
+                               places=12)
+        # The display level for the same cell: removing at retire_confidence
+        # means the level reached under the margin is at least that.
+        self.assertGreaterEqual(result["objective"]["no_help_confidence"],
+                                POLICY["retire_confidence"])
+        self.assertLess(result["objective"]["helps_confidence"], POLICY["benefit_confidence"])
+        self.assertEqual(result["class"], "no-benefit")
 
-    def test_four_runs_are_insufficient(self):
-        runs = flat_cell(4)
-        self.assertEqual(cell(runs[:4], runs[4:])["class"], "insufficient")
+    def test_one_run_per_arm_with_no_history_is_insufficient(self):
+        # A one-run group measures no spread: the priors are the fallback.
+        runs = flat_cell(1)
+        result = cell(runs[:1], runs[1:])
+        self.assertEqual(result["priors"]["objective"], gates.FALLBACK_PRIOR_VARIANCE)
+        self.assertEqual((result["class"], result["reason"]),
+                         ("insufficient", "the interval is not tight enough yet"))
 
     def test_one_cli_version_is_insufficient(self):
         runs = flat_cell(cli=CLIS[0])
@@ -423,9 +541,12 @@ class CellTests(unittest.TestCase):
         runs = flat_cell(5)
         runs[0]["trials"] = [gates.trial_record(trial(infra=True))] * 3
         result = cell(runs[:5], runs[5:])
-        self.assertEqual(result["class"], "insufficient")
         self.assertEqual(result["with"]["runs"], 4)
         self.assertEqual(result["skipped"], {"fewer than 1 scored or errored trials": 1})
+        # The skipped run is as if it were not there.
+        without = cell(runs[1:5], runs[5:], priors=result["priors"])
+        self.assertEqual((result["class"], result["objective"]),
+                         (without["class"], without["objective"]))
         # One infrastructure error among three leaves two trials: it counts.
         runs = flat_cell(5)
         runs[0]["trials"][0] = gates.trial_record(trial(infra=True))
@@ -439,7 +560,7 @@ class CellTests(unittest.TestCase):
         for run in without_runs:
             run["trials"][:2] = [gates.trial_record(trial(error="agent_failed"))] * 2
         result = cell(with_runs, without_runs)
-        self.assertNotIn(result["class"], ("no-benefit", "no-benefit-pending"))
+        self.assertNotEqual(result["class"], "no-benefit")
         self.assertEqual((result["without"]["runs"], result["skipped"]), (10, {}))
 
     def test_without_arm_timeouts_censoring_its_failures_cannot_retire(self):
@@ -457,7 +578,7 @@ class CellTests(unittest.TestCase):
                 without_runs += series("without", [(80, 80, 80)], [7.0 if r % 4 else 7.2],
                                        start=100 + r, carried=True)
         result = cell(with_runs, without_runs, carried=True, policy=POLICY)
-        self.assertNotIn(result["class"], ("no-benefit", "no-benefit-pending"))
+        self.assertNotEqual(result["class"], "no-benefit")
         self.assertEqual(result["without"]["runs"], 24)
 
     def test_without_arm_timeouts_can_show_benefit(self):
@@ -472,13 +593,14 @@ class CellTests(unittest.TestCase):
             return out
         self.assertEqual(cell(runs("with"), runs("without"))["class"], "benefit")
 
-    def test_an_errored_trial_blocks_no_benefit_at_the_looks(self):
+    def test_an_errored_trial_blocks_no_benefit(self):
         # One budget stop in one with run: that run has no judge figure,
         # the other nine do, and the numbers are still no-benefit.
         runs = flat_cell(10)
         runs[0]["trials"].append(gates.trial_record(trial(error="budget_exceeded")))
         result = cell(runs[:10], runs[10:])
-        self.assertEqual(result["full_class"], "no-benefit")
+        self.assertTrue(result["reason"].startswith("no-benefit on the numbers"),
+                        result["reason"])
         self.assertEqual(result["class"], "insufficient")
         self.assertIn("agent-errored", result["reason"])
 
@@ -494,29 +616,50 @@ class CellTests(unittest.TestCase):
                       series("without", NOISY_BACK[:5], FLAT_JUDGE))
         self.assertEqual(result["class"], "insufficient")
 
-    def test_zero_variance_decides_nothing(self):
+    def test_constant_arms_are_decided(self):
+        # The zero-variance rule is gone (2026-10-31): the prior stands in
+        # for a spread the arms do not show.
         same = [(80, 80, 80)] * 10
         self.assertEqual(cell(series("with", same, FLAT_JUDGE),
-                              series("without", same, FLAT_JUDGE))["class"], "insufficient")
-        # Constant but apart: still no decision.
+                              series("without", same, FLAT_JUDGE))["class"], "no-benefit")
+        # Constant and apart: benefit.
         self.assertEqual(cell(series("with", [(90, 90, 90)] * 5),
-                              series("without", [(40, 40, 40)] * 5))["class"], "insufficient")
+                              series("without", [(40, 40, 40)] * 5))["class"], "benefit")
 
-    def test_pass_rate_exactly_point_nine_is_ceiling(self):
+    def test_a_cell_at_the_ceiling_is_judged_by_the_removal_rule(self):
+        # The owner, 2026-11-03 ("Judge them by the removal rule"): both arms at
+        # 90% leave no room for the 0.15 margin, so the cell is decided like
+        # any other, and its reason says it sat at the ceiling.
         same = [(90, 90, 90)] * 5
-        self.assertEqual(cell(series("with", same), series("without", same))["class"],
-                         "ceiling")
+        result = cell(series("with", same), series("without", same))
+        self.assertEqual(result["class"], "insufficient")
+        same = [(90, 90, 90)] * 10
+        result = cell(series("with", same, FLAT_JUDGE), series("without", same, FLAT_JUDGE))
+        self.assertEqual(result["class"], "no-benefit")
+        self.assertTrue(result["reason"].endswith("both arms are at the ceiling"))
 
     def test_pass_rate_point_eight_nine_is_not_ceiling(self):
         same = [(89, 89, 89)] * 5
         result = cell(series("with", same), series("without", same))
         self.assertEqual(result["class"], "insufficient")
 
-    def test_a_check_failing_everywhere_cannot_discriminate(self):
+    def test_a_check_failing_everywhere_no_longer_parks_the_cell(self):
+        # It adds the same 0 to both arms; the deltas decide (2026-11-03).
         def runs(role):
             return [arm_run(role, [trial(8, 10, fail={9, (3 * r + k) % 9}) for k in range(3)], r)
                     for r in range(5)]
-        self.assertEqual(cell(runs("with"), runs("without"))["class"], "cannot-discriminate")
+        self.assertNotEqual(cell(runs("with"), runs("without"))["class"], "cannot-discriminate")
+
+    def test_the_floor_needs_floor_min_runs_on_each_arm(self):
+        low = [(1, 1, 1), (1, 1, 0)] * 3
+        n = gates.FLOOR_MIN_RUNS
+        result = cell(series("with", low[:n - 1], total=10),
+                      series("without", low[:n - 1], total=10))
+        self.assertEqual(result["class"], "insufficient")
+        self.assertIn("decide whether the fixture is broken", result["reason"])
+        self.assertEqual(cell(series("with", low[:n], total=10),
+                              series("without", low[:n], total=10))["class"],
+                         "cannot-discriminate")
 
     def test_both_arms_near_the_floor_cannot_discriminate(self):
         low = [(1, 1, 1), (1, 1, 0)] * 3
@@ -525,18 +668,31 @@ class CellTests(unittest.TestCase):
                          "cannot-discriminate")
 
     def test_insufficient_runs_come_before_cannot_discriminate(self):
+        # An arm with no counted run is insufficient, even beside an arm at
+        # the floor.
         low = [(1, 1, 1), (1, 1, 0)] * 3
+        without = series("without", low[:4], total=10)
+        for run in without:
+            run["trials"] = [gates.trial_record(trial(infra=True))]
+        result = cell(series("with", low[:4], total=10), without)
+        self.assertEqual((result["class"], result["reason"]),
+                         ("insufficient", "an arm has no counted run"))
         self.assertEqual(cell(series("with", low[:4], total=10),
                               series("without", low[:4], total=10))["class"],
-                         "insufficient")
+                         "cannot-discriminate")
 
     def test_retire_side_uses_the_stricter_bound(self):
         wide = [(80, 80, 80), (70, 70, 70)] * 3
         runs = (series("with", wide[:5], FLAT_JUDGE), series("without", wide[:5], FLAT_JUDGE))
-        strict = {**POLICY, "objective_margin": 0.2}
-        self.assertEqual(cell(*runs, policy=strict)["class"], "insufficient")
+        strict = {**POLICY, "objective_margin": 0.09}
+        result = cell(*runs, policy=strict)
+        self.assertEqual(result["class"], "insufficient")
+        # The 95% sequence is wider than the 85% one.
+        self.assertLess(result["objective"]["benefit_lower"], 0)
+        self.assertGreater(result["objective"]["retire_upper"],
+                           -result["objective"]["benefit_lower"])
         loose = {**strict, "retire_confidence": 0.6}
-        self.assertEqual(cell(*runs, policy=loose)["class"], "no-benefit-pending")
+        self.assertEqual(cell(*runs, policy=loose)["class"], "no-benefit")
 
     def test_one_confidently_better_check_is_benefit(self):
         # Overall the arms are level; check A is better with the skill and B
@@ -556,46 +712,75 @@ class CellTests(unittest.TestCase):
         self.assertEqual(result["class"], "benefit")
         self.assertEqual(result["confident_checks"], ['"c0"'])
 
-    def test_judge_needed_needs_five_judged_runs(self):
-        judges = FLAT_JUDGE[:4] + [None]
-        result = cell(series("with", FLAT[:5], judges), series("without", FLAT[:5], judges))
+    def test_the_judge_is_usable_with_one_judged_run_per_arm(self):
+        # Only the last run of each arm was judged. On priors measured over
+        # another skill's runs, that one pair decides a judge gain.
+        history = flat_cell(10, skill="other")
+        with_runs = series("with", FLAT[:5], [None] * 4 + [9.0])
+        without_runs = series("without", FLAT[:5], [None] * 4 + [5.0])
+        result = cell(with_runs, without_runs,
+                      priors=gates.run_priors(history + with_runs + without_runs))
+        self.assertEqual((result["with"]["judge_runs"], result["without"]["judge_runs"]),
+                         (1, 1))
+        self.assertEqual((result["class"], result["reason"]),
+                         ("benefit", "judge delta's lower bound is above 0"))
+        # With no judged run on one arm, the judge is still needed.
+        result = cell(series("with", FLAT[:5], [None] * 5), without_runs)
         self.assertEqual(result["class"], "insufficient")
+        self.assertIn("judge is needed", result["reason"])
 
-    def test_a_conditionally_judged_run_has_no_judge_figure(self):
+    def test_conditional_judging_counts_when_no_judge_call_was_skipped(self):
+        # 2026-10-31: every counted run of both arms judged, so the
+        # conditional skip selected nothing out.
         result = cell(*[series(role, FLAT[:10], FLAT_JUDGE, conditional=True)
                         for role in ("with", "without")])
-        self.assertEqual(result["class"], "insufficient")
-        self.assertEqual(result["with"]["judge_runs"], 0)
+        self.assertEqual(result["class"], "no-benefit", result["reason"])
+        self.assertEqual(result["with"]["judge_runs"], 10)
+        self.assertEqual(result["with"]["judge_conditional_runs"], 10)
 
-    def test_the_judge_needs_spread_within_two_runs_per_arm(self):
+    def test_conditional_judging_with_a_skipped_call_has_no_judge_figure(self):
+        with_runs, without_runs = [series(role, FLAT[:10], FLAT_JUDGE, conditional=True)
+                                   for role in ("with", "without")]
+        # One pair's judge was skipped (the objective already favored with).
+        for runs in (with_runs, without_runs):
+            runs[0]["trials"] = [gates.trial_record(trial(skipped=True, offset=k))
+                                 for k in range(3)]
+        result = cell(with_runs, without_runs)
+        self.assertEqual(result["class"], "insufficient")
+        self.assertIn("every counted run judged", result["reason"])
+        # The same runs judged unconditionally: the other nine decide.
+        for run in with_runs + without_runs:
+            run["judge_conditional"] = False
+        self.assertEqual(cell(with_runs, without_runs)["class"], "no-benefit")
+
+    def test_the_judge_needs_no_spread(self):
+        # Equal judge figures within every run, and the arms level: decided.
         result = cell(*[series(role, FLAT[:10], FLAT_JUDGE, spread=False)
                         for role in ("with", "without")])
-        self.assertEqual(result["class"], "insufficient")
-        # Spread in two runs of each arm is enough.
-        runs = [series(role, FLAT[:10], FLAT_JUDGE, spread=False)
-                for role in ("with", "without")]
-        for arm in runs:
-            for run in arm[:2]:
-                run["trials"] = [{**t, "judge": t["judge"] + (k - 1) / 10}
-                                 for k, t in enumerate(run["trials"])]
-        self.assertEqual(cell(*runs)["class"], "no-benefit")
+        self.assertEqual(result["class"], "no-benefit", result["reason"])
 
-    def test_the_judge_standard_error_is_floored_by_the_within_run_spread(self):
-        # The reproducer: judge figures (7, 7, 7.5) twice and (7, 7, 7) three
-        # times, on both arms.
+    def test_the_bounds_use_each_figures_own_prior(self):
         def runs(role):
             return [arm_run(role, [trial(80, T, 3 * r + k, j)
                                    for k, j in enumerate(marks)], r)
                     for r, marks in enumerate([[7, 7, 7.5]] * 2 + [[7, 7, 7]] * 3)]
-        result = cell(runs("with"), runs("without"), carried=True)
-        self.assertNotEqual(result["class"], "no-benefit")
-        wj, oj = result["with"]["judge_run_means"], result["without"]["judge_run_means"]
-        floor = gates.judge_floor([[7, 7, 7.5]] * 2 + [[7, 7, 7]] * 3)
-        floored = gates.bounds(wj, oj, POLICY["retire_confidence"], 2000,
-                               floors=(floor, floor))[1]
-        self.assertAlmostEqual(result["judge"]["retire_upper"], floored, places=12)
-        self.assertGreater(floored, gates.bounds(wj, oj, POLICY["retire_confidence"],
-                                                 2000)[1])
+        with_runs, without_runs = runs("with"), runs("without")
+        priors = {"objective": 0.002, "judge": 0.3, "check": 0.05}
+        result = cell(with_runs, without_runs, priors=priors)
+        self.assertEqual(result["priors"], priors)
+        strength = TEST_POLICY["prior_strength"]
+        for figure, arms in (("objective", "run_means"), ("judge", "judge_run_means")):
+            with self.subTest(figure=figure):
+                a, b = result["with"][arms], result["without"][arms]
+                self.assertAlmostEqual(result[figure]["benefit_lower"], gates.confidence_sequence(
+                    a, b, TEST_POLICY["benefit_confidence"], priors[figure], strength)[0],
+                    places=12)
+                self.assertAlmostEqual(result[figure]["retire_upper"], gates.confidence_sequence(
+                    a, b, TEST_POLICY["retire_confidence"], priors[figure], strength)[1],
+                    places=12)
+        # Without `priors` the cell records the ones measured over its runs.
+        self.assertEqual(cell(with_runs, without_runs)["priors"],
+                         gates.run_priors(with_runs + without_runs))
 
     def test_skipped_judge_is_not_needed_when_the_objective_gains(self):
         def runs(role, pattern):
@@ -624,24 +809,29 @@ class CellTests(unittest.TestCase):
         self.assertEqual(result["class"], "benefit")
 
     def test_class_c_is_no_benefit_only_when_its_objective_is_too(self):
-        runs = flat_cell(10)
-        self.assertEqual(cell(runs[:10], runs[10:], carried=True)["class"], "no-benefit")
-        # The committed objective margin is not met by thirty trials per arm.
-        result = cell(runs[:10], runs[10:], carried=True, policy=POLICY)
-        self.assertEqual(result["class"], "insufficient")
-        self.assertIn("objective", result["looks"][-1]["reason"])
+        swing = [(80, 80, 80), (60, 60, 60)] * 5
+        runs = [series(role, swing, FLAT_JUDGE, carried=True) for role in ("with", "without")]
+        self.assertEqual(cell(*runs, carried=True)["class"], "no-benefit")
+        # At the committed objective margin the judge is tight, the
+        # objective is not.
+        result = cell(*runs, carried=True, policy=LEGACY_POLICY)
+        self.assertLess(result["judge"]["retire_upper"], LEGACY_POLICY["judge_margin"])
+        self.assertEqual((result["class"], result["reason"]),
+                         ("insufficient", "the objective interval is not tight enough yet"))
         # Without objective checks the judge alone decides.
         def judge_only(role):
             return [arm_run(role, [{**trial(overall=j), "objective_checks": []}
                                    for j in figures(FLAT_JUDGE[r])], r) for r in range(10)]
-        result = cell(judge_only("with"), judge_only("without"), carried=True, policy=POLICY)
+        result = cell(judge_only("with"), judge_only("without"), carried=True,
+                      policy=LEGACY_POLICY)
         self.assertEqual(result["class"], "no-benefit")
 
-    def test_class_c_ceiling_on_the_judge_figure(self):
+    def test_class_c_at_the_judge_ceiling_is_judged_by_the_removal_rule(self):
         high = [9.2, 9.4] * 3
-        self.assertEqual(cell(series("with", FLAT[:5], high),
-                              series("without", FLAT[:5], high), carried=True)["class"],
-                         "ceiling")
+        result = cell(series("with", FLAT[:5], high), series("without", FLAT[:5], high),
+                      carried=True)
+        self.assertEqual(result["class"], "no-benefit")
+        self.assertTrue(result["reason"].endswith("both arms are at the ceiling"))
 
     def test_pairwise_class_c_reads_dimensions_mean(self):
         result = cell(series("with", FLAT[:5], [8.0, 8.2] * 3, pairwise=True),
@@ -654,53 +844,127 @@ class CellTests(unittest.TestCase):
                               carried=True)["class"], "insufficient")
 
 
-class LookTests(unittest.TestCase):
+class AnytimeTests(unittest.TestCase):
+    """No minimum run count and no fixed looks (the owner, 2026-10-31): a cell is
+    decided on all its counted runs, at any count."""
 
-    def test_a_later_look_that_is_not_no_benefit_decides(self):
+    def test_a_big_gain_with_one_run_per_arm_is_benefit(self):
+        # Priors measured across every skill's runs let one run decide.
+        history = flat_cell(10, skill="other")
+        with_runs, without_runs = series("with", GAIN[:1]), series("without", LOSS[:1])
+        result = cell(with_runs, without_runs,
+                      priors=gates.run_priors(history + with_runs + without_runs))
+        self.assertEqual((result["class"], result["with"]["runs"]), ("benefit", 1))
+        # With no history, the same pair is not enough.
+        self.assertEqual(cell(with_runs, without_runs)["class"], "insufficient")
+
+    def test_benefit_is_declared_at_any_count(self):
+        for n in (2, 3, 5, 7):
+            with self.subTest(n=n):
+                result = cell(series("with", GAIN[:n]), series("without", LOSS[:n]))
+                self.assertEqual((result["class"], result["with"]["runs"]), ("benefit", n))
+
+    def test_a_small_noisy_difference_is_insufficient(self):
+        # A 0.05 gain under a run-to-run spread of about 0.1: neither a
+        # confident gain nor inside the 0.05 margin of the rule before 2026-11-02,
+        # at any count here.
+        gain = [(85, 85, 85), (65, 65, 65)] * 10
+        base = [(80, 80, 80), (60, 60, 60)] * 10
+        for n in (2, 4, 10, 20):
+            with self.subTest(n=n):
+                result = cell(series("with", gain[:n], FLAT_JUDGE),
+                              series("without", base[:n], FLAT_JUDGE), policy=LEGACY_POLICY)
+                self.assertEqual(result["class"], "insufficient", result["reason"])
+                self.assertLess(result["objective"]["benefit_lower"], 0)
+                self.assertGreaterEqual(result["objective"]["retire_upper"],
+                                        LEGACY_POLICY["objective_margin"])
+
+    def test_no_benefit_needs_min_cli_versions(self):
+        runs = flat_cell(cli=CLIS[0])
+        result = cell(runs[:10], runs[10:])
+        self.assertEqual(result["class"], "insufficient")
+        self.assertIn("1 CLI version(s), under the 2", result["reason"])
+        self.assertEqual(cell(runs[:10], runs[10:],
+                              policy={**TEST_POLICY, "min_cli_versions": 1})["class"],
+                         "no-benefit")
+        # Keeping needs no second version.
+        gain = series("with", GAIN[:5], cli=CLIS[0]) + series("without", LOSS[:5],
+                                                              cli=CLIS[0])
+        self.assertEqual(cell(gain[:5], gain[5:])["class"], "benefit")
+
+    def test_with_no_history_the_committed_margin_takes_forty_eight_runs(self):
+        # On the fallback priors (sd 0.25, as with no run history), flat runs
+        # reach the 0.05 objective and 0.5 judge margins at the 95% retire
+        # level (the rule before 2026-11-02) only at 48 runs per arm.
+        fallback = gates.FALLBACK_PRIOR_VARIANCE
+        priors = {"objective": fallback, "judge": fallback * 100, "check": fallback}
+        for n, want in ((20, "insufficient"), (47, "insufficient"), (48, "no-benefit")):
+            with self.subTest(n=n):
+                result = cell(series("with", (FLAT * 3)[:n], (FLAT_JUDGE * 3)[:n]),
+                              series("without", (FLAT * 3)[:n], (FLAT_JUDGE * 3)[:n]),
+                              policy=LEGACY_POLICY, priors=priors)
+                self.assertEqual(result["class"], want, result["reason"])
+
+    def test_a_later_run_can_undo_no_benefit(self):
         swing = [(100, 100, 100), (0, 0, 0)] * 3
         with_runs = (series("with", FLAT[:5], FLAT_JUDGE)
                      + series("with", swing[:5], FLAT_JUDGE, start=5))
         without_runs = (series("without", FLAT[:5], FLAT_JUDGE)
                         + series("without", swing[1:6], FLAT_JUDGE, start=5))
+        self.assertEqual(cell(with_runs[:5], without_runs[:5])["class"], "no-benefit")
         result = cell(with_runs, without_runs)
-        self.assertEqual([lk["class"] for lk in result["looks"]],
-                         ["no-benefit", "insufficient"])
-        self.assertEqual(result["class"], "insufficient")
+        self.assertEqual((result["class"], result["with"]["runs"]), ("insufficient", 10))
 
-    def test_no_benefit_needs_both_of_the_two_largest_looks(self):
-        # The first five runs show one CLI version, so the five-run look is
-        # insufficient; the ten-run look alone is not enough.
-        def runs(role, n):
-            return (series(role, FLAT[:5], FLAT_JUDGE, cli=CLIS[0])
-                    + series(role, FLAT[5:n], FLAT_JUDGE[5:n], start=5, cli=CLIS[1]))
-        result = cell(runs("with", 10), runs("without", 10))
-        self.assertEqual(([lk["class"] for lk in result["looks"]], result["class"]),
-                         (["insufficient", "no-benefit"], "no-benefit-pending"))
-        # At twenty runs the two largest looks are ten and twenty.
-        result = cell(runs("with", 20), runs("without", 20))
-        self.assertEqual(([lk["class"] for lk in result["looks"]], result["class"]),
-                         (["insufficient", "no-benefit", "no-benefit"], "no-benefit"))
-
-    def test_benefit_is_declared_at_any_count(self):
-        result = cell(series("with", GAIN[:7]), series("without", LOSS[:7]))
-        self.assertEqual((result["class"], [lk["n"] for lk in result["looks"]]),
-                         ("benefit", [5]))
-
-    def test_the_looks_use_the_first_runs_in_timestamp_order(self):
+    def test_every_run_counts_in_any_order(self):
         with_runs = series("with", FLAT[:10], FLAT_JUDGE) + series(
             "with", NOISY[:3], FLAT_JUDGE, start=10)
         without_runs = series("without", FLAT[:10], FLAT_JUDGE) + series(
             "without", NOISY_BACK[:3], FLAT_JUDGE, start=10)
-        result = cell(with_runs[::-1], without_runs[::-1])
-        self.assertEqual(result["class"], "no-benefit")
+        self.assertEqual(cell(with_runs[:10], without_runs[:10], policy=POLICY)["class"],
+                         "no-benefit")
+        # The three noisy runs widen the bound past the committed margin.
+        forward = cell(with_runs, without_runs, policy=POLICY)
+        self.assertEqual((forward["class"], forward["with"]["runs"]), ("insufficient", 13))
+        backward = cell(with_runs[::-1], without_runs[::-1], policy=POLICY)
+        self.assertEqual((backward["class"], backward["objective"]),
+                         (forward["class"], forward["objective"]))
+
+
+class PerCellPriorTests(unittest.TestCase):
+    """#557 follow-up: a skill cell's priors are its own runs', with
+    `SKILL_PRIOR_GUARD` (10 degrees of freedom before the measured value
+    replaces the fallback)."""
+
+    def test_few_runs_use_the_fallback_and_enough_runs_their_own_spread(self):
+        few = gates.cell_priors(flat_cell(5), gates.SKILL_PRIOR_GUARD)
+        self.assertEqual((few["objective"], few["judge"]), (0.01, 1.0))
+        runs = flat_cell(6)
+        own = gates.cell_priors(runs, gates.SKILL_PRIOR_GUARD)
+        means = [gates.run_numbers(r["trials"], True)["run_mean"] for r in runs]
+        self.assertAlmostEqual(own["objective"],
+                               gates.pooled_variance([means[:6], means[6:]]), places=12)
+
+    def test_retirement_gives_each_cell_its_own_priors(self):
+        runs = flat_cell(6)
+        cell = gates.retirement({"runs": runs}, ["model-a"], "demo", LEGACY_POLICY,
+                                EXPECT)["cells"][0]
+        self.assertEqual(cell["priors"], gates.cell_priors(runs, gates.SKILL_PRIOR_GUARD))
+        given = gates.run_priors(runs)
+        cell = gates.retirement({"runs": runs}, ["model-a"], "demo", LEGACY_POLICY,
+                                EXPECT, given)["cells"][0]
+        self.assertEqual(cell["priors"], given)
 
 
 class VerdictTests(unittest.TestCase):
     MODELS = ["model-a", "model-b", "model-c"]
 
     def verdict(self, runs, models=None, expected=None):
+        # These test pooling and the verdict's order, on priors measured over
+        # every run given (as before #557's follow-up gave each skill cell
+        # its own; `PerCellPriorTests` covers that default).
         return gates.retirement({"runs": runs}, models or self.MODELS, "demo", TEST_POLICY,
-                                expected if expected is not None else EXPECT)
+                                expected if expected is not None else EXPECT,
+                                gates.run_priors(runs))
 
     @staticmethod
     def expect(*fixtures, tested="t1", fdig="f1"):
@@ -729,31 +993,50 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(self.verdict(runs, expected=self.expect("one", "two"))["verdict"],
                          "retire")
 
-    def test_a_cell_with_one_look_makes_the_verdict_pending(self):
-        runs = [r for m in self.MODELS[1:] for r in self.flat(m)] + self.flat("model-a", 5)
-        self.assertEqual(self.verdict(runs)["verdict"], "retire-pending")
+    def test_a_cell_with_too_few_runs_holds_the_verdict(self):
+        # One run per arm on model-a shows one CLI version: insufficient, and
+        # so is the verdict. A second run, on priors measured over every
+        # cell, is enough.
+        others = [r for m in self.MODELS[1:] for r in self.flat(m)]
+        result = self.verdict(others + self.flat("model-a", 1))
+        self.assertEqual(result["verdict"], "insufficient")
+        self.assertEqual([c["class"] for c in result["cells"]],
+                         ["insufficient", "no-benefit", "no-benefit"])
+        self.assertEqual(self.verdict(others + self.flat("model-a", 2))["verdict"], "retire")
 
     def test_one_benefit_cell_keeps(self):
         runs = [r for m in self.MODELS[1:] for r in self.flat(m)] + self.gain("model-a")
         self.assertEqual(self.verdict(runs)["verdict"], "keep")
 
-    def test_one_ceiling_cell_among_no_benefit_is_ceiling(self):
+    def test_no_verdict_is_ceiling_any_more(self):
+        # 2026-11-03: a ceiling cell is decided by the removal rule, so a
+        # subject's verdict is never parked at `ceiling`.
         runs = [r for m in self.MODELS[1:] for r in self.flat(m, 5)] + self.ceiling("model-a")
-        self.assertEqual(self.verdict(runs)["verdict"], "ceiling")
-
-    def test_all_ceiling_cells_never_retire(self):
+        self.assertNotEqual(self.verdict(runs)["verdict"], "ceiling")
         fixtures = ("one", "two", "three", "four")
         runs = [r for m in self.MODELS for f in fixtures for r in self.ceiling(m, fixture=f)]
-        self.assertEqual(self.verdict(runs, expected=self.expect(*fixtures))["verdict"],
-                         "ceiling")
+        self.assertNotEqual(self.verdict(runs, expected=self.expect(*fixtures))["verdict"],
+                            "ceiling")
 
-    def test_cannot_discriminate_outranks_ceiling(self):
-        runs = self.ceiling("model-a") + self.low("model-b") + self.flat("model-c")
+    def test_a_broken_fixture_cell_is_left_out_of_the_verdict(self):
+        runs = self.low("model-a") + self.flat("model-b") + self.flat("model-c")
+        result = self.verdict(runs)
+        self.assertEqual([c["class"] for c in result["cells"]],
+                         ["cannot-discriminate", "no-benefit", "no-benefit"])
+        self.assertEqual((result["verdict"], result["reason"]),
+                         ("retire", "every cell shows no benefit, apart from fixtures "
+                                    "that look broken"))
+
+    def test_every_cell_broken_is_cannot_discriminate(self):
+        runs = [r for m in self.MODELS for r in self.low(m)]
         self.assertEqual(self.verdict(runs)["verdict"], "cannot-discriminate")
 
     def test_insufficient_outranks_cannot_discriminate(self):
-        runs = self.low("model-a") + self.flat("model-b") + self.flat("model-c", 4)
-        self.assertEqual(self.verdict(runs)["verdict"], "insufficient")
+        runs = self.low("model-a") + self.flat("model-b") + self.flat("model-c", 1)
+        result = self.verdict(runs)
+        self.assertEqual([c["class"] for c in result["cells"]],
+                         ["cannot-discriminate", "no-benefit", "insufficient"])
+        self.assertEqual(result["verdict"], "insufficient")
 
     def test_a_roster_model_with_no_runs_is_insufficient(self):
         result = self.verdict([r for m in self.MODELS[:2] for r in self.flat(m)])
@@ -803,13 +1086,20 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(self.verdict(runs, ["model-a"], self.expect("", tested="new"))
                          ["verdict"], "retire")
 
-    def test_new_skill_content_starts_confirmation_over(self):
+    def test_new_skill_content_starts_the_with_arm_over(self):
         old = series("with", FLAT[:10], FLAT_JUDGE, tested="old")
-        new = series("with", FLAT[10:15], FLAT_JUDGE[10:15], start=10, tested="new")
+        new = series("with", FLAT[10:11], FLAT_JUDGE[10:11], start=10, tested="new")
         without = series("without", FLAT[:15], FLAT_JUDGE)
-        result = self.verdict(old + new + without, ["model-a"], self.expect("", tested="new"))
-        self.assertEqual(result["verdict"], "retire-pending")
-        self.assertEqual(result["cells"][0]["with"]["runs"], 5)
+        expected = self.expect("", tested="new")
+        result = self.verdict(old + without, ["model-a"], expected)
+        # No with run of the content on main: nothing to pair the arms on.
+        self.assertEqual((result["verdict"], result["cells"][0]["reason"]),
+                         ("insufficient",
+                          "pooling key incomplete: with_context, without_context"))
+        result = self.verdict(old + new + without, ["model-a"], expected)
+        self.assertEqual(result["cells"][0]["with"]["runs"], 1)
+        self.assertEqual([e["timestamp"] for e in result["cells"][0]["runs"]["with"]],
+                         [stamp(10)])
 
     def test_a_stale_run_of_old_content_does_not_choose_the_pool(self):
         # Ten flat runs of content A, three of B (on main), then one late run
@@ -820,8 +1110,10 @@ class VerdictTests(unittest.TestCase):
         without = series("without", FLAT[:14], FLAT_JUDGE)
         result = self.verdict(a + b + stale + without, ["model-a"],
                               self.expect("", tested="B"))
-        self.assertEqual(result["verdict"], "insufficient")
         self.assertEqual(result["cells"][0]["with"]["runs"], 3)
+        self.assertEqual([e["timestamp"] for e in result["cells"][0]["runs"]["with"]],
+                         [stamp(r) for r in (10, 11, 12)])
+        self.assertEqual(result["verdict"], "retire")
 
     def test_runs_of_another_fixture_or_arm_context_are_not_pooled(self):
         for field in ("fdig", "ctx"):
@@ -830,8 +1122,9 @@ class VerdictTests(unittest.TestCase):
                 new = series("with", FLAT[2:5], FLAT_JUDGE, start=2)
                 without = series("without", FLAT[:5], FLAT_JUDGE)
                 result = self.verdict(old + new + without, ["model-a"])
-                self.assertEqual(result["verdict"], "insufficient")
                 self.assertEqual(result["cells"][0]["with"]["runs"], 3)
+                self.assertEqual([e["timestamp"] for e in result["cells"][0]["runs"]["with"]],
+                                 [stamp(r) for r in (2, 3, 4)])
 
     def test_a_moved_fixture_pools_its_flat_runs_only_with_the_same_digest(self):
         # #422/#427: a flat fixture nested as `nested`, content unchanged.
@@ -870,7 +1163,11 @@ class VerdictTests(unittest.TestCase):
             with self.subTest(skill=skill):
                 self.assertFalse((evals / skill / old / "fixture.yaml").exists())
                 self.assertTrue((evals / skill / new / "fixture.yaml").is_file())
-                self.assertIn(new, compute_gates.expected_content(evals, skill, {}))
+                # A target taken off the schedule (unscheduled.yml) is not expected.
+                unscheduled = {row["path"] for row in yaml.safe_load(
+                    (evals / "unscheduled.yml").read_text(encoding="utf-8"))["fixtures"]}
+                if f"evals/{skill}/{new}" not in unscheduled:
+                    self.assertIn(new, compute_gates.expected_content(evals, skill, {}))
 
     def test_the_arms_are_paired_on_one_guidance_and_skill_set(self):
         # Round 5's reproducer (test_ctx.py): twenty without runs from old
@@ -903,12 +1200,22 @@ class VerdictTests(unittest.TestCase):
         # No pair key at all (a summary from before others_digest).
         result = self.verdict(flat_cell(pair=None), ["model-a"])
         self.assertEqual(result["verdict"], "insufficient")
-        # Two pairs with as many runs in their smaller arms: neither.
+        # Two pairs with as many runs in their smaller arms: the one with the
+        # newer runs (the owner, 2026-11-01), and neither only when that ties too.
         tie = (flat_cell(6, pair="others:G1")
                + series("with", FLAT[:6], FLAT_JUDGE, start=40, ctx="w2", pair="others:G2")
                + series("without", FLAT[:6], FLAT_JUDGE, start=40, ctx="o2",
                         pair="others:G2"))
         self.assertEqual(self.verdict(tie, ["model-a"])["cells"][0]["key"]["with_context"],
+                         "w2")
+        full_tie = (series("with", FLAT[:6], FLAT_JUDGE, start=40, ctx="w1", pair="others:G1")
+                    + series("without", FLAT[:6], FLAT_JUDGE, start=40, ctx="o1",
+                             pair="others:G1")
+                    + series("with", FLAT[:6], FLAT_JUDGE, start=40, ctx="w2",
+                             pair="others:G2")
+                    + series("without", FLAT[:6], FLAT_JUDGE, start=40, ctx="o2",
+                             pair="others:G2"))
+        self.assertEqual(self.verdict(full_tie, ["model-a"])["cells"][0]["key"]["with_context"],
                          None)
         # The pair with more runs in its SMALLER arm wins, not the larger.
         lopsided = (series("with", FLAT[:20], FLAT_JUDGE, pair="others:G1")
@@ -920,45 +1227,32 @@ class VerdictTests(unittest.TestCase):
         key = self.verdict(lopsided, ["model-a"])["cells"][0]["key"]
         self.assertEqual((key["with_context"], key["without_context"]), ("w2", "o2"))
 
-    def test_one_trial_runs_count_and_retire_only_at_the_same_looks(self):
+    def test_one_trial_runs_count_and_are_decided_like_any_other(self):
         # Round 5, N1: the weekly sweep fires one trial per run. Such a run
-        # counts, and no-benefit still needs both of the two largest looks.
+        # counts, and is decided on its run figures at any count.
         one = [(80,), (79,)] * 10
         judges = [7.0, 7.2] * 10
 
-        def runs(n):
-            return (series("with", one[:n], judges, spread=False)
-                    + series("without", one[:n], judges, spread=False))
-        for n, want in ((4, "insufficient"), (9, "insufficient"),
-                        (10, "no-benefit-pending"), (19, "no-benefit-pending"),
-                        (20, "no-benefit")):
+        def runs(n, with_judges=judges):
+            return (series("with", one[:n], with_judges[:n], spread=False)
+                    + series("without", one[:n], judges[:n], spread=False))
+        for n, want in ((2, "insufficient"), (3, "no-benefit"), (20, "no-benefit")):
             with self.subTest(n=n):
                 result = cell(*(lambda r: (r[:n], r[n:]))(runs(n)), carried=True)
                 self.assertEqual(result["class"], want, result["reason"])
                 self.assertEqual(result["with"]["runs"], n)
-        # Its bounds are the run-level ones: the judge floor is 0 (no run has
-        # two trials) and the objective floor is binomial over its trials.
+        # Its bounds are the run-level ones, on the measured priors.
         result = cell(*(lambda r: (r[:20], r[20:]))(runs(20)), carried=True)
-        self.assertEqual((result["with"]["judge_floor"], result["without"]["judge_floor"]),
-                         (0.0, 0.0))
-        self.assertEqual([look["n"] for look in result["looks"]], [5, 10, 20])
         rates = [r / T for r in (80, 79) * 10]
-        _, upper = gates.bounds(
-            rates, rates, TEST_POLICY["retire_confidence"],
-            TEST_POLICY["bootstrap_resamples"],
-            floors=tuple(gates.binomial_floor(sum(rates) / 20, 20) for _ in "ab"))
-        self.assertAlmostEqual(result["objective"]["retire_upper"], upper)
-        # Equal judge figures in every one-trial run of an arm cannot bound
-        # a delta, even when the other arm's vary: there is no spread to
-        # stand in for the missing within-run floor.
-        flat = (series("with", one, [7.0] * 20, spread=False)
-                + series("without", one, [7.0] * 20, spread=False))
-        self.assertEqual(cell(flat[:20], flat[20:], carried=True)["class"], "insufficient")
-        half = (series("with", one, [7.0] * 20, spread=False)
-                + series("without", one, judges, spread=False))
-        result = cell(half[:20], half[20:], carried=True)
-        self.assertEqual(result["class"], "insufficient", result["reason"])
-        self.assertIn("run judge figures that are not all equal", result["reason"])
+        _, upper = gates.confidence_sequence(
+            rates, rates, TEST_POLICY["retire_confidence"], result["priors"]["objective"],
+            TEST_POLICY["prior_strength"])
+        self.assertAlmostEqual(result["objective"]["retire_upper"], upper, places=12)
+        # Equal judge figures in every one-trial run of an arm are decided:
+        # no spread is required (2026-10-31).
+        flat = runs(20, [7.0] * 20)
+        result = cell(flat[:20], flat[20:], carried=True)
+        self.assertEqual(result["class"], "no-benefit", result["reason"])
 
     def test_the_arm_context_is_the_newest_among_runs_of_the_content_on_main(self):
         # The newest with run is of other content and another context; the
@@ -1323,10 +1617,10 @@ class ComputeGatesTests(unittest.TestCase):
         return run_ids
 
 
-    def run_gates(self, name, registry=True, as_of=AS_OF):
+    def run_gates(self, name, registry=True, as_of=AS_OF, policy_file=None):
         out = self.tmp / name
         args = ["--results-tree", str(self.tree), "--roster", str(self.roster),
-                "--policy", str(POLICY_FILE), "--evals-dir", str(self.evals),
+                "--policy", str(policy_file or POLICY_FILE), "--evals-dir", str(self.evals),
                 "--as-of", as_of, "--out", str(out)]
         if registry:
             args += ["--registry", f"acsi-agentskills={self.registry}"]
@@ -1348,6 +1642,37 @@ class ComputeGatesTests(unittest.TestCase):
         second, _ = self.run_gates("b.json")
         self.assertEqual(first.read_bytes(), second.read_bytes())
 
+    def test_one_trial_runs_count(self):
+        """A one-trial run's arm summary IS its trial, with `n: 1`, no
+        aggregate and no trial files (harness/run_eval.py, "Fixture
+        layout"). Every routine run fired with trials 1 was once skipped as
+        "no aggregate block", so no gate saw it (2026-10-31)."""
+        self.write("one", [[80]] * 3, [8.0] * 3)
+        for arm in sorted(self.tree.glob("routine-results/*/one/*/*_skill")):
+            outer = json.loads((arm / "summary.json").read_text(encoding="utf-8"))
+            inner = json.loads((arm / "trial-1" / "summary.json").read_text(
+                encoding="utf-8"))
+            shutil.rmtree(arm / "trial-1")
+            for field in ("aggregate", "errors"):
+                outer.pop(field)
+            write_json(arm / "summary.json", {**outer, **inner, "n": 1})
+        index = compute_gates.build_index(self.tree, self.evals, AS_OF)
+        mine = [r for r in index["runs"] if r["skill"] == "one"]
+        self.assertEqual(sorted(r["role"] for r in mine), ["with"] * 3 + ["without"] * 3)
+        self.assertTrue(all(len(r["trials"]) == 1 and r["trials"][0]["scored"]
+                            for r in mine))
+        self.assertEqual(index["skipped"], {"no aggregate block": 1})
+        # Only `n` 1 with no trial files is a trial; `n` 2 still needs its
+        # aggregate, and so does a summary beside trial files.
+        arms = sorted(self.tree.glob("routine-results/*/one/*/*_skill"))
+        self.edit(arms[0] / "summary.json", lambda d: d.update(n=2))
+        self.edit(arms[1] / "summary.json", lambda d: d.update(n=True))
+        write_json(arms[2] / "trial-1" / "summary.json",
+                   json.loads((arms[2] / "summary.json").read_text(encoding="utf-8")))
+        index = compute_gates.build_index(self.tree, self.evals, AS_OF)
+        self.assertEqual(len([r for r in index["runs"] if r["skill"] == "one"]), 3)
+        self.assertEqual(index["skipped"], {"no aggregate block": 4})
+
     def test_verdicts_links_and_skips(self):
         self.write("flat", FLAT[:10], FLAT_JUDGE)
         # One fixture per routine run id, as the fire workflow makes them.
@@ -1364,7 +1689,7 @@ class ComputeGatesTests(unittest.TestCase):
         entry = doc["skills"]["flat"]["cells"][0]["runs"]["with"][0]
         self.assertEqual(entry["run"]["billing"], "api")
         self.assertTrue((self.tree / entry["report"]["path"]).is_file())
-        self.assertEqual(doc["retirement_mode"], "auto")
+        self.assertEqual(doc["retirement_mode"], "proposal")
         self.assertNotIn("previous", doc)
 
     def in_place_fixture(self, skill):
@@ -1446,13 +1771,32 @@ class ComputeGatesTests(unittest.TestCase):
         self.assertEqual(len(compute_gates.build_index(self.tree, self.evals,
                                                        AS_OF)["bare_runs"]), 1)
 
-    def test_five_runs_are_pending_and_ten_retire(self):
+    def test_two_runs_are_insufficient_and_three_retire(self):
+        # No fixed looks (2026-10-31): the verdict is retaken on every run.
+        # On the rule before 2026-11-02 and a skill cell's own priors (#557
+        # follow-up: under 10 degrees of freedom, the fallback), five runs
+        # per arm leave the judge's upper bound above its 0.5 margin; a
+        # sixth brings it under.
+        legacy = self.tmp / "legacy-policy.yml"
+        legacy.write_text(POLICY_FILE.read_text(encoding="utf-8").replace(
+            "skills:\n  objective_margin: 0.15\n  judge_margin: 1.5",
+            "skills:\n  objective_margin: 0.05\n  judge_margin: 0.5").replace(
+            "  retire_confidence: 0.90\n  check_confidence: 0.85\n  min_cli_versions: 2\n"
+            "  prior_strength: 4\n  ceiling_fraction: 0.90\n  judge_ceiling: 9.0\n"
+            "  floor_fraction: 0.10\n  retirement_mode: proposal\n# Guidance",
+            "  retire_confidence: 0.95\n  check_confidence: 0.85\n  min_cli_versions: 2\n"
+            "  prior_strength: 4\n  ceiling_fraction: 0.90\n  judge_ceiling: 9.0\n"
+            "  floor_fraction: 0.10\n  retirement_mode: proposal\n# Guidance"), encoding="utf-8")
+        self.assertEqual(gates.load_gate_policy(legacy)["skills"]["retire_confidence"], 0.95)
         self.write("flat", FLAT[:5], FLAT_JUDGE)
-        _, doc = self.run_gates("1.json")
-        self.assertEqual(doc["skills"]["flat"]["verdict"], "retire-pending")
-        self.write("flat", FLAT[5:10], FLAT_JUDGE[5:10], start=5)
-        _, doc = self.run_gates("2.json")
+        _, doc = self.run_gates("1.json", policy_file=legacy)
+        self.assertEqual(doc["skills"]["flat"]["verdict"], "insufficient")
+        cell_ = doc["skills"]["flat"]["cells"][0]
+        self.assertGreaterEqual(cell_["judge"]["retire_upper"], LEGACY_POLICY["judge_margin"])
+        self.write("flat", FLAT[5:6], FLAT_JUDGE[5:6], start=5)
+        _, doc = self.run_gates("2.json", policy_file=legacy)
         self.assertEqual(doc["skills"]["flat"]["verdict"], "retire")
+        self.assertEqual(doc["skills"]["flat"]["cells"][0]["with"]["runs"], 6)
 
     def test_as_of_is_required(self):
         with self.assertRaises(SystemExit):
@@ -1595,9 +1939,12 @@ class ComputeGatesTests(unittest.TestCase):
                                           "no aggregate block": 1})
         self.assertIsNone(doc["skills"]["flat"]["cells"][0]["cost_usd"])
         # The arms are independent samples: the four refused with arms leave
-        # their without arms counted, and six with runs reach one look.
+        # their without arms counted, and six with runs against ten without
+        # are enough to decide.
         self.assertEqual(len(doc["skills"]["flat"]["runs_used"]), 16)
-        self.assertEqual(doc["skills"]["flat"]["verdict"], "retire-pending")
+        self.assertEqual((doc["skills"]["flat"]["cells"][0]["with"]["runs"],
+                          doc["skills"]["flat"]["cells"][0]["without"]["runs"]), (6, 10))
+        self.assertEqual(doc["skills"]["flat"]["verdict"], "retire")
 
     def test_the_verdict_reads_the_roster_it_is_given(self):
         # The roster follows current use (2026-10-25): a superseded model
@@ -1715,8 +2062,9 @@ class ComputeGatesTests(unittest.TestCase):
 
 
     def test_judge_figures_whose_variance_underflows_do_not_crash(self):
-        # Round 4's reproducer (test_p5): judge figures around 1e-100 square
-        # to 0 in the Welch-Satterthwaite denominator: ZeroDivisionError.
+        # Round 4's reproducer (test_p5): judge figures around 1e-100 squared
+        # to 0 in the old Welch-Satterthwaite denominator (ZeroDivisionError);
+        # the moderated variance's prior keeps every bound finite.
         run_ids = self.write("flat", FLAT[:10], FLAT_JUDGE)
         for run_id in run_ids:
             for path in (self.tree / "routine-results" / run_id).rglob("trial-*/summary.json"):
@@ -1831,6 +2179,66 @@ class ComputeGatesTests(unittest.TestCase):
         self.assertEqual(doc["skills"]["one"]["raw_verdict"], "retire")
 
     # --- Round 6 -----------------------------------------------------------
+
+
+class ExpectedContentSkipTests(unittest.TestCase):
+    """expected_content leaves out a fixture listed in evals/unscheduled.yml
+    and a `draft: true` one (the owner, 2026-11-02); everything else is expected."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.evals = self.tmp / "evals"
+        for name, extra in (("kept", ""), ("listed", ""), ("drafty", "draft: true\n")):
+            directory = self.evals / "demo" / name
+            directory.mkdir(parents=True)
+            (directory / "fixture.yaml").write_text(
+                f"skill: demo\nprompt: p\n{extra}", encoding="utf-8")
+
+    def write(self, text):
+        (self.evals / "unscheduled.yml").write_text(text, encoding="utf-8")
+
+    def test_a_listed_fixture_and_a_draft_are_skipped_and_the_rest_kept(self):
+        self.write("fixtures:\n  - path: evals/demo/listed\n    reason: Example reason.\n")
+        self.assertEqual(sorted(compute_gates.expected_content(self.evals, "demo", {})), ["kept"])
+
+    def test_no_unscheduled_file_expects_every_non_draft_fixture(self):
+        self.assertEqual(sorted(compute_gates.expected_content(self.evals, "demo", {})),
+                         ["kept", "listed"])
+
+    def test_a_malformed_unscheduled_file_fails_closed(self):
+        for text in ("fixtures: [", "- just\n- a list\n", "fixtures: nope\n",
+                     "fixtures:\n  - reason: no path\n"):
+            with self.subTest(text=text):
+                self.write(text)
+                with self.assertRaises(ValueError):
+                    compute_gates.expected_content(self.evals, "demo", {})
+
+
+class ConfidenceReachedTests(unittest.TestCase):
+    """The display level the explorer page shows: the level at which the
+    confidence sequence's bound just touches the threshold."""
+
+    def test_the_bound_sits_on_the_threshold_at_the_level_reached(self):
+        a, b = [0.9, 0.8, 1.0], [0.5, 0.6]
+        delta = sum(a) / 3 - sum(b) / 2
+        level = gates.confidence_reached(a, b, 0.0625, 4, delta)
+        self.assertTrue(0 < level < 1)
+        lower, _ = gates.confidence_sequence(a, b, level, 0.0625, 4)
+        self.assertAlmostEqual(lower, 0.0, places=9)
+        margin = 0.05
+        level = gates.confidence_reached(b, a, 0.0625, 4, margin - (-delta))
+        _, upper = gates.confidence_sequence(b, a, level, 0.0625, 4)
+        self.assertAlmostEqual(upper, margin, places=9)
+
+    def test_the_wrong_side_reaches_no_confidence(self):
+        self.assertEqual(gates.confidence_reached([0.2], [0.6], 0.0625, 4, -0.4), 0.0)
+        self.assertEqual(gates.confidence_reached([0.2], [0.2], 0.0625, 4, 0.0), 0.0)
+
+    def test_more_runs_raise_it(self):
+        one = gates.confidence_reached([0.9], [0.5], 0.0625, 4, 0.4)
+        four = gates.confidence_reached([0.9] * 4, [0.5] * 4, 0.0625, 4, 0.4)
+        self.assertLess(one, four)
 
 
 if __name__ == "__main__":

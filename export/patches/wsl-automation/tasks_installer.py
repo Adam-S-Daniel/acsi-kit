@@ -9,9 +9,13 @@ remaining pwsh-based S4U tasks too. The comment that explained the
 indefinite-repetition trigger lived on the keeper trigger, so it moves to the
 ccstatusline trigger, which now carries that construction first.
 
-The kit adds one task, the daily session miner (DECISIONS "Export record:
-wsl-automation"): the same shape as the usage census (wsl.exe as the action,
-S4U, one daily trigger, no StartWhenAvailable), with a 30 minute limit.
+The source registers a daily session miner too, but the kit's own wrapper
+(DECISIONS "Export record: wsl-automation") replaces the source's, so the
+miner task keeps the kit's comment, time (07:17) and 30 minute limit. The task
+health publish is left out with its script (DECISIONS "Re-pin (2026-11-03)"):
+it reads the left-out restic repository and keeper log and feeds the source
+account's fleet health audit. The weekly memory curation ships as the source
+has it.
 
 register-tasks.ps1, the thin elevated wrapper, follows the function's
 parameters.
@@ -34,29 +38,30 @@ WRAPPER = "scripts/register-tasks.ps1"
 
 HELP_HEAD = """    .SYNOPSIS
         Registers or updates the scheduled tasks that drive ccstatusline config sync, Codex Cloud
-        environment sync, the daily usage census publish, the every-minute waiting feed publish,
-        and the daily session miner.
+        environment sync, the daily usage census publish, the daily session miner, the weekly
+        memory curation, and the every-minute waiting feed publish.
 
     .DESCRIPTION
-        Creates five Windows Scheduled Tasks, or updates them in place if they already exist: a
+        Creates six Windows Scheduled Tasks, or updates them in place if they already exist: a
         ccstatusline config sync task that runs scripts/sync-ccstatusline-config.ps1 on a short
         repeating interval; a Codex Cloud environment sync task that runs
         scripts/sync-codex-cloud-environments.ps1 at midnight and noon while the distro is running;
         a usage census publish task that runs scripts/publish-usage-census.sh inside the distro
-        once a day, calling wsl.exe directly so no pwsh is involved; a waiting feed publish task
-        that runs scripts/publish-waiting-feed.sh inside the distro every minute, the same way; and
-        a session miner task that runs scripts/run-session-miner.sh inside the distro once a day,
-        the same way.
+        once a day, calling wsl.exe directly so no pwsh is involved; a session miner task that
+        runs scripts/run-session-miner.sh inside the distro once a day, the same way; a memory
+        curation task that runs scripts/run-memory-curation.sh the same way once a week; and a
+        waiting feed publish task that runs scripts/publish-waiting-feed.sh inside the distro every
+        minute, the same way.
 
-        All five run as background S4U tasks (session 0), so they never flash a console window on
+        All six run as background S4U tasks (session 0), so they never flash a console window on
         the desktop. The two pwsh-based tasks require an MSI PowerShell 7 and the "Log on as a
         batch job" right - see -PwshPath and scripts/grant-keeper-batch-logon.ps1. The usage
-        census, waiting feed and session miner tasks are S4U too, but their action is wsl.exe
-        itself, so they need no pwsh at all.
+        census, session miner, memory curation and waiting feed tasks are S4U too, but their
+        action is wsl.exe itself, so they need no pwsh at all.
 
         Every task's Settings and Principal are always (re)built fresh from this function's
         parameters, whether the task already exists or not, so their battery/idle behavior stays
-        in sync. Re-running this function is idempotent for all five tasks. None of them sets
+        in sync. Re-running this function is idempotent for all six tasks. None of them sets
         StartWhenAvailable: a missed run stays missed rather than firing the instant the machine
         wakes, inside WSL's post-wake transition window (see AGENTS.md).
 
@@ -68,7 +73,8 @@ HELP_HEAD = """    .SYNOPSIS
 
     .PARAMETER ScriptsDir
         Directory containing sync-ccstatusline-config.ps1, sync-codex-cloud-environments.ps1,
-        publish-usage-census.sh, publish-waiting-feed.sh and run-session-miner.sh.
+        publish-usage-census.sh, run-session-miner.sh, run-memory-curation.sh and
+        publish-waiting-feed.sh.
 
     .PARAMETER DistroName
         Name of the WSL distro the tasks run in. Defaults to 'Ubuntu'.
@@ -85,11 +91,9 @@ CENSUS_TIME_NEW = """        Time of day (HH:mm) the usage census task's daily t
         start on it.
 """
 
-WAITING_PARAM = """        'Claude Waiting Feed Publish'.
-"""
-MINER_PARAMS = """        'Claude Waiting Feed Publish'.
-
-    .PARAMETER SessionMinerTaskName
+MINER_HELP_START = "    .PARAMETER SessionMinerTaskName\n"
+MINER_HELP_END = "    .PARAMETER MemoryCurationTaskName\n"
+MINER_PARAMS = """    .PARAMETER SessionMinerTaskName
         Name of the scheduled task that runs the session miner from WSL (skills-evals'
         scripts/run_session_miner.sh through scripts/run-session-miner.sh). Defaults to
         'Session Miner'.
@@ -97,13 +101,18 @@ MINER_PARAMS = """        'Claude Waiting Feed Publish'.
     .PARAMETER SessionMinerTime
         Time of day (HH:mm) the session miner task's daily trigger fires. Defaults to '07:17':
         off the hour, and hours away from the usage census, which reads the same transcripts.
-"""
 
-WSLEXE_OLD = """        Path to wsl.exe used as the usage census and waiting feed tasks' action. Defaults to
+"""
+MEMORY_TIME_OLD = "        to '13:47', an hour after the session miner so the two never overlap.\n"
+MEMORY_TIME_NEW = "        to '13:47', clear of every other task's time.\n"
+HEALTH_HELP_START = "    .PARAMETER TaskHealthTaskName\n"
+HEALTH_HELP_END = "    .PARAMETER WslExePath\n"
+
+WSLEXE_OLD = """        Path to wsl.exe used as the usage census, session miner, memory curation, waiting feed and task health tasks' action. Defaults to
         %SystemRoot%\\System32\\wsl.exe.
 """
-WSLEXE_NEW = """        Path to wsl.exe used as the usage census, waiting feed and session miner tasks' action.
-        Defaults to %SystemRoot%\\System32\\wsl.exe.
+WSLEXE_NEW = """        Path to wsl.exe used as the usage census, session miner, memory curation and waiting
+        feed tasks' action. Defaults to %SystemRoot%\\System32\\wsl.exe.
 """
 
 PWSH_OLD = """        MSI install of PowerShell 7 (C:\\Program Files\\PowerShell\\7) when present - required for
@@ -126,7 +135,7 @@ EXAMPLES_END = "    #>\n"
 EXAMPLES_NEW = """    .EXAMPLE
         Set-WslAutomationScheduledTasks -ScriptsDir 'C:\\Users\\<you>\\repos\\wsl-automation\\scripts'
 
-        Registers (or updates) all five scheduled tasks using default names, times and intervals.
+        Registers (or updates) all six scheduled tasks using default names, times and intervals.
 
     .EXAMPLE
         Set-WslAutomationScheduledTasks -ScriptsDir $PSScriptRoot -WhatIf
@@ -143,13 +152,9 @@ PARAMS_NEW = """        [Parameter(Mandatory)]
 
 """
 
-WAITING_DEFAULT = "        [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',\n"
-MINER_DEFAULTS = """        [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',
-
-        [string]$SessionMinerTaskName = 'Session Miner',
-
-        [string]$SessionMinerTime = '07:17',
-"""
+MINER_DEFAULT_OLD = "        [string]$SessionMinerTime = '12:47',\n"
+MINER_DEFAULT_NEW = "        [string]$SessionMinerTime = '07:17',\n"
+HEALTH_DEFAULTS = "        [string]$TaskHealthTaskName = 'Task Health Publish',\n\n        [string]$TaskHealthTime = '23:47',\n\n"
 
 WT_PARAM = "        [string]$WtPath = (Get-WslAutomationDefaultWtPath),\n\n"
 
@@ -228,6 +233,9 @@ WAITING_COMMENT_NEW = """    # minute with the indefinite-repetition constructio
 """
 
 ARCHIVE_ANCHOR = "    # --- Archive legacy scripts this module supersedes ----------------------\n"
+MINER_BLOCK_START = "    # --- Session miner: one daily trigger, wsl.exe as the action ------------\n"
+MINER_BLOCK_END = "    # --- Memory curation: one weekly (Monday) trigger, wsl.exe as the action\n"
+HEALTH_BLOCK_START = "    # --- Task health publish: one daily trigger, wsl.exe as the action ------\n"
 MINER_BLOCK = """    # --- Session miner: one daily trigger, wsl.exe as the action ------------
     # Same shape as the usage census (wsl.exe directly, S4U, session 0, no StartWhenAvailable: a
     # missed day stays missed, and the next run reads every session since the last one, so
@@ -239,7 +247,7 @@ MINER_BLOCK = """    # --- Session miner: one daily trigger, wsl.exe as the acti
     # machine; IgnoreNew keeps a slow run from doubling up.
     $sessionMinerArguments = "--distribution $DistroName --cd `"$ScriptsDir`" --exec /bin/bash ./run-session-miner.sh"
     $sessionMinerAction = New-ScheduledTaskAction -Execute $WslExePath -Argument $sessionMinerArguments
-    $sessionMinerTrigger = New-ScheduledTaskTrigger -Daily -At $SessionMinerTime
+    $sessionMinerTrigger = New-ScheduledTaskTrigger -Daily -At $SessionMinerTime | ConvertTo-WslLocalTimeTrigger
     $sessionMinerSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
     $sessionMinerPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\\$env:USERNAME" -LogonType S4U
@@ -262,26 +270,27 @@ MINER_BLOCK = """    # --- Session miner: one daily trigger, wsl.exe as the acti
 
 SUMMARY_OLD_START = "    Write-Information -MessageData \"Backup task '$BackupTaskName'"
 SUMMARY_OLD_END = "    Write-Information -MessageData \"ccstatusline task '$CcstatuslineTaskName'"
-WAITING_SUMMARY = "(repeats every 1 min, indefinitely)\" -InformationAction Continue\n"
-MINER_SUMMARY = (
-    "(repeats every 1 min, indefinitely)\" -InformationAction Continue\n"
-    "    Write-Information -MessageData \"Session miner task '$SessionMinerTaskName' (background/S4U): "
-    "$WslExePath $sessionMinerArguments (daily at $SessionMinerTime)\" -InformationAction Continue\n"
+HEALTH_SUMMARY = (
+    "    Write-Information -MessageData \"Task health task '$TaskHealthTaskName' (background/S4U): "
+    "$WslExePath $taskHealthArguments (daily at $TaskHealthTime)\" -InformationAction Continue\n"
 )
 
 
 def _function(text: str, where: str) -> str:
     text = T.replace_between(text, "    .SYNOPSIS\n", "    .PARAMETER CcstatuslineTaskName\n", HELP_HEAD, where, keep_end=False)
     text = T.sub_once(text, CENSUS_TIME_OLD, CENSUS_TIME_NEW, where)
-    text = T.sub_once(text, WAITING_PARAM, MINER_PARAMS, where)
+    text = T.replace_between(text, MINER_HELP_START, MINER_HELP_END, MINER_PARAMS, where)
+    text = T.sub_once(text, MEMORY_TIME_OLD, MEMORY_TIME_NEW, where)
+    text = T.replace_between(text, HEALTH_HELP_START, HEALTH_HELP_END, "", where)
     text = T.sub_once(text, "sessions waiting on the owner) from WSL", "sessions waiting on you) from WSL", where)
     text = T.sub_once(text, WSLEXE_OLD, WSLEXE_NEW, where)
     text = T.sub_once(text, PWSH_OLD, PWSH_NEW, where)
     text = T.replace_between(text, EXAMPLES_OLD_START, EXAMPLES_END, EXAMPLES_NEW, where)
     text = T.sub_once(text, "This function manages seven related scheduled tasks by design",
-                      "This function manages five related scheduled tasks by design", where)
+                      "This function manages six related scheduled tasks by design", where)
     text = T.replace_between(text, PARAMS_START, PARAMS_END, PARAMS_NEW, where)
-    text = T.sub_once(text, WAITING_DEFAULT, MINER_DEFAULTS, where)
+    text = T.sub_once(text, MINER_DEFAULT_OLD, MINER_DEFAULT_NEW, where)
+    text = T.sub_once(text, HEALTH_DEFAULTS, "", where)
     text = T.sub_once(text, WT_PARAM, "", where)
     text = T.sub_once(text, TRIM_OLD, TRIM_NEW, where)
     text = T.replace_between(text, REMOVED_START, REMOVED_END, STORE_WARNING, where)
@@ -289,10 +298,12 @@ def _function(text: str, where: str) -> str:
     text = T.sub_once(text, CC_TRIGGER_OLD, CC_TRIGGER_NEW, where)
     text = T.sub_once(text, CODEX_COMMENT_OLD, CODEX_COMMENT_NEW, where)
     text = T.sub_once(text, WAITING_COMMENT_OLD, WAITING_COMMENT_NEW, where)
-    text = T.sub_once(text, ARCHIVE_ANCHOR, MINER_BLOCK + ARCHIVE_ANCHOR, where)
+    text = T.replace_between(text, MINER_BLOCK_START, MINER_BLOCK_END, MINER_BLOCK, where)
+    text = T.replace_between(text, HEALTH_BLOCK_START, ARCHIVE_ANCHOR, "", where)
     text = T.replace_between(text, SUMMARY_OLD_START, SUMMARY_OLD_END, "", where)
-    text = T.sub_once(text, WAITING_SUMMARY, MINER_SUMMARY, where)
-    for gone in ("BackupDir", "ResticRepoDir", "KeeperTaskName", "LauncherTaskName", "WtPath", "restic", "the keeper", "keeper task", "keeperTrigger"):
+    text = T.sub_once(text, HEALTH_SUMMARY, "", where)
+    for gone in ("BackupDir", "ResticRepoDir", "KeeperTaskName", "LauncherTaskName", "WtPath", "restic", "the keeper", "keeper task", "keeperTrigger",
+                 "TaskHealth", "task-health", "task health"):
         if gone in text:
             raise T.PatchError(f"{where}: {gone!r} is still mentioned")
     return text
@@ -302,8 +313,8 @@ WRAPPER_HELP_START = ".SYNOPSIS\n"
 WRAPPER_HELP_END = ".PARAMETER CcstatuslineTaskName\n"
 WRAPPER_HELP_NEW = """.SYNOPSIS
     Wrapper script for Set-WslAutomationScheduledTasks; installs or updates the ccstatusline
-    config sync, Codex Cloud environment sync, usage census publish, waiting feed publish and
-    session miner scheduled tasks.
+    config sync, Codex Cloud environment sync, usage census publish, session miner, memory
+    curation and waiting feed publish scheduled tasks.
 
 .DESCRIPTION
     Thin wrapper that imports the WslAutomation module and calls
@@ -314,36 +325,36 @@ WRAPPER_HELP_NEW = """.SYNOPSIS
 
 .PARAMETER ScriptsDir
     Directory containing sync-ccstatusline-config.ps1, sync-codex-cloud-environments.ps1,
-    publish-usage-census.sh, publish-waiting-feed.sh and run-session-miner.sh. Defaults to the
-    directory this script lives in.
+    publish-usage-census.sh, run-session-miner.sh, run-memory-curation.sh and
+    publish-waiting-feed.sh. Defaults to the directory this script lives in.
 
 .PARAMETER DistroName
     Name of the WSL distro the tasks run in. Defaults to 'Ubuntu'.
 
 """
 
-WRAPPER_CENSUS_TIME = """.PARAMETER UsageCensusTime
-    Time of day (HH:mm) the usage census task's daily trigger fires. Defaults to '12:37'.
+WRAPPER_MINER_OLD = """.PARAMETER SessionMinerTime
+    Time of day (HH:mm) the session miner task's daily trigger fires. Defaults to '12:47'.
 """
-WRAPPER_MINER_PARAMS = """.PARAMETER UsageCensusTime
-    Time of day (HH:mm) the usage census task's daily trigger fires. Defaults to '12:37'.
-
-.PARAMETER WaitingFeedTaskName
+WRAPPER_MINER_NEW = """.PARAMETER SessionMinerTime
+    Time of day (HH:mm) the session miner task's daily trigger fires. Defaults to '07:17'.
+"""
+WRAPPER_HEALTH_START = ".PARAMETER TaskHealthTaskName\n"
+WRAPPER_HEALTH_END = ".PARAMETER WslExePath\n"
+WRAPPER_WAITING_PARAM = """.PARAMETER WslExePath
+"""
+WRAPPER_WAITING_PARAM_NEW = """.PARAMETER WaitingFeedTaskName
     Name of the scheduled task that publishes the waiting feed every minute. Defaults to
     'Claude Waiting Feed Publish'.
 
-.PARAMETER SessionMinerTaskName
-    Name of the scheduled task that runs the session miner. Defaults to 'Session Miner'.
-
-.PARAMETER SessionMinerTime
-    Time of day (HH:mm) the session miner task's daily trigger fires. Defaults to '07:17'.
+.PARAMETER WslExePath
 """
 
-WRAPPER_WSLEXE_OLD = """    Path to wsl.exe used as the usage census task's action. Defaults to
+WRAPPER_WSLEXE_OLD = """    Path to wsl.exe used as the usage census, session miner, memory curation, and task health tasks' action. Defaults to
     %SystemRoot%\\System32\\wsl.exe.
 """
-WRAPPER_WSLEXE_NEW = """    Path to wsl.exe used as the usage census, waiting feed and session miner tasks' action.
-    Defaults to %SystemRoot%\\System32\\wsl.exe.
+WRAPPER_WSLEXE_NEW = """    Path to wsl.exe used as the usage census, session miner, memory curation and waiting feed
+    tasks' action. Defaults to %SystemRoot%\\System32\\wsl.exe.
 """
 
 WRAPPER_PWSH_OLD = """    Path to pwsh.exe used as the action executable for all the tasks. Defaults to an MSI install
@@ -376,14 +387,17 @@ WRAPPER_PARAMS_START = "    [Parameter(Mandatory)]\n    [string]$BackupDir,\n"
 WRAPPER_PARAMS_END = "    [string]$CcstatuslineTaskName = 'ccstatusline Config Sync',\n"
 WRAPPER_PARAMS_NEW = "    [string]$DistroName = 'Ubuntu',\n\n"
 
-WRAPPER_CENSUS_DEFAULT = "    [string]$UsageCensusTime = '12:37',\n"
-WRAPPER_MINER_DEFAULTS = """    [string]$UsageCensusTime = '12:37',
+WRAPPER_DEFAULTS_OLD = """    [string]$SessionMinerTime = '12:47',
+"""
+WRAPPER_DEFAULTS_NEW = """    [string]$SessionMinerTime = '07:17',
+"""
+WRAPPER_HEALTH_DEFAULTS_OLD = """    [string]$TaskHealthTaskName = 'Task Health Publish',
 
-    [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',
+    [string]$TaskHealthTime = '23:47',
 
-    [string]$SessionMinerTaskName = 'Session Miner',
+"""
+WRAPPER_HEALTH_DEFAULTS_NEW = """    [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',
 
-    [string]$SessionMinerTime = '07:17',
 """
 
 WRAPPER_PWSH_COMMENT_OLD = """    # is both stable across updates and launchable from the non-interactive session 0 the S4U
@@ -397,25 +411,30 @@ WRAPPER_CALL_NEW = """    Set-WslAutomationScheduledTasks -ScriptsDir $ScriptsDi
         -CcstatuslineTaskName $CcstatuslineTaskName -CcstatuslineIntervalMinutes $CcstatuslineIntervalMinutes `
         -PwshPath $PwshPath -CodexCloudEnvironmentSyncTaskName $CodexCloudEnvironmentSyncTaskName `
         -UsageCensusTaskName $UsageCensusTaskName -UsageCensusTime $UsageCensusTime `
-        -WaitingFeedTaskName $WaitingFeedTaskName -SessionMinerTaskName $SessionMinerTaskName `
-        -SessionMinerTime $SessionMinerTime -WslExePath $WslExePath `
+        -SessionMinerTaskName $SessionMinerTaskName -SessionMinerTime $SessionMinerTime `
+        -MemoryCurationTaskName $MemoryCurationTaskName -MemoryCurationTime $MemoryCurationTime `
+        -WaitingFeedTaskName $WaitingFeedTaskName -WslExePath $WslExePath `
         -LegacyScriptsToArchive $LegacyScriptsToArchive -SkipTaskHistory:$SkipTaskHistory -WhatIf:$WhatIfPreference
 """
 
 
 def _wrapper(text: str, where: str) -> str:
     text = T.replace_between(text, WRAPPER_HELP_START, WRAPPER_HELP_END, WRAPPER_HELP_NEW, where)
-    text = T.sub_once(text, WRAPPER_CENSUS_TIME, WRAPPER_MINER_PARAMS, where)
+    text = T.sub_once(text, WRAPPER_MINER_OLD, WRAPPER_MINER_NEW, where)
+    text = T.replace_between(text, WRAPPER_HEALTH_START, WRAPPER_HEALTH_END, "", where)
+    text = T.sub_once(text, WRAPPER_WAITING_PARAM, WRAPPER_WAITING_PARAM_NEW, where)
     text = T.sub_once(text, WRAPPER_WSLEXE_OLD, WRAPPER_WSLEXE_NEW, where)
     text = T.sub_once(text, WRAPPER_PWSH_OLD, WRAPPER_PWSH_NEW, where)
     text = T.replace_between(text, WRAPPER_EXAMPLES_START, WRAPPER_EXAMPLES_END, WRAPPER_EXAMPLES_NEW, where)
     # The DistroName parameter moves up beside ScriptsDir, ahead of the removed block.
     text = T.sub_once(text, "    [string]$DistroName = 'Ubuntu',\n\n", "", where)
     text = T.replace_between(text, WRAPPER_PARAMS_START, WRAPPER_PARAMS_END, WRAPPER_PARAMS_NEW, where)
-    text = T.sub_once(text, WRAPPER_CENSUS_DEFAULT, WRAPPER_MINER_DEFAULTS, where)
+    text = T.sub_once(text, WRAPPER_DEFAULTS_OLD, WRAPPER_DEFAULTS_NEW, where)
+    text = T.sub_once(text, WRAPPER_HEALTH_DEFAULTS_OLD, WRAPPER_HEALTH_DEFAULTS_NEW, where)
     text = T.sub_once(text, WRAPPER_PWSH_COMMENT_OLD, WRAPPER_PWSH_COMMENT_NEW, where)
     text = T.replace_between(text, WRAPPER_CALL_START, WRAPPER_CALL_END, WRAPPER_CALL_NEW, where)
-    for gone in ("BackupDir", "ResticRepoDir", "KeeperTaskName", "restic", "the keeper", "keeper task"):
+    for gone in ("BackupDir", "ResticRepoDir", "KeeperTaskName", "restic", "the keeper", "keeper task",
+                 "TaskHealth", "task-health", "task health"):
         if gone in text:
             raise T.PatchError(f"{where}: {gone!r} is still mentioned")
     return text

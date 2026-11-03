@@ -8,8 +8,9 @@ recommended or opinionated skill or guidance section
 library/<kind>/<id>/skills-evals/:
 
 - its fixture folders (evals/<skill>/, evals/guidance/<section>/), whole;
-- its weekly rows from evals/scheduled.yml (empty_config.py keeps only the
-  core rows), appended again by add-content.sh;
+- its weekly rows from evals/scheduled.yml, and its rows in
+  evals/unscheduled.yml (empty_config.py keeps only the core rows), appended
+  again by add-content.sh;
 - the test modules that only test those fixtures, whole;
 - the test classes and methods inside shared modules that test them, copied
   here (machinery_tests.py then removes them from the tree), with ops that
@@ -115,8 +116,8 @@ def _classes(text: str) -> dict:
     return {n.name: n for n in ast.parse(text).body if isinstance(n, ast.ClassDef)}
 
 
-def _scheduled_rows(root: Path) -> dict:
-    text = (root / "evals/scheduled.yml").read_text(encoding="utf-8")
+def _scheduled_rows(root: Path, name: str = "scheduled.yml") -> dict:
+    text = (root / "evals" / name).read_text(encoding="utf-8")
     rows = {}
     for m in re.finditer(r"^  - path: (\S+)\n(?:    .*\n)*", text, re.M):
         rows[m.group(1)] = m.group(0)
@@ -126,6 +127,9 @@ def _scheduled_rows(root: Path) -> dict:
 def apply(root: Path, ctx) -> None:
     lib = ctx["library"]
     rows = _scheduled_rows(root)
+    # evals/unscheduled.yml (new in the source, re-pin 2026-11-03): a skill
+    # fixture off the schedule needs its row there, so the item carries it.
+    off_rows = _scheduled_rows(root, "unscheduled.yml")
     run_tests = (root / RUN_TESTS).read_text(encoding="utf-8")
     gates = (root / GATES).read_text(encoding="utf-8")
     rt_classes, gate_classes = _classes(run_tests), _classes(gates)
@@ -140,6 +144,10 @@ def apply(root: Path, ctx) -> None:
         if sched:
             lib.write_fragment(kind, item, TREE, "scheduled-rows.yml", "".join(sched))
             ops.append({"op": "append-lines", "file": "evals/scheduled.yml", "fragment": "scheduled-rows.yml"})
+        off = [off_rows[p] for p in sorted(off_rows) if p == folders[0] or p.startswith(folders[0] + "/")]
+        if off:
+            lib.write_fragment(kind, item, TREE, "unscheduled-rows.yml", "".join(off))
+            ops.append({"op": "append-lines", "file": "evals/unscheduled.yml", "fragment": "unscheduled-rows.yml"})
         for module in modules:
             lib.move_tree(kind, item, TREE, root, module)
         for name in rt_cls:

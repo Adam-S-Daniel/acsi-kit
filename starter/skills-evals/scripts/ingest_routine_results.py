@@ -33,10 +33,26 @@ checkout, refusing to overwrite a file that differs.
 Subcommands (all output is `key=value` lines of already-validated values,
 for $GITHUB_OUTPUT):
 
-  resolve  --event-name NAME --event-path PATH
+  resolve  --event-name NAME --event-path PATH         (adds kind=eval|cost)
   validate --repo DIR --base REF --source REF --branch NAME
-           [--expect-sha SHA] --out DIR
-  place    --staged DIR --tree DIR
+           [--expect-sha SHA] --out DIR                (adds kind=, dest=)
+  place    --staged DIR --tree DIR [--kind eval|cost]
+  estimate --tree DIR --run-id ID
+
+A `claude/eval-cost-<run id>` branch (#572 part 1, 2026-11-02) is the other
+kind: `validate` dispatches on the branch regex to `validate_cost`, which
+accepts exactly one `improve-cost/<run id>/cost.json` passing
+scripts/improve_cost.py's `check_record` and stages it at
+`improve-costs/<run id>.json`. A rejection of either kind exits 1 (the run
+goes red: that is the alarm). `place --kind cost` keeps the first record
+ingested for a run id and reports `conflict=true`, exit 0, for a differing
+second one.
+
+`estimate` writes `routine-results/<run id>/cost_estimate.json` beside a run
+just placed (owner decision, 2026-11-01): each run_eval invocation's
+`usage.cost_estimate` with its `points` filled in, at the points-per-dollar
+rate the runs already on the tree measure (`calibrate`). It reads only the
+tree, never the branch, and never rewrites a file that is there.
 """
 
 from __future__ import annotations
@@ -57,6 +73,19 @@ from pathlib import Path
 
 RUN_ID = r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}"
 BRANCH_RE = re.compile(rf"claude/eval-(?P<run_id>{RUN_ID})")
+#: An improve run's cost record (#572 part 1, 2026-11-02): the routine
+#: pushes `claude/eval-cost-<run id>` on EVERY improve or guidance-improve
+#: exit, adding exactly COST_SOURCE. Used with fullmatch only, so it and
+#: BRANCH_RE never match one name (`cost-` is not a run id's digits).
+COST_BRANCH_RE = re.compile(rf"claude/eval-cost-(?P<run_id>{RUN_ID})")
+COST_SOURCE_ROOT = "improve-cost"
+COST_SOURCE_NAME = "cost.json"
+#: Where an accepted record lands on persistent/eval-results: its own root,
+#: never `routine-results/`, which the allowance guard and `calibrate` read
+#: as one directory per ingested EVAL run (a cost record there would free
+#: an eval fire's reservation).
+COST_DEST_ROOT = "improve-costs"
+COST_CAP = 4 * 1024
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 TIMESTAMP_RE = re.compile(r"[0-9]{8}T[0-9]{6}Z")
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
@@ -298,18 +327,28 @@ SUMMARY_ALLOWED = SUMMARY_REQUIRED + (
     "judge_selection", "fixture_digest", "judge_conditional") + (
     # An isolation guidance run's pooling key (#124): its fixture directory's
     # name and the section's and the rest of the guidance's digests.
-    "fixture_name", "guidance_digests")
+    "fixture_name", "guidance_digests") + (
+    # A guidance arm's own session receipt (#139, harness/guidance.py
+    # receipt_verdict).
+    "receipt",)
 #: A guidance summary's `guidance_digests` (harness/guidance.py content_digests).
 GUIDANCE_DIGEST_KEYS = ("section", "rest")
+#: Allowed, not required: the digest of the `section` arm's tokenless payload,
+#: which summaries from before it was recorded lack.
+GUIDANCE_DIGEST_OPTIONAL = ("section_payload",)
 #: A summary's `judge_selection` (#371): which model judges the arm, and the
 #: rule that chose it. Null when the run selected no judge.
 JUDGE_SELECTION_KEYS = ("model", "rule", "arm_tier", "judge_tier")
 JUDGE_SELECTION_RULES = ("tier-above-arm", "roster-judge", "fixture-pin")
 AGENT_KEYS = ("usage", "cost_usd", "num_turns", "duration_ms")
-#: `harness` keys every summary has carried since #71; `effort` came later
-#: and is optional, so an older summary still ingests.
+#: `harness` keys every summary has carried since #71; `effort` and
+#: `git_version` (#535, run_eval.git_version) came later and are optional, so
+#: an older summary still ingests.
 HARNESS_KEYS = ("name", "version", "permission_mode")
-HARNESS_ALLOWED = HARNESS_KEYS + ("effort",)
+HARNESS_ALLOWED = HARNESS_KEYS + ("effort", "git_version")
+#: `harness.git_version`: `git --version`'s first line, as run_eval reduces
+#: it (VERSION_MAX_CHARS characters of [A-Za-z0-9._() -]), or null.
+GIT_VERSION_RE = re.compile(r"git version [0-9][A-Za-z0-9._() -]{0,51}")
 #: run_eval's agent effort levels (guidance.EFFORT_LEVELS; a test pins the
 #: two together). Null is the CLI's default.
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
@@ -454,6 +493,11 @@ DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 REPOSITORY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}")
 CONTEXT_KEYS = ("repository", "revision", "digest", "lock_digest", "sources",
                 "guidance", "measurements")
+#: Optional in `context` (#535, ADR 0012's fleet hooks addendum): the digest
+#: of the fleet hook set the arm ran with (run_eval's
+#: fleet_hooks.HookSet.digest). Absent for an unhooked run and in every
+#: summary from before the hooks.
+CONTEXT_OPTIONAL = ("fleet_hooks_digest",)
 SOURCE_KEYS = ("registry", "revision", "digest", "bundles")
 CONTEXT_GUIDANCE_KEYS = ("revision", "digest", "bytes", "sections", "hook_digest")
 MEASUREMENT_KEYS = ("guidance_bytes", "skill_catalog_bytes", "skill_payload_bytes")
@@ -468,6 +512,11 @@ SUBJECT_KEYS = {
                  "end_char", "start_byte", "end_byte", "bytes", "deployed_digest",
                  "tested_digest", "tested_bytes"),
 }
+#: Optional in a skill context_subject (skills-evals#548): which copy the with
+#: arm tested, "main" (the registry checkout's) or "candidate"
+#: (--subject-candidate), and for "main" the checkout's HEAD commit. Older
+#: summaries lack both.
+SUBJECT_OPTIONAL = {"skill": ("subject_source", "subject_revision")}
 ARM_CONTEXT_KEYS = ("skills", "skills_digest", "guidance_bytes",
                     "guidance_digest", "subject_present")
 #: Optional in arm_context (#70): the digest of the arm's skills other than
@@ -498,7 +547,10 @@ def check_in_place(doc, where: str, parts: dict) -> None:
         raise Rejected(f"{where}: role does not match its arm")
 
     context = doc["context"]
-    _object(context, f"{where}: context", CONTEXT_KEYS, CONTEXT_KEYS)
+    _object(context, f"{where}: context", CONTEXT_KEYS + CONTEXT_OPTIONAL, CONTEXT_KEYS)
+    if "fleet_hooks_digest" in context:
+        _pattern(context["fleet_hooks_digest"], f"{where}: context.fleet_hooks_digest",
+                 DIGEST_RE)
     _pattern(context["repository"], f"{where}: context.repository", REPOSITORY_RE)
     _pattern(context["revision"], f"{where}: context.revision", SHA_RE)
     _pattern(context["digest"], f"{where}: context.digest", DIGEST_RE)
@@ -558,7 +610,8 @@ def check_in_place(doc, where: str, parts: dict) -> None:
     kind = "guidance" if parts["key"].startswith("guidance/") else "skill"
     if not isinstance(subject, dict) or subject.get("kind") != kind:
         raise Rejected(f"{where}: context_subject kind does not match its key")
-    _object(subject, f"{where}: context_subject", SUBJECT_KEYS[kind], SUBJECT_KEYS[kind])
+    _object(subject, f"{where}: context_subject",
+            SUBJECT_KEYS[kind] + SUBJECT_OPTIONAL.get(kind, ()), SUBJECT_KEYS[kind])
     if subject["action"] not in ("removed", "added"):
         raise Rejected(f"{where}: context_subject.action is not removed or added")
     _pattern(subject["tested_digest"], f"{where}: tested digest", DIGEST_RE)
@@ -579,6 +632,18 @@ def check_in_place(doc, where: str, parts: dict) -> None:
             raise Rejected(f"{where}: removed subject is not in a deployed source bundle")
         if subject["skill"] != doc.get("skill"):
             raise Rejected(f"{where}: context_subject.skill does not match its key")
+        if ("subject_source" in subject) != ("subject_revision" in subject):
+            raise Rejected(f"{where}: context_subject subject_source and "
+                           "subject_revision go together")
+        if "subject_source" in subject:
+            if subject["subject_source"] not in ("main", "candidate"):
+                raise Rejected(f"{where}: context_subject.subject_source is not "
+                               "main or candidate")
+            if subject["subject_source"] == "main":
+                _pattern(subject["subject_revision"], f"{where}: subject revision",
+                         SHA_RE)
+            elif subject["subject_revision"] is not None:
+                raise Rejected(f"{where}: a candidate subject has no revision")
     else:
         if subject["section"] != doc.get("section"):
             raise Rejected(f"{where}: context_subject.section does not match its key")
@@ -631,6 +696,38 @@ GUIDANCE_RULE_IDS = {
     "event_input_in_run": "data-exposure-in-ci",
     "push_without_verification": "git-push-does-not-mean-commit-exists",
 }
+
+
+#: harness/guidance.py receipt_verdict's keys, reasons and file record.
+RECEIPT_KEYS = ("proof", "ok", "reason", "detail", "files")
+RECEIPT_REASONS = (None, "delivery_unproven", "receipt_contaminated")
+RECEIPT_FILE_KEYS = ("path", "memory_type", "bytes", "sha256")
+RECEIPT_FILES_MAX = 64
+#: A recorded path is relative to the arm's scratch (`config/...`, `ws/...`)
+#: or one of the two placeholders; never an absolute host path.
+RECEIPT_PATH_RE = re.compile(r"(?:config|ws)(?:/[^\x00-\x1f/]+)*"
+                             r"|<outside the arm's scratch>|<managed policy>")
+
+
+def check_receipt(value, where: str) -> None:
+    where = f"{where}: receipt"
+    _object(value, where, RECEIPT_KEYS, RECEIPT_KEYS)
+    if value["proof"] != "transcript" or not isinstance(value["ok"], bool):
+        raise Rejected(f"{where}: malformed")
+    if value["reason"] not in RECEIPT_REASONS or (value["reason"] is None) != value["ok"]:
+        raise Rejected(f"{where}: reason disagrees with ok")
+    _string(value["detail"], f"{where}: detail", 500, null=value["ok"])
+    files = value["files"]
+    if not isinstance(files, list) or len(files) > RECEIPT_FILES_MAX:
+        raise Rejected(f"{where}: files")
+    for entry in files:
+        _object(entry, f"{where}: file", RECEIPT_FILE_KEYS, RECEIPT_FILE_KEYS)
+        _pattern(entry["path"], f"{where}: file path", RECEIPT_PATH_RE)
+        if any(part in ("..", ".") for part in entry["path"].split("/")):
+            raise Rejected(f"{where}: file path")
+        _string(entry["memory_type"], f"{where}: memory_type", 32, null=True)
+        _integer(entry["bytes"], f"{where}: bytes", 0, 10 ** 9)
+        _pattern(entry["sha256"], f"{where}: sha256", DIGEST_RE)
 
 
 def check_guidance_violations(value, where: str) -> None:
@@ -693,7 +790,7 @@ USAGE_KEYS = ("schema_version", "started_at", *USAGE_NULLABLE,
 #: `budget_stop` (#68): present only on a run that stopped starting work for
 #: its weekly allowance budget, so every summary written before it still
 #: ingests. run_eval.budget_stop_reading's keys and reasons.
-USAGE_OPTIONAL = ("budget_stop",)
+USAGE_OPTIONAL = ("budget_stop", "cost_estimate")
 BUDGET_STOP_KEYS = ("reason", "utilization", "moved", "limit")
 BUDGET_STOP_REASONS = ("per_run_cap", "account_above")
 METER_KEYS = ("snapshot_count", "unreadable_events", "not_sampled")
@@ -710,6 +807,17 @@ ROLE_NULLABLE = ("num_turns", "cost_usd", "cost_basis", "cache_creation", "model
 ROLE_KEYS = ("calls", "duration_ms", *ROLE_NULLABLE, "reasons")
 ROLE_MODEL_KEYS = (*MODEL_TOKEN_KEYS, "cost_usd")
 CACHE_SPLIT_KEYS = ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
+#: `cost_estimate` (owner decision, 2026-11-01): optional, so a summary
+#: written before it still ingests. run_eval._cost_estimate's keys and basis.
+COST_ESTIMATE_USD = ("usd", *(f"{role}_usd" for role in USAGE_ROLES))
+COST_ESTIMATE_NULLABLE = ("metered_usd", "last_agent_call_usd",
+                          "points_per_usd", "points")
+COST_ESTIMATE_KEYS = (*COST_ESTIMATE_USD, *COST_ESTIMATE_NULLABLE,
+                      "calls_with_cost", "calls_without_cost", "basis", "reasons")
+COST_ESTIMATE_BASIS = ("an estimate from the CLI's own per-call dollar figures "
+                       "(total_cost_usd, else modelUsage costUSD), times the "
+                       "measured points-per-dollar rate; not a meter reading")
+MAX_USD = 10 ** 6
 
 
 def _reasons(block: dict, where: str, nullable) -> None:
@@ -900,11 +1008,43 @@ def check_budget_stop(stop, where: str, billing) -> None:
         raise Rejected(f"{where}: the reading does not reach its limit")
 
 
+def check_cost_estimate(estimate, where: str) -> None:
+    """`usage.cost_estimate`: exactly its keys, every dollar figure a number
+    from 0, the total the sum of its roles', the last agent call and the
+    metered span within the dollars they are part of, and the points null:
+    the harness never calibrates them (ingest does, in cost_estimate.json)."""
+    where = f"{where}.cost_estimate"
+    _object(estimate, where, COST_ESTIMATE_KEYS, COST_ESTIMATE_KEYS)
+    for name in COST_ESTIMATE_USD:
+        _number(estimate[name], f"{where}.{name}", 0, MAX_USD)
+    for name in ("metered_usd", "last_agent_call_usd"):
+        _number(estimate[name], f"{where}.{name}", 0, MAX_USD, null=True)
+    for name in ("calls_with_cost", "calls_without_cost"):
+        _integer(estimate[name], f"{where}.{name}", 0, MAX_COUNT)
+    if estimate["points_per_usd"] is not None or estimate["points"] is not None:
+        raise Rejected(f"{where}: the harness never calibrates points")
+    if estimate["basis"] != COST_ESTIMATE_BASIS:
+        raise Rejected(f"{where}.basis is not the harness's")
+    usd, slack = estimate["usd"], 1e-9 * max(1.0, estimate["usd"])
+    parts = sum(estimate[f"{role}_usd"] for role in USAGE_ROLES)
+    if abs(usd - parts) > slack:
+        raise Rejected(f"{where}.usd is not the sum of its roles")
+    if estimate["calls_with_cost"] == 0 and usd != 0:
+        raise Rejected(f"{where}: dollars without a call that carries them")
+    for name, within in (("metered_usd", usd), ("last_agent_call_usd",
+                                                 estimate["agent_usd"])):
+        if estimate[name] is not None and estimate[name] > within + slack:
+            raise Rejected(f"{where}.{name} is more than it is part of")
+    _reasons(estimate, where, COST_ESTIMATE_NULLABLE)
+
+
 def check_usage(usage, where: str, run: dict) -> None:
     where = f"{where}: usage"
     _object(usage, where, USAGE_KEYS + USAGE_OPTIONAL, USAGE_KEYS)
     if "budget_stop" in usage:
         check_budget_stop(usage["budget_stop"], where, run["billing"])
+    if "cost_estimate" in usage:
+        check_cost_estimate(usage["cost_estimate"], where)
     _integer(usage["schema_version"], f"{where}.schema_version", 1, 1)
     _span(usage, where)
     _check_meter(usage, where, run["billing"])
@@ -948,6 +1088,34 @@ def check_usage(usage, where: str, run: dict) -> None:
                 call["role"] == role for call in calls):
             raise Rejected(f"{where}.{role}.calls does not match the calls listed")
     _reasons(measured, where, MEASURED_NULLABLE)
+
+
+def _capped(detail: str) -> str:
+    """The harness's own cut (run_eval._capped_detail): MAX_STRING
+    characters, ending in a marker that says how long the detail was."""
+    marker = f" [truncated: {len(detail)} chars]"
+    return detail[:MAX_STRING - len(marker)] + marker
+
+
+def cap_summary_details(doc) -> bool:
+    """Cut every over-cap objective check `detail` and `error.detail` string
+    in a summary to MAX_STRING, in place; True when one was cut. A harness
+    from before the cap wrote them whole, and that one long string (a
+    passing `files_unchanged` naming every file, 2026-11-03) rejected the
+    whole paid run. Only these two fields are cut, and only strings: a
+    wrong type is still check_summary's to refuse."""
+    if not isinstance(doc, dict):
+        return False
+    holders = [doc.get("error")]
+    if isinstance(doc.get("objective_checks"), list):
+        holders.extend(doc["objective_checks"])
+    cut = False
+    for holder in holders:
+        if isinstance(holder, dict) and isinstance(holder.get("detail"), str) \
+                and len(holder["detail"]) > MAX_STRING:
+            holder["detail"] = _capped(holder["detail"])
+            cut = True
+    return cut
 
 
 def check_summary(doc, where: str, parts: dict) -> None:
@@ -1037,6 +1205,8 @@ def check_summary(doc, where: str, parts: dict) -> None:
     if harness.get("effort") is not None \
             and harness["effort"] not in EFFORT_LEVELS:
         raise Rejected(f"{where}: harness.effort is not a known level")
+    _pattern(harness.get("git_version"), f"{where}: harness.git_version",
+             GIT_VERSION_RE, null=True)
     if ("run" in doc) != ("usage" in doc):
         raise Rejected(f"{where}: run and usage come together")
     if "run" in doc:
@@ -1081,8 +1251,9 @@ def check_summary(doc, where: str, parts: dict) -> None:
         _pattern(doc["fixture_name"], f"{where}: fixture_name", NAME_RE)
     if "guidance_digests" in doc:
         _object(doc["guidance_digests"], f"{where}: guidance_digests",
-                GUIDANCE_DIGEST_KEYS, GUIDANCE_DIGEST_KEYS)
-        for field in GUIDANCE_DIGEST_KEYS:
+                GUIDANCE_DIGEST_KEYS + GUIDANCE_DIGEST_OPTIONAL, GUIDANCE_DIGEST_KEYS)
+        for field in GUIDANCE_DIGEST_KEYS + tuple(
+                f for f in GUIDANCE_DIGEST_OPTIONAL if f in doc["guidance_digests"]):
             _pattern(doc["guidance_digests"][field],
                      f"{where}: guidance_digests.{field}", DIGEST_RE)
     for field in ("errors", "scored"):
@@ -1091,6 +1262,8 @@ def check_summary(doc, where: str, parts: dict) -> None:
     check_in_place(doc, where, parts)
     if "guidance_violations" in doc:
         check_guidance_violations(doc["guidance_violations"], where)
+    if "receipt" in doc:
+        check_receipt(doc["receipt"], where)
     for field in ("trial_errors", "aggregate", "section", "mode", "bytes",
                   "delivery", "hook_verdict", "installed", "decoy",
                   "hook_returncode", "guard", "subject"):
@@ -1227,6 +1400,111 @@ def added_files(repo: str, base: str, tip: str,
 
 
 # ---------------------------------------------------------------------------
+# The cost estimate's points (owner decision, 2026-11-01).
+
+ESTIMATE_NAME = "cost_estimate.json"
+ESTIMATE_SCHEMA_VERSION = 1
+CALIBRATION_BASIS = (
+    "weekly meter points (usage.meter_delta seven_day, no overrun added) over "
+    "the dollars of the calls that delta spans (cost_estimate.metered_usd), "
+    "summed over every run_eval invocation of the runs ingested before this "
+    "one that measured both")
+
+
+def _invocations(run_dir: Path) -> list:
+    """One ingested run's run_eval invocations: each distinct run-level
+    `usage` block (every summary of an invocation carries the same one), in
+    summary path order. A symlink, an oversize summary or one that does not
+    parse is skipped."""
+    blocks = {}
+    for path in sorted(run_dir.rglob("summary.json")):
+        try:
+            if path.is_symlink() or path.stat().st_size > SIZE_CAPS["summary.json"]:
+                continue
+            summary = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+            continue
+        usage = summary.get("usage") if isinstance(summary, dict) else None
+        if isinstance(usage, dict):
+            level = {key: value for key, value in usage.items() if key != "measured"}
+            blocks.setdefault(json.dumps(level, sort_keys=True), usage)
+    return list(blocks.values())
+
+
+def _week_moved(usage: dict):
+    """How far one invocation's weekly meter moved, or None when it was
+    not measured (no delta, or the window reset), as allowance_guard reads it."""
+    delta = usage.get("meter_delta")
+    windows = delta.get("windows") if isinstance(delta, dict) else None
+    week = windows.get("seven_day") if isinstance(windows, dict) else None
+    moved = week.get("delta") if isinstance(week, dict) else None
+    if not is_number(moved) or week.get("window_reset") is not False:
+        return None
+    return max(0.0, float(moved))
+
+
+def calibrate(tree: Path, skip: str) -> dict:
+    """The points-per-dollar rate measured over the ingested runs on `tree`
+    other than `skip`: their weekly meter movement over the dollars of the
+    calls it spans. No overrun is added: it is what these estimates are
+    collected to size. The rate is None until some invocation measured both."""
+    points = dollars = 0.0
+    used = 0
+    root = tree / DEST_ROOT
+    runs = sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink()
+                  and p.name != skip) if root.is_dir() else []
+    for run_dir in runs:
+        for usage in _invocations(run_dir):
+            estimate = usage.get("cost_estimate")
+            metered = estimate.get("metered_usd") if isinstance(estimate, dict) else None
+            moved = _week_moved(usage)
+            if moved is None or not is_number(metered) or not 0 < metered <= MAX_USD:
+                continue
+            points += moved
+            dollars += metered
+            used += 1
+    return {"invocations": used, "meter_points": points, "metered_usd": dollars,
+            "points_per_usd": points / dollars if dollars and points else None}
+
+
+def estimate(tree: Path, run_id: str) -> dict:
+    """Write `cost_estimate.json` for the ingested run `run_id`, unless one
+    is there or no invocation of it carries `usage.cost_estimate` (a run
+    from before it). Full precision; nothing is rounded."""
+    if not re.fullmatch(RUN_ID, run_id):
+        raise Rejected("run id is not a routine run id")
+    run_dir = tree / DEST_ROOT / run_id
+    target = run_dir / ESTIMATE_NAME
+    if target.exists() or target.is_symlink() or not run_dir.is_dir() \
+            or run_dir.is_symlink():
+        return {"estimated": "false"}
+    found = [u["cost_estimate"] for u in _invocations(run_dir)
+             if isinstance(u.get("cost_estimate"), dict)]
+    if not found:
+        return {"estimated": "false"}
+    calibration = calibrate(tree, run_id)
+    rate = calibration["points_per_usd"]
+    why = ("no run ingested before this one measured both a weekly meter delta "
+           "and the dollars it spans")
+    invocations = []
+    for block in found:
+        reasons = {k: v for k, v in block["reasons"].items()
+                   if k not in ("points_per_usd", "points")}
+        if rate is None:
+            reasons.update(points_per_usd=why, points=why)
+        invocations.append({**block, "points_per_usd": rate,
+                            "points": None if rate is None else block["usd"] * rate,
+                            "reasons": reasons})
+    doc = {"schema_version": ESTIMATE_SCHEMA_VERSION, "run_id": run_id,
+           "calibration": {**calibration, "basis": CALIBRATION_BASIS},
+           "usd": sum(i["usd"] for i in invocations),
+           "points": None if rate is None else sum(i["points"] for i in invocations),
+           "invocations": invocations}
+    target.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    return {"estimated": "true"}
+
+
+# ---------------------------------------------------------------------------
 # Subcommands.
 
 def validate(repo: str, base: str, source: str, branch: str,
@@ -1273,7 +1551,10 @@ def validate(repo: str, base: str, source: str, branch: str,
             raise Rejected(f"{name!r}: size changed while reading")
         text = decode_text(data, where)
         if kind == "summary.json":
-            check_summary(load_json(text, where), where, parts)
+            doc = load_json(text, where)
+            if cap_summary_details(doc):
+                data = (json.dumps(doc, indent=2)).encode("utf-8")
+            check_summary(doc, where, parts)
         elif kind == "tool_trace.json":
             check_tool_trace(load_json(text, where), where)
         else:
@@ -1294,10 +1575,89 @@ def validate(repo: str, base: str, source: str, branch: str,
     return {"run_id": run_id, "sha": tip, "files": str(len(staged))}
 
 
-def place(staged: Path, tree: Path) -> dict:
+def validate_cost(repo: str, base: str, source: str, branch: str,
+                  expect_sha: str | None, out: Path,
+                  evals_dir: Path | None = None) -> dict:
+    """The cost-branch twin of `validate` (#572 part 1, 2026-11-02): the
+    same merge-base, additions-only and mode rules, then exactly ONE file at
+    exactly `improve-cost/<run id>/cost.json`, at most COST_CAP bytes, UTF-8
+    JSON with no duplicate key or non-finite constant, passing
+    improve_cost.check_record, for the branch's own run id. A record whose
+    target is a private skill (plan_week.private_skills over main's
+    evals/) or names no committed fixture set is refused: its name alone
+    must never reach the public results branch. The destination is built
+    from the validated run id, never the branch text; the commit message is
+    never read."""
+    import improve_cost  # noqa: PLC0415 - only a cost branch needs it
+    match = COST_BRANCH_RE.fullmatch(branch)
+    if not match:
+        raise Rejected("branch name is not claude/eval-cost-<run id>")
+    run_id = match.group("run_id")
+    tip = resolve_commit(repo, source)
+    if expect_sha is not None:
+        if not SHA_RE.fullmatch(expect_sha):
+            raise Rejected("expected sha is not a 40-hex commit id")
+        if tip != expect_sha:
+            raise Rejected("the branch moved since the push that triggered "
+                           "this run; that newer push triggers its own ingest")
+    base_sha = resolve_commit(repo, base)
+    merge_base = git(repo, "merge-base", base_sha, tip).decode().strip()
+    if not SHA_RE.fullmatch(merge_base):
+        raise Rejected("the branch shares no history with the default branch")
+    files = added_files(repo, merge_base, tip)
+    expected = f"{COST_SOURCE_ROOT}/{run_id}/{COST_SOURCE_NAME}"
+    if len(files) != 1:
+        raise Rejected("a cost branch adds exactly one file")
+    name, _, oid = files[0]
+    if name != expected:
+        raise Rejected(f"{name!r}: not {expected!r}")
+    size = int(git(repo, "cat-file", "-s", oid).decode().strip())
+    if size > COST_CAP:
+        raise Rejected(f"{name!r}: {size} bytes is over the {COST_CAP}-byte cap")
+    data = git(repo, "cat-file", "blob", oid)
+    if len(data) != size:
+        raise Rejected(f"{name!r}: size changed while reading")
+    doc = load_json(decode_text(data, repr(name)), repr(name))
+    try:
+        improve_cost.check_record(doc)
+    except improve_cost.Invalid as exc:
+        raise Rejected(f"{name!r}: {exc}") from None
+    if doc["run_id"] != run_id:
+        raise Rejected(f"{name!r}: run_id is not the branch's")
+    evals = evals_dir if evals_dir is not None else Path(repo) / "evals"
+    check_cost_target(doc["mode"], doc["target"], evals)
+    if out.exists() and any(out.iterdir()):
+        raise Rejected("the staging directory is not empty")
+    dest = f"{COST_DEST_ROOT}/{run_id}.json"
+    (out / COST_DEST_ROOT).mkdir(parents=True, exist_ok=True)
+    (out / dest).write_bytes(data)
+    return {"run_id": run_id, "sha": tip, "files": "1"}, dest
+
+
+def check_cost_target(mode: str, target: str, evals: Path) -> None:
+    """Refuse a target the public results branch must not name: a private
+    skill, or one with no committed fixture set here. A guidance section
+    must have fixtures under evals/guidance/<section>/ (the manifest is in
+    _agent-guidance, which this workflow does not check out; the fire
+    workflow's fire-check already required both)."""
+    folder = evals / target if mode == "improve" else evals / "guidance" / target
+    if folder.is_symlink() or not folder.is_dir() \
+            or not any(folder.rglob("fixture.yaml")):
+        raise Rejected("the record's target has no committed fixture set")
+    if mode == "improve":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import plan_week  # noqa: PLC0415 - only a cost branch needs it
+        if target in plan_week.private_skills(evals):
+            raise Rejected("the record's target is a private skill")
+
+
+def place(staged: Path, tree: Path, *, first_wins: bool = False) -> dict:
     """Copy every staged file onto `tree`. A file already there with the
     same bytes is left alone; one with different bytes is a conflict and
-    nothing is written. No path component in `tree` may be a symlink."""
+    nothing is written. No path component in `tree` may be a symlink.
+    With `first_wins` (a cost record, #572), a conflict is not an error:
+    the record already ingested for that run id stands, nothing is written
+    and `conflict=true` says so."""
     plan = []
     tree_root = tree.resolve()
     for path in sorted(p for p in staged.rglob("*") if p.is_file()):
@@ -1315,6 +1675,8 @@ def place(staged: Path, tree: Path) -> dict:
         data = path.read_bytes()
         if target.exists():
             if not target.is_file() or target.read_bytes() != data:
+                if first_wins:
+                    return {"changed": "false", "added": "0", "conflict": "true"}
                 raise Rejected(f"{str(rel)!r}: already ingested with different content")
             continue
         plan.append((target, data))
@@ -1322,6 +1684,22 @@ def place(staged: Path, tree: Path) -> dict:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
     return {"changed": "true" if plan else "false", "added": str(len(plan))}
+
+
+def resolve_ingest(event_name: str, event_path: str) -> dict:
+    """`resolve` for this workflow's two branch kinds, dispatched by branch
+    regex alone: `kind=eval` for claude/eval-<run id>, `kind=cost` for
+    claude/eval-cost-<run id> (#572). Each kind's own validator then judges
+    the branch, so a cost branch never reaches the eval validator, and
+    back."""
+    try:
+        return {**resolve(event_name, event_path, COST_BRANCH_RE,
+                          "claude/eval-cost-<run id>"), "kind": "cost"}
+    except Rejected:
+        pass
+    return {**resolve(event_name, event_path,
+                      shape="claude/eval-<run id> or claude/eval-cost-<run id>"),
+            "kind": "eval"}
 
 
 def resolve(event_name: str, event_path: str, branch_re: re.Pattern = BRANCH_RE,
@@ -1373,15 +1751,28 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("place")
     p.add_argument("--staged", required=True, type=Path)
     p.add_argument("--tree", required=True, type=Path)
+    p.add_argument("--kind", choices=("eval", "cost"), default="eval")
+    p = sub.add_parser("estimate")
+    p.add_argument("--tree", required=True, type=Path)
+    p.add_argument("--run-id", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "resolve":
-            result = resolve(args.event_name, args.event_path)
+            result = resolve_ingest(args.event_name, args.event_path)
+        elif args.command == "validate" and COST_BRANCH_RE.fullmatch(args.branch):
+            result, dest = validate_cost(args.repo, args.base, args.source,
+                                         args.branch, args.expect_sha or None,
+                                         args.out)
+            result.update(kind="cost", dest=dest)
         elif args.command == "validate":
             result = validate(args.repo, args.base, args.source, args.branch,
                               args.expect_sha or None, args.out)
+            result.update(kind="eval", dest=f"{DEST_ROOT}/{result['run_id']}")
+        elif args.command == "estimate":
+            result = estimate(args.tree, args.run_id)
         else:
-            result = place(args.staged, args.tree)
+            result = place(args.staged, args.tree,
+                           first_wins=args.kind == "cost")
     except Rejected as exc:
         # Paths are already repr()-escaped; this is the backstop, so no
         # message can start a new log line (a `::workflow-command::`).

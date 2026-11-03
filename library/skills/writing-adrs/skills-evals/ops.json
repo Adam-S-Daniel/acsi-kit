@@ -6,6 +6,11 @@
       "fragment": "scheduled-rows.yml"
     },
     {
+      "op": "append-lines",
+      "file": "evals/unscheduled.yml",
+      "fragment": "unscheduled-rows.yml"
+    },
+    {
       "op": "insert-class",
       "file": "test/run_tests.py",
       "class": "TestIssue80",

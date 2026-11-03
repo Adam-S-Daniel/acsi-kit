@@ -83,6 +83,14 @@ def tearDownModule() -> None:
     unittest.doModuleCleanups()
 
 
+
+def _but_git(harness: dict) -> dict:
+    """`harness` without `git_version`, which every summary carries (#535)
+    and which is the host's own `git --version`, pinned in
+    test_issue_535_git_provisioning.py."""
+    assert "git_version" in harness, harness
+    return {key: value for key, value in harness.items() if key != "git_version"}
+
 class TestShippedCoolingOff(unittest.TestCase):
 
     def test_the_shipped_policy_sets_zero_and_says_why(self):
@@ -157,6 +165,9 @@ class TestHarnessInstallStep(unittest.TestCase):
     PIN = re.compile(r"claude-code@\d")
     BAD_LATEST = "::error::npm reported no usable latest Claude Code version"
     SHADOWED = "::error::claude on PATH is not the npm latest just installed"
+    # The install script verifies the version itself, so a shadowing claude now
+    # fails there, after its retries; the step's own check stays as a backstop.
+    GAVE_UP = "did not install a working claude after"
 
     @staticmethod
     def _steps(path, job):
@@ -189,9 +200,13 @@ class TestHarnessInstallStep(unittest.TestCase):
         self.assertNotIn("preinstalled", script)
         self.assertNotIn("@latest", script)
         lines = [ln.strip() for ln in script.splitlines()]
-        installs = [ln for ln in lines
-                    if "npm install" in ln and "@anthropic-ai/claude-code" in ln]
-        self.assertEqual(installs, ['npm install -g "@anthropic-ai/claude-code@${latest}"'])
+        # The install and its retry live in scripts/install_claude_code.sh,
+        # called from this job's own checkout; no step runs `npm install`.
+        self.assertNotIn("npm install", script)
+        installs = [ln for ln in lines if "install_claude_code.sh" in ln
+                    and not ln.startswith("#")]
+        self.assertEqual(installs, ['bash "$GITHUB_WORKSPACE/skills-evals/scripts/'
+                                    'install_claude_code.sh" "$latest"'])
         self.assertIn('latest="$(npm view @anthropic-ai/claude-code version)" || '
                       '{ echo "::error::could not resolve the latest Claude Code '
                       'version"; exit 1; }', lines)
@@ -258,8 +273,12 @@ class TestHarnessInstallStep(unittest.TestCase):
         fakes, tools, shadow = tmp / "fakes", tmp / "tools", tmp / "shadow"
         for d in (fakes, tools, shadow):
             d.mkdir()
-        for tool in ("timeout", "cp"):
+        for tool in ("timeout", "cp", "bash", "mktemp", "rm"):
             (tools / tool).symlink_to(shutil.which(tool))
+        # The step runs the script from its own checkout.
+        script = tmp / "ws" / "skills-evals" / "scripts" / "install_claude_code.sh"
+        script.parent.mkdir(parents=True)
+        script.symlink_to(REPO_ROOT / "scripts" / "install_claude_code.sh")
         calls = tmp / "npm-calls.txt"
         # What `npm install` puts on PATH: a claude whose `--version` has a
         # second line, which the step must drop.
@@ -283,7 +302,10 @@ class TestHarnessInstallStep(unittest.TestCase):
         done = subprocess.run(
             [shutil.which("bash"), "-c", self._body(which)], capture_output=True,
             text=True, timeout=60,
-            env={"PATH": path, "GITHUB_STEP_SUMMARY": str(summary)})
+            env={"PATH": path, "GITHUB_STEP_SUMMARY": str(summary),
+                 "GITHUB_WORKSPACE": str(tmp / "ws"),
+                 # No real sleep, no wall clock (a retry would otherwise wait).
+                 "SLEEP_CMD": "true", "NOW_CMD": "echo 0"})
         npm_calls = (calls.read_text(encoding="utf-8").splitlines()
                      if calls.is_file() else [])
         return done, (summary.read_text(encoding="utf-8")
@@ -348,7 +370,7 @@ class TestHarnessInstallStep(unittest.TestCase):
                 with self.subTest(shadow=shadow):
                     done, summary, _ = self._run(which, shadow_version=shadow)
                     self.assertNotEqual(done.returncode, 0)
-                    self.assertIn(self.SHADOWED, done.stdout)
+                    self.assertIn(self.GAVE_UP, done.stdout)
                     self.assertEqual(summary, "")
 
     @unittest.skipUnless(shutil.which("bash") and shutil.which("timeout"),
@@ -360,7 +382,7 @@ class TestHarnessInstallStep(unittest.TestCase):
                                    installed_version="2.1.3 (Claude Code)",
                                    shadow_version="2.1.30 (Claude Code)")
             self.assertNotEqual(done.returncode, 0)
-            self.assertIn(self.SHADOWED, done.stdout)
+            self.assertIn(self.GAVE_UP, done.stdout)
             ok, _, _ = self._run(which, view="printf '2.1.3\\n'",
                                  installed_version="2.1.3 (Claude Code)")
             self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
@@ -543,7 +565,7 @@ class TestSkillArmsRecordVersions(_RunEvalEndToEnd):
             with self.subTest(arm=arm):
                 summary = json.loads((run_dir / EVAL_DIR.name / arm / "summary.json")
                                      .read_text(encoding="utf-8"))
-                self.assertEqual(summary["harness"],
+                self.assertEqual(_but_git(summary["harness"]),
                                  {"name": "claude-code",
                                   "version": FAKE_VERSION_LINE,
                                   "permission_mode": "auto", "effort": None})
@@ -591,7 +613,7 @@ class TestSkillArmsRecordVersions(_RunEvalEndToEnd):
         summary = json.loads((self._run_dir("setup-fails") / "without_skill" /
                               "summary.json").read_text(encoding="utf-8"))
         self.assertEqual(summary["error"]["type"], "setup_failed")
-        self.assertEqual(summary["harness"],
+        self.assertEqual(_but_git(summary["harness"]),
                          {"name": "claude-code", "version": FAKE_VERSION_LINE,
                           "permission_mode": "auto", "effort": None})
         self.assertEqual(summary["models_used"], [])
@@ -609,7 +631,7 @@ class TestSkillArmsRecordVersions(_RunEvalEndToEnd):
         self.assertIn("exit 9", proc.stderr)
         summary = json.loads((self._run_dir(skill) / EVAL_DIR.name / "without_skill" /
                               "summary.json").read_text(encoding="utf-8"))
-        self.assertEqual(summary["harness"], {"name": "claude-code", "version": None,
+        self.assertEqual(_but_git(summary["harness"]), {"name": "claude-code", "version": None,
                                               "permission_mode": "auto", "effort": None})
         self.assertIsNone(summary["error"])
         self.assertEqual(summary["judge_models_used"], [])
@@ -670,6 +692,9 @@ class TestGuidanceArmsRecordVersions(unittest.TestCase):
              mock.patch.object(run_eval.guidance, "deliver", return_value=info), \
              mock.patch.object(run_eval.guidance, "agent_env", return_value={}), \
              mock.patch.object(run_eval.guidance, "run_guard", return_value=guard), \
+             mock.patch.object(run_eval.guidance, "receipt_verdict", return_value={
+                 "proof": "transcript", "ok": True, "reason": None,
+                 "detail": None, "files": []}), \
              mock.patch.object(run_eval, "_guard_error",
                                return_value={"type": "guard", "detail": "d"}), \
              mock.patch.object(run_eval, "run_agent", return_value=agent or {
@@ -683,7 +708,7 @@ class TestGuidanceArmsRecordVersions(unittest.TestCase):
     def test_a_scored_guidance_arm_records_both(self):
         result = self._run()
         summary = self._summary()
-        self.assertEqual(summary["harness"],
+        self.assertEqual(_but_git(summary["harness"]),
                          {"name": "claude-code", "version": "9.9.9 (Claude Code)",
                           "permission_mode": "auto", "effort": None})
         self.assertEqual(summary["models_used"], ["fake-model-a"])

@@ -22,6 +22,7 @@ Every item `REGENERATE.md` lists, and the quick start step that handles it:
 | `repo-settings` | `.github/workflows/actions.lock` | 17 |
 | `repo-settings` | GitHub App ids | 7 |
 | `repo-settings` | `repo-settings/fleet.yml`'s repo list | 8 |
+| `wsl-automation` | `.github/workflows/scheduled-run-health.yml` | 15 |
 | `wsl-automation` | `skills.lock` | 13 |
 | `wsl-automation` | `.github/workflows/actions.lock` | 17 |
 | `wsl-automation` | The Codex Cloud bootstrap pin | 16 |
@@ -75,11 +76,11 @@ opens its own pull request; the nightly bumper runs it from then on).
 
 ## The scheduled-run-health pin
 
-`scheduled-run-health.yml` in `repo-settings`, `skills-evals` and
-`acsi-agentskills` calls `_agent-guidance`'s reusable workflow, and a cross-repo
-reusable takes a full sha; the export ships forty zeros.
-`bash bootstrap/regenerate.sh run-health-sha` writes your `_agent-guidance`
-default branch's commit into all three.
+`scheduled-run-health.yml` in `repo-settings`, `skills-evals`,
+`acsi-agentskills` and `wsl-automation` calls `_agent-guidance`'s reusable
+workflow, and a cross-repo reusable takes a full sha; the export ships forty
+zeros. `bash bootstrap/regenerate.sh run-health-sha` writes your
+`_agent-guidance` default branch's commit into all four.
 
 ## The Codex Cloud pin
 

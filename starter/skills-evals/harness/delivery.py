@@ -117,13 +117,23 @@ class SkillSubject:
     tested_digest: str
     files: Mapping[str, bytes]
     modes: Mapping[str, str]
+    # Which copy the with arm tests (skills-evals#559): "main", the registry
+    # checkout's HEAD at `revision`, or "candidate" (--subject-candidate, no
+    # revision). None only before run_eval._in_place_plan chooses one.
+    source: str | None = None
+    revision: str | None = None
 
     def record(self) -> dict:
-        return {"kind": "skill", "registry": self.registry, "bundle": self.bundle,
-                "skill": self.skill, "action": self.action,
-                "deployed_digest": self.deployed_digest,
-                "tested_digest": self.tested_digest,
-                "bytes": sum(len(raw) for raw in self.files.values())}
+        out = {"kind": "skill", "registry": self.registry, "bundle": self.bundle,
+               "skill": self.skill, "action": self.action,
+               "deployed_digest": self.deployed_digest,
+               "tested_digest": self.tested_digest,
+               "bytes": sum(len(raw) for raw in self.files.values())}
+        # The ingester rejects one key without the other, so they are
+        # written together or not at all.
+        if self.source is not None:
+            out.update(subject_source=self.source, subject_revision=self.revision)
+        return out
 
 
 def _split_name(name: str) -> tuple[str | None, str]:
@@ -197,10 +207,12 @@ def resolve_skill_subject(frozen: context.FrozenContext, name: str,
                           candidate: Path | None = None) -> SkillSubject:
     """The one skill `name` (SKILL or BUNDLE:SKILL) names.
 
-    Adopted by the context: the deployed copy, removed from `without` (the
-    deployed version is what a keep-or-remove run tests). Not adopted: the
-    unique copy in the run's registry checkouts, added to `with`. Two copies
-    are an error, never a sorted pick.
+    Adopted by the context: the deployed copy, removed from `without`. Not
+    adopted: the unique copy in the run's registry checkouts, added to
+    `with`. Two copies are an error, never a sorted pick. The bytes the with
+    arm tests are chosen afterwards, by run_eval._in_place_plan: main's copy
+    of the skill (ADR 0012, addendum "main's copy", 2026-11-02) or a
+    --subject-candidate.
     """
     bundle, skill = _split_name(name)
     if registry is not None:
@@ -236,18 +248,26 @@ def resolve_skill_subject(frozen: context.FrozenContext, name: str,
     return _skill_candidate(subject, candidate)
 
 
-def _skill_candidate(subject: SkillSubject, candidate: Path | None) -> SkillSubject:
-    if candidate is None:
-        return subject
-    try:
-        files, modes = _tree_files(Path(candidate))
-    except OSError as exc:
-        raise DeliveryError("candidate_unreadable", "skill candidate could not be read") from exc
+def _skill_candidate(subject: SkillSubject, candidate: Path | None, *,
+                     files: Mapping[str, bytes] | None = None,
+                     modes: Mapping[str, str] | None = None,
+                     label: str = "candidate") -> SkillSubject:
+    """`subject` with the bytes the with arm tests: `candidate`'s, or
+    `files`/`modes` already read by the caller (main's copy, whose one read
+    is also what was compared with the checkout's HEAD). `label` names the
+    copy in messages only."""
+    if files is None:
+        if candidate is None:
+            return subject
+        try:
+            files, modes = _tree_files(Path(candidate))
+        except OSError as exc:
+            raise DeliveryError("candidate_unreadable", "skill candidate could not be read") from exc
     # The CLI may use front matter's name for its catalog entry. A candidate
     # cannot rename the identity while retaining its directory's old name.
     context._catalog(subject.bundle, subject.skill, files["SKILL.md"])
     if _catalog_name(files["SKILL.md"]) not in (None, subject.skill):
-        raise DeliveryError("candidate_identity_mismatch", "candidate catalog name differs from the subject")
+        raise DeliveryError("candidate_identity_mismatch", f"{label} catalog name differs from the subject")
     return replace(subject, files=files, modes=modes, tested_digest=context._file_digest(files))
 
 
@@ -549,9 +569,15 @@ def deliver_guidance(hook: bytes | None, payload: bytes, *, scratch: Path,
     header = (guidance.BEGIN_MARK.encode("utf-8") + b"\n"
               + f"<!-- fleet-guidance-version: {_sha256(payload)[:8]} -->\n".encode()
               + f"<!-- fleet-guidance-delivered: {PAYLOAD_MTIME} -->\n".encode())
-    wanted = {header + payload + _END_MARK + b"\n"}
+    bodies = [payload]
     if payload.startswith(_REPO_HEADER):
-        wanted.add(header + payload[len(_REPO_HEADER):] + _END_MARK + b"\n")
+        bodies.append(payload[len(_REPO_HEADER):])
+    # Since _agent-guidance#393 (2026-11-01) the hook ends the block with a
+    # check value line, the last 8 hex of the payload's sha256; a pinned
+    # revision from before it writes none.
+    check = f"fleet-guidance check value: {_sha256(payload)[56:]}\n".encode()
+    wanted = {header + body + tail + _END_MARK + b"\n"
+              for body in bodies for tail in (b"", check)}
     if raw not in wanted:
         raise DeliveryError("delivery_failed", "the complete delivered file or metadata differs from the payload")
     body = raw[len(header):]

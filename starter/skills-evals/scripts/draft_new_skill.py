@@ -3,9 +3,14 @@
 
 The consumer side of the session miner. The miner (acsi-agentskills-private,
 redacted at the source) writes one JSON proposal per lesson under
-`lessons/proposals/<YYYY-MM-DD>/<subject>__<kind>.json`. A daily caller,
+`lessons/proposals/<YYYY-MM-DD>/<subject>__<kind>.json`. Skill proposals
+filed as GitHub issues count too: an open issue in the public
+acsi-agentskills, labeled `skill-proposal`, filed by the owner, with a
+"Skill name: `<subject>`" (or "Working name: `<subject>`") line in its body,
+becomes a proposal of the same schema (`issue-proposals`) under
+`issue-proposals/<YYYY-MM-DD>/<subject>__new-skill.json`. A daily caller,
 `.github/workflows/routine-draft-skill.yml`, picks one `new-skill` proposal
-(`select`) and fires the eval routine in `draft` mode
+from either source (`select`) and fires the eval routine in `draft` mode
 (`routine-eval-fire.yml`, which builds the payload with `payload` and
 re-checks it with `fire-check`). The routine drafts, measures and pushes one
 branch, `claude/draft-skill-<run id>`; `routine-draft-skill-gate.yml`
@@ -35,17 +40,29 @@ HOOKS FIRST (the owner, 2026-10-26): every lesson is triaged in this order.
 Subcommands (`key=value` lines are for $GITHUB_OUTPUT and hold validated
 values only):
 
-  select    --lessons DIR --registry NAME=DIR [...] --evals DIR
-            --drafted FILE [--hook-declined FILE]
-            -> proposal=<path under lessons/>, count=0|1, hook_declined=0|1
-  drafted-subjects --repo DIR      -> `<subject> <decision>` per line
+  issue-proposals --issues FILE --out DIR
+            (FILE: the raw JSON array of acsi-agentskills' open
+            `skill-proposal` issues; writes
+            DIR/issue-proposals/<date>/<subject>__new-skill.json per usable
+            issue; skip counts and issue numbers on stderr)
+  select    --lessons DIR [--issue-proposals DIR ...] --registry NAME=DIR [...]
+            --evals DIR --drafted FILE [--hook-declined FILE]
+            -> proposal=<proposals/... or issue-proposals/...>, count=0|1,
+               hook_declined=0|1
+  drafted-subjects --repo DIR      -> `<subject> <decision>` per line, or
+                                      `<subject> unmeasured@<run_id>` for a
+                                      rejection that measured no fixture
   payload   --lessons DIR --proposal RELPATH --run-id ID [--hook-declined]
-            -> the fire payload JSON on stdout
+            -> the fire payload JSON on stdout (DIR is lessons/ for a
+               proposals/ path, the issue-proposals --out DIR for an
+               issue-proposals/ one)
   fire-check --payload FILE        (no output; exit 0 or 1)
   hook-first --payload FILE --proposal-json FILE --results DIR
   measure   --staging DIR --registry acsi-agentskills=DIR --ref SHA
             --payload FILE --trials N --results DIR
-            (exit 0 accepted, 1 rejected, 2 refused)
+            (exit 0 accepted, 1 rejected, 2 refused; a staging-shape
+            problem is refused once, leaving SHAPE_RETRY_MARKER in the
+            staging dir, and a rejected record on the retry)
   resolve   --event-name NAME --event-path PATH
   validate  --repo DIR --base REF --source REF --branch NAME
             [--expect-sha SHA] --registry acsi-agentskills=DIR --out DIR
@@ -67,8 +84,9 @@ PURPOSE.md, optional `references/`, `scripts/`, `assets/`), `fixtures/<name>/`
 `triage.json` (`{"mechanical": false, "reason": "..."}`; not needed when the
 payload says `hook_declined`).
 
-The branch, the staging directory, the payload and every proposal are
-UNTRUSTED (a model or a mined session wrote them). They are read as data
+The branch, the staging directory, the payload, every proposal and every
+issue are UNTRUSTED (a model, a mined session or a public issue tracker
+wrote them). They are read as data
 only; every refusal is a fixed message that never quotes them.
 """
 
@@ -105,15 +123,26 @@ from ingest_routine_results import Rejected  # noqa: E402
 #: A subject becomes a skill directory basename and `evals/<subject>/`.
 SUBJECT = r"[a-z0-9][a-z0-9-]{0,63}"
 SUBJECT_RE = re.compile(SUBJECT)
+#: The miner files every unattributed lesson under this subject.
+UNATTRIBUTED_SUBJECT = "none"
 PROPOSAL_ID = r"[A-Za-z0-9._:-]{1,128}"
-REPO_NAME = r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+"
+#: A repo is `owner/repo` (issue proposals), a bare directory name (the
+#: miner's `repos`: "the repos' directory names", lessons/README.md) or `~`
+#: (a session outside any repo). Matched with fullmatch; a name cannot start
+#: with `.`, so `.` and `..` fail, and one owner segment is the most a slash
+#: can add.
+REPO_NAME = r"(?:[A-Za-z0-9-]+/)?[A-Za-z0-9_][A-Za-z0-9._-]{0,99}|~"
+#: The most repos a proposal lists; the miner's first real one had 16.
+MAX_REPOS = 100
 DATE = r"[0-9]{4}-[0-9]{2}-[0-9]{2}"
 KINDS = ("skill-edit", "new-skill", "guidance-edit", "memory-note",
          "fixture-candidate")
-#: The one shape a proposal path takes under `lessons/` (the fire workflow
-#: checks its input with the same expression).
+#: The one shape a proposal path takes: `proposals/` under lessons/ (the
+#: miner's), or `issue-proposals/` under the `issue-proposals --out`
+#: directory (the fire workflow checks its input with the same expression).
 PROPOSAL_PATH_RE = re.compile(
-    rf"proposals/(?P<date>{DATE})/(?P<subject>{SUBJECT})__(?P<kind>new-skill)\.json")
+    r"(?P<root>proposals|issue-proposals)/"
+    rf"(?P<date>{DATE})/(?P<subject>{SUBJECT})__(?P<kind>new-skill)\.json")
 
 #: The proposal schema, one table: when the miner's final schema lands, this
 #: is the one edit. `type` is const | str | text | int | date | list.
@@ -127,7 +156,7 @@ PROPOSAL_SCHEMA = {
     "last_seen": {"type": "date"},
     "examples": {"type": "list", "min": 1, "max": 20,
                  "item": {"type": "text", "max": 2000}},
-    "repos": {"type": "list", "min": 0, "max": 20,
+    "repos": {"type": "list", "min": 0, "max": MAX_REPOS,
               "item": {"type": "str", "pattern": REPO_NAME}},
 }
 #: What the payload carries of a proposal (dates dropped).
@@ -135,6 +164,20 @@ PAYLOAD_PROPOSAL_KEYS = ("id", "subject", "evidence_count", "examples", "repos")
 MAX_PROPOSAL_FILE = 256 * 1024
 #: The fire payload's UTF-8 cap, under the fire step's 65536-byte text cap.
 MAX_PAYLOAD_BYTES = 60000
+
+#: Skill proposals filed as issues (`issue-proposals`). The repository is
+#: public, so only the owner's own open issues with the label count.
+ISSUE_REPO = "example-adopter/acsi-agentskills"
+ISSUE_LABEL = "skill-proposal"
+ISSUE_OWNER = "example-adopter"
+ISSUE_SOURCE = "issue-proposals"
+#: One page of 100 issues, each body at most 65536 characters at up to six
+#: bytes each once JSON-escaped, plus the issue's own metadata.
+MAX_ISSUES_FILE = 48 * 1024 * 1024
+MAX_ISSUE_NUMBER = 10 ** 9
+#: The line naming the subject: the first one wins.
+ISSUE_NAME_RE = re.compile(r"^(?:Working name|Skill name):[ \t]*`([^`\n]*)`",
+                           re.MULTILINE)
 
 RUN_ID_RE = re.compile(ingest.RUN_ID)
 BRANCH_RE = re.compile(rf"claude/draft-skill-(?P<run_id>{ingest.RUN_ID})")
@@ -173,7 +216,10 @@ FIXTURE_MAX_FILES = 400
 SIZE_CAPS = {"summary.json": 256 * 1024, "report.md": 64 * 1024,
              "skill.patch": 384 * 1024}
 #: A drafted fixture is a Class A isolation pair: no context (drafts run in
-#: isolation pairing), no setup hook, env, follow-up or model pin.
+#: isolation pairing, before the skill is on the registry's main), no setup
+#: hook, env, follow-up or model pin. Once the skill has merged,
+#: scripts/contextualize_fixtures.py (daily, routine-fixture-supply.yml) gives
+#: each one a measured in-place context and schedules it, so its runs pool.
 FIXTURE_KEYS = ("skill", "registry", "prompt", "arms", "objective_checks",
                 "judge", "judge_rubric", "timeout_s")
 FIXTURE_REQUIRED = ("skill", "registry", "prompt", "objective_checks",
@@ -264,6 +310,9 @@ def check_proposal(doc, path_date: str | None = None,
             raise Rejected("proposal: a field fails the schema")
     if doc["kind"] != "new-skill":
         raise Rejected("proposal: not a new-skill proposal")
+    if doc["subject"] == UNATTRIBUTED_SUBJECT:
+        raise Rejected("proposal: subject none is the miner's unattributed "
+                       "pool, not a skill")
     first, last = parse_date(doc["first_seen"]), parse_date(doc["last_seen"])
     if first > last:
         raise Rejected("proposal: first_seen is after last_seen")
@@ -583,14 +632,38 @@ def skill_exists(registry: Path, subject: str) -> bool:
     return any(p.is_file() for p in registry.glob(f"plugins/*/skills/{subject}/SKILL.md"))
 
 
+# Unmeasured rejections a subject may collect before it is retired anyway,
+# so a proposal no drafter can stage correctly stops costing a fire a day.
+MAX_UNMEASURED = 3
+UNMEASURED_PREFIX = "unmeasured@"
+
+
+def measured(doc: dict) -> bool:
+    """True when some fixture of a draft record ran both arms without error."""
+    fixtures = doc.get("fixtures")
+    if not isinstance(fixtures, dict):
+        return False
+    for row in fixtures.values():
+        arms = [row.get(a) for a in ("with_skill", "without_skill")] \
+            if isinstance(row, dict) else []
+        if arms and all(isinstance(a, dict) and a.get("total") and not a.get("errors")
+                        for a in arms):
+            return True
+    return False
+
+
 def parse_drafted(path: Path) -> dict[str, set[str]]:
-    """`<subject> <decision>` lines (drafted-subjects' output) by subject;
-    anything else is skipped."""
+    """`<subject> <decision>` and `<subject> unmeasured@<run_id>` lines
+    (drafted-subjects' output) by subject; anything else is skipped."""
     out: dict[str, set[str]] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         parts = line.split()
-        if len(parts) == 2 and SUBJECT_RE.fullmatch(parts[0]) and parts[1] in DECISIONS:
-            out.setdefault(parts[0], set()).add(parts[1])
+        if len(parts) != 2 or not SUBJECT_RE.fullmatch(parts[0]):
+            continue
+        tag = parts[1]
+        if tag in DECISIONS or (tag.startswith(UNMEASURED_PREFIX)
+                                and RUN_ID_RE.fullmatch(tag[len(UNMEASURED_PREFIX):])):
+            out.setdefault(parts[0], set()).add(tag)
     return out
 
 
@@ -601,35 +674,83 @@ def parse_subjects(path: Path | None) -> set[str]:
             if SUBJECT_RE.fullmatch(line.strip())}
 
 
+# A closed family: this many siblings measured and rejected, none accepted.
+MAX_FAMILY_REJECTED = 2
+
+
+def family(subject: str) -> str:
+    """The cluster a mined subject belongs to (mine_sessions.py's
+    `cluster_subject` names): `tool-<tool>` for `tool-<tool>-<word>`, `red-ci`
+    for `red-ci-<repo>`; any other subject is a family of its own."""
+    if subject.startswith("red-ci-"):
+        return "red-ci"
+    parts = subject.split("-")
+    if parts[0] == "tool" and len(parts) > 2:
+        return "-".join(parts[:2])
+    return subject
+
+
+def family_closed(subject: str, drafted: dict[str, set[str]]) -> bool:
+    """True when MAX_FAMILY_REJECTED other subjects of the same family were
+    measured and rejected and none was accepted: siblings of a signal that
+    keeps producing skills that add nothing are not drafted again under a
+    new name."""
+    fam = family(subject)
+    if fam == subject:
+        return False
+    siblings = [d for s, d in drafted.items() if s != subject and family(s) == fam]
+    if any("accepted" in d for d in siblings):
+        return False
+    return sum("rejected" in d for d in siblings) >= MAX_FAMILY_REJECTED
+
+
 def eligibility(subject: str, drafted: dict[str, set[str]],
                 declined: set[str]) -> tuple[bool, bool]:
     """(eligible, via a declined hook proposal). A skill record (accepted or
-    rejected) is final; a hook-first record holds the subject until the
-    agent-checks lane declines it."""
+    rejected) is final; a rejection that measured nothing is not, until
+    MAX_UNMEASURED of them; a hook-first record holds the subject until the
+    agent-checks lane declines it; a subject in a closed family
+    (`family_closed`) is not drafted."""
     decisions = drafted.get(subject, set())
     if decisions & {"accepted", "rejected"}:
+        return False, False
+    if family_closed(subject, drafted):
+        return False, False
+    if sum(d.startswith(UNMEASURED_PREFIX) for d in decisions) >= MAX_UNMEASURED:
         return False, False
     if "hook-first" in decisions:
         return (True, True) if subject in declined else (False, False)
     return True, False
 
 
-def select(lessons: Path, registries: dict[str, Path], evals: Path,
-           drafted_file: Path, declined_file: Path | None) -> dict:
-    drafted = parse_drafted(drafted_file)
-    declined = parse_subjects(declined_file)
-    proposals_dir = lessons / "proposals"
-    candidates, skipped = [], 0
+def proposal_files(root: Path, source: str):
+    """(path, path relative to root) of every `<source>/<day>/*__new-skill.json`
+    below `root`, skipping symlinked directories."""
+    proposals_dir = root / source
     days = sorted(proposals_dir.iterdir()) if proposals_dir.is_dir() \
         and not proposals_dir.is_symlink() else []
     for day in days:
         if day.is_symlink() or not day.is_dir():
             continue
         for path in sorted(day.glob("*__new-skill.json")):
-            rel = path.relative_to(lessons).as_posix()
+            yield path, path.relative_to(root).as_posix()
+
+
+def select(lessons: Path, registries: dict[str, Path], evals: Path,
+           drafted_file: Path, declined_file: Path | None,
+           issue_roots: list[Path] | None = None) -> dict:
+    """One proposal from lessons/proposals/ and every issue root's
+    issue-proposals/, all ranked together."""
+    drafted = parse_drafted(drafted_file)
+    declined = parse_subjects(declined_file)
+    sources = [(lessons, "proposals")] + [(root, ISSUE_SOURCE)
+                                          for root in issue_roots or []]
+    candidates, skipped = [], 0
+    for root, source in sources:
+        for path, rel in proposal_files(root, source):
             match = PROPOSAL_PATH_RE.fullmatch(rel)
             try:
-                if not match:
+                if not match or match.group("root") != source:
                     raise Rejected("bad path")
                 doc = check_proposal(read_json_file(path, MAX_PROPOSAL_FILE, "proposal"),
                                      match.group("date"), match.group("subject"))
@@ -677,7 +798,14 @@ def drafted_subjects(repo: str) -> list[str]:
         if isinstance(doc, dict) and isinstance(doc.get("subject"), str) \
                 and SUBJECT_RE.fullmatch(doc["subject"]) \
                 and doc.get("decision") in DECISIONS:
-            lines.add(f"{doc['subject']} {doc['decision']}")
+            # A rejection that measured nothing (a shape mistake caught
+            # before any run, or every fixture's run_eval failing) says
+            # nothing about the proposal, so it is not final: it counts
+            # toward MAX_UNMEASURED instead, and the subject is drafted again
+            # with no branch to delete by hand.
+            unmeasured = doc["decision"] == "rejected" and not measured(doc)
+            lines.add(f"{doc['subject']} unmeasured@{match.group('run_id')}"
+                      if unmeasured else f"{doc['subject']} {doc['decision']}")
     return sorted(lines)
 
 
@@ -692,22 +820,142 @@ def build_payload(doc: dict, run_id: str, hook_declined: bool) -> dict:
 def payload(lessons: Path, rel: str, run_id: str, hook_declined: bool) -> bytes:
     match = PROPOSAL_PATH_RE.fullmatch(rel)
     if not match:
-        raise Rejected("proposal path is not proposals/<date>/<subject>__new-skill.json")
+        raise Rejected("proposal path is not proposals/ or issue-proposals/"
+                       "<date>/<subject>__new-skill.json")
     if not RUN_ID_RE.fullmatch(run_id):
         raise Rejected("run id is not a routine run id")
-    root = (lessons / "proposals").resolve()
+    root = (lessons / match.group("root")).resolve()
     cursor = lessons
     for part in Path(rel).parts:
         cursor = cursor / part
         if cursor.is_symlink():
             raise Rejected("proposal path has a symlink")
     if not cursor.resolve().is_relative_to(root):
-        raise Rejected("proposal path leaves lessons/proposals")
+        raise Rejected("proposal path leaves its proposals directory")
     doc = check_proposal(read_json_file(cursor, MAX_PROPOSAL_FILE, "proposal"),
                          match.group("date"), match.group("subject"))
     out = build_payload(doc, run_id, hook_declined)
     check_payload(out)
     return encode_payload(out)
+
+
+# ---------------------------------------------------------------------------
+# issue-proposals: owner-filed `skill-proposal` issues as proposals.
+
+def clean_text(text: str) -> str:
+    """`text` with CRLF and CR made LF and every other control character but
+    newline and tab dropped."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return "".join(c for c in text
+                   if not ((ord(c) < 32 and c not in "\n\t") or ord(c) == 127))
+
+
+def body_chunks(body: str, limit: int) -> list[str]:
+    """`body` cut on paragraph boundaries (blank lines) into chunks of at most
+    `limit` characters; a paragraph over the limit is cut hard."""
+    pieces = []
+    for paragraph in re.split(r"\n[ \t]*\n", body):
+        paragraph = paragraph.strip("\n")
+        if not paragraph.strip():
+            continue
+        pieces += [paragraph[i:i + limit] for i in range(0, len(paragraph), limit)]
+    chunks: list[str] = []
+    for piece in pieces:
+        if chunks and len(chunks[-1]) + 2 + len(piece) <= limit:
+            chunks[-1] += "\n\n" + piece
+        else:
+            chunks.append(piece)
+    return [c for c in chunks if c.strip()]
+
+
+def issue_usable(issue) -> bool:
+    """An open issue (not a pull request) in the label, filed by the owner,
+    with the fields a proposal needs in their API types."""
+    if not isinstance(issue, dict) or "pull_request" in issue:
+        return False
+    user, labels = issue.get("user"), issue.get("labels")
+    return (issue.get("state") == "open"
+            and issue.get("author_association") == "OWNER"
+            and isinstance(user, dict) and user.get("login") == ISSUE_OWNER
+            and isinstance(labels, list)
+            and any(isinstance(label, dict) and label.get("name") == ISSUE_LABEL
+                    for label in labels)
+            and type(issue.get("number")) is int
+            and 1 <= issue["number"] <= MAX_ISSUE_NUMBER
+            and isinstance(issue.get("title"), str)
+            and (issue.get("body") is None or isinstance(issue["body"], str))
+            and all(isinstance(issue.get(k), str)
+                    and parse_date(issue[k][:10]) is not None
+                    for k in ("created_at", "updated_at")))
+
+
+def issue_subject(body: str) -> str | None:
+    match = ISSUE_NAME_RE.search(body)
+    if not match or not SUBJECT_RE.fullmatch(match.group(1)):
+        return None
+    return match.group(1)
+
+
+def issue_proposal(issue: dict, subject: str, body: str) -> dict:
+    limit = PROPOSAL_SCHEMA["examples"]["item"]["max"]
+    created, updated = issue["created_at"][:10], issue["updated_at"][:10]
+    title = " ".join(clean_text(issue["title"]).split())
+    head = f"{created} acsi-agentskills [issue] #{issue['number']} {title}".strip()
+    examples = [head[:limit], *body_chunks(body, limit)]
+    return {"schema_version": 1,
+            "id": f"issue-acsi-agentskills-{issue['number']}",
+            "subject": subject, "kind": "new-skill", "evidence_count": 1,
+            "first_seen": created, "last_seen": updated,
+            "examples": examples[:PROPOSAL_SCHEMA["examples"]["max"]],
+            "repos": [ISSUE_REPO]}
+
+
+def issue_proposals(issues_file: Path, out: Path) -> dict:
+    """One proposal file per usable issue under `out`/issue-proposals/, the
+    lower number winning a shared subject. Issue text is data: nothing of
+    it is printed, only counts and issue numbers."""
+    issues = read_json_file(issues_file, MAX_ISSUES_FILE, "issues")
+    if not isinstance(issues, list):
+        raise Rejected("issues: not a JSON array")
+    target = out / ISSUE_SOURCE
+    if target.exists() or target.is_symlink():
+        raise Refused("the output directory already holds issue proposals")
+    usable = sorted((i for i in issues if issue_usable(i)), key=lambda i: i["number"])
+    written: dict[str, int] = {}
+    unnamed, unusable, duplicate = [], [], []
+    for issue in usable:
+        body = clean_text(issue["body"] or "")
+        subject = issue_subject(body)
+        if subject is None:
+            unnamed.append(issue["number"])
+            continue
+        if subject in written:
+            duplicate.append(issue["number"])
+            continue
+        doc = issue_proposal(issue, subject, body)
+        try:
+            check_proposal(doc, doc["last_seen"], subject)
+            check_payload(build_payload(doc, "00000000T000000Z-000000", True))
+        except Rejected:
+            unusable.append(issue["number"])
+            continue
+        path = target / doc["last_seen"] / f"{subject}__new-skill.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(path, doc)
+        written[subject] = issue["number"]
+
+    def numbers(found: list[int]) -> str:
+        return " ".join(f"#{n}" for n in found)
+
+    print(f"skill-proposal issues: {len(issues)} listed, {len(usable)} owner-filed "
+          f"and open, {len(written)} written", file=sys.stderr)
+    print(f"issues without a name line: {len(unnamed)} {numbers(unnamed)}".rstrip(),
+          file=sys.stderr)
+    print(f"issues skipped as unusable: {len(unusable)} {numbers(unusable)}".rstrip(),
+          file=sys.stderr)
+    print(f"issues skipped for a subject a lower number has: {len(duplicate)} "
+          f"{numbers(duplicate)}".rstrip(), file=sys.stderr)
+    return {"written": str(len(written))}
 
 
 # ---------------------------------------------------------------------------
@@ -894,12 +1142,18 @@ def skill_report(record: dict) -> str:
         *[f"- {reason}" for reason in record["reasons"]], ""])
 
 
+# Left in the staging dir by a staging-shape refusal, so the drafter's one
+# retry (prompt step 5) records a second shape problem instead of refusing
+# again. Never part of the branch: measure writes only $RUNNER/results.
+SHAPE_RETRY_MARKER = ".shape-refused"
+
+
 def staging_parts(staging: Path) -> tuple[dict, dict, str]:
     """(skill files, fixture files by name, plugin) from the staging dir, or
     Rejected with a fixed reason."""
     if staging.is_symlink() or not staging.is_dir():
         raise Rejected("staging: not a directory")
-    entries = {p.name for p in staging.iterdir()}
+    entries = {p.name for p in staging.iterdir()} - {SHAPE_RETRY_MARKER}
     if not {"skill", "fixtures", "plugin"} <= entries \
             <= {"skill", "fixtures", "plugin", "triage.json"}:
         raise Rejected("staging: not exactly skill/, fixtures/, plugin and triage.json")
@@ -970,14 +1224,28 @@ def measure(staging: Path, registry_flag: str, ref: str, payload_path: Path,
         write_json(out / "summary.json", record)
         return 1
 
+    # A staging-shape problem (a stray file, a missing PURPOSE.md, a wrong
+    # fixture count) is the drafter's mistake, not the proposal's, and is
+    # caught before any run. A rejected record is final for the subject
+    # (eligibility), so recording it on the first try retired a proposal
+    # over one stray file without ever measuring it. The first try is a
+    # refusal the drafter fixes once (prompt step 5); the marker it leaves
+    # makes a second shape problem a rejected record, so retries stay
+    # bounded.
     try:
         skill, fixtures, plugin = staging_parts(staging)
+        problems = skill_problems(skill, subject) + fixtures_problems(fixtures, subject)
     except Rejected as exc:
-        return finish([str(exc)])
-    record["plugin"] = plugin
-    problems = skill_problems(skill, subject) + fixtures_problems(fixtures, subject)
+        skill, fixtures, plugin, problems = {}, {}, None, [str(exc)]
     if problems:
+        marker = staging / SHAPE_RETRY_MARKER
+        if staging.is_dir() and not staging.is_symlink() \
+                and not marker.is_symlink() and not marker.exists():
+            marker.write_text("\n".join(problems[:5]) + "\n", encoding="utf-8")
+            raise Refused("staging shape, fix it and measure once more: "
+                          + "; ".join(problems[:5]))
         return finish(problems)
+    record["plugin"] = plugin
     staged = list(skill.values()) + [d for f in fixtures.values() for d in f.values()]
     if quotes_an_example(staged, proposal["examples"]):
         return finish(["a staged file quotes a lesson example verbatim"])
@@ -1323,11 +1591,36 @@ def regenerate_readme(tree: Path) -> None:
         raise Rejected("the registry's README table generator failed")
 
 
+#: The registry's ADR 0013 layout pin, read by its
+#: test_the_shipped_plugins_match_the_adr_0013_layout; retire_skill.py edits
+#: the same file the other way.
+LAYOUT_FILE = "scripts/plugin_layout.json"
+
+
+def add_to_layout(tree: Path, plugin: str, subject: str) -> None:
+    """List `subject` under `plugin` in the layout pin, sorted, in the
+    registry's canonical form (json.dumps, indent 2, one trailing newline)."""
+    _no_symlink_on(tree, LAYOUT_FILE)
+    path = tree / LAYOUT_FILE
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        raise Rejected(f"the registry has no readable {LAYOUT_FILE}") from None
+    plugins = doc.get("plugins") if isinstance(doc, dict) else None
+    entry = plugins.get(plugin) if isinstance(plugins, dict) else None
+    skills = entry.get("skills") if isinstance(entry, dict) else None
+    if not isinstance(skills, list) or subject in skills:
+        raise Rejected(f"{LAYOUT_FILE} has no skill list for the plugin, or lists the skill")
+    entry["skills"] = sorted(skills + [subject])
+    path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+
+
 def apply(staged: Path, tree: Path) -> dict:
     """In an acsi-agentskills checkout: the patch, as data, then what the
     registry requires of a new skill (its pull-request template and CI):
     the bundle version bumped in both manifests (check_plugin_versions.py),
     the README skill table regenerated (generate_readme_table.py --check),
+    the skill listed in the ADR 0013 layout pin (scripts/plugin_layout.json),
     and a `docs/skill-impact.md` entry. `relock=true` means the bundle is in
     the registry's own skills.lock: commit, then re-pin the lock on that
     commit (`generate_skills_lock.py --repin`) and commit it, or
@@ -1360,6 +1653,7 @@ def apply(staged: Path, tree: Path) -> dict:
         if versions is not None and moved != versions:
             raise Rejected("the two plugin manifests disagree on the version")
         versions = moved
+    add_to_layout(tree, plugin, subject)
     _no_symlink_on(tree, "docs/skill-impact.md")
     insert_impact(tree / "docs" / "skill-impact.md", impact_entry(record, versions))
     _no_symlink_on(tree, "README.md")
@@ -1383,10 +1677,36 @@ def layout_line(subject: str, comment: str) -> str:
     return f"  {subject}/".ljust(27) + f"# {comment}"
 
 
+#: the owner's 2026-11-02 rule (test_issue_371_scheduled_fixtures.py): a skill
+#: fixture is on evals/scheduled.yml or listed in this file with a reason.
+UNSCHEDULED_FILE = "evals/unscheduled.yml"
+#: The reason an isolation pair (no `context:`) is listed, the same words the
+#: earlier drafted and hand-listed fixtures carry.
+ISOLATION_REASON = ("Isolation pair with no context: its runs cannot pool "
+                    "(ADR 0012); convert with a context before scheduling.")
+CONTEXT_REASON = ("Drafted by the draft loop with a context and no readiness "
+                  "note yet: add one and move it to scheduled.yml.")
+
+
+def unscheduled_entries(by_fixture: dict[str, dict[str, bytes]], subject: str) -> str:
+    """The unscheduled.yml rows for a drafted skill's fixtures, one per
+    fixture, with the reason its shape gives."""
+    rows = []
+    for name in sorted(by_fixture):
+        doc = yaml.safe_load(by_fixture[name]["fixture.yaml"].decode("utf-8"))
+        reason = CONTEXT_REASON if isinstance(doc, dict) and doc.get("context") \
+            else ISOLATION_REASON
+        rows.append(f"  - path: evals/{subject}/{name}\n"
+                    f"    reason: {json.dumps(reason)}\n")
+    return "".join(rows)
+
+
 def fixtures_apply(staged: Path, tree: Path) -> dict:
     """In a skills-evals checkout: the staged fixtures at evals/<subject>/,
-    and the README's layout entry the suite requires of every eval directory
-    (test_every_eval_directory_is_named_in_the_readmes_layout)."""
+    the README's layout entry the suite requires of every eval directory
+    (test_every_eval_directory_is_named_in_the_readmes_layout), and one
+    UNSCHEDULED_FILE row per fixture (test_issue_371_scheduled_fixtures.py):
+    a drafted fixture is not scheduled until someone writes its readiness."""
     record = staged_record(staged, "accepted")
     subject = record["subject"]
     source = staged / "evals" / subject
@@ -1410,6 +1730,12 @@ def fixtures_apply(staged: Path, tree: Path) -> dict:
                   if "evals/" in b and "harness/" in b), None)
     if index is None or anchor not in blocks[index]:
         raise Rejected("README.md has no layout block with a real-work/ entry")
+    _no_symlink_on(tree, UNSCHEDULED_FILE)
+    unscheduled = tree / UNSCHEDULED_FILE
+    listed = unscheduled.read_text(encoding="utf-8") if unscheduled.is_file() else ""
+    if not listed.startswith("#") or "\nfixtures:\n" not in listed \
+            or f"path: evals/{subject}/" in listed:
+        raise Rejected(f"{UNSCHEDULED_FILE} is missing, malformed or already lists the subject")
     entry = [layout_line(subject, f"A/B eval drafted from a lesson: "
                          f"{len(by_fixture)} fixtures")]
     entry += [f"    {name}/" for name in sorted(by_fixture)]
@@ -1419,7 +1745,9 @@ def fixtures_apply(staged: Path, tree: Path) -> dict:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
     readme.write_text("```".join(blocks), encoding="utf-8")
-    return {"subject": subject, "files": str(len(files) + 1)}
+    unscheduled.write_text(listed + ("" if listed.endswith("\n") else "\n")
+                           + unscheduled_entries(by_fixture, subject), encoding="utf-8")
+    return {"subject": subject, "files": str(len(files) + 2)}
 
 
 # ---------------------------------------------------------------------------
@@ -1467,11 +1795,11 @@ def pr_body(staged: Path, run_id: str, sha: str, branch: str, repo: str,
             "coverage census reports an `orphan_fixture`."]
         if mode == "auto":
             head += [
-                "", "Auto-merge (merge commit) is enabled, with no human "
-                "review. This pull request was opened with the job token, "
-                "which starts no workflow, so its required checks start only "
-                "when someone pushes to it or runs them, after the skill's "
-                "pull request has merged."]
+                "", "Auto-merge (merge commit) is not on yet, and no human "
+                "reviews this. Once the skill's pull request has merged, the "
+                "`Follow drafted-skill fixtures` workflow turns auto-merge "
+                "on (and restarts any checks GitHub held), so this merges "
+                "itself after its required checks pass."]
     return "\n".join([*head, "", "---", "", report, "", MARKER, ""])
 
 
@@ -1511,8 +1839,12 @@ def check_body_args(run_id: str, sha: str, branch: str) -> None:
 def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("issue-proposals")
+    p.add_argument("--issues", required=True, type=Path)
+    p.add_argument("--out", required=True, type=Path)
     p = sub.add_parser("select")
     p.add_argument("--lessons", required=True, type=Path)
+    p.add_argument("--issue-proposals", action="append", type=Path, default=[])
     p.add_argument("--registry", action="append", required=True)
     p.add_argument("--evals", required=True, type=Path)
     p.add_argument("--drafted", required=True, type=Path)
@@ -1589,7 +1921,10 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
             return 0
         if args.command == "select":
             result = select(args.lessons, parse_registries(args.registry),
-                            args.evals, args.drafted, args.hook_declined)
+                            args.evals, args.drafted, args.hook_declined,
+                            args.issue_proposals)
+        elif args.command == "issue-proposals":
+            result = issue_proposals(args.issues, args.out)
         elif args.command == "hook-first":
             result = hook_first(args.payload, args.proposal_json, args.results)
         elif args.command == "resolve":

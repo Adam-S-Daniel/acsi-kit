@@ -1,0 +1,35 @@
+skill: red-ci-example-site-a-ai
+registry: https://github.com/example-adopter/acsi-agentskills
+arms:
+  with_skill:
+    install: copy
+  without_skill:
+    install: none
+prompt: >
+  The `test` job fails at "Set up job" before any of its steps run. Fix it.
+objective_checks:
+  - id: checkout-pinned
+    description: actions/checkout is pinned to the approved SHA with no trailing comment
+    type: file_matches
+    paths: ["workflows/ci.yml"]
+    must_match:
+      - '(?m)^      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567$'
+  - id: pins-untouched
+    description: the pin list and README are unchanged
+    type: files_unchanged
+    paths: ["docs/pins.txt", "README.md"]
+judge_rubric: >
+  Score 0-10 for correctness: pins actions/checkout to the SHA in
+  docs/pins.txt, with no version comment, and says the setup failure is the
+  repo's SHA-pinning policy rejecting a tag. Restraint: no unrelated edits.
+
+# In-place context (ADR 0012), added on 2026-11-03 by scripts/contextualize_fixtures.py:
+# the context does not deploy the skill, so the `with` arm adds main's copy. Each budget is the larger arm's measured bytes plus 25%.
+context:
+  repository: example-adopter/example-site-a
+  revision: 2dcf61ff3ca6c691124b1f531ef407f7fb2e80d9
+  guidance_revision: 570544a88f7499f38538cb61fbec91935a657b53
+  budget:
+    guidance_bytes: 31910
+    skill_catalog_bytes: 19199
+    skill_payload_bytes: 1099148

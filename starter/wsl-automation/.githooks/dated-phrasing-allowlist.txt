@@ -22,7 +22,6 @@ example-adopter/acsi-agentskills plugins/acsi-coding-anywhere/skills/skills-doct
 example-adopter/acsi-agentskills plugins/acsi-coding-anywhere/skills/skills-doctor/SKILL.md :: "repo-owned" no longer identifies
 example-adopter/acsi-agentskills plugins/acsi-coding-anywhere/skills/skills-doctor/SKILL.md :: is now raised only where every local rung is
 example-adopter/acsi-agentskills plugins/acsi-coding-anywhere/skills/workflow-path-audit/SKILL.md :: is no longer reviewable as an audit
-example-adopter/_agent-guidance docs/reference/adopt-the-whole-system/starter/agent-skills/plugins/<you>-coding-anywhere/skills/workflow-path-audit/SKILL.md :: is no longer reviewable as an audit
 example-adopter/acsi-agentskills plugins/acsi-coding-local/skills/migrate-claude-memory/SKILL.md :: anymore. And because
 example-adopter/acsi-agentskills plugins/acsi-coding-local/skills/sync-cc-settings-between-wsl-and-windows/SKILL.md :: more-recently-modified-wins
 example-adopter/acsi-agentskills plugins/acsi-non-coding-local/skills/fastmail/SKILL.md :: Confirm the inbox is now visible

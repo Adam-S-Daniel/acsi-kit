@@ -8,24 +8,30 @@
 repo: repo-settings
 kit_name: repo-settings
 source: repo-settings
-source_sha: 075636253c63a91e84d32fd331ca80e0174737ac
+source_sha: 4308b61cd0a482b38c9c683094f85ed96132958e
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror)
 # are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
 
 edits:
+  # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
-    old: "    uses: Adam-S-Daniel/cms-platform/.github/workflows/scheduled-run-health.yml@v0.1.164\n"
+    old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"
     new: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@0000000000000000000000000000000000000000\n"
     why: >-
-      C4. The reusable now lives in _agent-guidance. A cross-repo reusable
-      takes a full commit sha, and the adopter's _agent-guidance commit does
+      C4. The source calls _agent-guidance's copy at a commit of the source
+      owner's repo, which the adopter's does not have. A cross-repo reusable
+      takes a full commit sha and the adopter's _agent-guidance commit does
       not exist yet, so this is a placeholder sha the adopter replaces with
       the command in REGENERATE.md.
   - path: .github/workflows/scheduled-run-health.yml
-    old: "# sweep once startup-failed 30/30 for a month unnoticed). The platform owns\n# the audit logic; this thin caller schedules it."
-    new: "# sweep once startup-failed 30/30 for a month unnoticed). _agent-guidance's\n# scheduled-run-health-reusable.yml owns the audit logic; this thin caller\n# schedules it."
-    why: C4. The audit logic now lives in _agent-guidance.
+    old: "The platform owns\n# the audit logic; this thin caller schedules it."
+    new: "_agent-guidance's\n# scheduled-run-health-reusable.yml owns the audit logic; this thin caller\n# schedules it."
+    why: C4. The audit logic lives in _agent-guidance.
+  - path: .github/workflows/scheduled-run-health.yml
+    old: "    # The audit scripts still come from cms-platform, at the release named\n    # in _agent-guidance's .github/health-audit-platform-ref.\n"
+    new: "    # The audit script is copied into _agent-guidance too (the adoption\n    # kit's DECISIONS C4).\n"
+    why: C4. The kit has no platform repo and no release pin; the script lives in _agent-guidance.
 
   - path: .gitignore
     old: "pytest-cache*\n"

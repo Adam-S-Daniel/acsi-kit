@@ -348,16 +348,21 @@ def test_the_install_step_always_installs_the_resolved_latest():
     run = _install_step()["run"]
     assert "command -v claude" not in run, "a preinstalled CLI must not be reused"
     assert 'latest="$(npm view @anthropic-ai/claude-code version)"' in run
-    assert 'npm install -g "@anthropic-ai/claude-code@${latest}"' in run
-    assert '[[ "${version%% *}" == "$latest" ]]' in run
+    assert ('npm install "${args[@]}" "@anthropic-ai/claude-code@${latest}"'
+            in run)
+    assert "args=(-g)" in run and "args+=(--force)" in run
+    assert '[[ "${version%% *}" != "$latest" ]]' in run
 
 
 def test_the_install_step_bounds_version_and_records_it():
     run = _install_step()["run"]
     assert run.splitlines()[0] == "set -euo pipefail"
-    assert 'version="$(timeout -k 10 60 claude --version)"' in run
-    assert '"::error::claude --version failed"' in run
-    assert '"::error::claude --version printed no version"' in run
+    # Each version check is bounded: 60 s, or what is left of the 180 s limit.
+    assert 'version="$(timeout -k 10 "$vt" claude --version 2>"$errf")"' in run
+    assert "((vt <= 60)) || vt=60" in run
+    assert "limit=180" in run and "delays=(5 10 20 40 80)" in run
+    assert "did not install a working claude after ${attempt} attempts" in run
+    assert "claude --version printed no version" in run
     assert '"$GITHUB_STEP_SUMMARY"' in run
     assert "${{" not in run
 
@@ -413,6 +418,7 @@ def _run_install_step(tmp_path, npm_view=f'echo "{LATEST}"', install_ok=True,
         '  exit $?',
         'fi',
         '[ "$1 $2" = "install -g" ] || exit 9',
+        '[ "$3" = --force ] && shift',
         'case "$3" in @anthropic-ai/claude-code@*) ;; *) exit 9 ;; esac',
         'ver="${3#@anthropic-ai/claude-code@}"',
         "exit 1" if not install_ok else ":",
@@ -422,13 +428,15 @@ def _run_install_step(tmp_path, npm_view=f'echo "{LATEST}"', install_ok=True,
     summary = tmp_path / "summary.md"
     summary.write_text("", encoding="utf-8")
     env = {"PATH": f"{shadow}:{npm_bin}:{tools}:/usr/bin:/bin",
-           "GITHUB_STEP_SUMMARY": str(summary)}
+           "GITHUB_STEP_SUMMARY": str(summary),
+           # No real sleep and no wall clock: the retry delays are injected.
+           "SLEEP_CMD": "true", "NOW_CMD": "echo 0"}
     body = _install_step()["run"]
     if timeout_args is not None:
         # The shipped bound is 60 s; a test cannot wait that long, so swap
         # in a short one. The shape test pins the shipped value.
-        assert "timeout -k 10 60 " in body
-        body = body.replace("timeout -k 10 60 ", f"timeout {timeout_args} ")
+        assert 'timeout -k 10 "$vt" ' in body
+        body = body.replace('timeout -k 10 "$vt" ', f"timeout {timeout_args} ")
     result = subprocess.run(
         # GitHub's default for a step with no `shell:` is `bash -e {0}`;
         # anything stricter must come from the body's own `set` line.
@@ -447,8 +455,9 @@ def test_a_stale_cli_earlier_on_path_fails_the_step(tmp_path):
     result, summary = _run_install_step(
         tmp_path, shadow_body='echo "2.1.100 (Claude Code)"')
     assert result.returncode != 0
-    assert (f"::error::claude on PATH reports '2.1.100 (Claude Code)', "
-            f"not npm latest {LATEST}") in result.stdout
+    assert ("did not install a working claude after 6 attempts in 0 seconds "
+            f"(last error: claude on PATH reports '2.1.100 (Claude Code)', "
+            f"not npm latest {LATEST})") in result.stdout
     assert summary == ""
 
 
@@ -473,7 +482,7 @@ def test_a_shadowing_cli_whose_version_extends_latest_fails(tmp_path):
         tmp_path, npm_view='echo "2.1.3"',
         shadow_body='echo "2.1.30 (Claude Code)"')
     assert result.returncode != 0
-    assert "::error::claude on PATH reports '2.1.30 (Claude Code)', not npm latest 2.1.3" in result.stdout
+    assert "claude on PATH reports '2.1.30 (Claude Code)', not npm latest 2.1.3)" in result.stdout
     assert summary == ""
 
 
@@ -496,7 +505,7 @@ def test_a_failing_version_fails_the_step_loudly(tmp_path):
     result, summary = _run_install_step(
         tmp_path, claude_body='echo "@@VER@@ (Claude Code)"; exit 3')
     assert result.returncode != 0
-    assert "::error::claude --version failed" in result.stdout
+    assert "did not install a working claude after" in result.stdout
     assert summary == ""
 
 
@@ -505,16 +514,16 @@ def test_a_hanging_version_is_ended_even_if_it_ignores_sigterm(tmp_path):
     start = time.monotonic()
     result, summary = _run_install_step(
         tmp_path, claude_body='trap "" TERM; sleep 30', timeout_args="-k 1 1")
-    assert time.monotonic() - start < 15
+    assert time.monotonic() - start < 60
     assert result.returncode != 0
-    assert "::error::claude --version failed" in result.stdout
+    assert "did not install a working claude after" in result.stdout
     assert summary == ""
 
 
 def test_an_empty_version_fails_the_step_loudly(tmp_path):
     result, _ = _run_install_step(tmp_path, claude_body="true")
     assert result.returncode != 0
-    assert "::error::claude --version printed no version" in result.stdout
+    assert "(last error: claude --version printed no version)" in result.stdout
 
 
 def test_markdown_in_the_version_cannot_reach_the_summary(tmp_path):
@@ -530,6 +539,102 @@ def test_a_huge_version_line_is_capped(tmp_path):
         tmp_path, claude_body="printf \"@@VER@@ (Claude Code) %0200000d\" 0")
     assert result.returncode == 0, result.stdout + result.stderr
     assert len(summary.splitlines()[-1]) < 200
+
+
+def _run_retry(tmp_path, *, bad_attempts=0, bad_version=None, install_seconds=0):
+    """Run the real step body with a stateful fake npm, a fake sleep and a fake
+    clock. The first `bad_attempts` installs leave a broken `claude` (or one
+    reporting `bad_version`); the sleep log and npm calls come back too."""
+    import shutil
+    import subprocess
+
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("no bash on PATH to execute the step body")
+    fakes = tmp_path / "fakes"
+    fakes.mkdir()
+    clock, count = tmp_path / "clock", tmp_path / "count"
+    npm_log, sleep_log = tmp_path / "npm.log", tmp_path / "sleep.log"
+    clock.write_text("1000\n")
+    count.write_text("0\n")
+    summary = tmp_path / "summary.md"
+    q = shlex.quote
+
+    def tool(path, body):
+        path.write_text("#!/bin/bash\n" + body, encoding="utf-8")
+        path.chmod(0o755)
+
+    bad = (f"echo {q(bad_version + ' (Claude Code)')}" if bad_version
+           else "echo 'Error: claude native binary not installed.'; exit 1")
+    tool(fakes / "claude.bad", bad + "\n")
+    tool(fakes / "claude.good", f"echo '{LATEST} (Claude Code)'\n")
+    tool(fakes / "npm", "\n".join([
+        'if [ "$1" = view ]; then echo ' + LATEST + '; exit 0; fi',
+        f'echo "$*" >> {q(str(npm_log))}',
+        f'n=$(( $(<{q(str(count))}) + 1 )); echo $n > {q(str(count))}',
+        f'echo $(( $(<{q(str(clock))}) + {install_seconds} )) > {q(str(clock))}',
+        f'if [ $n -le {bad_attempts} ]; then src=claude.bad; else src=claude.good; fi',
+        f'cp {q(str(fakes))}/$src {q(str(fakes))}/claude',
+    ]))
+    tool(fakes / "fake-sleep", "\n".join([
+        f'echo "$1" >> {q(str(sleep_log))}',
+        f'echo $(( $(<{q(str(clock))}) + $1 )) > {q(str(clock))}',
+    ]))
+    env = {"PATH": f"{fakes}:/usr/bin:/bin", "GITHUB_STEP_SUMMARY": str(summary),
+           "SLEEP_CMD": str(fakes / "fake-sleep"), "NOW_CMD": f"cat {clock}"}
+    result = subprocess.run([bash, "--noprofile", "--norc", "-e", "-c",
+                             _install_step()["run"]],
+                            env=env, capture_output=True, text=True, timeout=120)
+
+    def read(p):
+        return p.read_text().splitlines() if p.is_file() else []
+
+    return result, read(npm_log), read(sleep_log)
+
+
+PKG = "@anthropic-ai/claude-code@" + LATEST
+
+
+def test_success_on_the_first_try_installs_once_without_sleeping(tmp_path):
+    result, npm, sleeps = _run_retry(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert npm == [f"install -g {PKG}"]
+    assert sleeps == []
+    assert f"Claude Code {LATEST} installed and verified on attempt 1" in result.stdout
+
+
+def test_success_on_the_third_try_records_the_sleeps(tmp_path):
+    result, npm, sleeps = _run_retry(tmp_path, bad_attempts=2)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sleeps == ["5", "10"]
+    # A plain install first; every retry adds --force.
+    assert npm == [f"install -g {PKG}", f"install -g --force {PKG}",
+                   f"install -g --force {PKG}"]
+    assert "on attempt 3" in result.stdout
+
+
+def test_it_gives_up_before_an_attempt_that_would_cross_the_limit(tmp_path):
+    # Installs take 30 s each and end at 30, 65, 105 and 155 s; the next delay
+    # (40 s) would start attempt 5 at 195 s, past the 180 s limit.
+    result, npm, sleeps = _run_retry(tmp_path, bad_attempts=99, install_seconds=30)
+    assert result.returncode == 1
+    assert sleeps == ["5", "10", "20"]
+    assert len(npm) == 4
+    errors = [ln for ln in result.stdout.splitlines() if ln.startswith("::error::")]
+    assert errors == [
+        f"::error::Claude Code {LATEST} did not install a working claude after "
+        "4 attempts in 155 seconds (last error: Error: claude native binary "
+        "not installed.)"]
+
+
+def test_a_version_mismatch_is_retried_then_fails(tmp_path):
+    result, npm, sleeps = _run_retry(tmp_path, bad_attempts=99,
+                                     bad_version="2.1.299")
+    assert result.returncode == 1
+    assert sleeps == ["5", "10", "20", "40", "80"]
+    assert len(npm) == 6
+    assert ("(last error: claude on PATH reports '2.1.299 (Claude Code)', not "
+            f"npm latest {LATEST})") in result.stdout
 
 
 def _fresh(tmp_path):
@@ -602,3 +707,61 @@ def test_every_ci_action_is_locked_to_a_full_sha():
             assert key in listed, f"{uses} is not listed for ci.yml in actions.lock"
             checked += 1
     assert checked, "expected at least one third-party action to check"
+
+
+SKILL_GATES_STEP = "Check skill graduation and touch gates"
+
+
+def test_the_pytest_job_runs_the_skill_gates_on_pull_requests():
+    """AGENTS.md's graduation and touch gates are enforced only if the step
+    sits in a REQUIRED job, runs after the dependencies it imports are
+    installed, and reads the shas from env rather than interpolating them."""
+    steps = load_ci()["jobs"]["pytest"]["steps"]
+    names = [s.get("name") for s in steps]
+    matches = [s for s in steps if s.get("name") == SKILL_GATES_STEP]
+    assert len(matches) == 1, f"job `pytest` must carry exactly one `{SKILL_GATES_STEP}` step"
+    step = matches[0]
+    assert names.index("Install Python dependencies") < names.index(SKILL_GATES_STEP) \
+        < names.index("Run every test suite in the repo")
+    assert step["if"] == ("github.event_name == 'pull_request' && "
+                          "steps.salient.outputs.run == 'true'")
+    assert step["env"] == {"BASE_SHA": "${{ github.event.pull_request.base.sha }}",
+                           "HEAD_SHA": "${{ github.event.pull_request.head.sha }}"}
+    assert shlex.split(step["run"]) == ["python3", "scripts/check_skill_gates.py",
+                                        "--base", "$BASE_SHA", "--head", "$HEAD_SHA"]
+    assert "${{" not in step["run"]
+    assert "continue-on-error" not in step
+
+
+AGENT_CHECKS_WORKFLOW = WORKFLOWS_DIR / "agent-checks.yml"
+
+
+def load_agent_checks() -> dict:
+    return yaml.safe_load(AGENT_CHECKS_WORKFLOW.read_text(encoding="utf-8"))
+
+
+def test_agent_checks_is_a_job_of_its_own_workflow_and_not_of_ci():
+    """The required context `agent-checks` is published once: the job lives in
+    agent-checks.yml (so a description edit re-runs it without re-running the
+    suites) and ci.yml must not carry a second one."""
+    assert "agent-checks" in load_agent_checks()["jobs"]
+    assert "agent-checks" not in load_ci()["jobs"]
+
+
+def test_the_agent_checks_job_publishes_its_context_under_its_job_id():
+    job = load_agent_checks()["jobs"]["agent-checks"]
+    assert "name" not in job
+    assert "matrix" not in (job.get("strategy") or {})
+
+
+def test_no_concurrency_group_governs_the_agent_checks_job():
+    doc = load_agent_checks()
+    assert "concurrency" not in doc
+    assert "concurrency" not in doc["jobs"]["agent-checks"]
+
+
+def test_agent_checks_reports_on_every_pull_request_and_reruns_on_an_edit():
+    pull_request = ci_triggers(load_agent_checks())["pull_request"]
+    narrowing = {"paths", "paths-ignore", "branches", "branches-ignore"}
+    assert not (narrowing & set(pull_request)), "a filter would leave the required context unreported"
+    assert {"opened", "edited", "reopened", "synchronize"} <= set(pull_request["types"])

@@ -9,7 +9,11 @@ this script is the layer that runs BEFORE any spend:
 
   check  routine-eval-fire.yml runs it before the fire step, in every mode,
          and a refusal stops the fire. A fire may go only when
-         spent + pending + one run's reservation <= weekly_cap.
+         spent + pending + one run's reservation <= weekly_cap, where a
+         usable account reading can bound spent plus pending (2026-11-01,
+         below). A refusal exits 3 and an unreadable spend exits 1 (#524:
+         a refusal is the planned outcome for a surplus fire, so its run
+         ends cancelled; an error stays red).
   fits   prints how many more fires fit now; scripts/plan_week.py spends
          `room` itself, at each fire's historical cost, so the weekly sweep
          plans only what fits.
@@ -78,6 +82,69 @@ cap. It stays safe even when runs overlapped and their deltas count the
 same use twice: spent plus the hold is still at least the eval runs' own
 `per_run_overrun` plus the whole reading, and each run's unmeasured last
 call is what that overrun is for.
+
+The same double count remained for eval runs with no measured delta: `spent`
+charges each one the full reservation, while the hold subtracts only measured
+deltas. On 2026-11-01 the guard counted 29.5 points spent over 41 ingested
+runs plus 67.5 pending (8 improve fires held at the 72.0% reading less 9.0)
+while the account meter itself read 72% of the week, and refused every fire
+although the account had room (the owner: "Seems like there is room for more runs
+now; the week is almost over"). So when the newest snapshot is usable, the
+reading also bounds what the evals have committed: `used` (everything the
+account used before the reading, the evals' own runs and the owner's use
+included), plus the full `run_cost` of every ingested run not entirely inside
+the reading (an unread summary, no snapshot, or a snapshot after it), plus
+`per_run_overrun` for each run inside it that may still have been running
+then (it started less than `PENDING_FULL_HOLD` before the reading: its last
+call began at its last snapshot and can end after it), plus the eval-fire
+part of pending, plus the full charge of every improve fire the reading does
+not cover. `committed` is the smaller of that bound and spent plus pending,
+and `room` takes the cap's share from it. It is safe because `used` already
+holds every eval run's real use before the reading, so the bound is never
+below what the evals have truly committed: the minimum only removes double
+counting, and everything after the reading is still charged at its full
+estimate. In a normal week the owner's own use makes the bound the larger
+one, and nothing changes.
+
+One limit (the owner, 2026-11-01, "Unify the limit"): the in-run
+`stop_when_account_above` stop is also a fire limit. On 2026-11-01 the guard
+found 22.5 points of room under the cap while the account meter was already
+past the 80% stop, so every fire it let go stopped on its first reading. Now
+`room` is never more than `stop_left`, the stop less that same bound (the
+reading plus everything charged after it), and the refresh fire is refused
+once the reading is at or past the stop. Without a usable reading only the
+in-run stop applies, as before.
+
+Fires without results (2026-11-01): the bound still charged every eval fire
+without an ingested run, so 15 fires that had stopped hours before the 84%
+reading held 7.5 points it already held, and three fires were refused 3
+points under the 95% stop. A fire that started `PENDING_FULL_HOLD` or more
+before the reading has finished inside it (a routine run stops at 30
+minutes), so when the fires' start times are known the bound charges only
+the fires after that cut that no ingested run accounts for: a recent one the
+full reservation, an older one the overrun. An ingested run inside the
+reading whose summaries say it had ended by then (`usage.ended_at`) has no
+call after it, so it is not charged the overrun either (2026-11-01 13:54
+UTC: seven one-minute runs that had all ended held 3.5 points that way).
+
+Improve cap (#572, 2026-11-02): in the week of 2026-10-26 eight improve and
+guidance-improve fires went, every one dispatched by hand or by an agent, not
+by the planner, and each passed this check because it asked only for room
+for one charge. Held together they exceeded the whole cap, and nearly every
+eval fire was refused for the rest of the week. So the guard, which runs for
+every dispatcher, now also caps how many go: the owner's improve share of the
+weekly cap, `IMPROVE_WEEKLY_SHARE` (0.20) x weekly_cap as configured, allows
+`floor(share / improve_charge)` fires of both kinds together, and each kind
+(skill `improve`, `guidance-improve`) has a floor of one per account week, so
+the improvement loop never stops outright when one charge exceeds the share
+(`improve_cap`). The count is the window's successful fires of each kind plus
+its not-completed ones with a lower run id than the caller's (two fires
+dispatched together never refuse each other; the earlier goes). A refused
+fire prints `IMPROVE_CAP_REFUSAL` and exits 3. Known limit until #572 part
+(1) measures each improve run: a fire that passed the guard but whose run
+then ended other than success (a failure after the guard) uses no slot, as
+it is not charged either.
+
 Only an ingested eval run brings a newer snapshot, so when those full
 charges leave no room for one, one eval fire may still go to bring it
 (`refresh`); without that the holds lasted the week (2026-10-27).
@@ -172,15 +239,35 @@ PACE_CLOCK_SKEW = timedelta(minutes=5)
 #: An improve run measures baseline and candidate on every fixture of the
 #: skill at three trials each, about 24 agent trials for a four-fixture skill
 #: (thresholds doc), where an eval fire (arms both, one trial) runs two.
-IMPROVE_FIRE_UNITS = 12
+#: It was 12 until 2026-11-02 (#572): eval_fire_cost measured about 0.00497
+#: (268 of 270 runs measured), and the three usable account-meter brackets
+#: around improve fires came to 2.3x, 4.7x and 5.3x that per fire (1.3x to
+#: 7.3x with the meter's +-0.01 reading error), upper bounds since the
+#: owner's own use is inside them. 8 covers every bracket. It is a ceiling,
+#: recomputed from measured cost once #572 part (1) records each improve run.
+IMPROVE_FIRE_UNITS = 8
 #: The longest an improve fire runs: the routine's improve step gets 90
 #: minutes, plus setup, the push and the ingest. A fire that started this long
 #: before a meter snapshot is finished, so the snapshot already counts it.
 IMPROVE_MAX_RUN = timedelta(hours=2)
 #: The fire modes charged `improve_charge`, held all week (see above).
 IMPROVE_MODES = ("improve", "guidance-improve")
+#: the owner's improve share of the weekly cap (#572, 2026-11-02): the same 0.20
+#: plan_week.SHARES gives the improve band, but there it is a share of the
+#: room left in one sweep, and here of weekly_cap as configured, for the
+#: whole account week. Following weekly_cap means a temporary raise loosens
+#: this cap too, the owner's lever. `improve_cap` enforces it for every dispatcher.
+IMPROVE_WEEKLY_SHARE = 0.20
+# A refusal exits 3, apart from 1 (an unreadable spend, fail closed): the
+# weekly planner plans surplus fires at their historical cost, so the guard
+# refusing one at full reservation is the planned outcome (#524). The fire
+# workflow ends a refused run cancelled; an error stays red.
+REFUSED_EXIT = 3
 REFUSAL = ("::error::the weekly eval allowance cap would be exceeded by this "
            "fire; nothing was fired (evals/budget.yml, #68)")
+#: The improve cap's refusal (#572): numbers only, never a skill or section.
+IMPROVE_CAP_REFUSAL = ("::error::improve cap: share allows {allowed}, used {used} "
+                       "(this kind {mine}); nothing was fired (#572)")
 
 
 class GuardError(Exception):
@@ -295,6 +382,44 @@ def delta_inside(run_dir: Path, at: datetime) -> float:
         return 0.0
     return sum(max(0.0, float(usage["meter_delta"]["windows"]["seven_day"]["delta"]))
                for usage in blocks.values())
+
+
+def inside_reading(run_dir: Path, at: datetime) -> bool:
+    """Whether one ingested run is entirely inside the reading at `at`: every
+    summary readable with a `usage` block, at least one meter snapshot, and
+    every snapshot readable and no later than `at` (the test `delta_inside`
+    uses, measured or not). Anything else is outside, charged in full."""
+    seen = 0
+    for path in _summary_paths(run_dir):
+        summary = _load_summary(path)
+        usage = summary.get("usage") if isinstance(summary, dict) else None
+        if not isinstance(usage, dict):
+            return False
+        measured = usage.get("measured")
+        reading = measured.get("meter") if isinstance(measured, dict) else None
+        snapshots = reading.get("snapshots") if isinstance(reading, dict) else None
+        for snapshot in snapshots if isinstance(snapshots, list) else ():
+            stamp = _snapshot_time(snapshot)
+            if stamp is None or stamp > at:
+                return False
+            seen += 1
+    return seen > 0
+
+
+def ended_before(run_dir: Path, at: datetime) -> bool:
+    """Whether one ingested run had ended by `at`: every summary readable
+    with a run-level `usage.ended_at` no later than it. A run that ended
+    before the reading has its last call inside it too."""
+    seen = 0
+    for path in _summary_paths(run_dir):
+        summary = _load_summary(path)
+        usage = summary.get("usage") if isinstance(summary, dict) else None
+        ended = _snapshot_time({"at": usage.get("ended_at")}) \
+            if isinstance(usage, dict) else None
+        if ended is None or ended > at:
+            return False
+        seen += 1
+    return seen > 0
 
 
 def all_runs(tree: Path) -> list[Path]:
@@ -430,7 +555,10 @@ def pace(runs: list[Path], limits: dict, now: datetime):
 def account(tree: Path, limits: dict, now: datetime,
             fires: tuple[int, int], improve: tuple[int, int] = (0, 0),
             since: datetime | None = None,
-            improve_started: list | None = None) -> dict:
+            improve_started: list | None = None,
+            eval_started: list | None = None,
+            improve_by_kind: dict | None = None,
+            improve_in_flight: dict | None = None) -> dict:
     """{spent, pending, runs, fires, recent, reservation, cap, pace_room,
     account_used, week_elapsed, improve_fires, improve_charge,
     improve_covered, eval_inside} for the
@@ -449,7 +577,16 @@ def account(tree: Path, limits: dict, now: datetime,
     before the newest usable snapshot (`improve_covered` of them) be held
     together at no more than its account-wide `account_used`, less
     `eval_inside`, the measured deltas of the ingested runs inside that
-    reading."""
+    reading. `committed` is spent plus pending, or no more than `bound`, what
+    the newest usable reading bounds the evals' committed use at (None
+    without one; module docstring, 2026-11-01). `eval_started`, the start
+    times of the window's successful eval fires (improve fires left out),
+    lets the bound charge only the fires the reading cannot hold: those
+    started less than `PENDING_FULL_HOLD` before it with no ingested run
+    (module docstring, 2026-11-01 fires without results).
+    `improve_by_kind` and `improve_in_flight`, dicts keyed by improve mode
+    (`improve_kind_counts`), are the successful and the not-completed
+    improve fires of each kind, stored for `improve_cap` only (#572)."""
     try:
         fires_7d, fires_24h = fires
         improve_7d, improve_24h = improve
@@ -461,11 +598,25 @@ def account(tree: Path, limits: dict, now: datetime,
     # Improve fires are among the fires; they never produce routine-results.
     fires_7d = max(0, fires_7d - improve_7d)
     fires_24h = max(0, fires_24h - improve_24h)
+    if eval_started is not None and (
+            not isinstance(eval_started, list)
+            or any(not isinstance(start, datetime) or start.tzinfo is None
+                   for start in eval_started)):
+        raise GuardError("eval fire start times are not aware datetimes")
     if improve_started is not None and (
             not isinstance(improve_started, list)
             or any(not isinstance(start, datetime) or start.tzinfo is None
                    for start in improve_started)):
         raise GuardError("improve start times are not aware datetimes")
+    kinds = []
+    for given in (improve_by_kind, improve_in_flight):
+        given = {} if given is None else given
+        if not isinstance(given, dict) or any(
+                mode not in IMPROVE_MODES or isinstance(count, bool)
+                or not isinstance(count, int) or count < 0
+                for mode, count in given.items()):
+            raise GuardError("improve counts by kind are not non-negative integers")
+        kinds.append({mode: given.get(mode, 0) for mode in IMPROVE_MODES})
     if since is None:
         since = window_start(now)
     runs = ingested_runs(tree, now, since)
@@ -494,35 +645,104 @@ def account(tree: Path, limits: dict, now: datetime,
         eval_inside = sum(delta_inside(run_dir, at) for run_dir in runs)
     improve_held = (improve_7d - covered) * charge + (
         min(covered * charge, max(0.0, used - eval_inside)) if covered else 0.0)
-    pending = (recent * reserve + (unresulted - recent) * limits["per_run_overrun"]
-               + improve_held)
+    eval_pending = recent * reserve + (unresulted - recent) * limits["per_run_overrun"]
+    pending = eval_pending + improve_held
+    # The reading bounds what is committed (module docstring, 2026-11-01).
+    bound = None
+    if used is not None:
+        at = newest_snapshot(runs)[0]
+        outside = 0.0
+        for run_dir in runs:
+            if not inside_reading(run_dir, at):
+                outside += run_cost(run_dir, limits)
+            elif _parse_stamp(RUN_ID_RE.fullmatch(run_dir.name).group("stamp")) \
+                    + PENDING_FULL_HOLD > at and not ended_before(run_dir, at):
+                # Maybe still running at the reading: its last call is after it.
+                outside += limits["per_run_overrun"]
+        late_pending = eval_pending
+        if eval_started is not None:
+            # A fire that started `PENDING_FULL_HOLD` or more before the
+            # reading has finished (or stopped) inside it, results or not.
+            cut = at - PENDING_FULL_HOLD
+            late_runs = sum(
+                1 for run_dir in runs
+                if _parse_stamp(RUN_ID_RE.fullmatch(run_dir.name).group("stamp")) >= cut)
+            late = max(0, sum(1 for start in eval_started if start >= cut) - late_runs)
+            late_recent = min(recent, late)
+            late_pending = min(eval_pending, late_recent * reserve
+                               + (late - late_recent) * limits["per_run_overrun"])
+        bound = used + outside + late_pending + (improve_7d - covered) * charge
+    committed = spent + pending if bound is None else min(spent + pending, bound)
+    # One limit (the owner, 2026-11-01, "Unify the limit"): the in-run stop is
+    # also a fire limit, so no fire starts that the stop would end at once.
+    stop_left = None if bound is None else limits["stop_when_account_above"] - bound
     # Finished (IMPROVE_MAX_RUN or more ago) but newer than the reading, so
     # still held in full until an ingested run brings a newer snapshot.
     finished = 0
     if improve_started:
         finished = min(improve_7d - covered, max(0, sum(
             1 for start in improve_started if start + IMPROVE_MAX_RUN <= now) - covered))
-    return {"spent": spent, "pending": pending, "runs": len(runs),
+    return {"spent": spent, "pending": pending, "committed": committed,
+            "bound": bound, "stop_left": stop_left,
+            "stop": limits["stop_when_account_above"], "runs": len(runs),
             "fires": fires_7d, "recent": recent, "reservation": reserve,
             "cap": limits["weekly_cap"], "pace_room": room,
             "account_used": used, "week_elapsed": elapsed,
             "improve_fires": improve_7d, "improve_charge": charge,
             "improve_covered": covered, "eval_inside": eval_inside,
             "improve_finished": finished,
-            "improve_finished_held": finished * charge}
+            "improve_finished_held": finished * charge,
+            "improve_by_kind": kinds[0], "improve_in_flight": kinds[1]}
+
+
+def improve_numbers(state: dict, mode: str) -> tuple:
+    """(allowed, used, mine) for the improve cap (#572): the fires the share
+    allows (None when `improve_charge` is not positive: every measured cost
+    was zero, so the share sets no limit), the fires of both kinds counted,
+    successful or not completed, and those of `mode`'s kind. A hand-built
+    state without the counts reads as none used."""
+    charge = state["improve_charge"]
+    allowed = None if charge <= 0 else math.floor(
+        IMPROVE_WEEKLY_SHARE * state["cap"] / charge + EPSILON)
+    by_kind = state.get("improve_by_kind") or {}
+    in_flight = state.get("improve_in_flight") or {}
+    used = sum(by_kind.get(m, 0) + in_flight.get(m, 0) for m in IMPROVE_MODES)
+    mine = by_kind.get(mode, 0) + in_flight.get(mode, 0)
+    return allowed, used, mine
+
+
+def improve_cap(state: dict, mode: str) -> bool:
+    """Whether one more fire of improve `mode` may go under the improve cap
+    (#572, module docstring): fewer than the share allows are counted, or
+    none of its own kind is (the per-kind floor of one per account week).
+    The guard's `check` and the weekly planner both call this."""
+    allowed, used, mine = improve_numbers(state, mode)
+    return allowed is None or used < allowed or mine == 0
 
 
 def room(state: dict) -> float:
-    """The points left now: max(cap - spent, pace_room) - pending (`fits`).
-    The weekly planner (scripts/plan_week.py) spends it at each fire's
-    historical cost."""
-    return max(state["cap"] - state["spent"],
-               state.get("pace_room", 0.0)) - state["pending"]
+    """The points left now: max(cap - committed, pace_room - pending)
+    (`fits`), where committed is spent plus pending, never more than the
+    account reading's `bound` when there is one (`account`; module docstring,
+    2026-11-01), and never more than `stop_left`, what the account has below
+    `stop_when_account_above` once the bound is counted (one limit for
+    fires and runs, the owner, 2026-11-01). It is taken from the state's spent and pending here, not
+    from its `committed`, so a state built or changed by hand stays
+    consistent. The weekly planner (scripts/plan_week.py) spends it at each
+    fire's historical cost."""
+    committed = state["spent"] + state["pending"]
+    if state.get("bound") is not None:
+        committed = min(committed, state["bound"])
+    left = max(state["cap"] - committed,
+               state.get("pace_room", 0.0) - state["pending"])
+    if state.get("stop_left") is not None:
+        left = min(left, state["stop_left"])
+    return left
 
 
 def fits(state: dict) -> int:
     """How many more fires, each reserved in full, fit: the largest n with
-    n * reservation <= max(cap - spent - pending, pace_room - pending)
+    n * reservation <= `room`, max(cap - committed, pace_room - pending)
     (within EPSILON). The fixed cap left is a floor; late in an under-pace
     week the pace room can exceed it (the owner, 2026-10-25). Pending comes off
     both: the snapshot behind the pace room may predate those fires, and
@@ -604,21 +824,34 @@ def describe(state: dict) -> str:
     if state.get("improve_finished"):
         line += (f"; {state['improve_finished']} finished after it, held in full "
                  f"until a newer reading")
+    if "improve_charge" in state:
+        allowed, used, _ = improve_numbers(state, IMPROVE_MODES[0])
+        line += (f"; improve cap {'none' if allowed is None else allowed}, "
+                 f"used {used}")
     used = state.get("account_used")
     if state.get("pace_room", 0.0) > 0 or used is not None:
         return (f"{line}; account at {points(used or 0.0)}% with "
                 f"{points(state.get('week_elapsed') or 0.0)}% of its week gone, "
-                f"so pace allows {points(state.get('pace_room', 0.0))} points before pending fires")
+                f"so pace allows {points(state.get('pace_room', 0.0))} points before pending fires"
+                + (f"; the account reading bounds committed use at "
+                   f"{points(state['bound'])} points, "
+                   f"{points(max(0.0, state['stop_left']))} below the "
+                   f"{points(state['stop'])}% stop"
+                   if state.get("bound") is not None else ""))
     return f"{line}; no recent account reading, so no pace room"
 
 
-def check(state: dict, mode: str = "eval") -> bool:
-    """Whether one more fire, reserved in full (an improve fire at
-    `improve_charge`), stays within the cap."""
+def check(state: dict, mode: str = "eval") -> str | None:
+    """None when one more fire, reserved in full (an improve fire at
+    `improve_charge`), stays within the cap and, for an improve mode, the
+    improve cap (#572); otherwise the one refusal line `main` prints."""
     if mode in IMPROVE_MODES:
-        return room(state) + EPSILON >= state["improve_charge"]
+        if not improve_cap(state, mode):
+            allowed, used, mine = improve_numbers(state, mode)
+            return IMPROVE_CAP_REFUSAL.format(allowed=allowed, used=used, mine=mine)
+        return None if room(state) + EPSILON >= state["improve_charge"] else REFUSAL
     # Only an eval fire's ingested results carry a meter snapshot.
-    return fits(state) >= 1 or (mode == "eval" and refresh(state))
+    return None if fits(state) >= 1 or (mode == "eval" and refresh(state)) else REFUSAL
 
 
 def refresh(state: dict) -> bool:
@@ -634,6 +867,10 @@ def refresh(state: dict) -> bool:
     results. Its own reservation is held in full, and the in-run stop
     still bounds it."""
     if not state.get("improve_finished") or state.get("recent"):
+        return False
+    # A reading at or past the in-run stop: the fire would stop at once.
+    if state.get("account_used") is not None and state.get("stop") is not None \
+            and state["account_used"] >= state["stop"]:
         return False
     left = room(state) + state["improve_finished_held"] + EPSILON
     return left >= state["reservation"]
@@ -670,6 +907,30 @@ def improve_starts(runs: list, now: datetime,
             if f["conclusion"] == "success" and f["started"] >= since]
 
 
+def improve_kind_counts(runs: list, now: datetime, since: datetime | None = None,
+                        own_id: int | None = None) -> tuple:
+    """({mode: successful fires}, {mode: fires not completed}) of each
+    improve mode since `since` (default seven days before `now`) among the
+    runs API's rows, for the improve cap (#572). A not-completed fire counts
+    only when its run id is lower than `own_id`, the caller's own run
+    (GITHUB_RUN_ID), so the guard never counts itself and of two fires
+    dispatched together the earlier goes; with no `own_id` (the planner)
+    every not-completed fire counts. Its window is the success count's."""
+    since = since or now - WINDOW
+    by_kind = {mode: 0 for mode in IMPROVE_MODES}
+    in_flight = {mode: 0 for mode in IMPROVE_MODES}
+    for fire in improve_outcomes.charged_fires(runs):
+        if fire["started"] < since:
+            continue
+        mode = "improve" if "skill" in fire else "guidance-improve"
+        if fire["status"] not in (None, "completed"):
+            if own_id is None or fire["id"] < own_id:
+                in_flight[mode] += 1
+        elif fire["conclusion"] == "success":
+            by_kind[mode] += 1
+    return by_kind, in_flight
+
+
 def _live_improve_runs(now: datetime) -> list:
     """The fire runs of the last seven days, fetched once."""
     repo = os.environ.get("GITHUB_REPOSITORY", "")
@@ -690,18 +951,51 @@ def _live_improve(now: datetime, since: datetime | None = None) -> tuple[int, in
     return improve_counts(_live_improve_runs(now), now, since)
 
 
+def eval_fire_starts(runs: list, now: datetime,
+                     since: datetime | None = None) -> list[datetime]:
+    """The start times of the successful fires since `since` (default seven
+    days before `now`) among the runs API's rows that are not improve or
+    guidance-improve fires."""
+    since = since or now - WINDOW
+    improve_ids = {f["id"] for f in improve_outcomes.charged_fires(runs)}
+    starts = []
+    for run in runs:
+        if not isinstance(run, dict) or run.get("conclusion") != "success" \
+                or run.get("id") in improve_ids:
+            continue
+        started = improve_outcomes.parse_time(run.get("run_started_at")) \
+            or improve_outcomes.parse_time(run.get("created_at"))
+        if started is not None and started >= since:
+            starts.append(started)
+    return starts
+
+
+def _own_run_id() -> int | None:
+    """This run's id (GITHUB_RUN_ID), or None outside Actions or when it is
+    not a number; then every not-completed fire counts, this one included:
+    the safe direction."""
+    value = os.environ.get("GITHUB_RUN_ID", "")
+    return int(value) if value.isdigit() else None
+
+
 def _live_improve_both(now: datetime, since: datetime | None = None):
-    """(`improve_counts`, `improve_starts`) of one fetch of the fire runs."""
+    """(`improve_counts`, `improve_starts`, `eval_fire_starts`,
+    `improve_kind_counts`) of one fetch of the fire runs."""
     runs = _live_improve_runs(now)
-    return improve_counts(runs, now, since), improve_starts(runs, now, since)
+    return (improve_counts(runs, now, since), improve_starts(runs, now, since),
+            eval_fire_starts(runs, now, since),
+            improve_kind_counts(runs, now, since, _own_run_id()))
 
 
 def main(argv: list[str] | None = None, now: datetime | None = None,
-         fire_count=None, improve_count=None, improve_starts=None) -> int:
+         fire_count=None, improve_count=None, improve_starts=None,
+         eval_starts=None, improve_kinds=None) -> int:
     """`fire_count` and `improve_count`, functions of `now` returning
     `(fires_7d, fires_24h)` (all fires, and the improve fires among them),
     stand in for the API in tests, and `improve_starts`, a function of `now`
-    returning the improve fires' start times (used with `improve_count`)."""
+    returning the improve fires' start times (used with `improve_count`), and
+    `improve_kinds`, one returning `improve_kind_counts`' pair (none counted
+    when it is not given)."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", choices=("check", "fits"))
     parser.add_argument("--results-tree", type=Path, required=True,
@@ -713,7 +1007,8 @@ def main(argv: list[str] | None = None, now: datetime | None = None,
     parser.add_argument("--mode", choices=("eval", "scaffold", "draft", *IMPROVE_MODES),
                         default="eval",
                         help="the fire's mode: an improve or guidance-improve fire "
-                             "needs room for improve_charge")
+                             "needs room for improve_charge and a slot under the "
+                             "improve cap")
     args = parser.parse_args(argv)
     now = now or datetime.now(timezone.utc)
     try:
@@ -723,10 +1018,14 @@ def main(argv: list[str] | None = None, now: datetime | None = None,
         if improve_count:
             improve = improve_count(now)
             started = improve_starts(now) if improve_starts else None
+            evals = eval_starts(now) if eval_starts else None
+            by_kind, in_flight = improve_kinds(now) if improve_kinds else (None, None)
         else:
-            # One fetch feeds both the counts and the start times.
-            improve, started = _live_improve_both(now, since)
-        state = account(args.results_tree, limits, now, fires, improve, since, started)
+            # One fetch feeds the counts and the start times.
+            improve, started, evals, (by_kind, in_flight) = _live_improve_both(now, since)
+        state = account(args.results_tree, limits, now, fires, improve, since, started,
+                        eval_started=evals, improve_by_kind=by_kind,
+                        improve_in_flight=in_flight)
     except (GuardError, budget_file.BudgetError) as exc:
         # Fail closed: an unknown spend is never read as room to spend.
         print(f"::error::allowance guard: {exc}; refusing")
@@ -740,9 +1039,10 @@ def main(argv: list[str] | None = None, now: datetime | None = None,
     if args.command == "fits":
         print(f"fires={fits(state)}")
         return 0
-    if not check(state, args.mode):
-        print(REFUSAL)
-        return 1
+    refusal = check(state, args.mode)
+    if refusal is not None:
+        print(refusal)
+        return REFUSED_EXIT
     if args.mode not in IMPROVE_MODES and fits(state) < 1:
         print("allowed as the one refresh fire: its results bring a newer account reading")
     return 0

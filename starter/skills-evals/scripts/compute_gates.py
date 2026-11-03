@@ -42,8 +42,9 @@ what the caller checked out. No registry, or no unique copy, leaves it
 unknown, and every cell of the skill is then insufficient.
 
 A VALIDATED ARM RUN is one arm of one `<timestamp>[/<fixture>]` whose summary
-parses as a JSON object naming the skill and carrying an `aggregate` and a
-`run` block, whose role is `with` or `without` (the summary's `role`, else
+parses as a JSON object naming the skill and carrying an `aggregate` (not
+needed by a one-trial run: `n` 1 and no trial files) and a `run` block,
+whose role is `with` or `without` (the summary's `role`, else
 `run_eval._ROLES` of the arm name), whose requested model is recorded
 (`run_eval._arm_model`), whose trial summaries parse and have the shape
 run_eval writes (`gates.trial_record`), are numbered 1 to n and agree with
@@ -93,7 +94,7 @@ exception's type (never its message), and the others are still decided.
 AFTER harness/gates.py's verdict, ONE RETIREMENT PER EVALUATION: of several
 skills whose verdict is `retire`, only the one with the most arm runs (then
 the first by name) keeps it; the rest are `retire-pending`. Nothing is read
-from an earlier gates file: confirmation is harness/gates.py's, at two looks,
+from an earlier gates file: confirmation is harness/gates.py's anytime-valid bound,
 and a standing retirement belongs to part 2, which reads the open pull
 requests from GitHub.
 
@@ -252,7 +253,12 @@ def _validate(tree: Path, key: tuple, entry: dict, evals_dir: Path):
     summary = _parse(raw)
     if summary is None:
         return None, "no readable arm summary"
-    if not isinstance(summary.get("aggregate"), dict):
+    # A one-trial run (`--trials 1`, the routine's default) writes the trial
+    # itself as the arm summary, with `n: 1` and no aggregate and no trial
+    # files (harness/run_eval.py, "Fixture layout"); it is read as its one
+    # trial below. Any other summary needs its aggregate.
+    single = not entry["trials"] and type(summary.get("n")) is int and summary["n"] == 1
+    if not single and not isinstance(summary.get("aggregate"), dict):
         return None, "no aggregate block"
     if not isinstance(summary.get("run"), dict):
         return None, "no run block"
@@ -311,6 +317,17 @@ def _validate(tree: Path, key: tuple, entry: dict, evals_dir: Path):
     others = context_block.get("others_digest") if isinstance(context_block, dict) else None
     pair_key = (f"{others}:{guidance_base}"
                 if _string(others) and _string(guidance_base) else None)
+    # #535: a hooked run pools only with runs of the same hook set, and never
+    # with an unhooked one; an unhooked run's keys are exactly as before.
+    hooked = isinstance(frozen, dict) and "fleet_hooks_digest" in frozen
+    hooks = frozen["fleet_hooks_digest"] if hooked else None
+    if hooked:
+        # Present means hooked: null or any other non-digest is malformed, as
+        # ingest has it.
+        if not (_string(hooks) and ingest.DIGEST_RE.fullmatch(hooks)):
+            return None, "malformed arm summary"
+        context_digest = f"{context_digest}:{hooks}" if context_digest else None
+        pair_key = f"{pair_key}:{hooks}" if pair_key else None
     carried, has_checks = _fixture_class(evals_dir, skill, fixture, records)
     clis = sorted({doc["harness"]["version"] for doc in (summary, *trials)
                    if isinstance(doc.get("harness"), dict)
@@ -322,6 +339,7 @@ def _validate(tree: Path, key: tuple, entry: dict, evals_dir: Path):
                               if isinstance(subject, dict) else None),
             "fixture_digest": summary.get("fixture_digest"),
             "arm_context_digest": context_digest, "pair_key": pair_key, "cli_versions": clis,
+            "fleet_hooks_digest": hooks,
             "run": summary["run"],
             # Judged unconditionally only when every trial says so (#70).
             "judge_conditional": not all(t.get("judge_conditional") is False
@@ -378,6 +396,27 @@ def _validate_guidance(tree: Path, key: tuple, entry: dict, evals_dir: Path):
     except gates.MalformedSummary:
         return None, "malformed trial summary"
     pair, role = GUIDANCE_MODES[summary["mode"]]
+    payload = digests.get("section_payload")
+    if "section_payload" in digests and not (
+            _string(payload) and ingest.DIGEST_RE.fullmatch(payload)):
+        return None, "no guidance pooling key"
+    # The alone pair's arms load the section's payload (file intro plus
+    # extent) or nothing, so an edit elsewhere in the corpus does not change
+    # what they ran against: pool by the payload, not by the rest. A run
+    # without the payload (recorded before it existed) keeps the rest key.
+    alone = pair == "alone" and payload is not None
+    context = (("none" if role == "without" else payload) if alone else digests["rest"])
+    pair_key = "alone" if alone else digests["rest"]
+    # #535, as for a skill run: a hooked run's keys carry its hook set.
+    # Defensive: only isolation runs reach here today, and they are never
+    # hooked; in-place guidance runs are not pooled yet.
+    frozen = summary.get("context")
+    hooked = isinstance(frozen, dict) and "fleet_hooks_digest" in frozen
+    hooks = frozen["fleet_hooks_digest"] if hooked else None
+    if hooked:
+        if not (_string(hooks) and ingest.DIGEST_RE.fullmatch(hooks)):
+            return None, "no guidance pooling key"
+        context, pair_key = f"{context}:{hooks}", f"{pair_key}:{hooks}"
     carried, has_checks = _fixture_class(evals_dir, subject, name, records)
     harness = summary.get("harness")
     clis = ([harness["version"]] if isinstance(harness, dict)
@@ -386,8 +425,8 @@ def _validate_guidance(tree: Path, key: tuple, entry: dict, evals_dir: Path):
             "pair": pair, "timestamp": timestamp, "path": run_dir, "report": report,
             "tested_digest": digests["section"],
             "fixture_digest": summary["fixture_digest"],
-            "arm_context_digest": digests["rest"], "pair_key": digests["rest"],
-            "cli_versions": clis, "run": summary["run"],
+            "arm_context_digest": context, "pair_key": pair_key,
+            "fleet_hooks_digest": hooks, "cli_versions": clis, "run": summary["run"],
             "judge_conditional": summary.get("judge_conditional") is not False,
             "judge_carried": carried, "fixture_checks": has_checks,
             "trials": records, "content": _content(raw, [])}, None
@@ -483,28 +522,48 @@ def flag_registries(values: list[str] | None) -> dict:
 
 
 def tested_digest(registries: dict, skill, url) -> str | None:
-    """The skill's `tested_digest` as on main: its one copy in `registries`
-    (the fixture's `registry:` one, when it names one), digested as
-    harness/delivery.py digests a registry skill; None when it is not
-    unique or not readable."""
+    """The skill's `tested_digest` as on main: its one copy per
+    run_eval.main_copy (the fixture's `registry:` one, when it names one),
+    digested as harness/delivery.py digests a registry skill; None when it is
+    not unique or not readable."""
     if not isinstance(skill, str) or not run_eval._SKILL_NAME_RE.fullmatch(skill):
         return None
     try:
-        if url is not None:
-            entry = run_eval.registry_for_url(registries, str(url))
-            registries = {entry["name"]: entry}
-        matches = delivery._registry_matches(registries, None, skill)
-        if len(matches) != 1:
-            return None
-        files, _modes = delivery._tree_files(matches[0][2])
+        _identity, _bundle, path = run_eval.main_copy(
+            registries, skill, None if url is None else str(url))
+        files, _modes = delivery._tree_files(path)
     except (ValueError, OSError, delivery.DeliveryError, context.ContextError):
         return None
     return context._file_digest(files)
 
 
+def unscheduled_paths(evals_dir: Path) -> set:
+    """Paths listed in `evals/unscheduled.yml` (fixtures deliberately left off
+    the schedule, each with a written reason: the owner, 2026-11-02). A missing
+    file lists nothing; a malformed one raises ValueError, never an empty
+    list, so a broken file cannot make every fixture expected again unseen."""
+    path = evals_dir / "unscheduled.yml"
+    if not path.is_file():
+        return set()
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ValueError(f"{path.name} is unreadable") from exc
+    rows = doc.get("fixtures") if isinstance(doc, dict) else None
+    if not isinstance(rows, list) or not all(
+            isinstance(row, dict) and isinstance(row.get("path"), str) for row in rows):
+        raise ValueError(f"{path.name} must hold a `fixtures` list of {{path, reason}}")
+    return {row["path"] for row in rows}
+
+
 def expected_content(evals_dir: Path, skill: str, registries: dict) -> dict:
     """{fixture name, "" for a flat one: {"fixture_digest", "tested_digest"}}
-    for every fixture of `skill` on main; {} when it has none."""
+    for every fixture of `skill` on main, except a fixture listed in
+    `evals/unscheduled.yml` (it has a written reason to stay off the schedule)
+    and a `draft: true` fixture (unready by definition; `promote` schedules it
+    later, and it joins this set then); {} when it has none. A malformed
+    unscheduled.yml raises ValueError."""
+    unscheduled = unscheduled_paths(evals_dir)
     eval_dir = evals_dir / skill
     try:
         directories = run_eval.resolve_fixture_dirs(eval_dir, None) if eval_dir.is_dir() else []
@@ -517,6 +576,9 @@ def expected_content(evals_dir: Path, skill: str, registries: dict) -> dict:
         except (OSError, UnicodeDecodeError, yaml.YAMLError):
             doc = None
         doc = doc if isinstance(doc, dict) else {}
+        listed = "evals/" + directory.relative_to(evals_dir).as_posix()
+        if doc.get("draft") is True or listed in unscheduled:
+            continue
         out["" if directory == eval_dir else directory.name] = {
             "fixture_digest": run_eval.fixture_digest(directory),
             "tested_digest": tested_digest(registries, doc.get("skill"), doc.get("registry"))}

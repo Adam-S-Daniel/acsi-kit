@@ -6,10 +6,10 @@
     "acsi-coding-anywhere"
   ],
   "skills": {
-    "acsi-coding-anywhere/github-actions-repo-settings": "sha256:075aa817a241da6b72123cc9d0fb794cd37710aa17ed4ec70d8eaeb2cb25257f",
-    "acsi-coding-anywhere/skills-doctor": "sha256:eaf54aa652630cb8e171bc28ed4189d9b0941c7c768ccf2a630e865093e3aa70",
+    "acsi-coding-anywhere/github-actions-repo-settings": "sha256:03668a91242ed78ea24f090c00c8a8caba655034238d00cf8dda0cfb235dace5",
+    "acsi-coding-anywhere/skills-doctor": "sha256:b20ef6ba56f25d59ab3544cfc7f97f1c70947a528c983b363f2dfced54a39f6a",
     "acsi-coding-anywhere/vendor-release-impact-issues": "sha256:b7bc6f17c002a05b5c5c517ddf598c717820ef808d5d240a5e8e9d6e68a7c426",
-    "acsi-coding-anywhere/workflow-path-audit": "sha256:8a7c57bcd890bbab38c42473d8705f0b2521954385f03bf5289e3ec84d3fcdde"
+    "acsi-coding-anywhere/workflow-path-audit": "sha256:0723ef6ee66d268a912db3a7dfe51ea41c29189c5559e3baf5036f4d14697c2e"
   },
   "generated_from": "0000000000000000000000000000000000000000"
 }

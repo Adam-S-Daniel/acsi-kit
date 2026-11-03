@@ -38,6 +38,11 @@ permissions:
 
 jobs:
   audit:
+    # This repo's own reusable, not example-site-platform's: a reusable is covered by
+    # the lockfile of the repo it is defined in, example-site-platform has none, and
+    # under this repo's Require lockfile policy the platform call
+    # startup-failed every day from 2026-10-28. The reusable's header has the
+    # detail; the audit script lives in this repo too.
     uses: ./.github/workflows/scheduled-run-health-reusable.yml
     with:
       dry_run: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.dry_run) || false }}

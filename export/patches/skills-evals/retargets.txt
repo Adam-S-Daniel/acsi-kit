@@ -59,11 +59,19 @@ PROPAGATION_YML = REPO_ROOT / ".github" / "workflows" / "propagation.yml"
 @@@ old
                 self.assertFalse((ROOT / "evals" / skill / old / "fixture.yaml").exists())
                 self.assertTrue((ROOT / "evals" / skill / new / "fixture.yaml").is_file())
-                self.assertIn(new, compute_gates.expected_content(ROOT / "evals", skill, {}))
+                # A target taken off the schedule (unscheduled.yml) is not expected.
+                unscheduled = {row["path"] for row in yaml.safe_load(
+                    (ROOT / "evals/unscheduled.yml").read_text(encoding="utf-8"))["fixtures"]}
+                if f"evals/{skill}/{new}" not in unscheduled:
+                    self.assertIn(new, compute_gates.expected_content(ROOT / "evals", skill, {}))
 @@@ new
                 self.assertFalse((evals / skill / old / "fixture.yaml").exists())
                 self.assertTrue((evals / skill / new / "fixture.yaml").is_file())
-                self.assertIn(new, compute_gates.expected_content(evals, skill, {}))
+                # A target taken off the schedule (unscheduled.yml) is not expected.
+                unscheduled = {row["path"] for row in yaml.safe_load(
+                    (evals / "unscheduled.yml").read_text(encoding="utf-8"))["fixtures"]}
+                if f"evals/{skill}/{new}" not in unscheduled:
+                    self.assertIn(new, compute_gates.expected_content(evals, skill, {}))
 @@@ end
 === test/issues/test_issue_71.py
 # why: the improve loop's runner tests read skill fixtures under evals/; they read the invented ones under test/fixtures/evals.
@@ -248,14 +256,6 @@ ROOT = example_evals.checkout()
 === test/issues/test_issue_dev_setup.py
 # why: the dependency-directory lists are compared in the example checkout, whose invented real-work fixture declares one npm and one bundler directory.
 @@@ old
-import subprocess
-import unittest
-@@@ new
-import subprocess
-import sys
-import unittest
-@@@ end
-@@@ old
 CI_PREFIX = "skills-evals/"
 
 @@@ new
@@ -272,10 +272,10 @@ CHECKOUT = example_evals.checkout()
 
 @@@ end
 @@@ old
-    return subprocess.run(["bash", str(SCRIPT), *args], cwd=ROOT,
+    return subprocess.run(["bash", str(SCRIPT), *args], cwd=ROOT, env=env,
 @@@ new
     return subprocess.run(["bash", str(CHECKOUT / "scripts" / "dev_setup.sh"), *args],
-                          cwd=CHECKOUT,
+                          cwd=CHECKOUT, env=env,
 @@@ end
 @@@ old
         listed = subprocess.run(["python3", str(ROOT / "scripts" / "scaffold_real_work.py"),
@@ -506,8 +506,7 @@ ROOT = example_evals.checkout()
 @@@ old
 sys.path.insert(0, str(ROOT / "test"))
 from lockfile_pins import lock_problem  # noqa: E402
-REVIEWED = ["evals/workflow-path-audit/required-check-routing",
-            "evals/embeddable-tool-pages",
+REVIEWED = ["evals/embeddable-tool-pages",
             "evals/review-bash-ci-reliability/release-pipeline",
             "evals/skills-doctor/bucketed-account-store",
             "evals/github-actions-sha-pinning",
@@ -520,33 +519,50 @@ REVIEWED = ["evals/workflow-path-audit/required-check-routing",
             "evals/guidance/anything-you-name-gets-its-link/done-summary",
             "evals/guidance/anything-you-name-gets-its-link/no-url",
             "evals/guidance/watch-finished-is-not-ci-passed/legacy-status-failure",
-            "evals/guidance/git-push-does-not-mean-commit-exists/hook-refused-commit",
             "evals/guidance/pinning-github-actions/new-workflow",
-            "evals/guidance/git-practices/merge-method-and-closing-keyword",
             "evals/guidance/subagent-delegation/verifier-that-cannot-fail",
-            "evals/guidance/automation-vs-branch-protection/required-check-concurrency",
             "evals/guidance/working-in-these-repos/on-hold-pull-request",
             "evals/guidance/data-exposure-in-ci/dispatch-email-input",
+            "evals/guidance/data-exposure-in-ci/http-error-body",
+            "evals/guidance/data-exposure-in-ci/backup-config-secrets",
+            "evals/guidance/data-exposure-in-ci/realistic-contact-fixtures",
             "evals/guidance/name-becomes-scanner-data/bundle-lock-name",
             "evals/guidance/fleet-spans-two-owners/skills-lock-census",
             "evals/guidance/github-404-means-not-authorized/private-repo-404",
             "evals/guidance/test-that-can-signal-kills-every-session/stop-worker",
-            "evals/guidance/section-python/load-config",
             "evals/guidance/dependency-updates/dependabot-cooldown",
             "evals/guidance/agent-contribution-markers/open-pull-request",
             "evals/guidance/security/search-query",
-            "evals/guidance/section-docker/node-service",
-            "evals/guidance/section-javascript/fetch-retry",
-            "evals/guidance/section-typescript/parse-event",
-            "evals/guidance/section-go/fetch-user",
-            "evals/guidance/section-rust/parse-port",
-            "evals/guidance/section-dotnet/load-settings",
-            "evals/guidance/workstation-layout/clone-all",
             "evals/guidance/two-github-connectors/org-connector-ci",
             "evals/guidance/two-setup-gaps/multi-repo-cloud-session",
-            "evals/guidance/skills-ecosystem/push-fails-everywhere",
             "evals/guidance/finding-your-unknowns/changelog-check",
-            "evals/guidance/read-before-you-start/new-config-key"]
+            # Skill fixtures merged hermetic and left off the schedule while
+            # the skills-fixture lane was stopped (#62's children): their
+            # skills are live in acsi-agentskills and example-site-platform.
+            "evals/rename-pdfs",
+            "evals/pdf-ocr-audit",
+            "evals/cms-stuck-pr-triage",
+            "evals/post-failure-comment",
+            "evals/consumer-repo-provisioning",
+            "evals/platform-release-and-bump",
+            # Skills with eval runs that were never scheduled (2026-11-01).
+            "evals/ci-job-performance/browser-cache",
+            "evals/debug-github-workflows/git-identity",
+            "evals/debug-github-workflows/secret-name",
+            "evals/debug-github-workflows/swallowed-failure",
+            "evals/debug-github-workflows/wrong-branch",
+            "evals/vendor-release-impact-issues/closed-duplicate",
+            "evals/vendor-release-impact-issues/closing-keywords",
+            "evals/vendor-release-impact-issues/issue-hygiene",
+            "evals/vendor-release-impact-issues/stamps-skip-quotes",
+            # In place on repo-settings, which the routine clones from 2026-11-01.
+            "evals/github-actions-repo-settings/drift-diagnosis",
+            # In place, with a context; the rest of both skills' fixtures
+            # (the owner, 2026-11-02: leaving one out needs a reason).
+            "evals/review-bash-ci-reliability/drift-report-capture",
+            "evals/review-bash-ci-reliability/nightly-snapshot",
+            "evals/review-bash-ci-reliability/test-runner-assertions",
+            "evals/skills-doctor/personal-copy-outranks-repo"]
 @@@ new
 REVIEWED = list(example_evals.SCHEDULED)
 @@@ end
@@ -801,4 +817,11 @@ class AnchoringHelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+@@@ end
+=== test/issues/test_issue_fixture_pr_gate.py
+# why: the source spells the second owner in mixed case to test case-insensitive matching; the kit derives that spelling from the configured owner, because bootstrap/copy-starter.sh rewrites only the forms it knows (lowercase, upper and underscore) and refuses a tree that still names the invented owner.
+@@@ old
+                .replace("null", "https://github.com/Example-Adopter-Two/example-site/pull/12"),
+@@@ new
+                .replace("null", f"https://github.com/{gate.stakes.FLEET_OWNERS[1].title()}/example-site/pull/12"),
 @@@ end

@@ -5,8 +5,9 @@ The owner's decisions: build automatic removal (2026-10-25); removal pull reques
 auto-merge with no human review (2026-10-25, ADR 0014); results are not
 signed, the gate guards against honest mistakes (2026-10-26); removal pull
 requests auto-merge with no human (2026-10-26, acsi-agentskills ADR 0021),
-so the committed `retirement_mode` is `auto`, lowered to `proposal` (an
-issue) when the skill's plugin runs code or the workflow has no write token.
+and `auto` is lowered to `proposal` (an issue) when the skill's plugin runs
+code or the workflow has no write token. The owner set the committed
+`retirement_mode` to `proposal` on 2026-11-03 until the statistics fixes land.
 
 Hermetic: a hand-written gates document, registry checkouts in a temporary
 directory (local git only), and a fake `gh` and `push`; no network, no clock.
@@ -58,8 +59,7 @@ def cell(fixture, model, cls="no-benefit"):
     return {"fixture": fixture, "model": model, "class": cls,
             "with": {"runs": 10}, "without": {"runs": 11},
             "objective": {"delta": 0.0, "benefit_lower": -0.1, "retire_upper": 0.04},
-            "judge": {"delta": 0.1, "benefit_lower": -0.2, "retire_upper": 0.3},
-            "looks": [{"n": 5, "class": cls}, {"n": 10, "class": cls}]}
+            "judge": {"delta": 0.1, "benefit_lower": -0.2, "retire_upper": 0.3}}
 
 
 def gates_doc(mode="proposal", verdicts=None):
@@ -269,7 +269,7 @@ class ProposalTests(Base):
         body = fake.calls[-1][1]
         self.assertIn(retire_skill.ISSUE_MARKER.format(skill=SKILL), body)
         self.assertIn(f"plugins/{PLUGIN}/skills/{SKILL}", body)
-        self.assertIn("| basic | claude-opus-5-5 | 10 | 11 | 0.040 | 0.300 | 5, 10 |", body)
+        self.assertIn("| basic | claude-opus-5-5 | 10 | 11 | 0.040 | 0.300 |", body)
         self.assertEqual(fake.pushes, [])
         self.assertFalse(any(args[0] == "pr" for args in writes))
         self.assertUntouched()
@@ -318,11 +318,11 @@ class ProposalTests(Base):
         block["retirement_mode"] = "sometimes"
         return block
 
-    def test_the_committed_policy_is_auto(self):
-        """the owner, 2026-10-26: removal pull requests auto-merge, no human."""
+    def test_the_committed_policy_is_proposal(self):
+        """the owner, 2026-11-03: removals are proposals until the stats fixes land."""
         doc = yaml.safe_load((ROOT / "evals" / "gate-policy.yml").read_text())
-        self.assertEqual(doc["skills"]["retirement_mode"], "auto")
-        self.assertEqual(doc["guidance"]["retirement_mode"], "auto")
+        self.assertEqual(doc["skills"]["retirement_mode"], "proposal")
+        self.assertEqual(doc["guidance"]["retirement_mode"], "proposal")
 
 
 class AutoTests(Base):
@@ -360,14 +360,26 @@ class AutoTests(Base):
         self.assertEqual(writes[2], ["pr", "merge", url, "-R", "example-adopter/acsi-agentskills",
                                      "--auto", "--merge", "--match-head-commit", head])
         self.assertEqual(writes[3][:3], ["pr", "view", url])
-        self.assertEqual(len(writes), 4)
+        # Then the removal notice to the owner here (#557), naming the pull request.
+        self.assertEqual(writes[4][:4], ["issue", "create", "-R", "example-adopter/skills-evals"])
+        self.assertIn("agent-authored", writes[4])
+        notice = next(stdin for args, stdin in fake.calls if args[:2] == ["issue", "create"])
+        self.assertTrue(notice.startswith(
+            retire_skill.SKILL_NOTICE_MARKER.format(skill=SKILL)))
+        self.assertIn(f"@{retire_skill.NOTICE_OWNER}", notice)
+        self.assertIn(url, notice)
+        self.assertIn("**Revert**", notice)
+        self.assertTrue(notice.rstrip().endswith(retire_skill.AGENT_MARKER))
+        self.assertEqual(len(writes), 5)
         body = next(stdin for args, stdin in fake.calls if args[:2] == ["pr", "create"])
         self.assertIn("no human review", body)
         self.assertIn("0014-removal-pull-requests-merge-without-review.md", body)
         self.assertIn("0021-automated-skill-changes-merge-without-review.md", body)
         self.assertIn("1.2.7 -> 2.0.0", body)
         self.assertTrue(body.endswith(retire_skill.AGENT_MARKER + "\n"))
-        self.assertFalse(any(args[0] == "issue" for args in writes))
+        # No retirement issue: the one issue written is the removal notice.
+        self.assertEqual([args[:2] for args in writes if args[0] == "issue"],
+                         [["issue", "create"]])
         for message in git(self.registry, "log", "--format=%B%x00", "main..HEAD").split("\0"):
             if message.strip():
                 self.assertTrue(message.strip().endswith("Agent: claude-code"), message)
@@ -407,17 +419,20 @@ class AutoTests(Base):
         self.assertEqual(code, 0, err)
         self.assertEqual(len(fake.pushes), 1)
 
-    def test_a_plugin_that_runs_code_falls_back_to_the_issue(self):
-        cases = {"hooks dir": lambda r: (r / "plugins" / PLUGIN / "hooks").mkdir(),
-                 "bin dir": lambda r: (r / "plugins" / PLUGIN / "bin").mkdir(),
-                 "package file": lambda r: (r / "plugins" / PLUGIN / "package.json")
-                 .write_text("{}\n"),
-                 "manifest hooks key": lambda r: (r / "plugins" / PLUGIN / "plugin.json")
+    def test_a_removal_the_runtime_gate_would_hold_falls_back_to_the_issue(self):
+        # The owner, 2026-11-03: only a removal acsi-agentskills'
+        # plugin-runtime-review would hold falls back, not every skill of a
+        # plugin with hooks (ADR 0014's text-only removals addendum).
+        cases = {"a hook names the skill": lambda r: ((r / "plugins" / PLUGIN / "hooks").mkdir(), (r / "plugins" / PLUGIN / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {"Stop": [{"command": f"${{CLAUDE_PLUGIN_ROOT}}/skills/{SKILL}/check.sh"}]}}) + "\n")),
+                 "a manifest hook names the skill": lambda r: (r / "plugins" / PLUGIN / "plugin.json")
                  .write_text(json.dumps({"name": PLUGIN, "version": "1.2.7",
-                                         "hooks": "./hooks/hooks.json"}, indent=2) + "\n")}
+                                         "hooks": {"Stop": [{"command": f"x/skills/{SKILL}/a.sh"}]}},
+                                        indent=2) + "\n"),
+                 "the skill's own bin": lambda r: ((r / "plugins" / PLUGIN / "skills" / SKILL / "bin").mkdir(),
+                                                  (r / "plugins" / PLUGIN / "skills" / SKILL / "bin" / "t").write_text("x\n"))}
         for name, mutate in cases.items():
             with self.subTest(name):
-                registry = make_registry(self.tmp / name.replace(" ", "-"))
+                registry = make_registry(self.tmp / name.replace(" ", "-").replace("'", ""))
                 mutate(registry)
                 git(registry, "add", "-A")
                 git(registry, "commit", "-q", "--allow-empty", "-m", "runtime")
@@ -429,9 +444,28 @@ class AutoTests(Base):
                 self.assertEqual(len(writes), 1)
                 self.assertEqual(writes[0][:2], ["issue", "create"])
                 body = fake.calls[-1][1]
-                self.assertIn("`retirement_mode: auto`, but the skill's plugin runs code", body)
+                self.assertIn("`retirement_mode: auto`, but", body)
+                self.assertIn("plugin-runtime-review holds", body)
                 self.assertEqual(fake.pushes, [])
                 self.assertEqual(git(registry, "branch", "--show-current").strip(), "main")
+
+    def test_a_plugin_that_runs_code_still_gets_a_removal_pull_request(self):
+        cases = {"hooks dir": lambda r: (r / "plugins" / PLUGIN / "hooks").mkdir(),
+                 "bin dir": lambda r: ((r / "plugins" / PLUGIN / "bin").mkdir(),
+                                       (r / "plugins" / PLUGIN / "bin" / "tool").write_text("x\n")),
+                 "package file": lambda r: (r / "plugins" / PLUGIN / "package.json")
+                 .write_text("{}\n")}
+        for name, mutate in cases.items():
+            with self.subTest(name):
+                registry = make_registry(self.tmp / ("plain-" + name.replace(" ", "-")))
+                mutate(registry)
+                git(registry, "add", "-A")
+                git(registry, "commit", "-q", "--allow-empty", "-m", "runtime")
+                registries = compute_gates.flag_registries([f"acsi-agentskills={registry}"])
+                action = retire_skill.plan(gates_doc("auto"), registries, FakeGitHub().gh,
+                                           allowed=("auto", "proposal"))
+                self.assertEqual(action["action"], "removal")
+                self.assertNotIn("mode_reason", action)
 
     def test_a_plugin_without_runtime_paths_is_not_lowered(self):
         registries = compute_gates.flag_registries([f"acsi-agentskills={self.registry}"])
@@ -441,10 +475,12 @@ class AutoTests(Base):
         self.assertNotIn("mode_reason", action)
 
     def test_a_runtime_plugin_with_only_auto_allowed_is_refused(self):
-        (self.registry / "plugins" / PLUGIN / "bin").mkdir()
-        (self.registry / "plugins" / PLUGIN / "bin" / "tool").write_text("x\n")
+        hooks = self.registry / "plugins" / PLUGIN / "hooks"
+        hooks.mkdir()
+        (hooks / "hooks.json").write_text(json.dumps(
+            {"hooks": {"Stop": [{"command": f"${{CLAUDE_PLUGIN_ROOT}}/skills/{SKILL}/a.sh"}]}}))
         git(self.registry, "add", "-A")
-        git(self.registry, "commit", "-qm", "bin")
+        git(self.registry, "commit", "-qm", "hook")
         code, _, err, fake = self.run_main(gates_doc("auto"))
         self.assertEqual(code, 2)
         self.assertIn("falls back to proposal", err)
@@ -513,8 +549,11 @@ class AutoTests(Base):
         code = retire_skill.main(argv, env=AUTO_ENV, gh=reads.gh, push=reads.push,
                                  registry_gh=writes.gh, out=io.StringIO())
         self.assertEqual(code, 0)
-        self.assertEqual(reads.writes(), [])
-        self.assertTrue(all(args[:2] == ["api", "--paginate"] for args, _ in reads.calls))
+        # The one write on the job's own token is the removal notice here (#557).
+        self.assertEqual([args[:4] for args in reads.writes()],
+                         [["issue", "create", "-R", "example-adopter/skills-evals"]])
+        self.assertTrue(all(args[:2] in (["api", "--paginate"], ["issue", "create"])
+                            for args, _ in reads.calls))
         self.assertEqual([args[:2] for args, _ in writes.calls],
                          [["pr", "create"], ["api", "-X"], ["pr", "merge"], ["pr", "view"]])
 
@@ -611,7 +650,7 @@ class VerdictTests(Base):
     def test_a_retire_the_cells_do_not_support_is_refused(self):
         bad = {
             "a cell is not no-benefit": [cell("basic", MODELS[0]),
-                                         cell("basic", MODELS[1], "no-benefit-pending")],
+                                         cell("basic", MODELS[1], "insufficient")],
             "a roster model is missing": [cell("basic", MODELS[0])],
             "an extra model": [cell("basic", m) for m in [*MODELS, "claude-old"]],
             "no cell": [],
@@ -875,9 +914,6 @@ class InputTypeTests(Base):
             "a reason not text": gates_doc(verdicts={SKILL: {"verdict": "retire",
                                                              "reason": {"x": 1},
                                                              "cells": good}}),
-            "looks a number": gates_doc(verdicts={SKILL: {
-                "verdict": "retire", "reason": "r",
-                "cells": [{**c, "looks": 5} for c in good]}}),
         }
         for mode in ("proposal", "auto"):
             for name, doc in docs.items():
@@ -1147,8 +1183,8 @@ class SkillImpactTests(unittest.TestCase):
             "- Motivation: the retirement verdict is `retire` "
             "([skills-evals ADR 0014](https://github.com/example-adopter/skills-evals/blob/main/"
             "docs/decisions/0014-removal-pull-requests-merge-without-review.md)): "
-            "every cell (2 fixture(s) x 2 roster model(s)) shows no benefit at two fixed "
-            "looks.\n"
+            "every cell (2 fixture(s) x 2 roster model(s)) shows no benefit at the retire "
+            "confidence level.\n"
             f"- Change: `plugins/{PLUGIN}/skills/{SKILL}/` removed, the skill dropped from "
             f"`scripts/plugin_layout.json` and the README table, bundle `{PLUGIN}` 1.2.7 -> "
             "2.0.0 (a removal is a breaking change), by skills-evals' "

@@ -4,29 +4,30 @@ function Set-WslAutomationScheduledTasks {
     <#
     .SYNOPSIS
         Registers or updates the scheduled tasks that drive ccstatusline config sync, Codex Cloud
-        environment sync, the daily usage census publish, the every-minute waiting feed publish,
-        and the daily session miner.
+        environment sync, the daily usage census publish, the daily session miner, the weekly
+        memory curation, and the every-minute waiting feed publish.
 
     .DESCRIPTION
-        Creates five Windows Scheduled Tasks, or updates them in place if they already exist: a
+        Creates six Windows Scheduled Tasks, or updates them in place if they already exist: a
         ccstatusline config sync task that runs scripts/sync-ccstatusline-config.ps1 on a short
         repeating interval; a Codex Cloud environment sync task that runs
         scripts/sync-codex-cloud-environments.ps1 at midnight and noon while the distro is running;
         a usage census publish task that runs scripts/publish-usage-census.sh inside the distro
-        once a day, calling wsl.exe directly so no pwsh is involved; a waiting feed publish task
-        that runs scripts/publish-waiting-feed.sh inside the distro every minute, the same way; and
-        a session miner task that runs scripts/run-session-miner.sh inside the distro once a day,
-        the same way.
+        once a day, calling wsl.exe directly so no pwsh is involved; a session miner task that
+        runs scripts/run-session-miner.sh inside the distro once a day, the same way; a memory
+        curation task that runs scripts/run-memory-curation.sh the same way once a week; and a
+        waiting feed publish task that runs scripts/publish-waiting-feed.sh inside the distro every
+        minute, the same way.
 
-        All five run as background S4U tasks (session 0), so they never flash a console window on
+        All six run as background S4U tasks (session 0), so they never flash a console window on
         the desktop. The two pwsh-based tasks require an MSI PowerShell 7 and the "Log on as a
         batch job" right - see -PwshPath and scripts/grant-keeper-batch-logon.ps1. The usage
-        census, waiting feed and session miner tasks are S4U too, but their action is wsl.exe
-        itself, so they need no pwsh at all.
+        census, session miner, memory curation and waiting feed tasks are S4U too, but their
+        action is wsl.exe itself, so they need no pwsh at all.
 
         Every task's Settings and Principal are always (re)built fresh from this function's
         parameters, whether the task already exists or not, so their battery/idle behavior stays
-        in sync. Re-running this function is idempotent for all five tasks. None of them sets
+        in sync. Re-running this function is idempotent for all six tasks. None of them sets
         StartWhenAvailable: a missed run stays missed rather than firing the instant the machine
         wakes, inside WSL's post-wake transition window (see AGENTS.md).
 
@@ -38,7 +39,8 @@ function Set-WslAutomationScheduledTasks {
 
     .PARAMETER ScriptsDir
         Directory containing sync-ccstatusline-config.ps1, sync-codex-cloud-environments.ps1,
-        publish-usage-census.sh, publish-waiting-feed.sh and run-session-miner.sh.
+        publish-usage-census.sh, run-session-miner.sh, run-memory-curation.sh and
+        publish-waiting-feed.sh.
 
     .PARAMETER DistroName
         Name of the WSL distro the tasks run in. Defaults to 'Ubuntu'.
@@ -64,11 +66,6 @@ function Set-WslAutomationScheduledTasks {
         the laptop is usually awake at midday, and :37 is off the hour, clear of other jobs that
         start on it.
 
-    .PARAMETER WaitingFeedTaskName
-        Name of the scheduled task that publishes the waiting feed (the Claude Code cloud
-        sessions waiting on you) from WSL every minute. Defaults to
-        'Claude Waiting Feed Publish'.
-
     .PARAMETER SessionMinerTaskName
         Name of the scheduled task that runs the session miner from WSL (skills-evals'
         scripts/run_session_miner.sh through scripts/run-session-miner.sh). Defaults to
@@ -78,9 +75,22 @@ function Set-WslAutomationScheduledTasks {
         Time of day (HH:mm) the session miner task's daily trigger fires. Defaults to '07:17':
         off the hour, and hours away from the usage census, which reads the same transcripts.
 
+    .PARAMETER MemoryCurationTaskName
+        Name of the scheduled task that runs the weekly memory curation from WSL. Defaults to
+        'Memory Curation'.
+
+    .PARAMETER MemoryCurationTime
+        Time of day (HH:mm) the memory curation task's weekly (Monday) trigger fires. Defaults
+        to '13:47', clear of every other task's time.
+
+    .PARAMETER WaitingFeedTaskName
+        Name of the scheduled task that publishes the waiting feed (the Claude Code cloud
+        sessions waiting on you) from WSL every minute. Defaults to
+        'Claude Waiting Feed Publish'.
+
     .PARAMETER WslExePath
-        Path to wsl.exe used as the usage census, waiting feed and session miner tasks' action.
-        Defaults to %SystemRoot%\System32\wsl.exe.
+        Path to wsl.exe used as the usage census, session miner, memory curation and waiting
+        feed tasks' action. Defaults to %SystemRoot%\System32\wsl.exe.
 
     .PARAMETER PwshPath
         Path to pwsh.exe used as the action executable for the pwsh-based tasks. Defaults to an
@@ -108,7 +118,7 @@ function Set-WslAutomationScheduledTasks {
     .EXAMPLE
         Set-WslAutomationScheduledTasks -ScriptsDir 'C:\Users\<you>\repos\wsl-automation\scripts'
 
-        Registers (or updates) all five scheduled tasks using default names, times and intervals.
+        Registers (or updates) all six scheduled tasks using default names, times and intervals.
 
     .EXAMPLE
         Set-WslAutomationScheduledTasks -ScriptsDir $PSScriptRoot -WhatIf
@@ -118,7 +128,7 @@ function Set-WslAutomationScheduledTasks {
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         'PSUseSingularNouns',
         '',
-        Justification = 'This function manages five related scheduled tasks by design; Set-WslAutomationScheduledTasks is the name specified by the project spec.')]
+        Justification = 'This function manages six related scheduled tasks by design; Set-WslAutomationScheduledTasks is the name specified by the project spec.')]
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)]
@@ -136,11 +146,15 @@ function Set-WslAutomationScheduledTasks {
 
         [string]$UsageCensusTime = '12:37',
 
-        [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',
-
         [string]$SessionMinerTaskName = 'Session Miner',
 
         [string]$SessionMinerTime = '07:17',
+
+        [string]$MemoryCurationTaskName = 'Memory Curation',
+
+        [string]$MemoryCurationTime = '13:47',
+
+        [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',
 
         [string]$WslExePath = (Join-Path $env:SystemRoot 'System32\wsl.exe'),
 
@@ -201,7 +215,7 @@ function Set-WslAutomationScheduledTasks {
     # -RepetitionDuration unset here is required, not incidental - it is what makes the
     # repetition indefinite.
     $ccstatuslineTrigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date) `
-        -RepetitionInterval (New-TimeSpan -Minutes $CcstatuslineIntervalMinutes)
+        -RepetitionInterval (New-TimeSpan -Minutes $CcstatuslineIntervalMinutes) | ConvertTo-WslLocalTimeTrigger
 
     # Settings/Principal are always rebuilt fresh for the ccstatusline task too, regardless of
     # whether it already exists, so its battery/idle behavior always matches this function's
@@ -232,8 +246,8 @@ function Set-WslAutomationScheduledTasks {
     $codexCloudSyncArguments = "-NoProfile -File `"$codexCloudSyncScriptPath`" -DistroName $DistroName"
     $codexCloudSyncAction = New-ScheduledTaskAction -Execute $PwshPath -Argument $codexCloudSyncArguments
     $codexCloudSyncTriggers = @(
-        (New-ScheduledTaskTrigger -Daily -At '00:00'),
-        (New-ScheduledTaskTrigger -Daily -At '12:00')
+        (New-ScheduledTaskTrigger -Daily -At '00:00' | ConvertTo-WslLocalTimeTrigger),
+        (New-ScheduledTaskTrigger -Daily -At '12:00' | ConvertTo-WslLocalTimeTrigger)
     )
     $codexCloudSyncSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
@@ -264,7 +278,7 @@ function Set-WslAutomationScheduledTasks {
     # any trailing backslash above, which would otherwise escape the closing quote.
     $usageCensusArguments = "--distribution $DistroName --cd `"$ScriptsDir`" --exec /bin/bash ./publish-usage-census.sh"
     $usageCensusAction = New-ScheduledTaskAction -Execute $WslExePath -Argument $usageCensusArguments
-    $usageCensusTrigger = New-ScheduledTaskTrigger -Daily -At $UsageCensusTime
+    $usageCensusTrigger = New-ScheduledTaskTrigger -Daily -At $UsageCensusTime | ConvertTo-WslLocalTimeTrigger
     $usageCensusSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
     $usageCensusPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U
@@ -283,35 +297,6 @@ function Set-WslAutomationScheduledTasks {
         }
     }
 
-    # --- Waiting feed publish: every minute, wsl.exe as the action ----------
-    # Same shape as the usage census (wsl.exe directly, S4U, session 0), but repeating every
-    # minute with the indefinite-repetition construction the ccstatusline trigger documents above
-    # (-Once + creation-time -RepetitionInterval, no -RepetitionDuration). The script is cheap
-    # when nothing changed, so a 5 minute limit is generous; IgnoreNew keeps a slow run (a hung
-    # push) from stacking up behind itself. No StartWhenAvailable: the feed is a live view, so a
-    # missed minute is just skipped.
-    $waitingFeedArguments = "--distribution $DistroName --cd `"$ScriptsDir`" --exec /bin/bash ./publish-waiting-feed.sh"
-    $waitingFeedAction = New-ScheduledTaskAction -Execute $WslExePath -Argument $waitingFeedArguments
-    $waitingFeedTrigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date) `
-        -RepetitionInterval (New-TimeSpan -Minutes 1)
-    $waitingFeedSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew
-    $waitingFeedPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U
-
-    $existingWaitingFeedTask = Get-ScheduledTask -TaskName $WaitingFeedTaskName -ErrorAction SilentlyContinue
-    if ($existingWaitingFeedTask) {
-        if ($PSCmdlet.ShouldProcess($WaitingFeedTaskName, 'Update scheduled task')) {
-            Set-WslScheduledTask -TaskName $WaitingFeedTaskName -Action $waitingFeedAction -Trigger $waitingFeedTrigger `
-                -Settings $waitingFeedSettings -Principal $waitingFeedPrincipal
-        }
-    }
-    else {
-        if ($PSCmdlet.ShouldProcess($WaitingFeedTaskName, 'Register scheduled task')) {
-            Register-WslScheduledTask -TaskName $WaitingFeedTaskName -Action $waitingFeedAction -Trigger $waitingFeedTrigger `
-                -Settings $waitingFeedSettings -Principal $waitingFeedPrincipal
-        }
-    }
-
     # --- Session miner: one daily trigger, wsl.exe as the action ------------
     # Same shape as the usage census (wsl.exe directly, S4U, session 0, no StartWhenAvailable: a
     # missed day stays missed, and the next run reads every session since the last one, so
@@ -323,7 +308,7 @@ function Set-WslAutomationScheduledTasks {
     # machine; IgnoreNew keeps a slow run from doubling up.
     $sessionMinerArguments = "--distribution $DistroName --cd `"$ScriptsDir`" --exec /bin/bash ./run-session-miner.sh"
     $sessionMinerAction = New-ScheduledTaskAction -Execute $WslExePath -Argument $sessionMinerArguments
-    $sessionMinerTrigger = New-ScheduledTaskTrigger -Daily -At $SessionMinerTime
+    $sessionMinerTrigger = New-ScheduledTaskTrigger -Daily -At $SessionMinerTime | ConvertTo-WslLocalTimeTrigger
     $sessionMinerSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
     $sessionMinerPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U
@@ -339,6 +324,60 @@ function Set-WslAutomationScheduledTasks {
         if ($PSCmdlet.ShouldProcess($SessionMinerTaskName, 'Register scheduled task')) {
             Register-WslScheduledTask -TaskName $SessionMinerTaskName -Action $sessionMinerAction -Trigger $sessionMinerTrigger `
                 -Settings $sessionMinerSettings -Principal $sessionMinerPrincipal
+        }
+    }
+
+    # --- Memory curation: one weekly (Monday) trigger, wsl.exe as the action
+    # Built like the session miner above (wsl.exe directly, S4U, session 0, no StartWhenAvailable):
+    # a missed week is simply curated the next Monday. The wrapper bounds its own Claude run at 2
+    # hours, so the task's limit of 3 hours only ever stops a wedged wrapper.
+    $memoryCurationArguments = "--distribution $DistroName --cd `"$ScriptsDir`" --exec /bin/bash ./run-memory-curation.sh"
+    $memoryCurationAction = New-ScheduledTaskAction -Execute $WslExePath -Argument $memoryCurationArguments
+    $memoryCurationTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At $MemoryCurationTime | ConvertTo-WslLocalTimeTrigger
+    $memoryCurationSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit (New-TimeSpan -Hours 3) -MultipleInstances IgnoreNew
+    $memoryCurationPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U
+
+    $existingMemoryCurationTask = Get-ScheduledTask -TaskName $MemoryCurationTaskName -ErrorAction SilentlyContinue
+    if ($existingMemoryCurationTask) {
+        if ($PSCmdlet.ShouldProcess($MemoryCurationTaskName, 'Update scheduled task')) {
+            Set-WslScheduledTask -TaskName $MemoryCurationTaskName -Action $memoryCurationAction -Trigger $memoryCurationTrigger `
+                -Settings $memoryCurationSettings -Principal $memoryCurationPrincipal
+        }
+    }
+    else {
+        if ($PSCmdlet.ShouldProcess($MemoryCurationTaskName, 'Register scheduled task')) {
+            Register-WslScheduledTask -TaskName $MemoryCurationTaskName -Action $memoryCurationAction -Trigger $memoryCurationTrigger `
+                -Settings $memoryCurationSettings -Principal $memoryCurationPrincipal
+        }
+    }
+
+    # --- Waiting feed publish: every minute, wsl.exe as the action ----------
+    # Same shape as the usage census (wsl.exe directly, S4U, session 0), but repeating every
+    # minute with the indefinite-repetition construction the ccstatusline trigger documents above
+    # (-Once + creation-time -RepetitionInterval, no -RepetitionDuration). The script is cheap
+    # when nothing changed, so a 5 minute limit is generous; IgnoreNew keeps a slow run (a hung
+    # push) from stacking up behind itself. No StartWhenAvailable: the feed is a live view, so a
+    # missed minute is just skipped.
+    $waitingFeedArguments = "--distribution $DistroName --cd `"$ScriptsDir`" --exec /bin/bash ./publish-waiting-feed.sh"
+    $waitingFeedAction = New-ScheduledTaskAction -Execute $WslExePath -Argument $waitingFeedArguments
+    $waitingFeedTrigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date) `
+        -RepetitionInterval (New-TimeSpan -Minutes 1) | ConvertTo-WslLocalTimeTrigger
+    $waitingFeedSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew
+    $waitingFeedPrincipal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U
+
+    $existingWaitingFeedTask = Get-ScheduledTask -TaskName $WaitingFeedTaskName -ErrorAction SilentlyContinue
+    if ($existingWaitingFeedTask) {
+        if ($PSCmdlet.ShouldProcess($WaitingFeedTaskName, 'Update scheduled task')) {
+            Set-WslScheduledTask -TaskName $WaitingFeedTaskName -Action $waitingFeedAction -Trigger $waitingFeedTrigger `
+                -Settings $waitingFeedSettings -Principal $waitingFeedPrincipal
+        }
+    }
+    else {
+        if ($PSCmdlet.ShouldProcess($WaitingFeedTaskName, 'Register scheduled task')) {
+            Register-WslScheduledTask -TaskName $WaitingFeedTaskName -Action $waitingFeedAction -Trigger $waitingFeedTrigger `
+                -Settings $waitingFeedSettings -Principal $waitingFeedPrincipal
         }
     }
 
@@ -431,7 +470,8 @@ function Set-WslAutomationScheduledTasks {
     Write-Information -MessageData "ccstatusline task '$CcstatuslineTaskName' (background/S4U): $ccstatuslineArguments (repeats every $CcstatuslineIntervalMinutes min, indefinitely)" -InformationAction Continue
     Write-Information -MessageData "Codex Cloud task '$CodexCloudEnvironmentSyncTaskName' (background/S4U): $codexCloudSyncArguments (daily at 00:00 and 12:00)" -InformationAction Continue
     Write-Information -MessageData "Usage census task '$UsageCensusTaskName' (background/S4U): $WslExePath $usageCensusArguments (daily at $UsageCensusTime)" -InformationAction Continue
-    Write-Information -MessageData "Waiting feed task '$WaitingFeedTaskName' (background/S4U): $WslExePath $waitingFeedArguments (repeats every 1 min, indefinitely)" -InformationAction Continue
     Write-Information -MessageData "Session miner task '$SessionMinerTaskName' (background/S4U): $WslExePath $sessionMinerArguments (daily at $SessionMinerTime)" -InformationAction Continue
+    Write-Information -MessageData "Memory curation task '$MemoryCurationTaskName' (background/S4U): $WslExePath $memoryCurationArguments (weekly on Monday at $MemoryCurationTime)" -InformationAction Continue
+    Write-Information -MessageData "Waiting feed task '$WaitingFeedTaskName' (background/S4U): $WslExePath $waitingFeedArguments (repeats every 1 min, indefinitely)" -InformationAction Continue
     Write-Information -MessageData "Task Scheduler history (Microsoft-Windows-TaskScheduler/Operational): $taskHistoryResult" -InformationAction Continue
 }

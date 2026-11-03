@@ -60,7 +60,7 @@ skills_bootstrap:
   # the claim silently becomes false again rather than failing.
   #
   # `ref` AND `sha256` ARE MACHINE-PROPOSED — do not hand-edit them.
-  # `scripts/bump-hook-pin.sh` runs nightly from skills-lock-bump.yml and opens
+  # `scripts/bump-hook-pin.sh` runs every 6 hours from skills-lock-bump.yml and opens
   # a pull request here whenever the hook's BYTES change upstream, recomputing
   # the digest from the bytes at the commit it proposes. Editing either by hand
   # is not forbidden, just redundant and easy to get half-right — a ref moved
@@ -74,13 +74,13 @@ skills_bootstrap:
   # one move was hand-made; `sha256` was recomputed from the bytes at `ref`.
   registry: example-adopter/acsi-agentskills
   path: .claude/hooks/skills-bootstrap.sh
-  ref: 1ecea2593bcbca6b6073eedf50bb4ffa90ee77e8
+  ref: d1d3108aa2f3b73ae9c867f9f89955e91f82a6d3
   # sha256 of the file at `ref`. The ref is already content-addressed, so this
   # is belt-and-braces — but the artifact executes instruction text at session
   # start with no approval prompt, so "the bytes we deliver are the bytes that
   # were reviewed" is worth making mechanical rather than assumed. A mismatch
   # disables delivery for the whole run and fails it.
-  sha256: b83fc2035eaeb8be8ef0b29d59a26effbc0de5a7fc8a711af9d00089e707d78f
+  sha256: 4c838631bdf00454c10aec769f8f7e95a68af271e568f3c380aaef591ef4d976
   # The allowlist. Short repo names, matched the same way `exclude` is.
   #
   # Widened from two repos to ten on 2026-08-19 (ADR 0004). The two-repo start
@@ -123,7 +123,7 @@ skills_bootstrap:
     # `blocked` is only reachable once a lock exists. The entry is INERT, not
     # wrong; what it buys is that nothing further is needed HERE once the
     # companion merges.
-    # lock + ignore: pending cms-platform#275 — inert until that merges.
+    # lock + ignore: committed — cms-platform#275 merged 2026-08-19.
     - example-site-platform
     # lock: committed — PR #134 merged 2026-08-16, so the lock this file used
     # to call "in flight" has been committed for three days, and the sync

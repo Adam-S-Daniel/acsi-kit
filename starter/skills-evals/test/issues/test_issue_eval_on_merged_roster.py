@@ -225,13 +225,16 @@ class TestTheJobGraph(_Scripts):
     """The new order: roster -> disarm -> roster-pr (publish + arm) ->
     roster-wait -> eval -> publish. Asserted on the parsed `needs:`."""
 
-    def test_the_jobs_are_exactly_these_seven(self):
+    def test_the_jobs_are_exactly_these_eight(self):
+        # `failure-watch` (skills-evals#664) is the eighth: it only reports.
         self.assertEqual(sorted(self.jobs),
-                         ["disarm", "eval", "plan", "publish", "roster", "roster-pr", "roster-wait"])
+                         ["disarm", "eval", "failure-watch", "plan", "publish", "roster",
+                          "roster-pr", "roster-wait"])
 
     def test_each_jobs_needs(self):
         self.assertEqual(_needs(self.jobs["plan"]), [])
-        self.assertEqual(_needs(self.jobs["roster"]), [])
+        # skills-evals#587: `roster` needs `plan` for its `count` gate only.
+        self.assertEqual(_needs(self.jobs["roster"]), ["plan"])
         self.assertEqual(_needs(self.jobs["disarm"]), ["roster"])
         # ADR 0004: `roster-pr` arms BEFORE the eval, so it no longer needs
         # `eval` or `publish`; `disarm` must finish first, or it would turn
@@ -265,17 +268,24 @@ class TestTheJobGraph(_Scripts):
                               "beside an armed roster pull request")
         # Nothing depends on `publish`, and `roster-pr` depends on no job
         # that runs after it.
+        # (Except `failure-watch`, which only reports on every job's result.)
         for name, job in self.jobs.items():
+            if name == "failure-watch":
+                continue
             with self.subTest(job=name):
                 self.assertNotIn("publish", _needs(job))
         self.assertFalse({"eval", "publish", "roster-wait"} & _ancestors(self.jobs, "roster-pr"))
 
     def test_the_gates(self):
+        # skills-evals#587: neither runs when `roster` was skipped (the plan
+        # left nothing to evaluate); test_issue_eval_yml_in_place evaluates it.
         self.assertEqual(self.jobs["roster-pr"].get("if"),
-                         "${{ !cancelled() && github.ref == 'refs/heads/main' }}")
+                         "${{ !cancelled() && needs.roster.result != 'skipped' "
+                         "&& github.ref == 'refs/heads/main' }}")
         # Invariants 7 and 8: no wait on a `roster_only` dispatch or off `main`.
         self.assertEqual(self.jobs["roster-wait"].get("if"),
-                         "${{ !cancelled() && github.ref == 'refs/heads/main' "
+                         "${{ !cancelled() && needs.roster.result != 'skipped' "
+                         "&& github.ref == 'refs/heads/main' "
                          "&& !inputs.roster_only }}")
         # The eval/publish gates are exercised by TestTheGates below.
 
@@ -515,10 +525,11 @@ class TestTheGates(_Scripts):
     when it failed, timed out, was cancelled or never started."""
 
     def _ctx(self, wait_result, cleared, *, roster_only=False, eval_result="success",
-             plan_result="success", cancelled=False):
+             plan_result="success", cancelled=False, count="1"):
         return {"functions": {"cancelled": lambda: cancelled},
                 "inputs.roster_only": roster_only,
                 "needs.plan.result": plan_result,
+                "needs.plan.outputs.count": count,
                 "needs.roster-wait.result": wait_result,
                 "needs.roster-wait.outputs.cleared": cleared,
                 "needs.eval.result": eval_result}
@@ -574,7 +585,9 @@ class TestTheGates(_Scripts):
         # status-check function (`cancelled()`), so they are evaluated —
         # and skipped on `cleared != 'true'` — rather than implicitly
         # skipped or implicitly run. Nothing marks the failure as ignorable.
-        dependents = sorted(n for n, j in self.jobs.items() if "roster-wait" in _needs(j))
+        # `failure-watch` (skills-evals#664) also needs it, only to report.
+        dependents = sorted(n for n, j in self.jobs.items()
+                            if "roster-wait" in _needs(j) and n != "failure-watch")
         self.assertEqual(dependents, ["eval", "publish"])
         for name in dependents:
             with self.subTest(job=name):

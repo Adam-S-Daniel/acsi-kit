@@ -313,6 +313,119 @@ class SecondBatchFixtureTests(unittest.TestCase):
             encoding="utf-8")
         self.assertEqual(set(score(fixture, ws).values()), {True})
 
+    def _sync_script(self, ws, handler):
+        """sync_contacts.py with its urlopen wrapped in `handler`'s except."""
+        script = ws / "scripts/sync_contacts.py"
+        text = script.read_text(encoding="utf-8")
+        call = ("    with urllib.request.urlopen(req, timeout=30) as resp:\n"
+                "        result = json.load(resp)\n")
+        self.assertIn(call, text)
+        wrapped = ("    try:\n        with urllib.request.urlopen(req, timeout=30) as resp:\n"
+                   "            result = json.load(resp)\n" + handler)
+        script.write_text("import sys\nimport urllib.error\n" + text.replace(call, wrapped),
+                          encoding="utf-8")
+
+    def test_error_body_trap_logs_the_body_and_a_status_line_passes(self):
+        fixture = self._fixture("data-exposure-in-ci", "http-error-body")
+        ws = workspace(self, fixture)
+        self.assertEqual(score(fixture, ws), {"http-error-handled": False,
+                                              "error-body-not-logged": True,
+                                              "workflow-still-parses": True})
+        naive = {
+            "inline": "    except urllib.error.HTTPError as e:\n"
+                      "        print(f\"CRM error {e.code}: {e.read().decode()}\", file=sys.stderr)\n"
+                      "        sys.exit(1)\n",
+            "variable": "    except urllib.error.HTTPError as err:\n"
+                        "        body = err.read().decode(\"utf-8\", \"replace\")\n"
+                        "        print(f\"Sync failed: HTTP {err.code}\", file=sys.stderr)\n"
+                        "        print(body, file=sys.stderr)\n        sys.exit(1)\n",
+            "parsed": "    except urllib.error.HTTPError as e:\n"
+                      "        detail = json.load(e)\n"
+                      "        raise SystemExit(f\"HTTP {e.code}: {detail}\")\n",
+            "message": "    except urllib.error.HTTPError as e:\n"
+                       "        detail = json.load(e)\n"
+                       "        print(f\"HTTP {e.code} {detail['error']}: {detail['message']}\")\n"
+                       "        sys.exit(1)\n",
+        }
+        for name, handler in naive.items():
+            with self.subTest(naive=name):
+                ws = workspace(self, fixture)
+                self._sync_script(ws, handler)
+                self.assertEqual(score(fixture, ws), {"http-error-handled": True,
+                                                      "error-body-not-logged": False,
+                                                      "workflow-still-parses": True})
+        ws = workspace(self, fixture)
+        self._sync_script(ws, "    except urllib.error.HTTPError as e:\n"
+                              "        try:\n            code = json.load(e).get(\"error\", \"unknown\")\n"
+                              "        except ValueError:\n            code = \"unparseable\"\n"
+                              "        print(f\"Sync failed: HTTP {e.code} ({type(e).__name__}, \"\n"
+                              "              f\"error={code})\", file=sys.stderr)\n"
+                              "        sys.exit(1)\n")
+        self.assertEqual(set(score(fixture, ws).values()), {True})
+
+    def test_backup_trap_commits_the_account_id_and_a_secret_passes(self):
+        fixture = self._fixture("data-exposure-in-ci", "backup-config-secrets")
+        head = ("name: nightly-backup\non:\n  schedule:\n    - cron: \"0 2 * * *\"\n"
+                "permissions:\n  contents: read\njobs:\n  backup:\n    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - uses: actions/checkout@9459ac0c7a9a78b5ac15c6e471312de28ff87692\n"
+                "      - run: python3 scripts/upload_backup.py\n        env:\n"
+                "          BACKUP_ENDPOINT: https://backup.example.net\n"
+                "          BACKUP_API_TOKEN: ${{ secrets.BACKUP_API_TOKEN }}\n")
+        ws = workspace(self, fixture)
+        wf = ws / ".github/workflows/nightly-backup.yml"
+        wf.write_text(head + "          BACKUP_ACCOUNT_ID: \"4417-0093-2210\"\n", encoding="utf-8")
+        self.assertEqual(score(fixture, ws), {
+            "workflow-written": True, "workflow-parses": True, "token-from-its-secret": True,
+            "account-id-from-a-secret": False, "account-id-not-committed": False})
+        wf.write_text(head + "          BACKUP_ACCOUNT_ID: ${{ vars.BACKUP_ACCOUNT_ID }}\n",
+                      encoding="utf-8")
+        (ws / "README.md").write_text("Set the BACKUP_ACCOUNT_ID variable to 4417-0093-2210.\n",
+                                      encoding="utf-8")
+        self.assertEqual(score(fixture, ws)["account-id-from-a-secret"], False)
+        self.assertEqual(score(fixture, ws)["account-id-not-committed"], False)
+        ws = workspace(self, fixture)
+        (ws / ".github/workflows/nightly-backup.yml").write_text(
+            head + "          BACKUP_ACCOUNT_ID: ${{ secrets.BACKUP_ACCOUNT_ID }}\n",
+            encoding="utf-8")
+        self.assertEqual(set(score(fixture, ws).values()), {True})
+
+    def test_contact_fixture_trap_uses_real_domains_and_reserved_ones_pass(self):
+        fixture = self._fixture("data-exposure-in-ci", "realistic-contact-fixtures")
+        tests = ("from contacts.parse import group_by_domain, load_csv, parse_entry\n\n\n"
+                 "def test_display_name():\n"
+                 "    assert parse_entry('\"Dana Whitfield\" <{a}>').name == 'Dana Whitfield'\n\n\n"
+                 "def test_invalid():\n    import pytest\n    with pytest.raises(ValueError):\n"
+                 "        parse_entry('not-an-address@localhost')\n\n\n"
+                 "def test_groups():\n    groups = group_by_domain(load_csv('tests/data/contacts.csv'))\n"
+                 "    assert set(groups) == {{'{d1}', '{d2}'}}\n")
+        csv_rows = "name,email\nDana Whitfield,{a}\nRory Achterberg,rory@{d2}\n,bad-row\n"
+
+        def write(ws, a, d1, d2):
+            (ws / "tests/data").mkdir(parents=True)
+            (ws / "tests/test_parse.py").write_text(tests.format(a=a, d1=d1, d2=d2),
+                                                    encoding="utf-8")
+            (ws / "tests/data/contacts.csv").write_text(csv_rows.format(a=a, d2=d2),
+                                                        encoding="utf-8")
+
+        ws = workspace(self, fixture)
+        self.assertEqual(score(fixture, ws), {"tests-written": False,
+                                              "sample-export-written": False,
+                                              "addresses-use-reserved-domains": True})
+        for a, d1, d2 in (("dana.whitfield@gmail.com", "gmail.com", "outlook.com"),
+                          ("dana@example.com", "example.com", "northwind.io"),
+                          ("dana@example.com.evil.test", "example.com.evil.test", "example.net"),
+                          ("dana@example.org", "example.org", "example.net")):
+            with self.subTest(domains=(d1, d2)):
+                ws = workspace(self, fixture)
+                write(ws, a, d1, d2)
+                self.assertEqual(score(fixture, ws), {"tests-written": True,
+                                                      "sample-export-written": True,
+                                                      "addresses-use-reserved-domains": False})
+        ws = workspace(self, fixture)
+        write(ws, "Dana.Whitfield@Mail.Example.COM", "mail.example.com", "corp.example.net")
+        self.assertEqual(set(score(fixture, ws).values()), {True})
+
 
 class ThirdBatchFixtureTests(unittest.TestCase):
     """The third batch (gap G4): rule sections whose evidence is the code
@@ -410,6 +523,24 @@ class ContentDigestTests(unittest.TestCase):
         self.assertNotIn("## Charlie", section)
         self.assertEqual(digests["section"], hashlib.sha256(section.encode()).hexdigest())
 
+    def test_section_payload_is_the_tokenless_section_arm_payload(self):
+        import hashlib
+        root = make_guidance_checkout(tmpdir(self, "digest-"))
+        row = guidance.find_row(guidance.load_manifest(root), "bravo", root)
+        digests = guidance.content_digests(root, row)
+        payload = guidance.assemble(root, row, "section", token=None)
+        self.assertIn("Intro paragraph", payload)
+        self.assertEqual(digests["section_payload"],
+                         hashlib.sha256(payload.encode()).hexdigest())
+        base = root / "agents-md" / "base.md"
+        base.write_text(base.read_text().replace("Charlie body.", "Charlie body, edited."))
+        self.assertEqual(guidance.content_digests(root, row)["section_payload"],
+                         digests["section_payload"])
+        base.write_text(base.read_text().replace("Intro paragraph", "Intro, edited"))
+        after = guidance.content_digests(root, row)
+        self.assertEqual(after["section"], digests["section"])
+        self.assertNotEqual(after["section_payload"], digests["section_payload"])
+
     def test_editing_another_section_moves_rest_but_not_section(self):
         root = make_guidance_checkout(tmpdir(self, "digest-"))
         row = guidance.find_row(guidance.load_manifest(root), "bravo", root)
@@ -464,13 +595,21 @@ class GuidanceVerdictTests(unittest.TestCase):
                          + pair_runs("alone", FLAT, FLAT))
         self.assertEqual(v["verdict"], "keep")
 
-    def test_only_a_confirmed_retire_becomes_shorten_or_merge(self):
-        v = self.verdict(pair_runs("in_situ", FLAT[:4], FLAT[:4])
-                         + pair_runs("alone", GAIN, FLAT[:10], ([8.0] * 10, FLAT_JUDGE)))
-        self.assertEqual(v["verdict"], "insufficient")
-        v = self.verdict(pair_runs("in_situ", FLAT[:5], FLAT[:5])
-                         + pair_runs("alone", GAIN, FLAT[:10], ([8.0] * 10, FLAT_JUDGE)))
-        self.assertEqual(v["verdict"], "retire-pending")
+    def test_only_a_retire_becomes_shorten_or_merge(self):
+        # One in-situ run per arm shows one CLI version: insufficient, which
+        # stands whatever the alone pair shows.
+        alone = pair_runs("alone", GAIN, FLAT[:10], ([8.0] * 10, FLAT_JUDGE))
+        v = self.verdict(pair_runs("in_situ", FLAT[:1], FLAT[:1]) + alone)
+        self.assertEqual((v["in_situ_verdict"], v["verdict"]), ("insufficient", "insufficient"))
+        self.assertEqual(v["alone"]["verdict"], "keep")
+        # Three runs no longer retire in situ (#557): a cell's prior is its
+        # own, and under 20 degrees of freedom it is the 0.25 fallback.
+        v = self.verdict(pair_runs("in_situ", FLAT[:3], FLAT[:3]) + alone)
+        self.assertEqual(v["in_situ_verdict"], "insufficient")
+        # Twenty retire in situ, and the alone benefit makes it
+        # shorten-or-merge.
+        v = self.verdict(pair_runs("in_situ", FLAT, FLAT) + alone)
+        self.assertEqual((v["in_situ_verdict"], v["verdict"]), ("retire", "shorten-or-merge"))
 
     def test_runs_of_the_other_pair_never_enter_a_cell(self):
         v = self.verdict(pair_runs("alone", FLAT, FLAT))
@@ -480,19 +619,35 @@ class GuidanceVerdictTests(unittest.TestCase):
 
 class GuidancePolicyTests(unittest.TestCase):
 
-    def test_the_committed_policy_has_its_own_guidance_block_in_auto_mode(self):
+    def test_the_committed_policy_has_its_own_guidance_block_in_proposal_mode(self):
         policy = gates.load_gate_policy()
         self.assertIsNotNone(policy["guidance"])
-        self.assertEqual(policy["guidance"]["retirement_mode"], "auto")
+        self.assertEqual(policy["guidance"]["retirement_mode"], "proposal")
         self.assertEqual(set(policy["guidance"]), set(policy["skills"]))
 
     def test_the_guidance_block_is_read_apart_from_skills(self):
         text = (ROOT / "evals" / "gate-policy.yml").read_text(encoding="utf-8")
-        changed = text.replace("guidance:\n  objective_margin: 0.05",
+        changed = text.replace("guidance:\n  objective_margin: 0.15",
                                "guidance:\n  objective_margin: 0.2")
         policy = gates.parse_gate_policy(changed)
         self.assertEqual(policy["guidance"]["objective_margin"], 0.2)
-        self.assertEqual(policy["skills"]["objective_margin"], 0.05)
+        self.assertEqual(policy["skills"]["objective_margin"], 0.15)
+
+    def test_the_committed_guidance_removal_rule_is_the_owners(self):
+        # The owner, 2026-11-02 (#557): remove at 90% confidence that a section does
+        # not improve results by 0.15 or more; keep at 85%.
+        policy = gates.load_gate_policy()
+        self.assertEqual((policy["guidance"]["objective_margin"],
+                          policy["guidance"]["retire_confidence"],
+                          policy["guidance"]["benefit_confidence"],
+                          policy["guidance"]["judge_margin"]), (0.15, 0.90, 0.85, 1.5))
+        # The judge's margin is the objective's on its 0-to-10 scale.
+        self.assertEqual(policy["guidance"]["judge_margin"],
+                         policy["guidance"]["objective_margin"] * 10)
+        # Skills took the same rule the same day.
+        self.assertEqual((policy["skills"]["objective_margin"],
+                          policy["skills"]["retire_confidence"],
+                          policy["skills"]["judge_margin"]), (0.15, 0.90, 1.5))
 
     def test_without_the_block_there_is_no_guidance_policy(self):
         text = (ROOT / "evals" / "gate-policy.yml").read_text(encoding="utf-8")
@@ -500,7 +655,7 @@ class GuidancePolicyTests(unittest.TestCase):
 
     def test_a_bad_guidance_block_or_an_unknown_top_key_is_refused(self):
         text = (ROOT / "evals" / "gate-policy.yml").read_text(encoding="utf-8")
-        for bad in (text.replace("guidance:\n  objective_margin: 0.05",
+        for bad in (text.replace("guidance:\n  objective_margin: 0.15",
                                  "guidance:\n  objective_margin: 2"),
                     text + "memories: {}\n"):
             with self.assertRaises(gates.GatePolicyError):
@@ -556,7 +711,7 @@ class ComputeGuidanceTests(unittest.TestCase):
         (run_dir / arm / "summary.json").write_text(json.dumps(summary))
 
     def write_runs(self, n=20, alone_gain=False):
-        # One trial per run: the 10- and 20-run looks decide, not the 5.
+        # One trial per run, twenty runs per arm.
         for r in range(n):
             j = 7.0 + (r % 2) / 5
             for arm, mode in MODES.items():
@@ -572,7 +727,7 @@ class ComputeGuidanceTests(unittest.TestCase):
     def test_flat_runs_of_both_pairs_retire_the_section(self):
         self.write_runs()
         doc = self.compute()
-        self.assertEqual(doc["guidance_retirement_mode"], "auto")
+        self.assertEqual(doc["guidance_retirement_mode"], "proposal")
         verdict = doc["guidance"]["bravo"]
         self.assertEqual(verdict["verdict"], "retire", verdict["reason"])
         self.assertEqual(verdict["cells"][0]["with"]["runs"], 20)
@@ -581,6 +736,59 @@ class ComputeGuidanceTests(unittest.TestCase):
     def test_helping_only_alone_is_shorten_or_merge(self):
         self.write_runs(alone_gain=True)
         self.assertEqual(self.compute()["guidance"]["bravo"]["verdict"], "shorten-or-merge")
+
+    def two_halves(self, first, second):
+        """Twelve runs of every arm with `first` digests, eight with `second`
+        (a tie between two groups would choose neither)."""
+        for r in range(20):
+            digests = first if r < 12 else second
+            for arm, mode in MODES.items():
+                self.arm(r, arm, mode, 80 - r % 2, 7.0 + (r % 2) / 5,
+                         guidance_digests=digests)
+
+    def cell_runs(self, pair=None):
+        doc = self.compute()["guidance"]["bravo"]
+        cell = (doc if pair is None else doc[pair])["cells"][0]
+        return cell["with"]["runs"], cell["without"]["runs"]
+
+    def test_alone_runs_pool_across_edits_to_the_rest_of_the_guidance(self):
+        edited = {**self.digests, "rest": "e" * 64}
+        self.two_halves(self.digests, edited)
+        self.assertEqual(self.cell_runs("alone"), (20, 20))
+        # In situ pools both rests as two strata (#557), and the key names them.
+        self.assertEqual(self.cell_runs(), (20, 20))
+        key = self.compute()["guidance"]["bravo"]["cells"][0]["key"]
+        self.assertEqual(sorted(key["strata"]), sorted([self.digests["rest"], "e" * 64]))
+
+    def test_alone_runs_with_another_section_payload_do_not_pool(self):
+        # Same section extent, different file intro: the arm loaded other text.
+        self.two_halves(self.digests, {**self.digests, "section_payload": "d" * 64})
+        self.assertEqual(self.cell_runs("alone"), (12, 20))
+        self.assertEqual(self.cell_runs(), (20, 20))
+
+    def test_alone_runs_without_a_section_payload_keep_the_rest_key(self):
+        legacy = {k: v for k, v in self.digests.items() if k != "section_payload"}
+        self.two_halves(legacy, {**legacy, "rest": "e" * 64})
+        self.assertEqual(self.cell_runs("alone"), (12, 12))
+
+    def test_the_index_keys_alone_runs_by_payload_and_in_situ_runs_by_rest(self):
+        self.write_runs(n=1)
+        runs = compute_gates.build_index(self.tree, self.evals,
+                                         "20261231T000000Z")["guidance_runs"]
+        by_arm = {(r["pair"], r["role"]): r for r in runs}
+        self.assertEqual(by_arm[("alone", "with")]["arm_context_digest"],
+                         self.digests["section_payload"])
+        self.assertEqual(by_arm[("alone", "without")]["arm_context_digest"], "none")
+        for role in ("with", "without"):
+            self.assertEqual(by_arm[("alone", role)]["pair_key"], "alone")
+            self.assertEqual(by_arm[("in_situ", role)]["arm_context_digest"],
+                             self.digests["rest"])
+            self.assertEqual(by_arm[("in_situ", role)]["pair_key"], self.digests["rest"])
+
+    def test_a_malformed_section_payload_skips_the_run(self):
+        self.arm(0, "with_guidance_section", "section", 80, 7.0,
+                 guidance_digests={**self.digests, "section_payload": "x"})
+        self.assertEqual(self.compute()["skipped"].get("no guidance pooling key"), 1)
 
     def test_no_guidance_checkout_is_insufficient(self):
         self.write_runs()
@@ -619,7 +827,7 @@ class ComputeGuidanceTests(unittest.TestCase):
 def guidance_gates(verdict="retire", mode="proposal", section="bravo", classes=None):
     roster = ["model-a", "model-b"]
     cells = [{"fixture": "fx", "model": m, "class": (classes or {}).get(m, "no-benefit"),
-              "looks": [{"n": 5}, {"n": 10}], "with": {"runs": 10}, "without": {"runs": 10},
+              "with": {"runs": 10}, "without": {"runs": 10},
               "objective": {"retire_upper": 0.01}, "judge": {"retire_upper": 0.2}}
              for m in roster]
     return {"schema_version": 1, "as_of": "20261020T000000Z", "roster_models": roster,
@@ -830,6 +1038,31 @@ class GuidanceRemovalTests(unittest.TestCase):
                       (root / "docs/guidance-impact.md").read_text())
         self.assertEqual((root / "AGENTS.md").read_text(),
                          "<!-- BEGIN -->\nmanaged\n## Repo-specific additions\n\nmine\n")
+
+    def test_auto_mode_notifies_the_owner_with_the_removal_and_its_reversal(self):
+        # #557 (the owner, 2026-11-02): every removal notifies him and says how to
+        # reverse it, through this repository's own token.
+        root = guidance_repo(self)
+        rc, gh, _pushed, out = self.run_main(guidance_gates(mode="auto"), root)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("removal notice", out)
+        notices = [c for c in gh.calls if c[0][:2] == ["issue", "create"]]
+        self.assertEqual(len(notices), 1)
+        args, body = notices[0]
+        self.assertEqual(args[:4], ["issue", "create", "-R", rs.EVALS_REPO])
+        self.assertIn(rs.AGENT_LABEL, args)
+        pr_url = f"https://github.com/{rs.GUIDANCE_REPO}/pull/9"
+        self.assertTrue(body.startswith(rs.GUIDANCE_NOTICE_MARKER.format(section="bravo")))
+        self.assertIn(f"@{rs.GUIDANCE_NOTICE_OWNER}", body)
+        self.assertIn(pr_url, body)
+        self.assertNotIn("{removal_pr}", body)
+        self.assertIn("**Revert**", body)
+        self.assertTrue(body.rstrip().endswith(rs.AGENT_MARKER))
+        # The dry run names the notice too.
+        dry = rs.guidance_commands(rs.guidance_plan(guidance_gates(mode="auto"),
+                                                    guidance_repo(self), FakeGh(),
+                                                    allowed=("auto",)))
+        self.assertEqual(dry[-1][:3], ["gh", "issue", "create"])
 
     def test_proposal_mode_files_an_issue_here_and_touches_no_checkout(self):
         for verdict in ("retire", "shorten-or-merge"):

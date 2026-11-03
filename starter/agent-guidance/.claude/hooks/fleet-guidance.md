@@ -4,6 +4,8 @@
 > Edit only below the `## Repo-specific additions` header.
 > Everything above it will be overwritten on the next sync.
 
+guidance-marker: fleet-full (transcript counts use this line; keep it)
+
 Only what is **specific to this account and learned the hard way**; depth
 lives in each repo's `docs/` and the skills registry. Delivered once per
 session to BOTH `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, so a rule for
@@ -104,6 +106,13 @@ commits keep `Co-Authored-By:` and add `Agent: claude-code`/`codex`.
 Explain a merge, close or label change in a marked comment.
 **Never submit an APPROVE review**: it cannot be marked. The
 `github-write-marker.sh` hook enforces it.
+
+## PR descriptions open with a TLDR
+
+Start every PR description with a `## TLDR` heading and one to three
+plain-English sentences on what changes and why. Only an attribution block
+(HTML comments, a `_Requested by …_` line) may precede it. `agent-checks`
+fails a PR without it; editing the description re-runs the check.
 
 ## "The watch finished" is not "CI passed"
 

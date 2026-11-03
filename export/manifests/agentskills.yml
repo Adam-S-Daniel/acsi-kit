@@ -4,7 +4,7 @@
 repo: agentskills
 kit_name: agent-skills
 source: adam-agentskills
-source_sha: 0e81a5e9989c5f92a2af774f9d714e137a7262f9
+source_sha: 151d20ca550905bfdad78709460b880b5150ae75
 after: [_agent-guidance]
 
 exclude:
@@ -17,6 +17,10 @@ exclude:
   # rest are not shipped.
   - path: plugins/adam-coding-anywhere/skills/ci-job-performance/
     why: Content tiers (not shipped).
+  - path: plugins/adam-coding-anywhere/skills/fan-out-triage/
+    why: New in the source since the 2026-10-30 pin and not yet tiered, so not shipped until the owner tiers it (re-pin 2026-11-03).
+  - path: plugins/adam-coding-anywhere/skills/red-ci-adamdaniel-ai/
+    why: Content tiers (not shipped). New in the source; it diagnoses CI on the source owner's own platform site, like the platform skills of X4.
   - path: plugins/adam-coding-local/skills/
     why: DECISIONS X9 and Content tiers (the plugin's hooks and bin/ are machinery and stay).
   - path: plugins/adam-non-coding-local/skills/
@@ -60,19 +64,24 @@ edits:
       Locks the deduplicated owner list above. Read from the script, since
       git's config keeps one entry per includeIf condition however often the
       installer writes it, so the installed config cannot show a duplicate.
-  # ---- C4: the scheduled-run-health caller points at _agent-guidance's copy
+  # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
-    old: "    uses: Adam-S-Daniel/cms-platform/.github/workflows/scheduled-run-health.yml@v0.1.167\n"
+    old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"
     new: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@0000000000000000000000000000000000000000\n"
     why: >-
-      C4. The reusable now lives in _agent-guidance. A cross-repo reusable
-      takes a full commit sha (test_cross_repo_reusable_workflows_are_pinned_to_a_full_sha),
-      and the adopter's _agent-guidance commit does not exist yet, so this is
-      a placeholder sha the adopter replaces (REGENERATE.md), as in repo-settings.
+      C4. The source calls _agent-guidance's copy at a commit of the source
+      owner's repo, which the adopter's does not have. A cross-repo reusable
+      takes a full commit sha and the adopter's _agent-guidance commit does
+      not exist yet, so this is a placeholder sha the adopter replaces with
+      the command in REGENERATE.md.
   - path: .github/workflows/scheduled-run-health.yml
-    old: "# sweep once startup-failed 30/30 for a month unnoticed). The platform owns\n# the audit logic; this thin caller schedules it."
-    new: "# sweep once startup-failed 30/30 for a month unnoticed). _agent-guidance's\n# scheduled-run-health-reusable.yml owns the audit logic; this thin caller\n# schedules it."
-    why: C4. The audit logic now lives in _agent-guidance.
+    old: "The platform owns\n# the audit logic; this thin caller schedules it."
+    new: "_agent-guidance's\n# scheduled-run-health-reusable.yml owns the audit logic; this thin caller\n# schedules it."
+    why: C4. The audit logic lives in _agent-guidance.
+  - path: .github/workflows/scheduled-run-health.yml
+    old: "    # The audit scripts still come from cms-platform, at the release named\n    # in _agent-guidance's .github/health-audit-platform-ref.\n"
+    new: "    # The audit script is copied into _agent-guidance too (the adoption\n    # kit's DECISIONS C4).\n"
+    why: C4. The kit has no platform repo and no release pin; the script lives in _agent-guidance.
 
   # ---- X9: the machinery accepts a registry with no skills yet
   - path: setup.sh
@@ -136,8 +145,8 @@ edits:
     why: X9. The same command as ci.yml and AGENTS.md.
   - path: README.md
     stage: output
-    old: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | CI, GitHub and skill-delivery skills | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser) | Claude Code on the owner's machines |\n"
-    new: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | coding skills (CI, GitHub, skill delivery) | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser), plus the clone-sync and API-credit-lane hooks | Claude Code on the owner's machines |\n"
+    old: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | CI, GitHub and skill-delivery skills | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser) | Claude Code on the owner's machines |\n"
+    new: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | coding skills (CI, GitHub, skill delivery) | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser), plus the clone-sync and API-credit-lane hooks | Claude Code on the owner's machines |\n"
     why: X9. Says what each plugin is for, not which skills the source registry happened to ship.
   - path: README.md
     stage: output
@@ -271,6 +280,14 @@ regenerate:
     why: The sync delivers the guard from _agent-guidance's templates (byte-identical in the sources).
   - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/fleet-memory.sh, to: .claude/hooks/fleet-memory.sh}
     why: The sync delivers the fleet-memory hook (byte-identical in the sources).
+  - copy_from_kit: {repo: _agent-guidance, from: agents-md/base.md, to: plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-guidance.md}
+    why: >-
+      The anything-anywhere plugin's SessionStart hook installs this bundled
+      copy of _agent-guidance's base.md when its fetch is off or fails; it
+      must carry that repo's X9 blanking and Content tiers, not the source
+      owner's full guidance (re-pin 2026-11-03).
+  - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/fleet-memory.sh, to: plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh}
+    why: The plugin hook's bundled installer, a verbatim copy of _agent-guidance's (byte-identical in the sources).
   - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/skills-bootstrap.sh, to: .claude/hooks/skills-bootstrap.sh}
     why: >-
       Byte-identical in the sources, and _agent-guidance's repos.yml pins its

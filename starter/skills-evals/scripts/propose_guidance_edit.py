@@ -22,6 +22,16 @@ WHAT IT DOES, in order:
  3. Two scratch guidance copies from `git archive <ref>` of the checkout
     (no `.git`, so no push path), and the section's manifest row. A
     `skipped` row is refused: its owner decided it is not measured.
+ 3b. HELD-OUT FIRST: the validation fixture's baseline trials run before
+    the proposal call. One that passes every objective check in every trial
+    (`pse.saturated`) can only show a regression, never that the edit
+    carries over, so the next fixture in rotation order (never the fixed
+    holdout) is measured instead and train is the rest. When every
+    candidate passes everything, or the chosen one errors, the run is
+    rejected here, before the proposal or any train or candidate trial.
+    Those baseline trials are the validation fixture's first `--trials`
+    baseline trials below, not re-run, so on that one fixture the baseline
+    precedes the candidate instead of interleaving with it.
  4. PROPOSAL, before any measurement: one call (the roster's judge model,
     no tools) given the section's current text, the whole delivered corpus,
     the TRAIN fixtures' prompts, check descriptions and judge rubrics, and
@@ -227,9 +237,16 @@ class Runner:
             except OSError as exc:
                 raise Refusal(f"run_eval could not run: {type(exc).__name__}") from exc
 
+    #: The last proposal call's numbers, as pse.Runner keeps them (#572).
+    last_usage: dict | None = None
+
     def propose(self, prompt: str, model: str) -> str:
         """propose_skill_edit's call: one headless call, no tools."""
-        return pse.Runner().propose(prompt, model)
+        inner = pse.Runner()
+        try:
+            return inner.propose(prompt, model)
+        finally:
+            self.last_usage = inner.last_usage
 
 
 # ---------------------------------------------------------------------------
@@ -956,6 +973,51 @@ def run_pipeline(args, runner, now, validator, p, ts, stem, scratch) -> int:
     except Refusal as exc:
         return record_refusal(stem, record, "preflight", exc)
 
+    # Held-out first: the validation fixture's baseline trials, before the
+    # proposal; a saturated one is swapped for the next in rotation order.
+    raw = {side: {n: ([], []) for n in p["fixtures"]} for side in ("baseline", "candidate")}
+    screen = record["heldout_screen"] = []
+
+    def baseline_trials(name: str) -> dict:
+        for k in range(1, args.trials + 1):
+            out = trial_dir(results, ts, "baseline", name, k)
+            rc = runner.run_eval(fixture_layout_argv(
+                EVALS_DIR / name, base_root, out, ts, args.no_judge, results))
+            summaries, rcs = raw["baseline"][name]
+            summaries.append(read_summary(fixture_layout_summary(out, section)))
+            rcs.append(rc)
+        return fixture_metrics(*raw["baseline"][name])
+
+    validation, held = None, {}
+    try:
+        for name in pse.validation_order(p["train"] + [p["validation"]],
+                                         p["rotation"]):
+            held[name] = baseline_trials(name)
+            full = pse.saturated(held[name])
+            screen.append({"fixture": name, "passed": held[name]["passed"],
+                           "total": held[name]["total"], "saturated": full})
+            if not full:
+                validation = name
+                break
+    except Refusal as exc:
+        return record_refusal(stem, record, "held-out", exc)
+    if validation is None or held[validation]["error"]:
+        reason = ("no held-out headroom: every validation candidate passes every "
+                  "check on the baseline, so no held-out test could show an edit "
+                  "carries over; add harder fixtures instead" if validation is None
+                  else f"inconclusive: held-out fixture {validation!r} errored on "
+                       f"the baseline ({held[validation]['error']})")
+        record.update(status="rejected", phase="held-out", exit_code=EXIT_REJECTED,
+                      baseline=held, reasons=[reason])
+        write_record(stem, record)
+        print(f"rejected before proposal: {reason}")
+        return EXIT_REJECTED
+    if validation != p["validation"]:
+        p["train"] = sorted(n for n in p["train"] + [p["validation"]] if n != validation)
+        p["validation"] = validation
+        split.update(train=p["train"], validation=validation)
+        names = p["train"] + [p["validation"], p["holdout"]]
+
     original_file = (base_root / row["file"]).read_text(encoding="utf-8")
     span = extent_of(original_file, row["heading"])
     original = original_file[span["start"]:span["end"]]
@@ -968,6 +1030,8 @@ def run_pipeline(args, runner, now, validator, p, ts, stem, scratch) -> int:
         reply = runner.propose(prompt, p["proposal_model"])
     except Refusal as exc:
         return record_refusal(stem, record, "proposal", exc)
+    finally:
+        pse.write_proposal_usage(results, ts, runner)
     try:
         proposal = parse_proposal(reply)
         record["proposal"] = {"model": p["proposal_model"],
@@ -986,13 +1050,15 @@ def run_pipeline(args, runner, now, validator, p, ts, stem, scratch) -> int:
     (cand_root / row["file"]).write_text(new_file, encoding="utf-8")
 
     # Measure, interleaved: baseline trial k then candidate trial k, per fixture.
-    raw = {side: {n: ([], []) for n in names} for side in ("baseline", "candidate")}
+    # The screened held-out fixtures' first baseline trials are already in `raw`.
     roots = {"baseline": base_root, "candidate": cand_root}
 
     def measure(trials: range) -> dict:
         for k in trials:
             for name in names:
                 for side in ("baseline", "candidate"):
+                    if side == "baseline" and len(raw[side][name][0]) >= k:
+                        continue
                     out = trial_dir(results, ts, side, name, k)
                     rc = runner.run_eval(fixture_layout_argv(
                         EVALS_DIR / name, roots[side], out, ts, args.no_judge, results))

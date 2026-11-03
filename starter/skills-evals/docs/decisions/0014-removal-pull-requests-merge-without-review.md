@@ -179,3 +179,34 @@ two secrets in skills-evals (until both exist every removal is an issue); and
 repository can make. acsi-agentskills ADR 0021 still describes the removal
 as a patch raise and does not list `scripts/plugin_layout.json` among the
 files a removal touches (decision 3).
+
+## Addendum (2026-11-02): one removal rule, notified and reversible
+
+The owner decided on 2026-11-02 (#557) that skills and guidance sections share
+one removal rule: a removal when the gate is 90% confident that the subject
+does not improve results by 0.15 or more (`retire_confidence` 0.90,
+`objective_margin` 0.15, `judge_margin` 1.5), with no separate confirmation
+step, in both blocks of `evals/gate-policy.yml` (#565). Keeping stays at
+85%, applied per subject across its cells and routes (#578). Both blocks
+commit `retirement_mode: auto`; the 2026-10-26 addendum's "the guidance
+block stays `proposal`" no longer holds, since the eval-improve App now has
+a write path to `_agent-guidance`.
+
+What makes a removal with no human safe enough is that it can be undone:
+every removal pull request is followed by an `agent-authored` notice issue
+in skills-evals that mentions the owner, links the pull request and says how to
+reverse it (close it before it merges; press Revert after), and the
+explorer lists every removed skill and section with its date and that link
+(#565, #567). The trade the owner accepted: with no confirmation step, a section
+that helps only beside today's guidance but not beside older versions can
+be removed (43-97% of the time in the simulation of #565); the notice and
+revert are its backstop.
+
+
+## Text-only removals addendum (2026-11-03)
+
+The "Never through plugin-runtime-review" rule now uses ADR 0005's
+text-only skill changes addendum: a removal falls back to the issue only
+when plugin-runtime-review would hold it (the skill has its own `hooks/`
+or `bin/`, or a hook of its plugin names a path in it), not for every skill
+of a plugin that has hooks. The owner, 2026-11-03: "Yes, auto-merge them."

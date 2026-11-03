@@ -3,7 +3,7 @@ name: Fire eval routine
 # Fires the eval runner routine (ADR 0010, "Smallest next PRs" item 2).
 # The routine is the repository's own: its trigger id (trig_...) is the
 # variable ROUTINE_TRIGGER_ID of the routine-fire environment, set when the routine is
-# created (docs/routine-prompt.md), and the fire step refuses to run
+# created (docs/routine/eval-runner-prompt.md), and the fire step refuses to run
 # without a well-formed one.
 #
 # * `workflow_dispatch` ONLY. The weekly caller dispatches eval and improve
@@ -28,7 +28,14 @@ name: Fire eval routine
 #   the loop's own fixture resolution (`scripts/improve_gate.py
 #   fire-check`): nested evals/<skill>/<name> fixtures that all name it and
 #   acsi-agentskills, at least the loop's minimum of them, and `holdout`
-#   empty or one of their names.
+#   empty or one of their names. A third choice input, `trigger_only`
+#   (false by default; skills-evals#662), is improve mode only: true runs
+#   only skill-creator's description loop on the skill's reviewed
+#   evals/<skill>/trigger-eval-set.json, `holdout` must be empty, the check
+#   is `fire-check --trigger-only` (the committed set the loop accepts, any
+#   number of fixtures, all naming acsi-agentskills), and the payload gains
+#   `trigger_only: true` as its last key only then. It is still improve
+#   mode: the same branch, gate, outcomes and allowance charge.
 #   `guidance-improve` (ADR 0005, "Routine guidance improve mode addendum")
 #   sends exactly five: run_id, mode, section, trials and holdout (null when
 #   empty), and the routine runs scripts/propose_guidance_edit.py on that
@@ -39,13 +46,20 @@ name: Fire eval routine
 #   (guidance/<section>/<name>), and, after _agent-guidance is checked out
 #   (public, no credential kept), a manifest row that is not skipped.
 #   `draft` (turn a `new-skill` lesson into a drafted skill; caller
-#   routine-draft-skill.yml) takes one input, `proposal`, a path under
-#   acsi-agentskills-private's lessons/ matching
-#   proposals/<date>/<subject>__new-skill.json. A draft-only step mints the
-#   read-only registry App token (as propagation.yml does), sparse-checks
-#   out lessons/, and `scripts/draft_new_skill.py payload` re-validates the
+#   routine-draft-skill.yml) takes one input, `proposal`, matching
+#   (proposals|issue-proposals)/<date>/<subject>__new-skill.json. For a
+#   proposals/ path, a path under acsi-agentskills-private's lessons/, a
+#   step mints the read-only registry App token (as propagation.yml does)
+#   and sparse-checks out lessons/ from persistent/lessons. For an
+#   issue-proposals/ path, a skill proposal filed as an issue in the public
+#   acsi-agentskills, neither runs (so a missing persistent/lessons branch
+#   cannot fail it): a step lists the open `skill-proposal` issues with the
+#   job's read-only token and `scripts/draft_new_skill.py issue-proposals`
+#   rebuilds the same proposal files the caller selected from. Either way
+#   `scripts/draft_new_skill.py payload` re-validates the
 #   proposal and prints the payload, run_id, mode and proposal (subject,
-#   id, evidence_count, examples, repos), which `fire-check` checks again;
+#   id, evidence_count, examples, repos: at most 100, each owner/repo, a
+#   bare directory name or `~`), which `fire-check` checks again;
 #   the fire step sends that object as it is. A second draft-only input,
 #   `hook_declined` (a choice, false by default), says the agent-checks lane
 #   closed this subject's hook proposal as not planned; the payload then
@@ -110,7 +124,10 @@ name: Fire eval routine
 #   persistent/eval-results, counts this workflow's successful runs in the
 #   same window with the job's token (hence `actions: read`), and refuses the
 #   fire unless spent + pending + this run's reservation stays within
-#   evals/budget.yml's weekly_cap. An API error refuses too (fail closed). Its
+#   evals/budget.yml's weekly_cap. An API error refuses too (fail closed). A
+#   refusal (exit 3) ends the run `cancelled` via the `end-refused` job (#524),
+#   so a surplus planned fire is neither red nor counted as a fire; an error
+#   (exit 1) still fails closed and red. Its
 #   log line is numbers only. See docs/how-it-works.md, "The weekly allowance
 #   guard".
 # * No retry: the fire API has no idempotency key, so a retry after a lost
@@ -135,7 +152,8 @@ name: Fire eval routine
 #
 # * The run's title (`run-name`) names the mode, ` bare` after it for an
 #   eval fire with `arms: bare` (so the weekly planner can tell which
-#   (fixture, model) bare runs were fired), the one target input of that
+#   (fixture, model) bare runs were fired), ` trigger` after it for a
+#   trigger-only improve fire, the one target input of that
 #   mode (fixture, candidate, skill or section) and the model when one is
 #   given. It is the only place the runs API exposes a dispatch's inputs, so
 #   scripts/improve_outcomes.py reads improve and guidance-improve attempts
@@ -147,7 +165,7 @@ name: Fire eval routine
 # API: https://platform.claude.com/docs/en/api/claude-code/routines-fire
 
 run-name: >-
-  Fire eval routine: ${{ inputs.mode }}${{ inputs.mode == 'eval' && inputs.arms == 'bare' && ' bare' || '' }}
+  Fire eval routine: ${{ inputs.mode }}${{ inputs.mode == 'eval' && inputs.arms == 'bare' && ' bare' || '' }}${{ inputs.mode == 'improve' && inputs.trigger_only == 'true' && ' trigger' || '' }}
   ${{ inputs.fixture }}${{ inputs.candidate }}${{ inputs.skill }}${{ inputs.section }}
   ${{ inputs.model }}
 
@@ -204,13 +222,24 @@ on:
         description: >-
           Draft mode only (leave empty otherwise): the lesson proposal under
           acsi-agentskills-private's lessons/, e.g.
-          proposals/2026-10-26/example-skill__new-skill.json.
+          proposals/2026-10-26/example-skill__new-skill.json, or a skill
+          proposal issue in acsi-agentskills, e.g.
+          issue-proposals/2026-10-26/example-skill__new-skill.json.
         required: false
         type: string
       hook_declined:
         description: >-
           Draft mode only: true when the agent-checks lane declined this
           subject's hook proposal, so the routine skips its triage.
+        required: false
+        type: choice
+        options: ["false", "true"]
+        default: "false"
+      trigger_only:
+        description: >-
+          Improve mode only: true runs only skill-creator's description loop
+          on the skill's reviewed evals/<skill>/trigger-eval-set.json
+          (skills-evals#662).
         required: false
         type: choice
         options: ["false", "true"]
@@ -253,6 +282,8 @@ jobs:
     environment: routine-fire
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      refused: ${{ steps.allowance.outputs.refused }}
     steps:
       - name: Check out the default branch
         uses: actions/checkout@v7.0.1
@@ -266,7 +297,7 @@ jobs:
       # modes, runs scripts/improve_gate.py or guidance_improve_gate.py
       # fire-check.
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -291,7 +322,8 @@ jobs:
                      (.inputs.skill // ""), (.inputs.holdout // ""),
                      (.inputs.section // ""),
                      (.inputs.model // ""), (.inputs.proposal // ""),
-                     (.inputs.hook_declined // "false")]
+                     (.inputs.hook_declined // "false"),
+                     (.inputs.trigger_only // "false")]
                     | any(type != "string" or test("\u0000"))' \
                "$event" >/dev/null; then
             echo "::error::a dispatch input is missing, not a string, or contains a NUL byte"
@@ -317,6 +349,7 @@ jobs:
           model="$(jq -r '.inputs.model // ""' "$event")"
           proposal="$(jq -r '.inputs.proposal // ""' "$event")"
           hook_declined="$(jq -r '.inputs.hook_declined // "false"' "$event")"
+          trigger_only="$(jq -r '.inputs.trigger_only // "false"' "$event")"
           arms="$(jq -r '.inputs.arms' "$event")"
           trials="$(jq -r '.inputs.trials' "$event")"
 
@@ -338,6 +371,20 @@ jobs:
               echo "::error::input 'hook_declined' must be false or true"
               exit 1 ;;
           esac
+          case "$trigger_only" in
+            false|true) ;;
+            *)
+              echo "::error::input 'trigger_only' must be false or true"
+              exit 1 ;;
+          esac
+          if [ "$trigger_only" = true ] && [ "$mode" != improve ]; then
+            echo "::error::input 'trigger_only' may be true in improve mode only"
+            exit 1
+          fi
+          if [ "$trigger_only" = true ] && [ -n "$holdout" ]; then
+            echo "::error::input 'holdout' must be empty when 'trigger_only' is true"
+            exit 1
+          fi
 
           case "$mode" in
             eval|scaffold|draft)
@@ -427,11 +474,13 @@ jobs:
                 echo "::error::inputs 'fixture' and 'candidate' must be empty in draft mode"
                 exit 1
               fi
-              # The proposal file shape the miner writes; the subject part
-              # becomes a skill directory name, so it is checked here and
-              # again by draft_new_skill.py payload against the file.
-              if ! [[ "$proposal" =~ ^proposals/[0-9]{4}-[0-9]{2}-[0-9]{2}/[a-z0-9][a-z0-9-]{0,63}__new-skill\.json$ ]]; then
-                echo "::error::input 'proposal' is empty or is not proposals/<date>/<subject>__new-skill.json"
+              # The proposal file shape the miner (proposals/) or
+              # draft_new_skill.py issue-proposals (issue-proposals/) writes;
+              # the subject part becomes a skill directory name, so it is
+              # checked here and again by draft_new_skill.py payload against
+              # the file.
+              if ! [[ "$proposal" =~ ^(proposals|issue-proposals)/[0-9]{4}-[0-9]{2}-[0-9]{2}/[a-z0-9][a-z0-9-]{0,63}__new-skill\.json$ ]]; then
+                echo "::error::input 'proposal' is empty or is not proposals/ or issue-proposals/<date>/<subject>__new-skill.json"
                 exit 1
               fi ;;
             *)
@@ -495,7 +544,16 @@ jobs:
             # Its refusals are fixed text and never echo the input.
             # `--holdout=VALUE` is one word: a holdout with a leading `-`
             # (its pattern allows one) is read as a name, never as a flag.
-            if ! python3 scripts/improve_gate.py fire-check "$skill" --holdout="$holdout"; then
+            # A trigger-only fire (skills-evals#662) is checked by the
+            # trigger-only loop's rules instead: no holdout, a committed
+            # reviewed evals/<skill>/trigger-eval-set.json the loop accepts,
+            # any number of fixtures, every one naming acsi-agentskills.
+            if [ "$trigger_only" = true ]; then
+              if ! python3 scripts/improve_gate.py fire-check "$skill" --holdout= --trigger-only; then
+                echo "::error::input 'skill' is refused by the trigger-only loop's check"
+                exit 1
+              fi
+            elif ! python3 scripts/improve_gate.py fire-check "$skill" --holdout="$holdout"; then
               echo "::error::input 'skill' or 'holdout' is refused by the improvement loop's fixture check"
               exit 1
             fi
@@ -528,6 +586,7 @@ jobs:
             echo "model=${model}"
             echo "proposal=${proposal}"
             echo "hook_declined=${hook_declined}"
+            echo "trigger_only=${trigger_only}"
             echo "arms=${arms}"
             echo "trials=${trials}"
             echo "run_id=${run_id}"
@@ -536,7 +595,7 @@ jobs:
           if [ "$mode" = scaffold ]; then
             echo "mode: scaffold, candidate: ${candidate} (arms and trials are not sent)"
           elif [ "$mode" = improve ]; then
-            echo "mode: improve, skill: ${skill}, trials: ${trials}, holdout: ${holdout:-none} (arms is not sent)"
+            echo "mode: improve, skill: ${skill}, trials: ${trials}, holdout: ${holdout:-none}, trigger_only: ${trigger_only} (arms is not sent)"
           elif [ "$mode" = guidance-improve ]; then
             echo "mode: guidance-improve, section: ${section}, trials: ${trials}, holdout: ${holdout:-none} (arms is not sent)"
           elif [ "$mode" = draft ]; then
@@ -556,6 +615,51 @@ jobs:
           persist-credentials: false
           sparse-checkout: routine-results
 
+      # Private-skill evals push their results to acsi-agentskills-private
+      # (the owner, 2026-10-31), whose own ingest writes its persistent/eval-results.
+      # The guard charges those runs too: the read-only registry App token
+      # (that repository alone, contents read) reaches only the lookup and
+      # the data-only checkout, and scripts/overlay_private_results.py adds
+      # the runs to the tree in the workspace. No App, or no branch yet:
+      # nothing is added, and an unmatched private fire stays charged as
+      # pending, the guard's safe side.
+      - name: Mint the read-only token for the private results
+        id: private-token
+        if: vars.REGISTRY_READ_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          client-id: ${{ vars.REGISTRY_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REGISTRY_READ_APP_PEM }}
+          owner: example-adopter
+          repositories: acsi-agentskills-private
+          permission-contents: read
+      - name: Look for the private results branch
+        id: private-results
+        if: steps.private-token.outputs.token != ''
+        env:
+          PRIVATE_READ_TOKEN: ${{ steps.private-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if GH_TOKEN="$PRIVATE_READ_TOKEN" gh api repos/example-adopter/acsi-agentskills-private/branches/persistent/eval-results \
+               --silent 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out the private results (data only)
+        if: steps.private-results.outputs.exists == 'true'
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/acsi-agentskills-private
+          ref: persistent/eval-results
+          path: private-eval-results
+          persist-credentials: false
+          sparse-checkout: routine-results
+          token: ${{ steps.private-token.outputs.token }}
+      - name: Add the private runs to the results tree
+        if: steps.private-results.outputs.exists == 'true'
+        run: python3 scripts/overlay_private_results.py --private private-eval-results --tree eval-results-branch
+
       # Every mode, before the fire: refused (exit 1, numbers-only log) when
       # this run's reservation (an improve or guidance-improve run's own,
       # larger charge) would
@@ -566,7 +670,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MODE: ${{ steps.validate.outputs.mode }}
-        run: python3 scripts/allowance_guard.py check --results-tree eval-results-branch --mode "$MODE"
+        run: |
+          set -euo pipefail
+          rc=0
+          python3 scripts/allowance_guard.py check --results-tree eval-results-branch --mode "$MODE" || rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "refused=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::the weekly allowance guard refused this fire; ending the run cancelled (#524)"
+            exit 0
+          fi
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
 
       # The fleet pin (the owner, 2026-10-06: "Pin to fleet owners (Recommended)"):
       # the candidate's owner must be in SYNC_OWNERS and its name in
@@ -574,7 +689,7 @@ jobs:
       # miner reads them. A public repository; no credentials are kept.
       # Guidance-improve mode reads its section's manifest row from it too.
       - name: Check out _agent-guidance (the fleet registry)
-        if: steps.validate.outputs.mode == 'scaffold' || steps.validate.outputs.mode == 'guidance-improve'
+        if: steps.allowance.outputs.refused != 'true' && (steps.validate.outputs.mode == 'scaffold' || steps.validate.outputs.mode == 'guidance-improve')
         uses: actions/checkout@v7.0.1
         with:
           repository: example-adopter/_agent-guidance
@@ -586,7 +701,7 @@ jobs:
       # `skipped` (propose_guidance_edit's load_row), so a section the
       # proposer would refuse never starts a session. Fixed text only.
       - name: Check the guidance section's manifest row
-        if: steps.validate.outputs.mode == 'guidance-improve'
+        if: steps.allowance.outputs.refused != 'true' && (steps.validate.outputs.mode == 'guidance-improve')
         env:
           SECTION: ${{ steps.validate.outputs.section }}
           HOLDOUT: ${{ steps.validate.outputs.holdout }}
@@ -606,7 +721,7 @@ jobs:
       # candidate), so without this such a fire spends its whole run before
       # rejecting (2026-10-28, run 20261028T213124Z-65c174). Numbers only.
       - name: Check the guidance section's train headroom
-        if: steps.validate.outputs.mode == 'guidance-improve'
+        if: steps.allowance.outputs.refused != 'true' && (steps.validate.outputs.mode == 'guidance-improve')
         env:
           SECTION: ${{ steps.validate.outputs.section }}
         run: |
@@ -623,7 +738,7 @@ jobs:
       # status, never the issue's text.
       - name: Compute the issue snapshot
         id: snapshot
-        if: steps.validate.outputs.mode == 'scaffold'
+        if: steps.allowance.outputs.refused != 'true' && (steps.validate.outputs.mode == 'scaffold')
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE: ${{ steps.validate.outputs.candidate }}
@@ -636,13 +751,17 @@ jobs:
             --registry "$FLEET_REGISTRY" --sync-workflow "$FLEET_SYNC_WORKFLOW"
           echo "file=${out}" >> "$GITHUB_OUTPUT"
 
-      # Draft mode only. The read-only registry App token, minted exactly as
-      # propagation.yml mints it: acsi-agentskills-private alone, contents
-      # read, revoked when the job ends. It reaches only the checkout below.
+      # Draft mode, a proposals/ path only. The read-only registry App token,
+      # minted exactly as propagation.yml mints it: acsi-agentskills-private
+      # alone, contents read, revoked when the job ends. It reaches only the
+      # checkout below.
       - name: Mint the read-only token for the lessons
         id: lessons-token
-        if: steps.validate.outputs.mode == 'draft'
-        uses: actions/create-github-app-token@v3.2.0
+        if: >-
+          steps.allowance.outputs.refused != 'true'
+          && steps.validate.outputs.mode == 'draft'
+          && startsWith(steps.validate.outputs.proposal, 'proposals/')
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ vars.REGISTRY_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.REGISTRY_READ_APP_PEM }}
@@ -654,7 +773,10 @@ jobs:
       # persistent/lessons, where the miner writes (main is PR-only;
       # skills-evals#423, ADR 0015). Credentials not kept.
       - name: Check out the lessons (acsi-agentskills-private)
-        if: steps.validate.outputs.mode == 'draft'
+        if: >-
+          steps.allowance.outputs.refused != 'true'
+          && steps.validate.outputs.mode == 'draft'
+          && startsWith(steps.validate.outputs.proposal, 'proposals/')
         uses: actions/checkout@v7.0.1
         with:
           repository: example-adopter/acsi-agentskills-private
@@ -664,18 +786,49 @@ jobs:
           sparse-checkout: lessons
           token: ${{ steps.lessons-token.outputs.token }}
 
+      # Draft mode, an issue-proposals/ path only. The job's read-only token
+      # lists the open `skill-proposal` issues of the public acsi-agentskills
+      # (the caller's own request), saved as data and never printed, and
+      # `issue-proposals` rebuilds the proposal files byte for byte as the
+      # caller did; it prints counts and issue numbers only. An API error
+      # fails the job (closed). An issue edited since the pick has a new
+      # date, so `payload` below finds no file and the fire stops.
+      - name: Convert the skill-proposal issues
+        id: issue-proposals
+        if: >-
+          steps.allowance.outputs.refused != 'true'
+          && steps.validate.outputs.mode == 'draft'
+          && startsWith(steps.validate.outputs.proposal, 'issue-proposals/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          issues="${RUNNER_TEMP:?}/skill-proposal-issues.json"
+          fetched=ok
+          gh api "repos/example-adopter/acsi-agentskills/issues?labels=skill-proposal&state=open&per_page=100" \
+            > "$issues" || fetched=ERROR
+          if [ "$fetched" = ERROR ]; then
+            echo "::error::could not list the skill-proposal issues"
+            exit 1
+          fi
+          out="$RUNNER_TEMP/issue-lessons"
+          python3 scripts/draft_new_skill.py issue-proposals --issues "$issues" --out "$out"
+          echo "dir=${out}" >> "$GITHUB_OUTPUT"
+
       # Draft mode only, with no token in env: `payload` re-validates the one
-      # proposal file (inside lessons/proposals, not a symlink, every field
-      # to the schema) and prints the payload, refusing one over 60,000
-      # bytes; `fire-check` re-reads that payload offline. Both refusals are
-      # fixed text that never echoes the file.
+      # proposal file (inside lessons/proposals or the rebuilt
+      # issue-proposals, not a symlink, every field to the schema) and
+      # prints the payload, refusing one over 60,000 bytes; `fire-check`
+      # re-reads that payload offline. Both refusals are fixed text that
+      # never echoes the file.
       - name: Build the draft payload
         id: draft-payload
-        if: steps.validate.outputs.mode == 'draft'
+        if: steps.allowance.outputs.refused != 'true' && (steps.validate.outputs.mode == 'draft')
         env:
           RUN_ID: ${{ steps.validate.outputs.run_id }}
           PROPOSAL: ${{ steps.validate.outputs.proposal }}
           HOOK_DECLINED: ${{ steps.validate.outputs.hook_declined }}
+          ISSUE_LESSONS: ${{ steps.issue-proposals.outputs.dir }}
         run: |
           set -euo pipefail
           out="${RUNNER_TEMP:?}/draft-payload.json"
@@ -683,12 +836,17 @@ jobs:
           if [ "$HOOK_DECLINED" = true ]; then
             declined=(--hook-declined)
           fi
-          python3 scripts/draft_new_skill.py payload --lessons lessons-repo/lessons \
+          case "$PROPOSAL" in
+            issue-proposals/*) lessons="${ISSUE_LESSONS:?}" ;;
+            *) lessons=lessons-repo/lessons ;;
+          esac
+          python3 scripts/draft_new_skill.py payload --lessons "$lessons" \
             --proposal="$PROPOSAL" --run-id="$RUN_ID" "${declined[@]}" > "$out"
           python3 scripts/draft_new_skill.py fire-check --payload "$out"
           echo "file=${out}" >> "$GITHUB_OUTPUT"
 
       - name: Fire the eval routine
+        if: steps.allowance.outputs.refused != 'true'
         env:
           ROUTINE_TRIGGER_ID: ${{ vars.ROUTINE_TRIGGER_ID }}
           EVAL_ROUTINE_FIRE_BEARER: ${{ secrets.EVAL_ROUTINE_FIRE_BEARER }}
@@ -704,6 +862,7 @@ jobs:
           MODEL: ${{ steps.validate.outputs.model }}
           PROPOSAL: ${{ steps.validate.outputs.proposal }}
           HOOK_DECLINED: ${{ steps.validate.outputs.hook_declined }}
+          TRIGGER_ONLY: ${{ steps.validate.outputs.trigger_only }}
           ISSUE_SNAPSHOT_FILE: ${{ steps.snapshot.outputs.file }}
           DRAFT_PAYLOAD_FILE: ${{ steps.draft-payload.outputs.file }}
         run: |
@@ -745,12 +904,18 @@ jobs:
                 '{text: ({mode: "eval", run_id: $run_id, fixture: $fixture, arms: $arms, trials: $trials}
                          + (if $model == "" then {} else {model: $model} end) | tojson)}')" ;;
             improve)
-              # Exactly five keys; an empty holdout is null, never "".
+              # Exactly five keys; an empty holdout is null, never "". A
+              # trigger-only fire adds `trigger_only: true` as a sixth, last
+              # key, only then, so every other improve payload is byte for
+              # byte what it was.
               body="$(jq -n -c \
                 --arg run_id "$RUN_ID" --arg skill "$SKILL" \
                 --argjson trials "$TRIALS" --arg holdout "$HOLDOUT" \
+                --arg trigger_only "${TRIGGER_ONLY:-false}" \
                 '{text: ({run_id: $run_id, mode: "improve", skill: $skill, trials: $trials,
-                          holdout: (if $holdout == "" then null else $holdout end)} | tojson)}')" ;;
+                          holdout: (if $holdout == "" then null else $holdout end)}
+                         + (if $trigger_only == "true" then {trigger_only: true} else {} end)
+                         | tojson)}')" ;;
             guidance-improve)
               # Exactly five keys; an empty holdout is null, never "".
               body="$(jq -n -c \
@@ -896,7 +1061,7 @@ jobs:
               echo "### Eval routine fired (improve mode)"
               echo
               echo "- Run id: \`${RUN_ID}\`"
-              echo "- Skill: \`${SKILL}\`, trials: \`${TRIALS}\`"
+              echo "- Skill: \`${SKILL}\`, trials: \`${TRIALS}\`, trigger-only: \`${TRIGGER_ONLY:-false}\`"
               if [ -n "$HOLDOUT" ]; then
                 echo "- Holdout: \`${HOLDOUT}\`"
               else
@@ -941,3 +1106,28 @@ jobs:
               echo "- Results branch: \`claude/eval-${RUN_ID}\`"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  # A refused fire (the guard's exit 3, #524) is the planned outcome for a
+  # surplus fire, so it must end neither red (the run-health audit files issues
+  # on failure) nor success (every consumer counts a success run as a real
+  # fire). Cancelling the run ends it `cancelled`, which none of them counts.
+  # actions: write lives on this job alone.
+  end-refused:
+    needs: fire
+    if: needs.fire.outputs.refused == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Cancel this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::could not cancel the refused run"
+            exit 1
+          fi
+          # Stay in progress so the cancellation lands on this job too.
+          sleep 60

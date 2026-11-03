@@ -8,10 +8,23 @@
 # privacy contract on its output, and how to schedule this script.
 #
 # Steps, all inside one temp dir that is removed on exit:
+#   0. shallow-clone the private `persistent/usage-events` branch (step 5
+#      reuses the clone) so the census can read the cloud guidance records in
+#      it, read-only (`--cloud-guidance`);
 #   1. shallow-clone skills-evals and run ITS copy of
-#      scripts/model_usage_census.py against the real transcripts;
+#      scripts/model_usage_census.py against the real transcripts; with the
+#      private branch read (or known missing), the census also writes a
+#      PRIVATE plan of this run's loaded skill copies (#562, 2026-11-02);
+#   1b. clone, bare and blob-less, only the public registries that plan names
+#      (anonymously: no credential helper, no global or system config, no
+#      prompt) and add the plan's `skill-digest` rows: a 12-hex prefix only
+#      for content once on a public branch there. A failed clone leaves those
+#      rows `unknown:unverified-commit` and the summary says
+#      "registry: not read", never which one or why;
 #   2. shallow-clone the persistent/eval-results branch, copy in usage/latest.json
-#      (models) and usage/weekly-local.json (skill invocations);
+#      (models) and usage/weekly-local.json (skill invocations), after
+#      skill_usage.check_public passes on the weekly file (a full digest, a
+#      commit, a fork's name or a private skill's name refuses the publish);
 #   3. commit "propagation: usage census [skip ci]" ONLY if the census
 #      changed (either file), and push it (one `pull --rebase` retry when
 #      the push is not a fast-forward);
@@ -25,6 +38,15 @@
 #      as an orphan with a README. A failure here never undoes or blocks the
 #      public publish: it prints one line without detail and the script exits
 #      1 at the end.
+# A failed fetch in step 0 (the repository does not answer, or the clone
+# fails; a branch that does not exist is not a failure) never blocks the
+# public publish either: once the results clone exists, the previous public
+# usage/weekly-local.json's cloud rows and cloud source, and its local and
+# cloud skill-digest rows, each with its source (#562), are carried forward
+# verbatim (they are already public), each unless its source was read more
+# than 14 days ago; the summary says "cloud: carried forward", "skill copies:
+# carried forward" and "cloud skill copies: carried forward" (or "not read"),
+# and the script exits 1 at the end like a private failure.
 #
 # Transcript roots: ~/.claude/projects, and under WSL also every existing
 # Windows-side root (/mnt/c/Users/*/.claude/projects) and every Cowork root
@@ -47,6 +69,8 @@
 #   CENSUS_NOW        ISO-8601 instant handed to the census as `--now`
 #   USAGE_HOOK_LOGS   hook log path(s), `:`-separated; replaces the defaults
 #   USAGE_EVENTS_URL  the private repository to publish events to
+#   REGISTRY_MIRROR_BASE  prefix of a public registry's clone URL, before
+#                     `<owner>/<repo>.git` (default https://github.com/)
 #   WSL_USERS_DIR     the Windows users directory seen from WSL (default /mnt/c/Users)
 #   PYTHON            interpreter (default python3)
 set -euo pipefail
@@ -55,6 +79,7 @@ URL="${SKILLS_EVALS_URL:-https://github.com/example-adopter/skills-evals.git}"
 BRANCH="persistent/eval-results"
 EVENTS_URL="${USAGE_EVENTS_URL:-https://github.com/example-adopter/acsi-agentskills-private.git}"
 EVENTS_BRANCH="persistent/usage-events"
+MIRROR_BASE="${REGISTRY_MIRROR_BASE:-https://github.com/}"
 WIN_USERS="${WSL_USERS_DIR:-/mnt/c/Users}"
 PY="${PYTHON:-python3}"
 # A census whose counts did not change is still re-published once its
@@ -88,6 +113,26 @@ no_bg=(--config maintenance.auto=false --config gc.auto=0)
 
 git clone "${no_bg[@]}" --quiet --depth 1 "$URL" "$tmp/src" >/dev/null 2>&1 \
   || { echo "usage census: could not clone skills-evals" >&2; exit 1; }
+
+# --- 0. The private branch, fetched BEFORE the census so the census can read
+# the cloud guidance records in it. private_fetch is `cloned`, `missing` (the
+# repository answered and has no such branch) or `failed` (and then
+# private_fetch_step names the step for the one-line failure message).
+private_fetch=failed
+private_fetch_step=reach
+found=0
+git ls-remote --exit-code --heads "$EVENTS_URL" "refs/heads/$EVENTS_BRANCH" >/dev/null 2>&1 \
+  || found=$?
+if [ "$found" = 0 ]; then
+  if git clone "${no_bg[@]}" --quiet --depth 1 --single-branch --branch "$EVENTS_BRANCH" \
+       "$EVENTS_URL" "$tmp/private" >/dev/null 2>&1; then
+    private_fetch=cloned
+  else
+    private_fetch_step=clone
+  fi
+elif [ "$found" = 2 ]; then
+  private_fetch=missing
+fi
 
 is_wsl=0
 if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then
@@ -128,12 +173,110 @@ else
 fi
 census_args+=(--hook-logs "$hook_logs")
 if [ -n "${CENSUS_NOW:-}" ]; then census_args+=(--now "$CENSUS_NOW"); fi
+if [ "$private_fetch" = cloned ]; then census_args+=(--cloud-guidance "$tmp/private"); fi
+# #562: the loaded copies need the store's record of each use; a branch that
+# does not exist yet is an empty store (every use takes this run's record).
+# A failed fetch passes nothing, so no skill-records source is written and the
+# previous one is carried below.
+plan=""
+if [ "$private_fetch" = cloned ]; then
+  plan="$tmp/digest-plan.json"
+  census_args+=(--event-store "$tmp/private" --digest-plan-out "$plan")
+elif [ "$private_fetch" = missing ]; then
+  mkdir "$tmp/empty-store"
+  plan="$tmp/digest-plan.json"
+  census_args+=(--event-store "$tmp/empty-store" --digest-plan-out "$plan")
+fi
 # The census's own status line names its output path; this script prints its
 # own summary instead. stderr stays: its messages name no path.
 "$PY" "$tmp/src/scripts/model_usage_census.py" "${census_args[@]}" >/dev/null
 
+# --- 1b. The public registries the plan's uses point at, cloned bare and
+# blob-less (example-site-a is about 529 MiB in full; trees are enough to list
+# a path's history, and `git archive` fetches only that path's blobs). Every
+# git here runs without the machine's global or system config, without a
+# credential helper and without a prompt: these repositories are public, and
+# a clone that needs a credential has failed. Errors are discarded, so no
+# path, URL or sha reaches the output; only the fixed note does.
+registry_note=""
+if [ -n "$plan" ]; then
+  mirror_args=()
+  unread=0
+  n=0
+  while IFS= read -r repo; do
+    [ -n "$repo" ] || continue
+    if ! [[ "$repo" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$ ]]; then
+      unread=1
+      continue
+    fi
+    n=$((n + 1))
+    url="$MIRROR_BASE$repo.git"
+    if env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+         git -c credential.helper= clone "${no_bg[@]}" --quiet --bare --filter=blob:none \
+         -- "$url" "$tmp/mirror-$n" >/dev/null 2>&1 \
+       && [ "$(env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+               git -C "$tmp/mirror-$n" config --get remote.origin.url 2>/dev/null)" = "$url" ]; then
+      mirror_args+=("$repo=$tmp/mirror-$n")
+    else
+      unread=1
+    fi
+  done < <("$PY" -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1]))["registries"]))' "$plan")
+  applied="$("$PY" - "$tmp/src/scripts" "$plan" "$tmp/usage/weekly-local.json" \
+               "${mirror_args[@]+"${mirror_args[@]}"}" 2>/dev/null <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import model_usage_census
+mirrors = dict(arg.split("=", 1) for arg in sys.argv[4:])
+print("unread" if model_usage_census.apply_digest_plan(sys.argv[2], sys.argv[3], mirrors)
+      else "read")
+PY
+  )" || { echo "usage census: loaded copies could not be added" >&2; exit 1; }
+  if [ "$unread" = 1 ] || [ "$applied" = unread ]; then registry_note="registry: not read"; fi
+fi
+
 git clone "${no_bg[@]}" --quiet --depth 1 --single-branch --branch "$BRANCH" "$URL" "$tmp/results" >/dev/null 2>&1 \
   || { echo "usage census: could not clone the $BRANCH branch" >&2; exit 1; }
+
+# A failed fetch of the private branch: carry the previous public file's cloud
+# guidance rows and local and cloud skill-digest rows, each with its source,
+# into this run's file (skill_usage.carry), so the publish below goes ahead
+# with them instead of dropping what is already public. Decided here because
+# the previous file is in the results clone. One fixed phrase per carried part.
+cloud_note=""
+if [ "$private_fetch" = failed ]; then
+  cloud_note="$("$PY" - "$tmp/src/harness" "$tmp/results/usage/weekly-local.json" \
+               "$tmp/usage/weekly-local.json" "$tmp/src/scripts" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[4])
+import skill_usage
+import model_usage_census
+from pathlib import Path
+new = json.load(open(sys.argv[3], encoding="utf-8"))
+carried = skill_usage.carry(skill_usage.load(sys.argv[2]), new)
+if any(count is not None for count in carried.values()):
+    model_usage_census._write_json(Path(sys.argv[3]), new)
+print("; ".join(f"{label}: " + ("not read" if count is None else "carried forward")
+                for label, count in carried.items()))
+PY
+  )" || cloud_note="cloud: not read; skill copies: not read; cloud skill copies: not read"
+fi
+
+# The last gate on the public weekly file (#562): nothing is staged when it
+# fails, and the line names no value.
+"$PY" - "$tmp/src/harness" "$tmp/src/scripts" "$tmp/usage/weekly-local.json" "$tmp/src" \
+  >/dev/null 2>&1 <<'PY' || { echo "usage census: refusing to publish (check_public)" >&2; exit 1; }
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+import model_usage_census
+import skill_usage
+doc = json.load(open(sys.argv[3], encoding="utf-8"))
+allowlist = model_usage_census.skill_allowlist(Path(sys.argv[4]))
+public = set(model_usage_census.public_registries().values())
+sys.exit(1 if skill_usage.check_public(doc, allowlist, public) else 0)
+PY
 
 # Totals for the summary line, and the changed/unchanged decision. Both read
 # only the four JSON files; neither uses the clock. A missing old
@@ -175,6 +318,8 @@ PY
 read -r state models turns calls hooks weeks events <<<"$decision"
 
 summary="usage census: $models models, $turns assistant turns, $calls skill invocations, $hooks hook runs, $weeks weeks"
+if [ -n "$cloud_note" ]; then summary="$summary; $cloud_note"; fi
+if [ -n "$registry_note" ]; then summary="$summary; $registry_note"; fi
 
 # --- 1. The public census. A failure here exits at once: the private
 # publish below is never reached without a public result.
@@ -225,13 +370,10 @@ fi
 private_fail() { echo "usage census: private events not published ($1)" >&2; return 1; }
 
 publish_private() {
-  local dir="$tmp/private" created=0 found=0 added
-  git ls-remote --exit-code --heads "$EVENTS_URL" "refs/heads/$EVENTS_BRANCH" >/dev/null 2>&1 \
-    || found=$?
-  if [ "$found" = 0 ]; then
-    git clone "${no_bg[@]}" --quiet --depth 1 --single-branch --branch "$EVENTS_BRANCH" \
-      "$EVENTS_URL" "$dir" >/dev/null 2>&1 || { private_fail "clone"; return 1; }
-  elif [ "$found" = 2 ]; then
+  local dir="$tmp/private" created=0 added
+  if [ "$private_fetch" = cloned ]; then
+    :  # fetched before the census, which has only read it
+  elif [ "$private_fetch" = missing ]; then
     # The repository answered and has no such branch: (re)create it.
     git init --quiet -b "$EVENTS_BRANCH" "$dir" >/dev/null 2>&1 \
       && git -C "$dir" config maintenance.auto false \
@@ -255,10 +397,12 @@ Field reference: skills-evals `evals/usage/CENSUS.md`, "Private usage events".
 - **No ruleset.** This repository is private, and rulesets cannot protect a
   branch of it on this plan, so nothing guards it against deletion or a force
   push. Do not delete it.
+- cloud-* files and the shards under events/<month>/cloud-skills/ are written by cloud hooks and cannot be regenerated; a re-created branch loses them.
+- A cloud-skills shard holds one line per skill use a cloud session uploaded, from its main transcript and subagent transcripts: records seen, never complete.
 README
     created=1
   else
-    private_fail "reach"
+    private_fail "$private_fetch_step"
     return 1
   fi
   added="$("$PY" - "$tmp/src/scripts" "$tmp/events.jsonl" "$dir" 2>/dev/null <<'PY'
@@ -275,6 +419,12 @@ PY
   # anything else (and so never anything under lessons/).
   while IFS= read -r path; do
     [ -n "$path" ] || continue
+    # cloud-* files, and the per-session shards under cloud-skills/
+    # (#562 PR B), belong to cloud hooks; this machine never writes one.
+    if [[ "$path" =~ ^events/[0-9]{4}-[0-9]{2}/cloud-[^/]*(/[0-9a-f]{16})?\.jsonl$ ]]; then
+      private_fail "unexpected staged paths"
+      return 1
+    fi
     if [[ "$path" =~ ^events/[0-9]{4}-[0-9]{2}/[A-Za-z0-9][A-Za-z0-9._-]*\.jsonl$ ]]; then
       continue
     fi

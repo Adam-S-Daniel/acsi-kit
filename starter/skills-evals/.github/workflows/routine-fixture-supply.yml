@@ -3,24 +3,28 @@ name: Fixture supply
 # Eval fixtures are the real improvement queue (improve needs several per
 # skill, and only writing-adrs has enough), so they are made and promoted
 # with no person in the loop (the owner, 2026-10-26: "closed loop with no human in
-# the loop"; ADR 0003's 2026-10-26 addendum). Daily, two independent jobs:
+# the loop"; ADR 0003's 2026-10-26 addendum).
 #
-# * `plan` + `dispatch` scaffold new real-work fixtures. `plan` runs the
-#   read-only miner over the fleet's merged pull requests (REST only, the
-#   job's read-only token; public repositories only), then
-#   `scripts/scaffold_real_work.py pick` skips every candidate the routine
-#   would refuse or already has (a fixture, a `claude/scaffold-<id>` branch,
-#   or a successful scaffold fire within REFIRE_AFTER_DAYS, read from the
-#   fire workflow's run titles), ranks the rest by their subject skills
-#   (fewest fixtures first), and cuts the list to what fits: at most
-#   MAX_IN_FLIGHT (3) routine sessions at once, counting fires of the last
-#   45 minutes (the guard's PENDING_FULL_HOLD) as still running, and the weekly allowance guard's room
-#   (scripts/allowance_guard.py; it fails closed). `dispatch` fires them one
-#   at a time through routine-eval-fire.yml in scaffold mode, which
-#   validates the candidate, runs the guard again and holds the bearer; a
-#   minute apart. The routine pushes `claude/scaffold-<id>`, and
-#   routine-scaffold-gate.yml gates it and opens a pull request that merges
-#   itself once `test` passes.
+# THE SCAFFOLD LANE IS PAUSED (the owner, 2026-11-03, skills-evals#656). Its
+# `plan` and `dispatch` jobs, which mined the fleet's merged pull requests
+# and fired the routine in scaffold mode to turn them into `draft: true`
+# real-work fixtures, are removed from this workflow, so nothing here fires
+# the routine. What replaces them: the weekly sweep's fixture requests
+# (`needs-fixtures` and `needs-harder-fixtures` issues, scripts/
+# work_item_issues.py) ask the fleet worker to build each fixture from real
+# fleet work when one fits, as an ordinary per-skill fixture with invented
+# names and data and an `origin:` mapping naming the pull request it came
+# from (scripts/fixture_pr_gate.py requires it). scripts/fixture_queue.py
+# tracks those requests, their pull requests and the fixtures' runs and
+# cost for the Evals Explorer, and files `half-built-or-broken` issues when
+# the queue stalls (explorer-data.yml). To resume the lane, restore the two
+# jobs from this file's history (the commit that removed them cites
+# skills-evals#656); scripts/
+# scaffold_real_work.py `pick`, routine-eval-fire.yml's scaffold mode and
+# routine-scaffold-gate.yml are kept, unchanged.
+#
+# Daily, one job:
+#
 # * `promote` lands a `draft: true` fixture on the weekly schedule once it
 #   has MIN_PROMOTION_RUNS (2) ingested runs on persistent/eval-results with
 #   both arms and no errored arm, for its committed content
@@ -33,6 +37,14 @@ name: Fixture supply
 #   ADR 0003 round 6 and 7 do for the roster. One promotion pull request at
 #   a time: an open one holds the slot. No App token: nothing is pushed, and
 #   the next run tries again.
+# * The same job then runs `scripts/contextualize_fixtures.py`: a drafted
+#   skill's fixture (an isolation pair the draft loop listed in
+#   evals/unscheduled.yml) gets a measured in-place context once its skill
+#   is on acsi-agentskills' main, and moves to evals/scheduled.yml, so its
+#   runs pool toward a verdict (adversarial gap review, 2026-11-03, item 2).
+#   It reads the context repositories and registries as data, from their
+#   default branches, with no credential; the same pull request carries both
+#   changes.
 #
 # * The results branch is bot-written and untrusted: it is checked out
 #   without credentials and read as data; nothing from it runs.
@@ -52,139 +64,6 @@ on:
 permissions: {}
 
 jobs:
-  plan:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      actions: read
-    outputs:
-      matrix: ${{ steps.pick.outputs.matrix }}
-      count: ${{ steps.pick.outputs.count }}
-    steps:
-      - name: Check out the default branch
-        uses: actions/checkout@v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      # The fleet the miner reads: names in cron_coverage.fleet, owners in
-      # SYNC_OWNERS, from _agent-guidance's default branch. Public.
-      - name: Check out _agent-guidance (the fleet registry)
-        uses: actions/checkout@v7.0.1
-        with:
-          repository: example-adopter/_agent-guidance
-          path: _agent-guidance
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install PyYAML
-        run: python3 -m pip install pyyaml==6.0.3
-      - name: Check out persistent/eval-results (the ingested runs)
-        uses: actions/checkout@v7.0.1
-        with:
-          ref: persistent/eval-results
-          path: eval-results-branch
-          persist-credentials: false
-          sparse-checkout: routine-results
-      # The newest 20 merged pull requests per repository: new work arrives
-      # a few a day, and every candidate costs three REST reads against the
-      # job token's hourly limit.
-      # The fleet includes the private registry, which the job token cannot
-      # see, so the miner would fail closed on its 404 (2026-10-26, run
-      # 40361751478). The read-only registry App sees it and is listed
-      # under `skipped`; public repositories read the same with any token.
-      - name: Mint the read-only fleet token
-        id: fleet-token
-        uses: actions/create-github-app-token@v3.2.0
-        with:
-          client-id: ${{ vars.REGISTRY_READ_APP_CLIENT_ID }}
-          private-key: ${{ secrets.REGISTRY_READ_APP_PEM }}
-          owner: example-adopter
-          repositories: acsi-agentskills-private
-          permission-contents: read
-      - name: Mine merged fleet pull requests
-        env:
-          GH_TOKEN: ${{ steps.fleet-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          python3 scripts/mine_real_work.py mine --registry _agent-guidance/repos.yml \
-            --sync-workflow _agent-guidance/.github/workflows/sync.yml \
-            --out "$RUNNER_TEMP/candidates.json" --limit 20
-      # 30 is scripts/scaffold_real_work.py REFIRE_AFTER_DAYS. A read that
-      # fails plans no fire; the error body is never printed.
-      - name: List scaffold branches and recent scaffold fires
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if ! git ls-remote --heads origin 'refs/heads/claude/scaffold-*' \
-               > "$RUNNER_TEMP/branches.txt" 2> /dev/null; then
-            echo "::error::could not list the scaffold branches; planning no fire"
-            exit 1
-          fi
-          since="$(date -u -d '-30 days' +%Y-%m-%dT%H:%M:%SZ)"
-          if ! gh api --paginate \
-               "repos/${GITHUB_REPOSITORY}/actions/workflows/routine-eval-fire.yml/runs?status=success&created=%3E%3D${since}&per_page=100" \
-               --jq '.workflow_runs[].display_title' > "$RUNNER_TEMP/fired.txt" 2> /dev/null; then
-            echo "::error::could not list the recent fires; planning no fire"
-            exit 1
-          fi
-      - name: Pick candidates within the routine's limit and the weekly allowance
-        id: pick
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 scripts/scaffold_real_work.py pick \
-            --candidates "$RUNNER_TEMP/candidates.json" \
-            --branches "$RUNNER_TEMP/branches.txt" --fired "$RUNNER_TEMP/fired.txt" \
-            --results-tree eval-results-branch --max 3 > "$RUNNER_TEMP/pick.out"
-          cat "$RUNNER_TEMP/pick.out" >> "$GITHUB_OUTPUT"
-
-  dispatch:
-    needs: plan
-    # An empty matrix is an error to GitHub, so nothing to fire skips the job.
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && needs.plan.outputs.count != '0'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: write
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    steps:
-      - name: Fire the routine in scaffold mode
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          CANDIDATE: ${{ matrix.candidate }}
-          SLOT: ${{ matrix.slot }}
-        run: |
-          set -euo pipefail
-          # The miner key pattern routine-eval-fire.yml checks again.
-          if ! [[ "$CANDIDATE" =~ ^[A-Za-z0-9-]+__[A-Za-z0-9._-]+__[1-9][0-9]{0,6}$ ]] \
-             || ! [[ "$SLOT" =~ ^[0-2]$ ]]; then
-            echo "::error::the planned candidate or slot has an unexpected shape"
-            exit 1
-          fi
-          # The routine starts one session at a time: a minute between fires.
-          if [ "$SLOT" != 0 ]; then
-            sleep 60
-          fi
-          if ! gh workflow run routine-eval-fire.yml \
-            --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH" \
-            --raw-field mode=scaffold --raw-field "candidate=$CANDIDATE" \
-            --raw-field arms=both --raw-field trials=1 > /dev/null 2>&1; then
-            echo "::error::Routine scaffold dispatch failed"
-            exit 1
-          fi
-          echo "fired scaffold mode for ${CANDIDATE}"
-
   promote:
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
@@ -199,7 +78,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
       - name: Install PyYAML
@@ -222,11 +101,65 @@ jobs:
           python3 scripts/scaffold_real_work.py promote --results-tree eval-results-branch \
             --as-of "$as_of" --apply > "$RUNNER_TEMP/promote.out"
           cat "$RUNNER_TEMP/promote.out" >> "$GITHUB_OUTPUT"
+      # Full history: a lock names its registry at an older commit, and the
+      # guidance pin is searched for in _agent-guidance's history.
+      - name: Check out _agent-guidance
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/_agent-guidance
+          path: ctx/_agent-guidance
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out acsi-agentskills
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/acsi-agentskills
+          path: ctx/acsi-agentskills
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out example-site-platform
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/example-site-platform
+          path: ctx/example-site-platform
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - name: Check out example-site-a
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/example-site-a
+          path: ctx/example-site-a
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - name: Check out wsl-automation
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/wsl-automation
+          path: ctx/wsl-automation
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Give drafted fixtures a context and schedule them
+        id: contextualize
+        run: |
+          set -euo pipefail
+          as_of="$(git -C eval-results-branch log -1 --format=%cI)"
+          args=()
+          for repo in _agent-guidance acsi-agentskills example-site-platform example-site-a wsl-automation; do
+            args+=(--context-repo "example-adopter/${repo}=ctx/${repo}")
+          done
+          python3 scripts/contextualize_fixtures.py "${args[@]}" \
+            --registry acsi-agentskills=ctx/acsi-agentskills \
+            --registry example-site-platform=ctx/example-site-platform \
+            --registry example-site-a=ctx/example-site-a \
+            --as-of "$as_of" --apply > "$RUNNER_TEMP/contextualize.out"
+          cat "$RUNNER_TEMP/contextualize.out" >> "$GITHUB_OUTPUT"
       - name: Mint the roster App token
         id: app-token
-        if: steps.promote.outputs.count != '0'
+        if: steps.promote.outputs.count != '0' || steps.contextualize.outputs.count != '0'
         continue-on-error: true
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ vars.ROSTER_APP_CLIENT_ID }}
           private-key: ${{ secrets.ROSTER_APP_PRIVATE_KEY }}
@@ -235,15 +168,17 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
       - name: Open the promotion pull request and turn on auto-merge
-        if: steps.promote.outputs.count != '0'
+        if: steps.promote.outputs.count != '0' || steps.contextualize.outputs.count != '0'
         env:
           GH_TOKEN: ${{ github.token }}
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
           BASE: ${{ github.event.repository.default_branch }}
           RUN_ID: ${{ github.run_id }}
-          COUNT: ${{ steps.promote.outputs.count }}
-          FIXTURES: ${{ steps.promote.outputs.fixtures }}
+          PROMOTED: ${{ steps.promote.outputs.count }}
+          PROMOTED_FIXTURES: ${{ steps.promote.outputs.fixtures }}
+          CONTEXTUALIZED: ${{ steps.contextualize.outputs.count }}
+          CONTEXTUALIZED_FIXTURES: ${{ steps.contextualize.outputs.fixtures }}
         run: |
           set -euo pipefail
           app_token=""
@@ -258,11 +193,14 @@ jobs:
           app_gh() {
             GH_TOKEN="$app_token" GITHUB_TOKEN="" gh "$@"
           }
-          if ! [[ "$RUN_ID" =~ ^[0-9]+$ ]] || ! [[ "$COUNT" =~ ^[1-9][0-9]*$ ]] \
-             || ! [[ "$FIXTURES" =~ ^[A-Za-z0-9/_.\ -]+$ ]]; then
+          if ! [[ "$RUN_ID" =~ ^[0-9]+$ ]] || ! [[ "$PROMOTED" =~ ^[0-9]+$ ]] \
+             || ! [[ "$CONTEXTUALIZED" =~ ^[0-9]+$ ]] \
+             || ! [[ "$PROMOTED_FIXTURES" =~ ^[A-Za-z0-9/_.\ -]*$ ]] \
+             || ! [[ "$CONTEXTUALIZED_FIXTURES" =~ ^[A-Za-z0-9/_.\ -]*$ ]]; then
             echo "::error::the promotion's outputs have an unexpected shape"
             exit 1
           fi
+          COUNT=$((PROMOTED + CONTEXTUALIZED))
           open="$(gh api "repos/${REPO}/pulls?state=open&base=${BASE}&per_page=100" \
             --jq '[.[] | select(.head.ref | startswith("fixture-promotion/"))] | length')" || open=""
           case "$open" in
@@ -278,7 +216,7 @@ jobs:
           git add -A -- evals
           while IFS= read -r changed; do
             case "$changed" in
-              evals/scheduled.yml|evals/*/fixture.yaml) ;;
+              evals/scheduled.yml|evals/unscheduled.yml|evals/*/fixture.yaml) ;;
               *)
                 echo "::error::the promotion changed a file it does not write"
                 exit 1 ;;
@@ -305,16 +243,30 @@ jobs:
           fi
           body="$RUNNER_TEMP/body.md"
           {
-            echo "Promotes ${COUNT} fixture(s) from \`draft: true\` to the weekly schedule (\`evals/scheduled.yml\`): each has at least two ingested runs on \`persistent/eval-results\` with both arms and no errored arm, for its committed content, and its red/green check passed when it was scaffolded."
+            echo "## TLDR"
             echo
-            for path in $FIXTURES; do
-              echo "- \`${path}\`"
-            done
+            echo "Puts ${COUNT} fixture(s) on the weekly schedule (\`evals/scheduled.yml\`) so their runs count toward their skills' verdicts."
             echo
-            echo "Opened by routine-fixture-supply.yml (\`scripts/scaffold_real_work.py promote\`); it merges automatically once \`test\` passes (ADR 0003's 2026-10-26 addendum)."
+            if [ "$PROMOTED" != 0 ]; then
+              echo "Promoted from \`draft: true\` (\`scripts/scaffold_real_work.py promote\`): each has at least two ingested runs on \`persistent/eval-results\` with both arms and no errored arm, for its committed content, and its red/green check passed when it was scaffolded."
+              echo
+              for path in $PROMOTED_FIXTURES; do
+                echo "- \`${path}\`"
+              done
+              echo
+            fi
+            if [ "$CONTEXTUALIZED" != 0 ]; then
+              echo "Given an in-place context (\`scripts/contextualize_fixtures.py\`): drafted isolation pairs whose skill is now on acsi-agentskills' main, each pinned to its context repository's main and a byte-matching guidance revision, with budgets measured plus 25%, and moved off \`evals/unscheduled.yml\`."
+              echo
+              for path in $CONTEXTUALIZED_FIXTURES; do
+                echo "- \`${path}\`"
+              done
+              echo
+            fi
+            echo "Opened by routine-fixture-supply.yml; it merges automatically once \`test\` passes (ADR 0003's 2026-10-26 addendum)."
           } > "$body"
           url="$(app_gh pr create --repo "$REPO" --base "$BASE" --head "$branch" \
-            --title "Promote ${COUNT} fixture(s) to the weekly schedule" --body-file "$body")"
+            --title "Schedule ${COUNT} fixture(s) for the weekly run" --body-file "$body")"
           number="${url##*/}"
           if ! [[ "$number" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::could not read the new pull request's number"

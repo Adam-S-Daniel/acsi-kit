@@ -9,6 +9,8 @@
 > Edit only below the `## Repo-specific additions` header.
 > Everything above it will be overwritten on the next sync.
 
+guidance-marker: fleet-stub (transcript counts use this line; keep it)
+
 ## Fleet guidance is delivered once per session — not by this file
 
 The account's full guidance — incidents, fleet policy, machine layout, the
@@ -34,6 +36,14 @@ line:
   would when degraded — just don't report it as a problem or try to "fix" it.
 
 No verdict at all means the hook never ran — treat that as DEGRADED.
+
+**Say what loaded, in your first reply to the user in a session.** The
+installed guidance ends with a line `fleet-guidance check value: <8 hex>`.
+Begin that reply with `fleet-guidance check: <the value>`, copied from that
+line, or `fleet-guidance check: none` when no such line is in your context.
+Never guess a value or copy one from anywhere else: the session's record
+compares it with what actually loaded. Only in replies to the user — never in
+commits, PR or issue text, files or prompts for other agents.
 
 ## Codex reads the same block, from `~/.codex/AGENTS.md`
 
@@ -147,7 +157,7 @@ execution-time limit, not just the next one.
 **Recognising it:** the run starts on time, the log stops a few seconds in, and
 Task Scheduler Id 329 terminates it at *exactly* `ExecutionTimeLimit` later (5
 min for ccstatusline and the waiting feed, 15 min for the census and the Codex
-Cloud sync, 30 min for the session miner).
+Cloud sync, 30 min for the session miner, 3h for the memory curation).
 `LastTaskResult=267014` (`0x41306`, `SCHED_S_TASK_TERMINATED`) is the signature
 — a stuck prompt, not a slow run. Note it is a *terminated* result, not an
 error one, so failure-only alerting will not see it.
@@ -271,3 +281,30 @@ full. Keep the job ids, and add no `name:`, `matrix` or `concurrency:`;
 - `reachability-unknown` means GitHub's API was unreachable; re-run the job.
 - Cross-repo reusable workflows (`jobs.<id>.uses`) are not covered by the
   lockfile and take a full 40-character commit SHA.
+
+### Memory curation covers both Claude homes on this machine
+
+Claude Code on this machine keeps memory in two homes: the WSL one
+(`~/.claude`) and the Windows one (`%USERPROFILE%\.claude`). The routine spec in
+`_agent-guidance` (`docs/routines/memory-curation.md`) names only one, so
+`scripts/run-memory-curation.sh` resolves the Windows home at run time (never a
+hardcoded user name) and passes both to the headless session.
+
+- **The log is counts-only and the summary is a local file.** Memory is private:
+  the log gets directory and note counts, never a path, note name or note text,
+  and Claude's summary goes to a mode-600 file (`~/.cache/memory-curation/last-summary.md`),
+  not to the log.
+- **An unresolvable Windows home is not a failure.** The run continues on the
+  WSL home and logs `windows_home=unresolved`.
+
+### Task start times are local, with no UTC offset
+
+`New-ScheduledTaskTrigger` in pwsh 7 writes `StartBoundary` in UTC, and Task
+Scheduler stores it with the offset in effect at registration
+(`...-04:00`). Such a trigger fires at a fixed UTC instant, so every daily task
+registered during daylight time ran an hour early after the November 2026
+clock change (issue 89). Every trigger therefore goes through the private
+`ConvertTo-WslLocalTimeTrigger`, which writes the boundary back as local time
+with no offset; Task Scheduler then keeps the wall-clock time across the
+change. A new trigger must go through it too; `tests/Tasks.Tests.ps1` fails
+otherwise.

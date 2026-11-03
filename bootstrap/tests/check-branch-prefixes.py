@@ -7,12 +7,13 @@ and one no-permission "pushed" workflow per lane listens for them
 (on.push.branches) and hands off to its gate. So:
 
   * the lanes are the claude/ branch patterns of skills-evals' workflows,
-    and there are the five the system has: results (claude/eval-*),
-    improve, guidance improve, scaffold and draft-skill;
-  * every claude/<lane>- branch the routine prompt (docs/routine-prompt.md)
-    or another skills-evals doc names matches a lane, and every lane is
-    named by the routine prompt (no workflow listens for a branch nothing
-    pushes);
+    and there are the six the system has: results (claude/eval-*),
+    improve, improve cost, guidance improve, scaffold and draft-skill;
+  * every claude/<lane>- branch the routine's instructions
+    (docs/routine/eval-runner-instructions.md, which the routine's stub
+    prompt reads at each run) or another skills-evals doc names matches a
+    lane, and every lane is named by the instructions (no workflow listens
+    for a branch nothing pushes);
   * where one branch name matches two lanes (claude/eval-improve-<run> also
     matches claude/eval-*), every lane it matches has a paths filter, and the
     filters share no directory, so exactly one lane's workflow fires;
@@ -53,15 +54,15 @@ for path in sorted((SE / ".github" / "workflows").glob("*.yml")):
         if b.startswith("claude/"):
             paths = push.get("paths")
             lanes[b] = (path.name, {p.split("/")[0] for p in paths} if paths else None)
-check(f"skills-evals listens on the five routine lanes ({sorted(lanes)})", set(lanes) == {
-    "claude/eval-*", "claude/eval-improve-*", "claude/eval-guidance-improve-*",
+check(f"skills-evals listens on the six routine lanes ({sorted(lanes)})", set(lanes) == {
+    "claude/eval-*", "claude/eval-improve-*", "claude/eval-cost-*", "claude/eval-guidance-improve-*",
     "claude/scaffold-*", "claude/draft-skill-*"})
 
 BRANCH = re.compile(r"claude/[a-z][a-z-]*-")
-prompt = (SE / "docs" / "routine-prompt.md").read_text(encoding="utf-8")
+prompt = (SE / "docs" / "routine" / "eval-runner-instructions.md").read_text(encoding="utf-8")
 named_in_prompt = set(BRANCH.findall(prompt))
-check("the routine prompt names its branches", bool(named_in_prompt))
-for doc in sorted((SE / "docs").glob("*.md")):
+check("the routine's instructions name its branches", bool(named_in_prompt))
+for doc in sorted((SE / "docs").rglob("*.md")):
     rel = doc.relative_to(KIT)
     for token in sorted(set(BRANCH.findall(doc.read_text(encoding="utf-8")))):
         sample = token + "run"
@@ -77,7 +78,7 @@ for doc in sorted((SE / "docs").glob("*.md")):
                           not (seen & d))
                     seen |= d
 for pattern in sorted(lanes):
-    check(f"the routine prompt pushes to {pattern} ({lanes[pattern][0]} listens)",
+    check(f"the routine's instructions push to {pattern} ({lanes[pattern][0]} listens)",
           any(fnmatch.fnmatchcase(t + "run", pattern) for t in named_in_prompt))
 
 loop_doc = (KIT / "docs" / "evals-and-loop.md").read_text(encoding="utf-8")

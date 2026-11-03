@@ -10,9 +10,12 @@ PyYAML and running the shell steps that carry logic against a fake `gh`:
   * routine-draft-skill.yml: a daily schedule plus dispatch; `select` holds
     contents/actions/issues read, mints the read-only registry App token
     exactly as propagation.yml does, reads lessons/ and plugins/ of the
-    private registry, the public registry, the drafted branches and the
-    declined hook proposals, and checks the allowance with `fits`;
-    `dispatch` holds actions: write, re-checks the proposal pattern and maps
+    private registry, the public registry, the drafted branches, the
+    declined hook proposals and the open `skill-proposal` issues of the
+    public acsi-agentskills (converted by `issue-proposals`, failing closed
+    on an API error, and passed to `select --issue-proposals`), and checks
+    the allowance with `fits`; `dispatch` holds actions: write, re-checks
+    the proposal pattern (proposals/ or issue-proposals/) and maps
     `hook_declined` before `gh workflow run`, never echoing a bad value;
   * routine-draft-skill-pushed.yml: a filtered push with no reach, whose
     branch no other routine signal matches;
@@ -22,7 +25,12 @@ PyYAML and running the shell steps that carry logic against a fake `gh`:
     acting job re-validates at the judged sha before it acts; the fixtures
     pull request follows the skill's; hook-first opens an issue with the job
     token's `issues: write` and nothing else; no merge, force or approve;
-  * all three: every `uses:` locked in actions.lock at a tag the repo
+    the fixtures pull request is opened with the roster App token and the
+    gate never arms its auto-merge;
+  * draft-fixtures-follow.yml: schedule plus dispatch; once the skill's pull
+    request has merged it updates a job-token-opened fixtures pull request's
+    branch and turns on its auto-merge, with the roster App token alone;
+  * all four: every `uses:` locked in actions.lock at a tag the repo
     already pins, no `${{ }}` in a `run:`, no concurrency group, every
     checkout without persisted credentials.
 
@@ -31,6 +39,7 @@ Discovered and run by test/run_tests.py.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -51,11 +60,16 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 CALLER = WORKFLOWS / "routine-draft-skill.yml"
 SIGNAL = WORKFLOWS / "routine-draft-skill-pushed.yml"
 GATE = WORKFLOWS / "routine-draft-skill-gate.yml"
-OURS = (CALLER, SIGNAL, GATE)
+FOLLOW = WORKFLOWS / "draft-fixtures-follow.yml"
+OURS = (CALLER, SIGNAL, GATE, FOLLOW)
 sys.path.insert(0, str(TEST_DIR))
 from lockfile_pins import lock_problem  # noqa: E402
 
 PROPOSAL = "proposals/2026-10-26/example-skill__new-skill.json"
+ISSUE_PROPOSAL = "issue-proposals/2026-10-26/example-skill__new-skill.json"
+ISSUES_API = ("repos/example-adopter/acsi-agentskills/issues"
+              "?labels=skill-proposal&state=open&per_page=100")
+CONVERT = "Convert the skill-proposal issues"
 BRANCH = "claude/draft-skill-20261026T063000Z-0a1b2c"
 DEFAULT_BRANCH_IF = ("github.ref == format('refs/heads/{0}', "
                      "github.event.repository.default_branch)")
@@ -208,6 +222,7 @@ class CallerTests(unittest.TestCase):
                        "--registry acsi-agentskills-private=../acsi-agentskills-private",
                        "--lessons ../acsi-agentskills-private-lessons/lessons",
                        "--evals evals --drafted",
+                       '--issue-proposals "$RUNNER_TEMP/issue-lessons"',
                        '--hook-declined "$RUNNER_TEMP/hook-declined.txt"'):
             self.assertIn(needle, body)
         fetch = step(self.doc, "select", "Fetch the drafted branches")["run"]
@@ -240,6 +255,19 @@ class CallerTests(unittest.TestCase):
             self.assertEqual(refs, ["refs/remotes/origin/claude/draft-skill-20261026T000000Z-abcdef"])
         outputs = self.jobs["select"]["outputs"]
         self.assertEqual(set(outputs), {"proposal", "count", "hook_declined", "fits"})
+
+    def test_the_issues_are_converted_with_the_job_token_before_select(self):
+        names = [s.get("name") for s in self.jobs["select"]["steps"]]
+        self.assertLess(names.index(CONVERT), names.index("Select one new-skill proposal"))
+        convert = step(self.doc, "select", CONVERT)
+        # No `if`: the issues are read whether or not persistent/lessons exists.
+        self.assertNotIn("if", convert)
+        self.assertEqual(convert["env"], {"GH_TOKEN": "${{ github.token }}"})
+        self.assertEqual(convert["working-directory"], "skills-evals")
+        self.assertIn(ISSUES_API, convert["run"])
+        self.assertIn("|| fetched=ERROR", convert["run"])
+        self.assertIn('draft_new_skill.py issue-proposals --issues "$issues"', convert["run"])
+        self.assertIn('--out "$RUNNER_TEMP/issue-lessons"', convert["run"])
 
     def test_the_allowance_pre_check_runs_only_with_a_pick(self):
         s = step(self.doc, "select", "Check the weekly allowance")
@@ -315,17 +343,18 @@ class CallerStepTests(unittest.TestCase):
                 self.assertEqual(written, f"present={present}\n" if present else "")
 
     def test_dispatch_sends_the_proposal_and_the_declined_flag(self):
-        for flag, sent in (("0", "false"), ("1", "true")):
-            with self.subTest(flag=flag):
+        for flag, sent, path in (("0", "false", PROPOSAL), ("1", "true", PROPOSAL),
+                                 ("0", "false", ISSUE_PROPOSAL)):
+            with self.subTest(flag=flag, path=path):
                 self.log.unlink(missing_ok=True)
                 proc = self.run_step("Dispatch the draft", DEFAULT_BRANCH="main",
-                                PROPOSAL=PROPOSAL, HOOK_DECLINED=flag)
+                                PROPOSAL=path, HOOK_DECLINED=flag)
                 self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
                 [call] = self.calls()
                 self.assertEqual(call[:2], ["workflow", "run"])
                 self.assertIn("routine-eval-fire.yml", call)
                 self.assertIn("mode=draft", call)
-                self.assertIn(f"proposal={PROPOSAL}", call)
+                self.assertIn(f"proposal={path}", call)
                 self.assertIn(f"hook_declined={sent}", call)
 
     def test_dispatch_refuses_a_bad_value_without_calling_gh(self):
@@ -334,6 +363,9 @@ class CallerStepTests(unittest.TestCase):
             "dotdot": ("proposals/2026-10-26/../x__new-skill.json", "0"),
             "subst": ("proposals/2026-10-26/$(id)__new-skill.json", "0"),
             "newline": (PROPOSAL + "\nproposals/x", "0"),
+            "singular_issue_root": (ISSUE_PROPOSAL.replace("issue-proposals", "issue-proposal"), "0"),
+            "nested_root": ("lessons/" + ISSUE_PROPOSAL, "0"),
+            "issue_dotdot": ("issue-proposals/2026-10-26/../x__new-skill.json", "0"),
             "empty": ("", "0"),
             "flag_empty": (PROPOSAL, ""),
             "flag_word": (PROPOSAL, "true"),
@@ -372,6 +404,43 @@ class CallerStepTests(unittest.TestCase):
         proc = self.run_step("List the declined hook proposals", GH_TOKEN="t", FAKE_GH_OUT="")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual((self.tmp / "hook-declined.txt").read_text(), "")
+
+    def run_convert(self, **env):
+        # The step runs in the skills-evals checkout: draft_new_skill.py is
+        # this repository's.
+        return subprocess.run(["bash", "-c", step(self.doc, "select", CONVERT)["run"]],
+                              cwd=REPO_ROOT, env={**self.env, **env},
+                              capture_output=True, text=True, timeout=120)
+
+    def test_the_issues_become_proposal_files_without_echoing_them(self):
+        issues = [{"number": 18, "title": "Skill: example skill", "state": "open",
+                   "author_association": "OWNER", "user": {"login": "example-adopter"},
+                   "labels": [{"name": "skill-proposal"}],
+                   "created_at": "2026-10-20T08:00:00Z",
+                   "updated_at": "2026-10-26T09:00:00Z",
+                   "body": "Skill name: `example-skill`.\n\nleaked-body text."},
+                  {"number": 19, "title": "No name line", "state": "open",
+                   "author_association": "OWNER", "user": {"login": "example-adopter"},
+                   "labels": [{"name": "skill-proposal"}],
+                   "created_at": "2026-10-20T08:00:00Z",
+                   "updated_at": "2026-10-26T09:00:00Z", "body": "leaked-body only."}]
+        proc = self.run_convert(GH_TOKEN="t", FAKE_GH_OUT=json.dumps(issues))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn("leaked-body", proc.stdout + proc.stderr)
+        self.assertIn("issues without a name line: 1 #19", proc.stderr)
+        [call] = self.calls()
+        self.assertEqual(call, ["api", ISSUES_API])
+        written = sorted(p.relative_to(self.tmp / "issue-lessons").as_posix()
+                         for p in (self.tmp / "issue-lessons").rglob("*.json"))
+        self.assertEqual(written, [ISSUE_PROPOSAL])
+
+    def test_the_issue_list_fails_closed_on_an_api_error(self):
+        proc = self.run_convert(GH_TOKEN="t", FAKE_GH_OUT='{"message": "leaked-body"}',
+                                FAKE_GH_EXIT="1")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("::error::could not list the skill-proposal issues", proc.stdout)
+        self.assertNotIn("leaked-body", proc.stdout + proc.stderr)
+        self.assertFalse((self.tmp / "issue-lessons").exists())
 
     def test_declined_list_fails_closed_on_an_api_error(self):
         proc = self.run_step("List the declined hook proposals", GH_TOKEN="t",
@@ -453,6 +522,8 @@ class GateTests(unittest.TestCase):
         refs = sorted((p, v.strip()) for p, v in strings(self.doc) if "secrets." in v)
         mint = next(i for i, s in enumerate(self.jobs["skill-pr"]["steps"])
                     if str(s.get("uses", "")).startswith("actions/create-github-app-token@"))
+        roster = next(i for i, s in enumerate(self.jobs["fixtures-pr"]["steps"])
+                      if str(s.get("uses", "")).startswith("actions/create-github-app-token@"))
         self.assertEqual(refs, sorted([
             (("jobs", "credential", "steps", "0", "env", "PR_CREDENTIAL_SET"),
              "${{ secrets.EVAL_IMPROVE_APP_CLIENT_ID != '' && secrets.EVAL_IMPROVE_APP_PEM != '' }}"),
@@ -460,14 +531,17 @@ class GateTests(unittest.TestCase):
              "${{ secrets.EVAL_IMPROVE_APP_CLIENT_ID }}"),
             (("jobs", "skill-pr", "steps", str(mint), "with", "private-key"),
              "${{ secrets.EVAL_IMPROVE_APP_PEM }}"),
+            (("jobs", "fixtures-pr", "steps", str(roster), "with", "private-key"),
+             "${{ secrets.ROSTER_APP_PRIVATE_KEY }}"),
         ]))
         with_ = self.jobs["skill-pr"]["steps"][mint]["with"]
         self.assertEqual(with_["repositories"], "acsi-agentskills")
         self.assertEqual({k: v for k, v in with_.items() if k.startswith("permission-")},
                          {"permission-contents": "write", "permission-pull-requests": "write"})
-        users = [p for p, v in strings(self.doc) if "steps.app-token.outputs" in v]
-        self.assertEqual(len(users), 1)
-        self.assertEqual(users[0][-2:], ("env", "GH_TOKEN"))
+        users = sorted(p for p, v in strings(self.doc) if "steps.app-token.outputs" in v)
+        self.assertEqual([(u[1], u[-2:]) for u in users],
+                         [("fixtures-pr", ("env", "APP_TOKEN")),
+                          ("skill-pr", ("env", "GH_TOKEN"))])
 
     def test_every_acting_job_revalidates_at_the_judged_sha_first(self):
         for name in ("skill-pr", "fixtures-pr", "hook-issue"):
@@ -541,7 +615,13 @@ class GateTests(unittest.TestCase):
         self.assertEqual(fixtures["env"]["AUTO"], "${{ needs.skill-pr.outputs.auto }}")
         self.assertEqual(self.jobs["skill-pr"]["outputs"]["auto"],
                          "${{ steps.open.outputs.auto }}")
-        for run, mode in ((skill["run"], '"$MODE"'), (fixtures["run"], '"$mode"')):
+        # The fixtures step opens ready or draft but never arms auto-merge:
+        # draft-fixtures-follow.yml does, after the skill has merged.
+        self.assertNotIn("gh pr merge", fixtures["run"])
+        self.assertNotIn('"MERGE"', fixtures["run"])
+        self.assertIn("if [ \"$mode\" = draft ]; then\n  draft=(--draft)\nfi",
+                      fixtures["run"].replace("          ", ""))
+        for run, mode in ((skill["run"], '"$MODE"'),):
             with self.subTest(mode=mode):
                 self.assertIn(f"if [ {mode} = draft ]; then\n  draft=(--draft)\nfi",
                               run.replace("          ", ""))
@@ -559,6 +639,25 @@ class GateTests(unittest.TestCase):
         self.assertLess(run.index("gh pr merge"), run.index('echo "auto=true"'))
         self.assertIn("eval-improve/*|retire-skill/*|draft-skill/*)", run)
         self.assertIn('if [ "$AUTO" = true ]; then\n  mode=auto', fixtures["run"].replace("          ", ""))
+
+    def test_the_fixtures_pull_request_is_opened_with_the_roster_app(self):
+        steps = self.jobs["fixtures-pr"]["steps"]
+        ids = [s.get("id") for s in steps]
+        names = [s.get("name") for s in steps]
+        mint = steps[ids.index("app-token")]
+        opener = steps[names.index("Open the fixtures' pull request")]
+        self.assertLess(ids.index("revalidate"), ids.index("app-token"))
+        self.assertLess(ids.index("app-token"), names.index(opener["name"]))
+        self.assertIs(mint["continue-on-error"], True)
+        self.assertTrue(mint["uses"].startswith("actions/create-github-app-token@"))
+        self.assertEqual(mint["with"]["repositories"], "skills-evals")
+        self.assertEqual({k: v for k, v in mint["with"].items() if k.startswith("permission-")},
+                         {"permission-contents": "write", "permission-pull-requests": "write"})
+        self.assertEqual(opener["env"]["APP_TOKEN"], "${{ steps.app-token.outputs.token }}")
+        self.assertEqual(opener["env"]["GH_TOKEN"], "${{ github.token }}")
+        self.assertNotIn("gh pr merge", opener["run"])
+        self.assertIn("::warning::", opener["run"])
+        self.assertIn("draft-fixtures-follow.yml", opener["run"])
 
     def test_the_fixtures_commit_is_evals_subject_only(self):
         body = step(self.doc, "fixtures-pr", "Open the fixtures' pull request")["run"]
@@ -578,11 +677,123 @@ class GateTests(unittest.TestCase):
         self.assertIn("python3 scripts/generate_skills_lock.py --repin", skill)
         self.assertIn('grep -qxF -- "relock=false"', skill)
         self.assertIn("--repo acsi-agentskills", skill)
+        # The registry's own required checks run on the finished tree before
+        # the push, so a draft they reject is never opened (adam-agentskills#102).
+        push = skill.index('push origin "HEAD:refs/heads/${target}"')
+        for check in ('pip install -q -r "$reg/requirements-dev.txt"',
+                      "python3 scripts/check_skills.py",
+                      "python3 scripts/generate_readme_table.py --check",
+                      "python3 scripts/generate_skills_lock.py --check-current",
+                      "pytest -q -p no:cacheprovider scripts/test_check_consistency.py"):
+            self.assertIn(check, skill)
+            self.assertLess(skill.index(check), push, check)
+        self.assertLess(skill.index("generate_skills_lock.py --repin"),
+                        skill.index("generate_skills_lock.py --check-current"))
 
     def test_the_guards_can_fail(self):
         self.assertIsNotNone(lock_problem("actions/checkout@v4", GATE))
+        # The fixtures-step guards fail on a mutated copy of the gate.
+        mutated = copy.deepcopy(self.doc)
+        steps = mutated["jobs"]["fixtures-pr"]["steps"]
+        steps[[s.get("id") for s in steps].index("app-token")]["continue-on-error"] = False
+        self.assertIsNot(steps[[s.get("id") for s in steps].index("app-token")]
+                         ["continue-on-error"], True)
+        opener = next(s for s in steps if s.get("name") == "Open the fixtures' pull request")
+        opener["run"] += "\ngh pr merge \"$url\" --auto --merge\n"
+        self.assertIn("gh pr merge", opener["run"])
         self.assertEqual(PUSH_TARGET.findall("git push origin HEAD:main"), ["HEAD:main"])
         self.assertTrue(fnmatch("claude/eval-x", "claude/eval-*"))
+
+
+class FollowTests(unittest.TestCase):
+    """draft-fixtures-follow.yml: structural facts, each with a control."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.doc = load(FOLLOW)
+
+    @staticmethod
+    def problems(doc: dict) -> list[str]:
+        """Every structural rule the workflow must keep; empty when it does."""
+        found = []
+        on = triggers(doc)
+        if set(on) != {"schedule", "workflow_run", "workflow_dispatch"} \
+                or on["workflow_run"] != {"workflows": ["Ingest routine eval results"],
+                                          "types": ["completed"]}:
+            found.append("triggers")
+        if on.get("schedule") != [{"cron": "7,37 * * * *"}]:
+            found.append("schedule")
+        if doc.get("permissions") != {}:
+            found.append("workflow permissions")
+        if "concurrency" in doc or "env" in doc:
+            found.append("workflow concurrency or env")
+        job = doc["jobs"]["follow"]
+        if job.get("permissions") != {"actions": "read", "contents": "read", "pull-requests": "read"}:
+            found.append("job permissions")
+        if "concurrency" in job:
+            found.append("job concurrency")
+        if job.get("if") != DEFAULT_BRANCH_IF:
+            found.append("default branch only")
+        runs = "\n".join(s["run"] for s in job["steps"] if "run" in s)
+        for needle in ("update-branch", "--auto --merge", "draft-skill-fixtures/",
+                       "merged_at", "status=action_required"):
+            if needle not in runs:
+                found.append(f"missing {needle}")
+        if "${{" in runs:
+            found.append("expression in run")
+        for banned in ("gh pr close", "--force", "approve", "git push"):
+            if banned in runs:
+                found.append(f"banned {banned}")
+        return found
+
+    def test_the_structure_holds(self):
+        self.assertEqual(self.problems(self.doc), [])
+
+    def test_the_app_token_is_minted_first_and_scoped(self):
+        steps = self.doc["jobs"]["follow"]["steps"]
+        self.assertEqual(steps[0]["id"], "app-token")
+        self.assertIs(steps[0]["continue-on-error"], True)
+        self.assertEqual(steps[0]["with"]["repositories"], "skills-evals")
+        env = steps[1]["env"]
+        self.assertEqual(env["APP_TOKEN"], "${{ steps.app-token.outputs.token }}")
+        self.assertEqual(env["GH_TOKEN"], "${{ github.token }}")
+        self.assertEqual(env["REGISTRY"], "example-adopter/acsi-agentskills")
+        self.assertEqual(len(steps), 2)
+
+    def test_each_rule_can_fail(self):
+        def mutate(change):
+            doc = copy.deepcopy(self.doc)
+            change(doc)
+            return self.problems(doc)
+
+        def run_of(doc):
+            return doc["jobs"]["follow"]["steps"][1]
+
+        self.assertIn("triggers", mutate(lambda d: triggers(d).update(push={})))
+        self.assertIn("triggers", mutate(lambda d: triggers(d).pop("workflow_run")))
+        self.assertIn("triggers", mutate(
+            lambda d: triggers(d)["workflow_run"].update(workflows=["Other"])))
+        self.assertIn("schedule", mutate(
+            lambda d: triggers(d).update(schedule=[{"cron": "0 * * * *"}])))
+        self.assertIn("workflow permissions", mutate(
+            lambda d: d.update(permissions={"contents": "read"})))
+        self.assertIn("workflow concurrency or env", mutate(
+            lambda d: d.update(concurrency={"group": "x"})))
+        self.assertIn("job permissions", mutate(
+            lambda d: d["jobs"]["follow"]["permissions"].update(contents="write")))
+        self.assertIn("job concurrency", mutate(
+            lambda d: d["jobs"]["follow"].update(concurrency="x")))
+        self.assertIn("default branch only", mutate(
+            lambda d: d["jobs"]["follow"].pop("if")))
+        for needle in ("update-branch", "--auto --merge", "draft-skill-fixtures/",
+                       "merged_at", "status=action_required"):
+            self.assertIn(f"missing {needle}", mutate(
+                lambda d, n=needle: run_of(d).update(run=run_of(d)["run"].replace(n, "x"))))
+        self.assertIn("expression in run", mutate(
+            lambda d: run_of(d).update(run=run_of(d)["run"] + "\necho ${{ github.actor }}")))
+        for banned in ("gh pr close", "--force", "approve", "git push"):
+            self.assertIn(f"banned {banned}", mutate(
+                lambda d, b=banned: run_of(d).update(run=run_of(d)["run"] + f"\n{b}")))
 
 
 if __name__ == "__main__":

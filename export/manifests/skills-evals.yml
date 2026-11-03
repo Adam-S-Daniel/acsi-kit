@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: d965ccf6aeb0c3f5e2d744063405923525620b94
+source_sha: 8f6351af9677c042c104f20bc09bd104706ed16e
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -39,6 +39,9 @@ substitutions:
   - {name: skills-evals miner drive test datum, literal: /mnt/d/repos/o/r, to: /mnt/e/repos/o/r, paths: [test/issues/test_issue_session_miner.py]}
   - {name: skills-evals scaffold candidate test datum, literal: jodidaniel__jodidaniel.com__1, to: example-adopter-two__example-site-b__1, paths: [test/issues/test_issue_routine_eval_fire.py]}
   - {name: skills-evals budget test name, literal: test_the_committed_budget_is_adams_current_cap, to: test_the_committed_budget_is_the_standing_cap}
+  - {name: skills-evals guidance removal rule test name, literal: test_the_committed_guidance_removal_rule_is_adams, to: test_the_committed_guidance_removal_rule_is_the_owners}
+  - {name: skills-evals guidance removal notice test name, literal: test_auto_mode_notifies_adam_with_the_removal_and_its_reversal, to: test_auto_mode_notifies_the_owner_with_the_removal_and_its_reversal}
+  - {name: skills-evals registry size constant, literal: _ADAM_AGENTSKILLS_NOW, to: _ACSI_AGENTSKILLS_NOW}
   - {name: skills-evals Google-key-shaped test strings split so secret scanning does not read them as live keys, regex: '"AIza(?=[0-9A-Za-z_-]{30,}")', to: '"AI" + "za', paths: [test/run_tests.py]}
 
 exclude:
@@ -119,15 +122,6 @@ exclude:
   - path: test/issues/test_issue_ci_job_performance_browser_cache.py
     why: X9. Every test in it locks the ci-job-performance fixture, which the kit does not ship.
 
-inputs:
-  - from: docs/routine-prompt.md
-    to: docs/routine-prompt.md
-    why: >-
-      The eval runner routine's prompt lives only in claude.ai (the
-      routines inventory). Committed as a doc so the kit carries the loop's
-      most important prompt. The kit keeps it already substituted (the
-      leak scan covers export/ too); the substitution pass leaves it as is.
-
 edits:
   # ---- Review fixes (2026-10-29): owner issue links in live output
   - path: harness/run_eval.py
@@ -178,25 +172,30 @@ edits:
       name each path copy-starter.sh skips (__pycache__/, *.pyc,
       .pytest_cache/, node_modules/, .DS_Store); the lines already present
       are not repeated.
-  # ---- C4: the scheduled-run-health caller points at _agent-guidance's copy
+  # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
-    old: "    uses: Adam-S-Daniel/cms-platform/.github/workflows/scheduled-run-health.yml@v0.1.163\n"
+    old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"
     new: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@0000000000000000000000000000000000000000\n"
     why: >-
-      C4. The reusable now lives in _agent-guidance. A cross-repo reusable
-      takes a full commit sha, and the adopter's _agent-guidance commit does
+      C4. The source calls _agent-guidance's copy at a commit of the source
+      owner's repo, which the adopter's does not have. A cross-repo reusable
+      takes a full commit sha and the adopter's _agent-guidance commit does
       not exist yet, so this is a placeholder sha the adopter replaces with
       the command in REGENERATE.md.
   - path: .github/workflows/scheduled-run-health.yml
-    old: "# sweep once startup-failed 30/30 for a month unnoticed). The platform owns\n# the audit logic; this thin caller schedules it."
-    new: "# sweep once startup-failed 30/30 for a month unnoticed). _agent-guidance's\n# scheduled-run-health-reusable.yml owns the audit logic; this thin caller\n# schedules it."
-    why: C4. The audit logic now lives in _agent-guidance.
+    old: "The platform owns\n# the audit logic; this thin caller schedules it."
+    new: "_agent-guidance's\n# scheduled-run-health-reusable.yml owns the audit logic; this thin caller\n# schedules it."
+    why: C4. The audit logic lives in _agent-guidance.
+  - path: .github/workflows/scheduled-run-health.yml
+    old: "    # The audit scripts still come from cms-platform, at the release named\n    # in _agent-guidance's .github/health-audit-platform-ref.\n"
+    new: "    # The audit script is copied into _agent-guidance too (the adoption\n    # kit's DECISIONS C4).\n"
+    why: C4. The kit has no platform repo and no release pin; the script lives in _agent-guidance.
   # ---- X9: no browser-testing fixture to install
   - path: .github/workflows/ci.yml
     old: |2
             - name: Set up Node for the browser-testing AST fixture
               if: steps.salient.outputs.run == 'true'
-              uses: actions/setup-node@v7.0.0
+              uses: actions/setup-node@v7.1.0
               with:
                 node-version: 22
             - name: Install browser-testing parser dependencies
@@ -206,7 +205,7 @@ edits:
     new: |2
             - name: Set up Node for the real-work fixtures' dependencies
               if: steps.salient.outputs.run == 'true'
-              uses: actions/setup-node@v7.0.0
+              uses: actions/setup-node@v7.1.0
               with:
                 node-version: 22
     why: >-
@@ -231,7 +230,7 @@ edits:
       # Fires the eval runner routine (ADR 0010, "Smallest next PRs" item 2).
       # The routine is the repository's own: its trigger id (trig_...) is the
       # variable ROUTINE_TRIGGER_ID of the routine-fire environment, set when the routine is
-      # created (docs/routine-prompt.md), and the fire step refuses to run
+      # created (docs/routine/eval-runner-prompt.md), and the fire step refuses to run
       # without a well-formed one.
     why: C7. The source names its owner's trigger in the header; the kit's adopter creates their own routine.
   - path: .github/workflows/routine-eval-fire.yml
@@ -336,6 +335,8 @@ edits:
     old: |2
           runs-on: ubuntu-latest
           timeout-minutes: 5
+          outputs:
+            refused: ${{ steps.allowance.outputs.refused }}
           steps:
             - name: Check out the default branch
     new: |2
@@ -345,6 +346,8 @@ edits:
           environment: routine-fire
           runs-on: ubuntu-latest
           timeout-minutes: 5
+          outputs:
+            refused: ${{ steps.allowance.outputs.refused }}
           steps:
             - name: Check out the default branch
     why: >-
@@ -363,17 +366,32 @@ edits:
     why: C7. Locks the environment the bearer and trigger id are read from.
   # ---- C6: the allowance budget at the standing defaults
   - path: evals/budget.yml
-    stage: output
     old: |
-      # Temporarily 60 points for the week ending 2026-11-02 17:00 UTC (the owner,
-      # 2026-10-27: 50, after two improve fires' estimated charge had left 2.5
-      # points, which blocked every fire; 2026-10-28: "a smidge" more, 55; then
-      # 60, so the first guidance-improve fire could go); back to 0.30 after
-      # that reset.
-      weekly_cap: 0.60
+      # 100 points for the allowance week ending Mon 2026-11-09 17:00 UTC only
+      # (Adam, 2026-11-02, finish-week push). Restore to 0.25 after that reset
+      # (Adam's steady-state goal, 2026-11-02). Normally: all automated evals
+      # together, in each allowance week of the account (Monday 17:00 UTC to the
+      # next; Adam, 2026-10-26), so a sanctioned push in one week is not charged to
+      # the next.
+      weekly_cap: 1.00
     new: |
+      # 30 points: all automated evals together, in each allowance week of the
+      # account (Monday 17:00 UTC to the next; Adam, 2026-10-26), so a sanctioned
+      # push in one week is not charged to the next.
       weekly_cap: 0.30
-    why: C6. The standing default (30 points a week); the dropped comment recorded one week's temporary raise, a spending decision of the source owner's.
+    why: >-
+      C6. The standing default (30 points a week, the header's standing
+      decision); the dropped text recorded one week's temporary raise and a
+      planned steady-state change, spending decisions of the source owner's.
+  - path: evals/budget.yml
+    old: |
+      # limit"). 95 points for the allowance week ending 2026-11-09 17:00 UTC only
+      # (Adam, 2026-11-02); restore to 0.80 after that reset.
+      stop_when_account_above: 0.95
+    new: |
+      # limit").
+      stop_when_account_above: 0.80
+    why: C6. The standing default (80 points); the dropped clause recorded one week's temporary raise.
   # ---- C12: account-specific App ids are not the kit's (a substitution rule,
   # above, finds the roster App's id by its context, so this file spells none)
 
@@ -381,13 +399,23 @@ edits:
   - path: test/issues/test_issue_68_allowance_guard.py
     stage: output
     old: |2
-              # The owner, 2026-10-27/28: 60 points until the 2026-11-02 reset, then
-              # 0.30 again (restore LIMITS here when evals/budget.yml goes back).
-              self.assertEqual(budget.load_budget(), {**LIMITS, "weekly_cap": 0.60})
+              # 100 points a week and a 95% account stop for the allowance week
+              # ending 2026-11-09 17:00 UTC only (the owner, 2026-11-02, finish-week
+              # push); after that reset, 25 points and 80%. 2026-11-01 (permanent):
+              # the per-run cap is 1 point, the overrun the p95 of a run's largest
+              # call.
+              self.assertEqual(budget.load_budget(),
+                               {**LIMITS, "weekly_cap": 1.00,
+                                "stop_when_account_above": 0.95,
+                                "per_run_cap": 0.01, "per_run_overrun": 0.0018,
+                                "points_per_usd": 0.00214})
     new: |2
-              # C6: the kit ships the standing defaults.
-              self.assertEqual(budget.load_budget(), LIMITS)
-    why: C6. The committed budget is the standing default, LIMITS, not the source's one-week raise.
+              # C6: the kit ships the standing weekly cap and account stop; the
+              # source's permanent per-run values (2026-11-01) are kept.
+              self.assertEqual(budget.load_budget(),
+                               {**LIMITS, "per_run_cap": 0.01, "per_run_overrun": 0.0018,
+                                "points_per_usd": 0.00214})
+    why: C6. The committed budget is the standing default weekly cap and stop, not the source's one-week raise.
   # ---- X9: machinery that must accept an empty starting state
   - path: scripts/plan_scheduled_evals.py
     stage: output
@@ -440,8 +468,8 @@ edits:
       absent file builds as no gaps, like the other optional dumps.
   - path: dashboard/page/index.html
     stage: output
-    old: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key' };\n"
-    new: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', threads: 'id', loop_gaps: 'gap' };\n"
+    old: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', half_built_issues: 'key', fixture_requests: 'key', cost_benefit_weeks: 'week', cost_benefit_summary: 'key' };\n"
+    new: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', half_built_issues: 'key', fixture_requests: 'key', cost_benefit_weeks: 'week', cost_benefit_summary: 'key', threads: 'id', loop_gaps: 'gap' };\n"
     why: >-
       Cold start. The two new placeholder rows are hidden the way the other
       key-field placeholders are, so the loop gap counts stay 0 of 0 and the

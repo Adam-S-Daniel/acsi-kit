@@ -360,6 +360,67 @@ An independent review of the merged decision found four routes around it.
   writes elsewhere in the workspace worked, and `.claude/` held only
   `.cc-writes/` afterwards. No fixture's task writes under `.claude/`, so no
   opt-out exists.
+- **The CLI runs programs from PATH outside the sandbox** (#606). At every
+  launch CLI 2.1.316 ran a planted `git` (`ls-files`, `status`, `log`,
+  `config user.name`) and `sh -c uname -s ...` from the first PATH
+  directory, unconfined (measured with a dead `ANTHROPIC_BASE_URL`, no model
+  call). A follow-up turn is a new launch, and fixtures put
+  `$WORKSPACE/bin` first on PATH, so a `bin/git` an agent wrote in one turn
+  would run with network and the arm's credentials at the start of the
+  next. Every absolute PATH entry inside the workspace
+  (`run_eval._agent_path_dirs`, as given and resolved) is guarded like
+  `.claude/`: the same `Edit(...)` deny rules and `denyWrite`, and a trial
+  in which anything under one changed during a turn (content, mode, a
+  symlink, the directory appearing) fails after that turn with
+  `agent_wrote_agent_config`. Relative and empty PATH entries, which the
+  CLI searches from the workspace, are dropped from the arm's PATH, and an
+  entry that is the workspace itself refuses the arm (`read_rules_unsafe`),
+  since it cannot be write-protected without the whole workspace
+  (`run_eval.workspace_path_or_error`). No fixture's stand-ins write their
+  own directory, so no opt-out exists.
+- **The CLI's own startup `git` reads the workspace's git configuration**
+  (#609). At every launch CLI 2.1.316 runs `git status --short`, `git log`
+  and `git config user.name` in its cwd, outside the sandbox, with hooks and
+  fsmonitor off but filter drivers on: a `filter.<driver>.clean` in the
+  workspace's `.git/config` ran unconfined at launch (measured against a
+  local stand-in API, no model call). The sandbox protects `.git/config` by
+  path, and a renamed and re-created `.git` is a new path. So a multi-turn
+  arm snapshots, before its first turn, `.git` itself (inode, type),
+  `config`, `config.worktree`, `commondir`, `info/attributes`, every
+  `include.path`/`includeIf.*.path` those name (followed to git's depth of
+  10, missing targets included) and the arm's global git config; a change
+  after any turn but the last fails the trial with
+  `agent_wrote_agent_config` before the next launch
+  (`run_eval._workspace_git_snapshot`). The last turn and one-turn arms are
+  not held to it: no launch follows, and the harness's own git reads the
+  workspace only through `workspace_git`'s private, hardened copy. The
+  empty file the sandbox leaves as a mount point for a protected path that
+  did not exist (`workspace_git._sandbox_placeholder`, a 0-byte
+  `.git/config.worktree`) reads as absent; any content still differs. A
+  path outside the workspace is named by its role (`~/.gitconfig`) in the
+  published detail. Sandboxed Bash cannot write `.git/config` itself, so
+  `git remote add` or `git push -u` already fail there; an agent running
+  `git config --global` would fail a follow-up, and no multi-turn fixture's
+  task does.
+- **What is left of those launch-time reads** (#612). Every launch sets
+  `GIT_CEILING_DIRECTORIES` to the workspace's parent, so a `.git` git cannot
+  use there (a broken `HEAD`) never sends the CLI's `git` up to a parent
+  directory's configuration, which TMPDIR may let Bash write; the agent's
+  sandboxed git sees the same value. A fixture's `env:` may not set a
+  variable that moves where git finds a repository or its configuration
+  (`guidance.GIT_REDIRECT_ENV`: `GIT_DIR`, `GIT_CONFIG_*`, `XDG_CONFIG_HOME`
+  and the like). The file tools, which the sandbox does not confine, are
+  denied every absolute PATH directory outside the workspace and the real
+  HOME's `~/.gitconfig` and `~/.config/git`, each as given and resolved, and a PATH entry that holds the workspace refuses the
+  arm. Left as they are, with the reason: system git configuration
+  (`/etc/gitconfig`) is not writable by the agent; include values in the
+  `%(prefix)/` and `~user/` forms, and `..` after a symlink, matter only for
+  an include that already exists, since adding one changes a watched file;
+  and the moment between the post-turn check and the next launch holds only
+  the session-id check, while a sandboxed writer that outlived its turn is
+  still denied every guarded path; a workspace path holding the PATH
+  separator (`:`) would split the ceiling, but it would break PATH the same
+  way and no workspace the harness makes has one.
 - **Claude in Chrome is a browser outside the sandbox**, and
   `--strict-mcp-config` does not remove it (`CLAUDE_CODE_ENABLE_CFC` or the
   account default turns it on, CLI 2.1.292). Every turn passes `--no-chrome`,

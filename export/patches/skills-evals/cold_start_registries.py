@@ -80,7 +80,7 @@ def apply(root: Path, ctx) -> None:
     reg = "harness/registries.yml"
     text = _read(root, reg)
     text, n = re.subn(
-        r"  - name: example-site-(?:platform|a)\n    url: \S+\n    layout: \S+\n", "", text)
+        r"  - name: example-site-(?:platform|a)\n    url: \S+\n    layout: \S+\n(?:    private: false\n)?", "", text)
     if n != 2:
         raise SystemExit(f"cold_start_registries: {reg}: dropped {n} example-site entries, expected 2")
     _write(root, reg, text)
@@ -91,8 +91,8 @@ def apply(root: Path, ctx) -> None:
          '    layout: "plugins/*/skills/*/SKILL.md"\n'
          '    may_be_empty: true\n')
     _sub(root, reg,
-         "# wildcard.\nregistries:\n",
-         "# wildcard.\n"
+         "# typed command prefixed by one of them (`plugin:skill`) under `other`.\nregistries:\n",
+         "# typed command prefixed by one of them (`plugin:skill`) under `other`.\n"
          "#\n"
          "# `may_be_empty: true` (optional, a boolean, false when absent) says the\n"
          "# registry may hold no skill yet: the coverage census then resolves it with\n"
@@ -175,7 +175,7 @@ def apply(root: Path, ctx) -> None:
          "#   automated lanes (auto-merge nudges, dependabot auto-merge) is inside this trust\n"
          "#   boundary just the same as a maintainer's own push: treat it as trusted,\n"
          "#   or drop the key.\n")
-    _sub(root, ev, "# * All five checkouts (distinct repositories)", "# * All three checkouts (distinct repositories)")
+    _sub(root, ev, "# * All seven checkouts (distinct repositories)", "# * All five checkouts (distinct repositories)")
 
     # --- README: the prose follows the registry list
     _sub(root, "README.md",

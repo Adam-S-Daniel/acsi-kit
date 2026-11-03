@@ -36,19 +36,30 @@
 #   hermetic mutation suite alone. See evals/propagation/ROUTINE.md, now
 #   marked HISTORY, for what that layer did and why.
 #
-# * DELIBERATELY NO `paths:` filter, contrary to the fleet's usual rule. The
-#   arms probe an unpinned upstream registry — acsi-agentskills at `main` —
-#   so a pull request that touches nothing here can still be the first place
-#   real delivery drift shows up; filtering this workflow to its own paths
-#   would mean that drift only surfaces at the next 05:41 schedule. `gate`'s
-#   mutation suite is hermetic Python with no CLI to install, so it stays
-#   cheap and always-present on the same trigger rather than being split onto
-#   a filtered one of its own.
+# * `pull_request` is FILTERED to the files these jobs read (the owner, 2026-11-02:
+#   a dashboard-only PR was running every arm). The arms still probe an
+#   unpinned upstream registry, acsi-agentskills at `main`, so drift there can
+#   now go unseen by an unrelated pull request; it surfaces at the next push to
+#   main or the 05:41 schedule instead, and both stay unfiltered for that
+#   reason. Nothing here is a required context, so a skipped run blocks no
+#   merge. When a job starts reading a new file, add it to the list.
 
 name: Propagation
 
 on:
   pull_request:
+    paths:
+      - ".github/workflows/propagation.yml"
+      - ".github/workflows/actions.lock"
+      - ".claude/hooks/**"
+      - "skills.lock"
+      - "harness/**"
+      - "scripts/eval_coverage.py"
+      - "scripts/install_claude_code.sh"
+      - "test/test_propagation.py"
+      - "evals/propagation/**"
+      - "evals/**/fixture.yaml"
+      - "evals/non-coverage.yml"
   push:
     branches: [main]
   # :41 rather than :00 because GitHub queues the whole platform's cron on the
@@ -142,7 +153,7 @@ jobs:
       - name: Mint the GitHub App token for the optional private registry
         id: registry-token
         if: github.event_name == 'schedule' && vars.REGISTRY_READ_APP_CLIENT_ID != ''
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         continue-on-error: true
         with:
           client-id: ${{ vars.REGISTRY_READ_APP_CLIENT_ID }}
@@ -162,7 +173,7 @@ jobs:
           token: ${{ steps.registry-token.outputs.token }}
 
       - name: Set up Python for census
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -228,7 +239,7 @@ jobs:
           persist-credentials: false
 
       - name: Download safe census artifact
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@v8.0.2
         with:
           name: coverage-census
           path: ${{ runner.temp }}/coverage
@@ -309,7 +320,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -353,7 +364,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v7.0.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
 
@@ -383,7 +394,10 @@ jobs:
           # page, an empty answer or two lines is refused, never stripped
           # into something that looks like a version.
           [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::npm reported no usable latest Claude Code version"; exit 1; }
-          npm install -g "@anthropic-ai/claude-code@${latest}"
+          # Retries with backoff inside a 180 s limit and proves `claude --version`
+          # works and equals $latest (run 41670633700: no native binary). The
+          # script comes from this job's own checkout, before any credential.
+          bash "$GITHUB_WORKSPACE/skills-evals/scripts/install_claude_code.sh" "$latest"
           version="$(timeout -k 10 60 claude --version)" || { echo "::error::claude --version failed"; exit 1; }
           # First line only, and only characters a version string needs: this
           # lands in a markdown code span in the step summary.
@@ -399,7 +413,7 @@ jobs:
           { echo "### Harness"; echo "Claude Code \`${version}\` (npm latest)"; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
