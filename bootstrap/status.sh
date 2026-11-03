@@ -100,7 +100,7 @@ if [ "$CONFIG_OK" = 1 ]; then
 fi
 
 # ------------------------------------------------------------------ checks
-declare -A DONE DETAIL VERIFY_RC VERIFY_OUT
+declare -A STEP_DONE DETAIL VERIFY_RC VERIFY_OUT
 [ "$CONFIG_OK" = 0 ] || require_tools "$GH"
 check_verify() { # id groups
   local g=$2 out="$BOOT_WORK/verify.out" rc=0 summary
@@ -114,7 +114,7 @@ check_verify() { # id groups
     fi
     VERIFY_OUT[$g]=$(grep -E '^(FAIL|ERROR): ' "$out" || true)
   fi
-  if [ "${VERIFY_RC[$g]}" = 0 ]; then DONE[$1]=1; else DETAIL[$1]=${VERIFY_OUT[$g]}; fi
+  if [ "${VERIFY_RC[$g]}" = 0 ]; then STEP_DONE[$1]=1; else DETAIL[$1]=${VERIFY_OUT[$g]}; fi
 }
 check_files() { # id "repo:path ..."
   local f missing=""
@@ -122,24 +122,24 @@ check_files() { # id "repo:path ..."
     gh_read "repos/$CFG_OWNER/${f%%:*}/contents/${f#*:}" \
       || missing+="missing on $CFG_OWNER/${f%%:*}'s default branch: ${f#*:} (HTTP $GH_HTTP); merge the starter pull request"$'\n'
   done
-  if [ -z "$missing" ]; then DONE[$1]=1; else DETAIL[$1]=${missing%$'\n'}; fi
+  if [ -z "$missing" ]; then STEP_DONE[$1]=1; else DETAIL[$1]=${missing%$'\n'}; fi
 }
 for id in "${IDS[@]}"; do
   case ${CTYPE[$id]} in
-    config) if [ "$CONFIG_OK" = 1 ]; then DONE[$id]=1; else DETAIL[$id]=$CONFIG_ERR; fi ;;
+    config) if [ "$CONFIG_OK" = 1 ]; then STEP_DONE[$id]=1; else DETAIL[$id]=$CONFIG_ERR; fi ;;
     verify) [ "$CONFIG_OK" = 0 ] || check_verify "$id" "${CARG[$id]}" ;;
     files)  [ "$CONFIG_OK" = 0 ] || check_files "$id" "${CARG[$id]}" ;;
-    ask)    if [ -n "${ASKED[$id]:-}" ]; then DONE[$id]=1
-            elif [ "${CTAG[$id]}" = content ] && [ "$CONFIG_OK" = 1 ] && [ -f "$CHOICES" ]; then DONE[$id]=1; fi ;;
+    ask)    if [ -n "${ASKED[$id]:-}" ]; then STEP_DONE[$id]=1
+            elif [ "${CTAG[$id]}" = content ] && [ "$CONFIG_OK" = 1 ] && [ -f "$CHOICES" ]; then STEP_DONE[$id]=1; fi ;;
   esac
 done
 
 # ------------------------------------------------------------------ report
 NEXT="" N=0
 for id in "${IDS[@]}"; do
-  if [ -n "${DONE[$id]:-}" ]; then
+  if [ -n "${STEP_DONE[$id]:-}" ]; then
     N=$((N + 1))
-    if [ "${CTYPE[$id]}" = ask ] && [ -n "${ASKED[$id]:-}" ]; then label="asked: done"; else label=done; fi
+    if [ "${CTYPE[$id]}" = ask ] && [ -n "${ASKED[$id]:-}" ]; then label="asked: done"; else label="done"; fi
   elif [ "${OPT[$id]}" = yes ]; then
     label=optional
   elif [ -z "$NEXT" ]; then
