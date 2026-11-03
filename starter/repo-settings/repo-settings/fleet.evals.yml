@@ -1,0 +1,73 @@
+# fleet.evals.yml: the evals track's part of fleet.yml (the adoption kit's
+# export/DECISIONS.md C13).
+#
+# fleet.yml declares the base repos only, so a setup without evals (no
+# skills-evals repo, no roster App) plans and applies cleanly, and
+# repo-settings.yml's plan job needs only the GUIDANCE_SYNC_APP_ID variable.
+# This file holds skills-evals' element, exactly as it reads under
+# fleet.yml's `repos:`. The engine and the workflows never read this file:
+# until it is merged, nothing applies to skills-evals.
+#
+# Merging it: /adopt-evals runs the kit's `bootstrap/regenerate.sh
+# evals-fleet`, once skills-evals exists and before the settings apply that
+# protects it. That parses both files, appends each element below to
+# fleet.yml's `repos:` list (an element fleet.yml already declares is left
+# as it is), deletes this file, and proposes both changes in one pull
+# request. By hand: move the element to the end of fleet.yml's `repos:`
+# list and delete this file, in one pull request.
+#
+# tests/test_repo_settings.py reads fleet.yml plus this file while it exists,
+# and refuses a repo declared in both.
+repos:
+  - name: example-adopter/skills-evals
+    manage: ["all"]
+    overrides:
+      ruleset:
+        required_status_checks: [test, agent-checks]
+      # why: skills-evals' scaffold gate opens DRAFT fixture PRs with the
+      # workflow GITHUB_TOKEN, which GitHub allows only while "Allow GitHub
+      # Actions to create and approve pull requests" is on. The same switch
+      # lets GITHUB_TOKEN submit approving reviews; that grants nothing while
+      # the ruleset requires 0 approving reviews, and a test fails if that
+      # count is raised without revisiting this. A draft PR cannot merge, and
+      # a PR opened by GITHUB_TOKEN gets no passing `test` on its own (ADR 0003,
+      # amendment), so the required check still gates it. docs/decisions/0008.
+      actions:
+        can_approve_pull_request_reviews: true
+      # The label that gate puts on the draft PRs it opens. Declared, not
+      # hand-made, so a fresh skills-evals clone or a deleted label converges.
+      # Removing this entry does not delete the live label.
+      labels:
+        - name: eval-scaffold
+          color: C5DEF5
+          description: Draft real-work fixture opened by the scaffold gate
+      # why: the weekly roster PR is armed for auto-merge by the roster App
+      # (its App id is the ROSTER_WRITER_APP_ID variable). GitHub checks
+      # --match-head-commit only when
+      # auto-merge is enabled, so ANY write-access actor that later pushes
+      # roster/proposal retargets the armed PR (known instance: skills-evals'
+      # dependabot-auto-merge.yml job holds a persisted GITHUB_TOKEN with
+      # contents: write). This ruleset lets only the App and the repo Admin
+      # role (actor_id 5, same encoding as admin_bypass) update that branch.
+      # github-actions is deliberately NOT a bypass actor: it is the
+      # Dependabot job's identity too. ORDER: skills-evals' App-push PR (moves
+      # the roster push to the App) must be merged first, or the weekly roster
+      # push by GITHUB_TOKEN is blocked. Removing this entry does not delete
+      # the live ruleset. docs/decisions/0004; ADR 0003:
+      # https://github.com/example-adopter/skills-evals/blob/main/docs/decisions/0003-roster-merges-automatically.md
+      extra_rulesets:
+        - name: roster proposal branch
+          target_branches: [roster/proposal]
+          rules: [creation, update, deletion, non_fast_forward]
+          bypass_actors:
+            - {actor_type: Integration, actor_id: "${ROSTER_WRITER_APP_ID}", bypass_mode: always}
+            - {actor_type: RepositoryRole, actor_id: 5, bypass_mode: always}
+        # why: the eval workflow and the usage-census publisher accumulate
+        # results on `persistent/eval-results` across runs and PRs. Only
+        # deletion is blocked, with no bypass actors: bots and humans still
+        # push, and delete_branch_on_merge silently skips the branch.
+        # Removing this entry does not delete the live ruleset.
+        # docs/decisions/0007 (the standard), 0001 (the results branch).
+        - name: persistent branches
+          target_branches: ["persistent/**"]
+          rules: [deletion]

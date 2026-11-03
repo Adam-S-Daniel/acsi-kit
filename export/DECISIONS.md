@@ -54,6 +54,7 @@ The per-file detail is in the manifests beside this file.
 | C10 | Text that tells a story about the owner by name (for example "<name>'s standing rule", "<name>'s decision on 2026-10-06") says "the owner" instead, capitalized only where a sentence starts. Dates and measurements stay. | Names. | n/a |
 | C11 | **Live registries list only the kit's repos.** `repos.yml`, `fleet.yml`, `dependabot.yml` entries, workflow repo lists and any other config the code acts on name only the kit's own repos (and, in `repo-settings`' `fleet.yml` and `_agent-guidance`'s `repos.yml` only, the invented example repos of C3, which steps 9 and 11 trim; skills-evals' workflows and `harness/registries.yml` do not name them, see "Cold-start fixes"). The owner's other repos (personal tools, sites, scratch repos) are dropped from config, and tests that pin those lists are updated. Mentions of those repos in history (ADRs, evidence, changelog analysis, routine findings) stay, like P2 citations. | Config that names repos an adopter doesn't have would sync into, or report on, repos that don't exist. History mentions are what lessons were learned on. | Keep the full list; the adopter trims it. |
 | C12 | **Account-specific numbers become config.** GitHub App ids (the source's two bypass Apps' and any others), installation ids and similar numbers that differ per account are read from a variable or a single config file the bootstrap fills, never hardcoded in the kit. | They are the owner's App ids; an adopter's Apps have different ones. | n/a |
+| C13 | **`repo-settings/fleet.yml` declares the base repos only; `skills-evals`' element ships in `repo-settings/fleet.evals.yml`** (owner, 2026-11-03, issue #12). The patch `patches/repo-settings/evals_fragment.py` finds the element by its parsed name (a PyYAML node tree, never a text anchor; exactly one, or the export fails) and moves its lines, comments included, under the fragment's header. `/adopt-evals` merges it back (`bootstrap/regenerate.sh evals-fleet`, step 40). The shipped tests read `fleet.yml` plus the fragment while it exists. | With the element in `fleet.yml`, a base-only setup had a `fleet.yml` naming a repo it did not have and a roster App id it did not need, so `repo-settings.yml`'s own `plan` job failed until evals were added, and `apply-settings.sh` had to hand the engine a filtered copy. | Drop the patch: `fleet.yml` declares `skills-evals` again, the base-only `plan` job fails until `/adopt-evals`, and `apply-settings.sh` again needs to leave a declared but absent `skills-evals` out of a filtered copy (its form before #12). |
 
 ## Kept on purpose (questions an inventory raised)
 
@@ -1777,3 +1778,50 @@ the `agentskills` README plugin-table edit no longer matched its source.
 ### Round 3 (2026-11-03)
 
 The re-sync's failure issue (#14) caught skills-evals' dashboard gaining a `ci_red_runs` placeholder key, which broke the cold-start edit on `dashboard/page/index.html`. The edit's old and new text now carry that key; its intent (hide the two cold-start placeholder rows like the others) is unchanged. _agent-guidance → ba30b6f and skills-evals → c6b38e1 needed nothing else.
+
+## Evals fragment (2026-11-03)
+
+Issue [#12](https://github.com/Adam-S-Daniel/acsi-kit/issues/12): the
+starter `repo-settings/fleet.yml` no longer declares `skills-evals` (C13).
+
+- **The patch.** `patches/repo-settings/evals_fragment.py` runs after
+  `kit_config.py`, which edits that element's comments and actor id. It
+  composes `fleet.yml` with PyYAML, finds the one `repos:` element whose
+  `name` is `<owner>/skills-evals`, and takes its lines from its `- name:`
+  line to the end of its last value (the deepest scalar's or flow list's end
+  mark). Those lines go, byte for byte, under `repos:` in
+  `repo-settings/fleet.evals.yml`, after a header that says what the file is
+  and how it is merged. It then parses both files again: `fleet.yml` must
+  hold its other elements and keys unchanged and the fragment exactly that
+  element. No element, or two, fails the export; so does an element that
+  does not start its line with `- `. `export/tests/test_evals_fragment.py`
+  runs it on invented fleets, the missing and doubled element among them.
+- **What stays in `fleet.yml`.** The comment block above the element (the
+  required-check preconditions of several repos) stays where it was. Two
+  later comments still point at it as "the cms-platform#437 comment above
+  example-adopter/skills-evals"; it is still above where that element was.
+- **Tests.** In `tests/test_repo_settings.py`, `setUpModule` also patches
+  `rs.load_config`: loading the shipped `fleet.yml` appends the fragment's
+  elements while the fragment exists, and refuses a repo declared in both.
+  Every shipped test about `skills-evals` (its approval switch, label,
+  roster ruleset, required checks, the counts) therefore runs unchanged,
+  before and after the merge. `test_the_real_fleet_names_both_app_ids_by_variable`
+  reads both files' text. New `EvalsFragmentTests`: `fleet.yml` alone
+  declares no `skills-evals` and resolves with only `GUIDANCE_SYNC_APP_ID`
+  set (what the `plan` job has on a base-only setup), the fragment holds only
+  `skills-evals`, the merged fleet does not resolve without
+  `ROSTER_WRITER_APP_ID` (the negative control), and a repo in both files is
+  refused. The fragment-only tests skip once the fragment is merged.
+- **The bootstrap.** `regenerate.sh evals-fleet` (evals track, step 40;
+  `lib/common.sh`'s `regen_track` puts it there although it edits the base
+  repo `repo-settings`) runs `lib/fleet_fragment.py merge` on a clone: it
+  appends each fragment element `fleet.yml` does not declare to the end of
+  its `repos:` list, re-indented to that list, checks the result parses to
+  the old list plus those elements, deletes the fragment and proposes both
+  files on `regenerate/evals-fleet`. `--check` (`verify.sh
+  --only regen:evals-fleet`) passes once `fleet.yml` declares
+  `<owner>/skills-evals` once and no fragment is left. `apply-settings.sh`
+  no longer leaves a declared but absent `skills-evals` out: `fleet.yml`
+  declares it only after step 40, so an absent one is reported like any
+  missing repo, with the `create-repos.sh` hint. The filtered copy stays for
+  `--track base` and `--track evals` once `fleet.yml` declares it.

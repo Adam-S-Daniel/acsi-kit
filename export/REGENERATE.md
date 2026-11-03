@@ -85,6 +85,12 @@ a pull request with the result.
   and its two sites, say), remove its element, and its rows in
   `tests/test_repo_settings.py`, before the first apply.
 
+- **`repo-settings/fleet.evals.yml`** (DECISIONS C13) holds `skills-evals`'
+  element of `fleet.yml`, which the export moved out so that `fleet.yml`
+  alone is a base-only fleet. When you add evals, merge it into `fleet.yml`
+  and delete it (the bootstrap's `regenerate.sh evals-fleet` does both, in
+  a pull request), before the settings apply that protects `skills-evals`.
+
 ## `wsl-automation`
 
 - **`.github/workflows/scheduled-run-health.yml`** calls `_agent-guidance`'s

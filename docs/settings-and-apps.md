@@ -67,9 +67,11 @@ rest. A trigger added to that workflow must be added to the policy first.
 and `"${ROSTER_WRITER_APP_ID}"`, read from `repo-settings`' repository
 variables, and the engine refuses to plan while either is unset. That is
 why the Apps come before the first apply. `"${ROSTER_WRITER_APP_ID}"`
-appears only in `skills-evals`' entry, so a base-only setup needs only
-`guidance-sync`'s id: `apply-settings.sh` leaves `skills-evals` out until it
-exists ([the first apply](#the-first-apply)).
+appears only in `skills-evals`' element, and the starter's `fleet.yml` does
+not declare `skills-evals`: its element waits in
+`repo-settings/fleet.evals.yml` until the evals track merges it
+([the first apply](#the-first-apply)). So a base-only setup needs only
+`guidance-sync`'s id.
 
 After the first apply, `repo-settings`' `repo-settings.yml` reconciles on
 every merge and on a schedule: a read-only `diff` job with the
@@ -158,17 +160,19 @@ preview; `--check` is the read-back alone (`verify.sh --only settings`).
 With a second owner, sign gh in as that account (`gh auth switch`) and run
 it again with `--owner <OWNER_TWO>`.
 
-`skills-evals` is the evals track's. While it does not exist, the script
-leaves its entry out of a copy of `fleet.yml` and applies the rest, so the
-base needs neither that repo nor the `roster` App's id; once it exists, the
-same command applies it too and needs `ROSTER_WRITER_APP_ID` (step 39).
+`skills-evals` is the evals track's, and so is its element of `fleet.yml`.
+The starter ships it in a fragment, `repo-settings/fleet.evals.yml`, that
+nothing applies, so `fleet.yml` alone is the base: the first apply needs
+neither that repo nor the `roster` App's id, and `repo-settings.yml`'s own
+`plan` job passes with only `GUIDANCE_SYNC_APP_ID` set. `repo-settings`'
+tests read `fleet.yml` plus the fragment while it exists, so they hold
+`skills-evals`' settings either way. `/adopt-evals` creates the repo, then
+`bootstrap/regenerate.sh evals-fleet` (step 40) appends the fragment's
+element to `fleet.yml`'s `repos:` list, deletes the fragment and opens the
+pull request; after you merge it, the same `apply-settings.sh` applies
+`skills-evals` too and needs `ROSTER_WRITER_APP_ID` (step 39).
 `--track base` or `--track evals` limits a run, or a `--check`, to one
-track's repos; `status.sh` checks each step on its own track. The committed
-`fleet.yml` keeps declaring `skills-evals`, because `repo-settings`' tests
-hold it to that entry: on a base-only setup, `repo-settings.yml`'s own
-`plan` job, which reads the committed file, fails until `/adopt-evals` adds
-the repo and the `ROSTER_WRITER_APP_ID` variable, so apply from your
-machine with `apply-settings.sh` meanwhile.
+track's repos; `status.sh` checks each step on its own track.
 
 From then on, a pull request is the only way to change a default branch.
 Check it: `git push origin main` from a clone is rejected with `GH013`, and
