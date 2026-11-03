@@ -2,8 +2,20 @@
 
 For the kit's owner and the agents working on it; adopters can skip this.
 
-- **Re-pin.** Each `export/manifests/*.yml` names a `source_sha`. To pick up
-  newer source repos, check them out beside this clone, move the shas, run
+- **Re-pin.** Each `export/manifests/*.yml` names a `source_sha`. The daily
+  `resync` job (`.github/workflows/resync.yml`, also run by hand from the
+  Actions tab) moves each one to its source's default-branch head
+  (`export/resync.py`), regenerates `starter/`, runs `export/tests`, and
+  opens or updates one pull request from `resync/auto`. Before merging it,
+  tier any new skill or guidance section in `bootstrap/content-catalog.json`
+  and record every departure in `export/DECISIONS.md`. It needs a GitHub App
+  with contents and pull-requests write on this repo, named by the
+  repository variable `RESYNC_APP_CLIENT_ID` (its client id) and the
+  repository secret `RESYNC_APP_PEM` (its private key); without them it only
+  writes what it would change to the run summary. It never re-pins
+  `agentskills-private` (its source is private) and does not rewrite
+  `library/`, so do those by hand. By hand, the fallback: check the sources
+  out beside this clone, move the shas, run
   `python3 export/export.py` to rewrite `starter/`, then
   `bash run-all-tests.sh` (as root: `unshare --pid --fork --mount-proc --
   bash run-all-tests.sh`), and record every departure in
