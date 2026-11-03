@@ -1,0 +1,13 @@
+# Proposes action bumps weekly. A release must be 7 days old first
+# (`default-days: 7`), the account's cooling-off rule for third-party
+# actions; security updates skip the wait. The github-actions ecosystem
+# supports only `default-days`. After a bump, regenerate
+# .github/workflows/actions.lock with `gh actions-lock --no-narrow`.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

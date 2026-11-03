@@ -1,0 +1,22 @@
+# No `labels:` on purpose. The owner's automation acts only on labels an
+# outside reporter cannot add (`agent-ready`, `hook-proposal`); a template
+# that applied one would let anyone queue work for it.
+name: Feedback from trying the kit
+description: Something that confused you, a step that failed, or how long a part took.
+body:
+  - type: input
+    id: step
+    attributes:
+      label: Which step?
+      description: The number `bash bootstrap/status.sh` shows, or "before step 0".
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: For a failed step, paste the command and its output. Leave out tokens, keys and anything personal; this repo is public.
+    validations:
+      required: true
+  - type: input
+    id: time
+    attributes:
+      label: How long it took (optional)
