@@ -6,9 +6,11 @@
 steps.json (beside this script) is the one list of the quick start's steps;
 status.sh reads it too. This rewrites the table between the
 <!-- quickstart:begin --> and <!-- quickstart:end --> markers in the kit's
-docs/quick-start.md, with the columns Step | What | Run | Time | Read, where Read
-links each step's docs section (steps.json's kit-relative link, made
-relative to the page), and the fixed "any" row for verify.sh last.
+docs/quick-start.md, with the columns Step | What | Run | Time | Track | Read,
+where Track is the step's track (base, what /adopt sets up, or evals, what
+/adopt-evals adds), Read links each step's docs section (steps.json's
+kit-relative link, made relative to the page), and the fixed "any" row for
+verify.sh last.
 Everything outside the markers is left as it is.
 
 --check writes nothing: it exits 1 with one line when the table is stale.
@@ -25,7 +27,7 @@ BEGIN = "<!-- quickstart:begin -->"
 END = "<!-- quickstart:end -->"
 NOTE = "<!-- generated from bootstrap/steps.json by bootstrap/render-quickstart.py: edit steps.json, then rerun it -->"
 ANY_ROW = ("| any | Check | `bootstrap/status.sh` for where you are; `bootstrap/verify.sh` for the fast checks, "
-           "`--only settings` or `--only regen:<task>` for the slow ones | | [quick start](#where-you-are) |")
+           "`--only settings` or `--only regen:<task>` for the slow ones | | | [quick start](#where-you-are) |")
 
 
 def cell(text):
@@ -44,9 +46,9 @@ def read_link(s, page):
 
 
 def table(steps, page):
-    rows = [NOTE, "", "| Step | What | Run | Time | Read |", "|---|---|---|---|---|"]
+    rows = [NOTE, "", "| Step | What | Run | Time | Track | Read |", "|---|---|---|---|---|---|"]
     for s in steps:
-        rows.append(f"| {cell(s['id'])} | {cell(s['title'])} | {cell(s['run'])} | {s['minutes']} min | {read_link(s, page)} |")
+        rows.append(f"| {cell(s['id'])} | {cell(s['title'])} | {cell(s['run'])} | {s['minutes']} min | {cell(s['track'])} | {read_link(s, page)} |")
     rows.append(ANY_ROW)
     return "\n".join(rows)
 

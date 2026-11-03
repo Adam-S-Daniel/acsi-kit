@@ -5,7 +5,8 @@ your own account, with the GitHub CLI (`gh`). The order is
 [`steps.json`](steps.json), rendered in
 [the quick start](../docs/quick-start.md); `status.sh` says where you are
 and the [`/adopt` skill](../.claude/skills/adopt/SKILL.md) walks you
-through it.
+through it (and [`/adopt-evals`](../.claude/skills/adopt-evals/SKILL.md)
+through the eval steps).
 
 Every script:
 
@@ -40,8 +41,8 @@ session.
 | `apply-settings.sh` | Clones your `repo-settings` and runs its own engine, `scripts/repo_settings.py`, on `repo-settings/fleet.yml` for one owner: `apply`, then `diff`, which must report no drift. Refuses while `fleet.yml` names a repo that does not exist. `--dry-run` is the engine's preview, `--check` the `diff` alone. | Apply for the second owner while `gh` is signed in as the first (sign in as that account and pass `--owner`). |
 | `install-machine.sh` | On one durable machine: clones or fast-forwards `acsi-agentskills` and `_agent-guidance` into `REPOS_DIR` and runs their installers: `setup.sh --owner-machine`, `scripts/install-agent-hooks.sh`, `scripts/register-memory-home-hook.sh`, and with `--with-codex` `scripts/register-codex-hook.sh`. | Install git 2.54+, PyYAML or Codex. Trust the Codex hook (`/hooks` in Codex). |
 | `verify.sh` | Read-only PASS, FAIL or SKIP per group: `repos`, `labels`, `branches`, `environments`, `variables`, `apps:<app>`, `installs:<app>`, `values:<group>`; `settings` (the engine's `diff`) and `regen:<task>` only when named with `--only`; `content` (each installed optional item is on its repo's default branch) once `add-content.sh` has recorded your choices. Names of variables and secrets only, never a value. | See a secret's value, or anything outside GitHub (routines, cloud environments, machines). |
-| `status.sh` | Read-only: one line per step (done, next, todo, optional, asked: done), then the next step with its time, kind, what to run and the section to read. `--mark`/`--unmark` record the steps nothing can see, in a state file outside every repo. | Decide an ask step for you. |
-| `render-quickstart.py` | Writes the steps table into `../docs/quick-start.md`; `--check` fails when it is stale. | |
+| `status.sh` | Read-only: one line per step (done, next, todo, optional, asked: done), how many steps of each track (base, evals) are done, then the next step with its time, kind, what to run and the section to read. `--track base\|evals` limits it to one track. `--mark`/`--unmark` record the steps nothing can see, in a state file outside every repo. | Decide an ask step for you. |
+| `render-quickstart.py` | Writes the steps table, with each step's track, into `../docs/quick-start.md`; `--check` fails when it is stale. | |
 
 The libraries: `lib/common.sh` (config parsing, the registries of repos,
 environments, Apps, values and variables, and the `gh` wrappers that honor

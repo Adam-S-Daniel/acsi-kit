@@ -1,16 +1,21 @@
 ---
 name: adopt
-description: Guide the user step by step through setting up, or resuming the setup of, the agent guidance, skills and evals system from this kit on their own GitHub account, driven by bootstrap/status.sh. Use when the user types /adopt, asks to set up or continue setting up the system, or asks which step they are on.
+description: Guide the user step by step through setting up, or resuming the setup of, the base of this kit's system on their own GitHub account (fleet guidance, the skills registries, repo settings, git hooks, machines), without evals, driven by bootstrap/status.sh --track base. Use when the user types /adopt, asks to set up or continue setting up guidance and skills, or asks which base step they are on. For evals (the skills-evals loop, its routine, Apps and budget), or the whole system in one go, use /adopt-evals instead.
 ---
 
-# Adopt the whole system, one step at a time
+# Adopt the base system, one step at a time
 
-You are helping the user build, on their own account, the system that the
-six exported repos under `starter/` run. `bootstrap/steps.json` is the list
-of steps; `bootstrap/status.sh` reads the real state of the account and says
-which step is next. Work from the kit's folder (the one holding
-`bootstrap/`). The explanations live in `docs/`; the steps table is
-`docs/quick-start.md`.
+You are helping the user build, on their own account, the base of the
+system that the six exported repos under `starter/` run: the fleet guidance,
+the skills registries, repo settings, git hooks and machines.
+`bootstrap/steps.json` is the list of steps, each on the `base` or the
+`evals` track; this skill runs the base track only.
+`bootstrap/status.sh --track base` reads the real state of the account and
+says which base step is next. The evals track belongs to `/adopt-evals`
+(`.claude/skills/adopt-evals/SKILL.md`); skip every evals step here, even
+when `bash bootstrap/status.sh` without `--track` lists it as next. Work
+from the kit's folder (the one holding `bootstrap/`). The explanations live
+in `docs/`; the steps table is `docs/quick-start.md`.
 
 ## First sitting
 
@@ -35,17 +40,19 @@ which step is next. Work from the kit's folder (the one holding
 
 ## Each turn
 
-1. Run `bash bootstrap/status.sh` (with `--config <path>` if needed). Trust
-   it over memory: it reads GitHub. A step done earlier can turn undone when
-   something changed under it; then that step is next again.
+1. Run `bash bootstrap/status.sh --track base` (with `--config <path>` if
+   needed). Trust it over memory: it reads GitHub. A step done earlier can
+   turn undone when something changed under it; then that step is next
+   again.
 2. Explain the next step in two or three sentences, and link the section on
    its `Read:` line (a heading in `docs/`). Say how long it takes and what
    kind of step it is.
 3. Do the step by its kind:
    - **script**: run its command with `--dry-run` first and show the user
      the planned writes. Ask before the real run. Run it, then run
-     `bash bootstrap/status.sh` again and show the result; for a `verify`
-     check, `bash bootstrap/verify.sh --only <groups>` shows the detail.
+     `bash bootstrap/status.sh --track base` again and show the result;
+     for a `verify` check, `bash bootstrap/verify.sh --only <groups>` shows
+     the detail.
      A script that needs the user's input (`create-apps.sh` wants the URL
      GitHub redirects to; `set-secrets.sh` a hidden value or a file) runs in
      the user's own terminal: show the dry run, give the exact command, and
@@ -70,14 +77,21 @@ which step is next. Work from the kit's folder (the one holding
    marked by hand: run `bash bootstrap/status.sh --mark <id>` once the user
    says it is done (for a machine step, on every machine). A `verify`,
    `files` or `config` step is never marked: status.sh reads the real state
-   and refuses `--mark` for it, so run `bash bootstrap/status.sh` again (and
+   and refuses `--mark` for it, so run
+   `bash bootstrap/status.sh --track base` again (and
    `bash bootstrap/verify.sh --only <groups>` for the detail) until it
    reads done. The browser steps that create or install the Apps (6, 7)
-   and the federation step (26) are `verify` steps.
+   are `verify` steps.
 4. When a script fails, read the error, find the cause in the script or the
    docs, and help fix it. Then run the step again, dry run first.
 5. At the end of each sitting, name the next step and its time estimate, so
    the user knows where to start next time.
+6. When status.sh reads `Next: nothing; every required base step is done`,
+   the base is set up. Say what that gives up: nothing measures the skills
+   and guidance, or improves or retires them automatically. Then tell the
+   user that `/adopt-evals` adds evals whenever they want them, and that
+   `docs/before-you-start.md`, "With or without evals", says what it
+   costs.
 
 ## Steps with a catch
 
@@ -97,9 +111,11 @@ which step is next. Work from the kit's folder (the one holding
   prompt from `docs/routines.md`. On Linux or WSL, give the cron,
   systemd or launchd line instead: the desktop app there would curate the
   wrong `~/.claude`.
-- **The eval runner** (steps 24 and 25): the bearer is shown once. The
-  user keeps it and the `trig_...` id and types both into
-  `set-secrets.sh --only routine-fire` themselves.
+- **Steps 2, 5, 6, 13 and 22** each carry a part only evals use (their
+  `Run:` line says which). Run them whole: steps 2 and 13 still create and
+  copy `skills-evals`, and step 6 still creates `roster`, because the base
+  needs them. The one part to leave out is step 22's usage census, which
+  only evals read: on Linux or macOS pass `--jobs session-miner`.
 
 ## The content step
 
