@@ -4,7 +4,7 @@
 repo: agentskills
 kit_name: agent-skills
 source: adam-agentskills
-source_sha: 151d20ca550905bfdad78709460b880b5150ae75
+source_sha: 13075c83be711d134d7e39e3d00584dea736b933
 after: [_agent-guidance]
 
 exclude:
@@ -145,8 +145,8 @@ edits:
     why: X9. The same command as ci.yml and AGENTS.md.
   - path: README.md
     stage: output
-    old: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | CI, GitHub and skill-delivery skills | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser) | Claude Code on the owner's machines |\n"
-    new: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | coding skills (CI, GitHub, skill delivery) | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser), plus the clone-sync and API-credit-lane hooks | Claude Code on the owner's machines |\n"
+    old: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance and a hook that blocks unmarked GitHub writes | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | CI, GitHub and skill-delivery skills | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser) | Claude Code on the owner's machines |\n"
+    new: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance and a hook that blocks unmarked GitHub writes | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | coding skills (CI, GitHub, skill delivery) | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser), plus the clone-sync and API-credit-lane hooks | Claude Code on the owner's machines |\n"
     why: X9. Says what each plugin is for, not which skills the source registry happened to ship.
   - path: README.md
     stage: output
@@ -248,6 +248,35 @@ edits:
     new: "An example of a federated plugin: the skills of a separate platform repo, served from that repo rather than mirrored here. Point it at a repo of your own, or remove the entry. |"
     why: The README's generated plugin table repeats the marketplace description.
 
+  # ---- C11: the skill freshness lint (re-pin round 2, 2026-11-03)
+  - path: .github/workflows/skill-freshness.yml
+    stage: output
+    old: |2
+            - name: Check out sibling registries
+              # Where scripts/skills_registries.yml expects them, as ci.yml's census
+              # does. Both are public: an anonymous shallow clone needs no token.
+              # acsi-agentskills-private is private, so it is skipped and the report
+              # says so.
+              run: |
+                git clone --depth 1 --filter=blob:none --quiet https://github.com/example-adopter/example-site-platform.git ../example-site-platform
+                git clone --depth 1 --filter=blob:none --quiet https://github.com/example-adopter/example-site-a.git ../example-site-a
+    new: |2
+            # A public sibling registry scripts/skills_registries.yml declares is
+            # cloned here, where that file expects it, as ci.yml's census would
+            # (`git clone --depth 1 --filter=blob:none --quiet
+            # https://github.com/<owner>/<repo>.git ../<repo>`). None is declared
+            # yet. acsi-agentskills-private is private, so it is skipped and the
+            # report says so.
+    why: >-
+      C11, as for ci.yml's census. The step cloned the source owner's platform
+      repo and one of its consumer sites, which an adopter does not have; a
+      clone of a missing repo fails the job. The how-to stays as a comment.
+  - path: .github/workflows/skill-freshness.yml
+    stage: output
+    old: "# Scheduled, not a pull-request check: the cited repos (example-site-platform, the\n# sites, the fleet's other repos) change"
+    new: "# Scheduled, not a pull-request check: the cited repos (the fleet's other\n# repos) change"
+    why: C11. The kit's freshness config names no platform repo or site registry.
+
 # DECISIONS X9 and Content tiers: the plugins ship with the four core skills
 # (see each patch's docstring).
 patches:
@@ -267,6 +296,11 @@ patches:
       X9. The tests that read the shipped layout accept an empty skill list,
       and the README-table tests use an unrenderable entry where they used an
       empty bundle (listed in DECISIONS.md, Export record: agentskills).
+  - file: kit_freshness.py
+    why: >-
+      C11. The freshness lint's config (new in the source) drops the platform
+      and site registries that skills_registries.yml no longer declares, their
+      waivers, and the source owner's personal tool repo.
 
 # P3 and the files the sync delivers.
 regenerate:
@@ -288,6 +322,11 @@ regenerate:
       owner's full guidance (re-pin 2026-11-03).
   - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/fleet-memory.sh, to: plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh}
     why: The plugin hook's bundled installer, a verbatim copy of _agent-guidance's (byte-identical in the sources).
+  - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/github-write-marker.sh, to: plugins/acsi-anything-anywhere/hooks/github-write-marker/github-write-marker.sh}
+    why: >-
+      The plugin's write-marker hook, a verbatim copy of _agent-guidance's
+      (byte-identical in the sources); it enforces the core section "Agent-made
+      GitHub contributions carry a marker" (re-pin round 2, 2026-11-03).
   - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/skills-bootstrap.sh, to: .claude/hooks/skills-bootstrap.sh}
     why: >-
       Byte-identical in the sources, and _agent-guidance's repos.yml pins its

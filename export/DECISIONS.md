@@ -1722,3 +1722,54 @@ re-exported. Every overlay `NOTICE` also still cites the export as
 a path from before the move.
 
 The same day, skills-evals moved again to 341f4bd (skills-evals#720: only `skill-coverage.yml` writes `coverage/latest.json` and `badges/coverage.json`; `propagation.yml`'s census writes `fixture-census/`, guarded by `test_issue_660_single_writer.py`). The manifest needed no other change.
+
+### Round 2 (2026-11-03)
+
+The daily re-sync failed the same day
+([run 41722628098](https://github.com/Adam-S-Daniel/acsi-kit/actions/runs/41722628098)):
+the `agentskills` README plugin-table edit no longer matched its source.
+`export/resync.py` moved the public pins again; `repo-settings`,
+`wsl-automation` and the platform `imports:` were unchanged, and
+`agentskills-private` stays at `c5b1bc9` (not re-exported, as above).
+
+| Repo | Old | New |
+|---|---|---|
+| `_agent-guidance` | `2e2045a0870db995547d0e79d8a5148f89e94b0b` | `7c5a3a9c6bee4c65ea873daa8aa4c4e76246b9e7` |
+| `agentskills` (the public registry) | `151d20ca550905bfdad78709460b880b5150ae75` | `13075c83be711d134d7e39e3d00584dea736b933` |
+| `skills-evals` | `341f4bd5717e171a21cfe362d510536dc6d37709` | `73d9c4c5ad5d81c1e612756af8fc0c489e208ccc` |
+
+- **`agentskills`, the write-marker hook ships.** The anything-anywhere
+  plugin gained a `PreToolUse` hook
+  (`hooks/github-write-marker/github-write-marker.sh`) that blocks a GitHub
+  write without the agent marker. It is a verbatim copy of
+  `_agent-guidance`'s `.claude/hooks/github-write-marker.sh`, which the kit
+  already ships, and it enforces the core section "Agent-made GitHub
+  contributions carry a marker", so it is machinery, not new content: a new
+  `copy_from_kit` step regenerates it from the kit's `_agent-guidance` (the
+  two are byte-identical in the sources). The README plugin-table edit
+  (`X9`) and `blank_registry.py`'s anything-anywhere description follow the
+  source's new wording, which names the hook.
+- **`agentskills`, the skill freshness lint ships, trimmed (C11).** New in the
+  source: `scripts/check_skill_freshness.py`, its test, its config
+  `scripts/skills_freshness.yml` and the scheduled `skill-freshness.yml`
+  workflow, which files one issue when the lint fails. It is generic
+  machinery and ships. New patch `kit_freshness.py` cuts the config's two
+  platform and site registries (the kit's `skills_registries.yml` no longer
+  declares them), every waiver (each is for a skill of one of those
+  registries; the shipped test requires a waiver to name a declared
+  registry) and the source owner's personal tool repo from `repos:`, then
+  checks that every repo left is in `kit_repos`. Two output edits replace the
+  workflow's clone of the platform repo and a site with a comment, as
+  `ci.yml`'s census edit does, and drop the platform from its header.
+- **`agentskills`, not shipped:** the `launch-top-level-claude-session` edit
+  sits under the excluded `coding-local` skills.
+- **`skills-evals`, `retirement_exempt.py`:** the source's `guidance_plan()`
+  now lowers an `auto` removal to a proposal when the verdict allows only one
+  (`proposal_only`), right after `kind = "retire"`. The patch's anchor
+  follows that line; the core-item guard still comes first. The rest of the
+  source's gate rewrite (the betting bound, parked cells, the new gate
+  tests, the removed stratified-pooling simulator) is machinery and ships
+  as the source has it.
+- **`_agent-guidance`:** `sync.sh`, `bump-consumer-locks.sh`, the fleet-worker
+  routine and `test/run-tests.sh` changed with no manifest change.
+  `package-lock.json` is unchanged, so the Node install is the same.

@@ -141,3 +141,50 @@ def test_the_real_manifests_all_parse_and_name_a_full_sha():
             continue
         key, source, spans = resync.sha_spans(path.read_text(encoding="utf-8"), path.name)
         assert spans and all(resync.SHA.fullmatch(s) for _, _, s in spans), path.name
+
+
+# ── The workflow: a failed re-sync is reported in one issue ─────────────────
+
+WORKFLOW = EXPORT_DIR.parent / ".github" / "workflows" / "resync.yml"
+ISSUE_TITLE = "Re-sync from sources is failing"
+
+
+def _job():
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    return doc, doc["jobs"]["resync"]
+
+
+def test_the_workflow_reads_at_workflow_level_and_the_job_adds_issues_write_only():
+    doc, job = _job()
+    assert doc["permissions"] == {"contents": "read"}
+    assert job["permissions"] == {"contents": "read", "issues": "write"}
+
+
+def test_no_run_block_interpolates_an_expression():
+    _, job = _job()
+    for step in job["steps"]:
+        assert "${{" not in step.get("run", ""), step.get("name")
+
+
+def test_a_failure_opens_or_updates_one_issue_and_a_success_closes_it():
+    _, job = _job()
+    report, close = job["steps"][-2], job["steps"][-1]
+    assert report["if"] == "failure()" and close["if"] == "success()"
+    for step in (report, close):
+        assert "uses" not in step
+        assert step["env"]["ISSUE_TITLE"] == ISSUE_TITLE
+        assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
+        assert step["env"]["RUN_URL"] == (
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+        assert "select(.title == env.ISSUE_TITLE)" in step["run"]
+    run = report["run"]
+    assert "gh issue create" in run and "gh issue edit" in run and "gh issue comment" in run
+    # The body opens with the TLDR heading, and the label is best effort.
+    assert run.index("printf '## TLDR") < run.index("printf 'The daily")
+    assert "--add-label agent-authored > /dev/null \\\n" in run and "|| echo \"::warning::" in run
+    # It names the failed step from the step outcomes, never the log.
+    named = {"resync", "regenerate", "tests", "push"}
+    assert {k.removeprefix("OUTCOME_").lower() for k in report["env"] if k.startswith("OUTCOME_")} == named
+    assert named <= {s.get("id") for s in job["steps"]}
+    assert "gh run view" not in run and "--log" not in run
+    assert "gh issue close" in close["run"]
