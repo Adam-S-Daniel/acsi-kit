@@ -66,10 +66,12 @@ it and acts:
 | improve | `claude/eval-improve-*` (`eval-improve/`) | `routine-improve-gate.yml` opens a pull request in `acsi-agentskills` from `eval-improve/<skill>` with the `eval-improve` App |
 | guidance improve | `claude/eval-guidance-improve-*` (`eval-guidance-improve/`) | `routine-guidance-improve-gate.yml` opens one in `_agent-guidance` |
 | scaffold | `claude/scaffold-*` | `routine-scaffold-gate.yml` opens a fixtures pull request here with the `roster` App |
+| improve cost | `claude/eval-cost-*` (`improve-cost/`) | `routine-eval-ingest.yml` validates the cost record of an improve or guidance-improve run |
 | draft skill | `claude/draft-skill-*` (`draft-skill/`, `evals/`) | `routine-draft-skill-gate.yml` opens a skill pull request in `acsi-agentskills` and a fixtures one here, or a hook-proposal issue |
 
-An improve branch also matches `claude/eval-*`; the two lanes' path filters
-are disjoint, so only one fires. `skills-evals`' `AGENTS.md` has the full
+An improve or cost branch also matches `claude/eval-*`; the lanes' path
+filters are disjoint, and the results lane excludes cost branches, so only
+one fires. `skills-evals`' `AGENTS.md` has the full
 workflow table.
 
 ## Workload identity federation

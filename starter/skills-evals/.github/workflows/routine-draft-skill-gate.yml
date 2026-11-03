@@ -15,9 +15,12 @@ name: Gate routine skill draft
 #               evals/<subject>/: the drafted skill beat no skill on its own
 #               fixtures. This gate opens a DRAFT pull request in
 #               acsi-agentskills with the skill, then a DRAFT pull request
-#               here with only evals/<subject>/ and its README layout line;
+#               here with only evals/<subject>/, its README layout line
+#               and its evals/unscheduled.yml rows;
 #               both bodies say to merge the skill first. In auto merge
-#               mode (below) both are ready instead, with auto-merge on.
+#               mode (below) both are ready instead; the skill's has
+#               auto-merge on, the fixtures' is armed later by
+#               draft-fixtures-follow.yml.
 #   rejected    nothing else: the record stays on its branch, and the
 #               subject counts as drafted, so it is not picked again.
 #
@@ -51,14 +54,24 @@ name: Gate routine skill draft
 #                  is fixtures-pr: fixtures for a skill no pull request
 #                  proposes would only fail.
 #     fixtures-pr  contents: write and pull-requests: write on this
-#                  repository's job token: it commits evals/<subject>/ and
-#                  its README layout line (fixtures-apply) to a fresh branch `draft-skill-fixtures/<subject>` from
-#                  the default branch and opens a draft pull request. It
-#                  runs only after skill-pr opened the skill's pull request,
-#                  so the order is skill first, fixtures second; the
-#                  fixtures pull request says to merge after the skill's.
-#                  A pull request opened with the job token starts no other
-#                  workflow, so `test` (ci.yml) runs once a person pushes.
+#                  repository's job token. After re-validation it mints the
+#                  roster App installation token (skills-evals only, contents
+#                  and pull-requests write; as routine-fixture-supply.yml
+#                  does), and one step uses it: it commits evals/<subject>/
+#                  its README layout line and its evals/unscheduled.yml
+#                  rows (fixtures-apply) to a fresh
+#                  branch `draft-skill-fixtures/<subject>` from the default
+#                  branch and opens the pull request, ready in auto merge
+#                  mode, a draft otherwise. It runs only after skill-pr
+#                  opened the skill's pull request, so the order is skill
+#                  first, fixtures second; the fixtures pull request says to
+#                  merge after the skill's. GitHub holds every workflow run
+#                  of a pull request opened by github-actions[bot] at
+#                  `action_required` (skills-evals#618), so the required
+#                  `test` (ci.yml) would never run; the App's pull request
+#                  is not held. Without the App token it falls back to the
+#                  job token and warns that the checks wait for
+#                  draft-fixtures-follow.yml to restart them.
 #     hook-issue   contents: read and issues: write on the job token.
 # * One proposal per subject: an existing `draft-skill/<subject>` branch in
 #   acsi-agentskills, `draft-skill-fixtures/<subject>` branch here or
@@ -67,14 +80,17 @@ name: Gate routine skill draft
 #   force-pushes or deletes anything.
 # * The merge mode is the improvement gate's one switch,
 #   evals/improve-policy.yml `improve_merge_mode`, read by
-#   `improve_gate.py merge-mode` (draft when the skill's plugin runs code).
+#   `improve_gate.py merge-mode` (draft when plugin-runtime-review would
+#   hold the skill's change).
 #   In `auto` (the owner, 2026-10-26; acsi-agentskills ADR 0021) the skill's pull
 #   request is ready, labeled and auto-merges (merge commit) after its
 #   required checks, unless another loop pull request (`eval-improve/*`,
 #   `draft-skill/*`, `retire-skill/*`) is open there, which makes both
-#   drafts. The fixtures pull request is ready with auto-merge only when the
-#   skill's is, so it never leads; opened with the job token, its required
-#   checks start only when someone pushes or runs them.
+#   drafts. The fixtures pull request is ready only when the skill's is, and
+#   this gate never turns auto-merge on for it: draft-fixtures-follow.yml
+#   (every 30 minutes) arms it once the skill's pull request has MERGED, so
+#   the fixtures can never merge before their skill, and restarts the checks
+#   of one the job-token fallback opened.
 # * Branch names, shas and file content are never interpolated into a
 #   `run:` block: the event is read from $GITHUB_EVENT_PATH by the
 #   validator, which emits only values that matched a strict pattern, and
@@ -133,7 +149,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -245,7 +261,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -273,17 +289,18 @@ jobs:
           cat "$RUNNER_TEMP/revalidate.out"
 
       # The loop's one merge switch (evals/improve-policy.yml), lowered to
-      # draft when the skill's plugin runs code, exactly as the improvement
-      # gate decides it. No credential is held yet.
+      # draft when plugin-runtime-review would hold the skill's change,
+      # exactly as the improvement gate decides it. No credential is held yet.
       - name: Decide the merge mode
         id: mode
         working-directory: skills-evals
         env:
           PLUGIN: ${{ needs.validate.outputs.plugin }}
+          SUBJECT: ${{ needs.validate.outputs.subject }}
         run: |
           set -euo pipefail
           python3 scripts/improve_gate.py merge-mode \
-            --tree ../acsi-agentskills --plugin "$PLUGIN" > "$RUNNER_TEMP/mode.out"
+            --tree ../acsi-agentskills --plugin "$PLUGIN" --skill "$SUBJECT" > "$RUNNER_TEMP/mode.out"
           cat "$RUNNER_TEMP/mode.out"
           cat "$RUNNER_TEMP/mode.out" >> "$GITHUB_OUTPUT"
 
@@ -291,7 +308,7 @@ jobs:
       # acsi-agentskills alone, with contents and pull-requests write only.
       - name: Mint the GitHub App token for acsi-agentskills
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.EVAL_IMPROVE_APP_CLIENT_ID }}
           private-key: ${{ secrets.EVAL_IMPROVE_APP_PEM }}
@@ -395,6 +412,21 @@ jobs:
             echo "::error::apply printed no relock decision"
             exit 1
           fi
+          # The registry's own checks on the finished tree, before anything is
+          # pushed: a draft its required checks would reject never becomes a
+          # pull request (adam-agentskills#102 opened red on a layout pin and a
+          # payload reference). These are the default branch's own scripts
+          # and pinned dev requirements; the drafted files are read, never run.
+          python3 -m pip install -q -r "$reg/requirements-dev.txt"
+          if ! (cd "$reg" \
+                && python3 scripts/check_skills.py > "$RUNNER_TEMP/check_skills.out" \
+                && python3 scripts/generate_readme_table.py --check \
+                && python3 scripts/generate_skills_lock.py --check-current \
+                && python3 -m pytest -q -p no:cacheprovider scripts/test_check_consistency.py); then
+            grep -E '^  \[' "$RUNNER_TEMP/check_skills.out" | grep -v '\[british-spelling\]' || true
+            echo "::error::the drafted ${SUBJECT} skill fails acsi-agentskills' own checks; no pull request is opened"
+            exit 1
+          fi
           commit="$(git -C "$reg" rev-parse HEAD)"
           git -C "$reg" -c "http.https://github.com/.extraheader=$auth" \
             push origin "HEAD:refs/heads/${target}"
@@ -468,7 +500,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -496,12 +528,29 @@ jobs:
       # fixtures-apply from this job's staged copy, plus the README layout
       # line the suite requires of every eval directory, on a fresh branch
       # from the default branch: the record under draft-skill/ stays on the
-      # routine's branch. The job token pushes; a push with it starts no
-      # workflow.
+      # routine's branch. The roster App token pushes and opens the pull
+      # request, so its required checks run (a job-token pull request is held
+      # at `action_required`, skills-evals#618); with no App token the job
+      # token does it and warns. Auto-merge is NOT turned on here:
+      # draft-fixtures-follow.yml arms it after the skill's pull request has
+      # merged.
+      - name: Mint the roster App token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          client-id: ${{ vars.ROSTER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.ROSTER_APP_PRIVATE_KEY }}
+          owner: example-adopter
+          repositories: skills-evals
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Open the fixtures' pull request
         working-directory: skills-evals
         env:
           GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
           BASE: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ needs.validate.outputs.branch }}
@@ -520,7 +569,17 @@ jobs:
             fi
           done
           target="draft-skill-fixtures/${SUBJECT}"
-          b64="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          # The App token when it minted and has the shape of one; else the
+          # job token, whose pull request GitHub holds for approval.
+          push_token="$GH_TOKEN"
+          case "${APP_TOKEN:-}" in
+            ''|*[!A-Za-z0-9_.-]*)
+              echo "::warning::the roster App token is unavailable; the fixtures pull request is opened with the job token, so its checks are held until draft-fixtures-follow.yml restarts them" ;;
+            *) push_token="$APP_TOKEN"
+               echo "::add-mask::${APP_TOKEN}" ;;
+          esac
+          export GH_TOKEN="$push_token"
+          b64="$(printf 'x-access-token:%s' "$push_token" | base64 -w0)"
           echo "::add-mask::${b64}"
           auth="AUTHORIZATION: basic ${b64}"
           existing="$(git -c "http.https://github.com/.extraheader=$auth" \
@@ -534,15 +593,18 @@ jobs:
             --staged "$RUNNER_TEMP/staged" --tree .
           git add -A
           # The commit adds files under evals/<subject>/, edits README.md's
-          # layout, and changes nothing else.
+          # layout and lists the fixtures in evals/unscheduled.yml, and
+          # changes nothing else.
           outside="$(git diff --cached --name-only -- . \
-            ":(exclude)evals/${SUBJECT}/" ":(exclude)README.md")"
+            ":(exclude)evals/${SUBJECT}/" ":(exclude)README.md" \
+            ":(exclude)evals/unscheduled.yml")"
           changed="$(git diff --cached --name-only --diff-filter=a -- "evals/${SUBJECT}/")"
           added="$(git diff --cached --name-only --diff-filter=A -- "evals/${SUBJECT}/")"
           readme="$(git diff --cached --name-only --diff-filter=M -- README.md)"
+          unscheduled="$(git diff --cached --name-only --diff-filter=M -- evals/unscheduled.yml)"
           if [ -n "$outside" ] || [ -n "$changed" ] || [ -z "$added" ] \
-             || [ "$readme" != README.md ]; then
-            echo "::error::the fixtures commit would not be evals/${SUBJECT}/ additions plus the README layout line"
+             || [ "$readme" != README.md ] || [ "$unscheduled" != evals/unscheduled.yml ]; then
+            echo "::error::the fixtures commit would not be evals/${SUBJECT}/ additions plus the README layout line and the unscheduled.yml rows"
             exit 1
           fi
           git -c user.name="skills-evals draft-gate bot" \
@@ -578,19 +640,9 @@ jobs:
           if ! gh pr edit "$url" --add-label agent-authored > /dev/null 2>&1; then
             echo "::warning::could not add the agent-authored label to the fixtures pull request"
           fi
-          # The job token starts no workflow, so this pull request's
-          # required checks wait for someone to push or run them; by then
-          # the skill's pull request, already auto-merging, has had its
-          # checks. Auto-merge only removes the click.
-          if [ "$mode" = auto ]; then
-            gh pr merge "$url" --repo "$REPO" --auto --merge
-            method="$(gh pr view "$url" --repo "$REPO" --json autoMergeRequest \
-              --jq '.autoMergeRequest.mergeMethod // ""')" || method=""
-            if [ "$method" != "MERGE" ]; then
-              echo "::error::auto-merge is not enabled on ${url}"
-              exit 1
-            fi
-          fi
+          # Auto-merge is not armed here: the fixtures must not merge before their
+          # skill. draft-fixtures-follow.yml arms auto-merge once the skill's
+          # pull request has merged.
           {
             echo "### Fixtures pull request opened (${mode})"
             echo
@@ -623,7 +675,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 

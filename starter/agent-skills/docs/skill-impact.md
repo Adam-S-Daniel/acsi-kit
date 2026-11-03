@@ -34,11 +34,291 @@ Rules:
 - **Append-only.** A wrong entry gets a correcting entry, not an edit.
 - **This repo is public and scanned.** Nothing sensitive in an entry, ever;
   a sensitive rejection is recorded by PR link alone.
+- **CI enforces the gates.** `scripts/check_skill_gates.py`, run in the
+  required `pytest` check, reads each new entry's `- Eval:` line and fails a
+  PR whose skill change is not covered. A removed SKILL.md needs a `remove`
+  entry. A new skill needs a `create` entry, a PURPOSE.md and a green arm:
+  `with_skill objective X/Y, without_skill A/B` (X > 0, X/Y >= A/B) with the
+  routine run id or results link; a skill in `acsi-coding-local` or
+  `acsi-non-coding-local` may write `exempt` instead. An edited SKILL.md
+  needs an entry (any kind but `rejected`) and a PURPOSE.md, and its Eval
+  line depends on skills-evals' coverage census: a covered skill shows a run
+  (counts such as `21/21`, or a run id such as `20261026T211234Z-1b7681`),
+  a deliberately skipped one a run or `exempt`, a gap a run or its first
+  fixture (a `skills-evals/pull/N` link or `evals/<skill>/`). When the
+  census cannot decide, the check warns instead of failing. It also fails
+  any change to an entry already on main.
 
 Entries before 2026-08-25 predate this file and live only in git history —
 no backfill is planned; the file adds the fields git does not capture.
 
 ---
+
+## 2026-11-03 — acsi-anything-anywhere/finding-unknowns — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: baseline on main before the edit: routine run `20261102T232251Z-7913f6` (with 3/4, without 3/4); post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only). Description-only edit; the body is unchanged.
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-coding-local/launch-top-level-claude-session — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-coding-local/migrate-claude-memory — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-coding-local/sync-cc-settings-between-wsl-and-windows — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-coding-local/tool-powershell — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: baseline on main before the edit: routine run `20261103T004441Z-300a13` (with_skill objective 16/17, without_skill 15/17); post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only). Description-only edit; the body is unchanged.
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-coding-local/windows-elevation-from-wsl — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: baseline on main before the edit: routine run `20261102T232726Z-a3fb46` (with 7/7, without 7/7); post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only). Description-only edit; the body is unchanged.
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-non-coding-local/add-from-address — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-non-coding-local/add-received-from-addresses — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-non-coding-local/compare-pdfpairs — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-non-coding-local/fastmail — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-non-coding-local/pdf-ocr-audit — edit
+
+- Motivation: the skill listing drops descriptions once it passes Claude Code's character budget, and Windows desktop sessions listed 13 skills by name only (skills-evals#668).
+- Change: frontmatter description shortened to 400 characters or fewer, keeping its purpose, trigger phrases and boundaries; this registry now caps descriptions at 400 (PR pending).
+- Eval: baseline on main before the edit: routine run `20261102T232211Z-058dea` (with 13/13, without 1/13); post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only). Description-only edit; the body is unchanged.
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-coding-local/tool-powershell — create
+
+- Motivation: a `new-skill` lesson mined from agent sessions (redacted, 4 pieces of evidence) that the draft loop's triage could not check mechanically.
+- Change: new skill `plugins/acsi-coding-local/skills/tool-powershell/`, drafted by the skills-evals draft loop with skill-creator at `2a40fd2e7c52`; bundle `acsi-coding-local` 2.2.1 -> 2.2.2 (PR pending).
+- Eval: draft-loop measurement, skills-evals routine run `20261103T004441Z-300a13`, 1 trials per arm over 4 new fixtures: with_skill objective 16/17, without_skill 15/17. Not badge input; the fixtures land in a companion skills-evals PR.
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-coding-anywhere/red-ci-example-site-a-ai — create
+
+- Motivation: a `new-skill` lesson mined from agent sessions (redacted, 54 pieces of evidence) that the draft loop's triage could not check mechanically.
+- Change: new skill `plugins/acsi-coding-anywhere/skills/red-ci-example-site-a-ai/`, drafted by the skills-evals draft loop with skill-creator at `2a40fd2e7c52`; bundle `acsi-coding-anywhere` 1.3.6 -> 1.3.7 (PR pending).
+- Eval: draft-loop measurement, skills-evals routine run `20261103T003800Z-5baf20`, 1 trials per arm over 4 new fixtures: with_skill objective 9/10, without_skill 7/10. Not badge input; the fixtures land in a companion skills-evals PR.
+- Outcome: pending review.
+
+## 2026-11-03 — acsi-non-coding-local/rename-pdfs — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56), held out of #96 until a baseline routine run existed.
+- Change: example `Form W-2` is now `Form W2` (the file forbids hyphens in name parts); pip advice and the script's missing-pypdf message use `pip install --user` (or a venv) instead of `--break-system-packages`.
+- Eval: baseline on main before the edit: routine run `20261102T232136Z-d58e9f`, with 8/8, without 4/8 objective checks (1 trial); post-merge run to follow in a correcting entry.
+- Outcome: pending
+
+## 2026-11-03 — acsi-non-coding-local/pdf-ocr-audit — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56), held out of #96 until a baseline routine run existed.
+- Change: fixed a contradiction about scanner-named files; dropped all-caps; pip advice and `check_ocr.py`'s auto-install use `--user` instead of `--break-system-packages`; new PURPOSE.md.
+- Eval: baseline on main before the edit: routine run `20261102T232211Z-058dea`, with 13/13, without 1/13 objective checks (1 trial); post-merge run to follow in a correcting entry.
+- Outcome: pending
+
+## 2026-11-03 — acsi-anything-anywhere/finding-unknowns — edit
+- Motivation: Correcting entry for the 2026-10-31 edit (#96): post-merge eval result.
+- Change: none (eval record only).
+- Eval: routine run `20261102T232251Z-7913f6`: with 3/4, without 3/4. The cited baseline `20261026T145523Z-6dc188` recorded no objective checks, so there is no before number; the fixture does not exercise the new step. One trial per arm.
+- Outcome: no regression attributable to the edit; kept.
+
+## 2026-11-03 — acsi-anything-anywhere/writing-adrs — edit
+- Motivation: Correcting entry for the 2026-10-31 edit (#96): post-merge eval result.
+- Change: none (eval record only).
+- Eval: routine run `20261102T232327Z-cdc21e` (bootstrap): with 9/9, without 5/9; baseline with 9/9, without 5/9. No change. One trial per arm.
+- Outcome: no regression attributable to the edit; kept.
+
+## 2026-11-03 — acsi-coding-anywhere/workflow-path-audit — edit
+- Motivation: Correcting entry for the 2026-10-31 edit (#96): post-merge eval result.
+- Change: none (eval record only).
+- Eval: routine run `20261102T232423Z-4b06bc` (required-check-routing): with 8/8, without 8/8; baseline the same. No change. One trial per arm.
+- Outcome: no regression attributable to the edit; kept.
+
+## 2026-11-03 — acsi-coding-anywhere/github-actions-repo-settings — edit
+- Motivation: Correcting entry for the 2026-10-31 edit (#96): post-merge eval result.
+- Change: none (eval record only).
+- Eval: routine run `20261102T232454Z-ee22cd` (drift-diagnosis): with 3/9, without 3/9. The cited baseline `20261026T145520Z-e53d67` recorded no objective checks, so there is no before number. One trial per arm.
+- Outcome: no regression attributable to the edit; kept.
+
+## 2026-11-03 — acsi-coding-anywhere/ci-job-performance — edit
+- Motivation: Correcting entry for the 2026-10-31 edit (#96): post-merge eval result.
+- Change: none (eval record only).
+- Eval: routine run `20261101T211416Z-706447` (browser-cache): with 5/7, without 5/7; baseline with 6/7, without 6/7. Both arms fell by one check, so the drop is not from the skill text. One trial per arm.
+- Outcome: no regression attributable to the edit; kept.
+
+## 2026-11-03 — acsi-coding-anywhere/debug-github-workflows — edit
+- Motivation: Correcting entry for the 2026-10-31 edit (#96): post-merge eval result.
+- Change: none (eval record only).
+- Eval: routine run `20261102T232543Z-c5b420` (swallowed-failure): with 6/7, without 7/7; baseline with 5/7, without 6/7. The with arm rose by one; the one-check gap to without is unchanged. One trial per arm.
+- Outcome: no regression attributable to the edit; kept.
+
+## 2026-11-03 — acsi-coding-anywhere/skills-doctor — edit
+- Motivation: Correcting entry for the 2026-10-31 edit (#96): post-merge eval result.
+- Change: none (eval record only).
+- Eval: routine run `20261102T232624Z-2b2255` (bucketed-account-store): with 4/5, without 4/5. The cited baseline `20261026T144654Z-5dd589` recorded no objective checks, so there is no before number. One trial per arm.
+- Outcome: no regression attributable to the edit; kept.
+
+## 2026-11-03 — acsi-coding-anywhere/disarm-inherited-reach — edit
+- Motivation: Correcting entry for the 2026-10-31 edit (#96): post-merge eval result.
+- Change: none (eval record only).
+- Eval: routine run `20261102T232655Z-23534d`: with 7/9, without 6/9; baseline with 9/9, without 8/9. Both arms newly failed `rotation-ran` and `rotation-location-standalone` (the reaper script did not run in either arm), so the drop is not from the skill text; the with arm still passes every disarm check and keeps its one-check lead. One trial per arm.
+- Outcome: no regression attributable to the edit; kept.
+
+## 2026-11-03 — acsi-coding-local/windows-elevation-from-wsl — edit
+- Motivation: Correcting entry for the 2026-10-31 edit (#96): post-merge eval result.
+- Change: none (eval record only).
+- Eval: routine run `20261102T232726Z-a3fb46`: with 7/7, without 7/7; baseline with 7/7, without 6/7. The with arm is unchanged. One trial per arm.
+- Outcome: no regression attributable to the edit; kept.
+
+## 2026-11-01 — acsi-coding-anywhere/skills-doctor — edit
+- Motivation: [adam-agentskills#99](https://github.com/Adam-S-Daniel/adam-agentskills/pull/99) changed the bootstrap hook to install the newer pin when one lock descends from another on the same registry ([ADR 0022](decisions/0022-install-the-newer-pin-when-one-lock-descends-from-the-other.md)), but `check_provenance.py`'s `read_union` still copied the old rule and reported a skill the hook had delivered as `deleted-by-the-cross-lock-conflict`.
+- Change: the doctor reads what the hook did: a contested name whose install record entry, newer than every contesting lock, names it at one contesting lock's digest with matching bytes is the note `resolved-by-newer-pin`, naming the winning lock; any other contest stays `deleted-by-the-cross-lock-conflict`, now worded as contested under ADR 0022's conditions; SKILL.md's two statements of the old rule updated; bundle `acsi-coding-anywhere` 1.3.5 -> 1.3.6 (PR pending).
+- Eval: baseline on main before the edit: routine run `20261026T144654Z-5dd589` (bucketed-account-store: with_skill objective 4/5, without_skill 3.7/5, n=3); post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge); no fixture exercises a cross-lock contest, so the behavior is pinned by two new end-to-end tests that drive the real hook.
+- Outcome: pending
+
+## 2026-11-01 — acsi-coding-anywhere/fan-out-triage — create
+
+- Motivation: a `new-skill` lesson mined from agent sessions (redacted, 1 pieces of evidence) that the draft loop's triage could not check mechanically.
+- Change: new skill `plugins/acsi-coding-anywhere/skills/fan-out-triage/`, drafted by the skills-evals draft loop with skill-creator at `2a40fd2e7c52`; bundle `acsi-coding-anywhere` 1.3.4 -> 1.3.5 (PR pending).
+- Eval: draft-loop measurement, skills-evals routine run `20261101T134413Z-2962c7`, 1 trials per arm over 4 new fixtures: with_skill objective 23/25, without_skill 4/25. Not badge input; the fixtures land in a companion skills-evals PR.
+- Outcome: pending review.
+
+## 2026-10-31 — acsi-anything-anywhere/finding-unknowns — edit
+- Motivation: [adam-agentskills#21](https://github.com/Adam-S-Daniel/adam-agentskills/issues/21): a batch of 32 issue bodies was rewritten twice because the output contract changed after filing.
+- Change: new step under "Before implementation": fix the output contract before a batch of whole-object writes, then write one item and read it back before sending the rest; new PURPOSE.md.
+- Eval: baseline on main before the edit: routine run `20261026T145523Z-6dc188`; post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge); the fixture exercises the blind-spot pass, not batch writes.
+- Outcome: pending
+
+## 2026-10-31 — acsi-anything-anywhere/writing-adrs — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: removed a padding clause from the numbering rule; new PURPOSE.md.
+- Eval: baseline on main before the edit: routine run `20261031T190211Z-c3e925`; post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge) (bootstrap: with 9/9, without 5/9).
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-anywhere/workflow-path-audit — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: `grep -qE` now reads a here-string instead of a pipe (pipe race under pipefail); required checks read from `rules/branches/main` (union of rulesets); checkout placeholder names the repo's pin form; new PURPOSE.md.
+- Eval: baseline on main before the edit: routine run `20261031T185821Z-a37f6c`; post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge) (required-check-routing: with 8/8, without 8/8).
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-anywhere/github-actions-repo-settings — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: section reference fixed (4-8); removed three pointers to PURPOSE.md, which is never loaded; classification paragraph in the present tense; version-comment rule stated without the ADR 0004 history.
+- Eval: baseline on main before the edit: routine run `20261026T145520Z-e53d67`; post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge) (drift-diagnosis).
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-anywhere/ci-job-performance — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: undated "currently has no dated pwsh tags" replaced with a check to run.
+- Eval: baseline on main before the edit: routine run `20261026T211329Z-fdfe3e`; post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge) (browser-cache: with 6/7, without 6/7).
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-anywhere/debug-github-workflows — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: dropped measurement narrative ("about 3 weeks old", "15/15 calls") that PURPOSE.md already holds; instruction unchanged.
+- Eval: baseline on main before the edit: routine run `20261026T211328Z-470e6e`; post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge) (swallowed-failure: with 5/7, without 6/7).
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-anywhere/skills-doctor — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: `check_provenance.py --account-channel` invocation now uses `-I` and the file's path form; heading count fixed; account-store and retired-registry text stated as current rules; old-CLI (pre-2.1.280) trap moved to PURPOSE.md; removed three pointers to PURPOSE.md.
+- Eval: baseline on main before the edit: routine run `20261026T144654Z-5dd589`; post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge) (bucketed-account-store).
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-anywhere/disarm-inherited-reach — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing. (flagged item: the skill fired on the session's own pre-authorized worktree)
+- Change: "When to invoke" bullet scoped to a clone or worktree made as a scratch tree; the session's own working tree still triggers the skill before a negative control or destructive path. Description unchanged; new PURPOSE.md.
+- Eval: baseline on main before the edit: routine run `20261031T044227Z-1d369e`; post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge) (with 9/9, without 8/9).
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-local/windows-elevation-from-wsl — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: description trimmed to what and when (rules stay in the body); "Where the rule lives" history moved to PURPOSE.md.
+- Eval: baseline on main before the edit: routine run `20261031T161419Z-a85866`; post-merge routine run to follow in a correcting entry (the eval routine evaluates the default branch only, so it cannot measure this branch before merge) (with 7/7, without 6/7).
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-local/migrate-claude-memory — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing. Conflicted with STRATEGY.md's 2026-10-24 memory policy (no `autoMemoryDirectory`, no `.claude/memory/` in a repo).
+- Change: removed the in-repo `autoMemoryDirectory` section, Workflow 3 and `scripts/memory-migrate.sh` (used only by Workflow 3); description no longer promises copying a store into a repo; "plugin" corrected to "skill".
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-local/sync-cc-settings-between-wsl-and-windows — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: description trimmed to what and when; merge rules stay in the body.
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending
+
+## 2026-10-31 — acsi-coding-local/launch-top-level-claude-session — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: description trimmed to what and when; procedure stays in the body.
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending
+
+## 2026-10-31 — acsi-non-coding-local/ocr-pdfs — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: intro states what the skill does instead of comparing it with a predecessor.
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending
+
+## 2026-10-31 — acsi-non-coding-local/fastmail — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: description no longer claims adding From addresses (sibling skills do); removed three example workflows that repeated sections 2-4; new PURPOSE.md.
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending
+
+## 2026-10-31 — acsi-non-coding-local/add-from-address — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: `pwsh trigger.ps1` now uses the skill-directory path so it works from any working directory.
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending
+
+## 2026-10-31 — acsi-non-coding-local/add-received-from-addresses — edit
+- Motivation: prompt-audit sweep findings in [adam-agentskills#56](https://github.com/Adam-S-Daniel/adam-agentskills/issues/56) (2026-10-08, 10-27, 10-28), each checked against the current file before editing.
+- Change: `pwsh trigger.ps1` now uses the skill-directory path so it works from any working directory.
+- Eval: exempt (skills-evals `evals/non-coverage.yml`)
+- Outcome: pending
 
 ## 2026-10-29 — acsi-coding-anywhere/skills-doctor — edit
 - Motivation: Adam-S-Daniel/_agent-guidance#348 (prompt audit) and its fleet dry run of a dated-phrasing check: migration-relative wording in always-loaded text goes stale.

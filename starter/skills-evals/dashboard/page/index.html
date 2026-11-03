@@ -28,10 +28,17 @@
 .pd-table td { padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); vertical-align: top; }
 .pd-table td.num, .pd-table th.num { text-align: right; }
 .pd-table a { color: inherit; }
+.pd-alert { border-width: 1px 1px 1px 0.375rem; }
+.pd-alert[data-state="attention"] { border-color: var(--color-bad); }
+.pd-alert[data-state="clear"] { border-color: var(--color-ok); }
+.pd-alert-line { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--cds-gap-xs) var(--cds-gap-md); }
+.pd-alert-num { font-family: var(--font-anthropic-serif); font-size: var(--cds-font-size-title); font-variant-numeric: tabular-nums; line-height: 1.1; }
 .pd-pill { display: inline-block; padding: 0 var(--cds-pad-xs); border-radius: 999px; border: 1px solid var(--color-border-line); white-space: nowrap; }
 .pd-good { color: var(--color-ok); }
 .pd-warn { color: var(--color-warn); }
 .pd-bad { color: var(--color-bad); }
+.pd-console td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: smaller; }
+.pd-check { display: inline-flex; align-items: center; gap: var(--cds-gap-xs); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
 .pd-search { font: inherit; font-size: var(--cds-font-size-caption); padding: var(--cds-pad-xs) var(--cds-pad-sm); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); background: var(--color-bg); color: var(--color-fg); max-width: 20rem; }
 .pd-chips { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs); }
 .pd-chip { font: inherit; font-size: var(--cds-font-size-caption); padding: var(--cds-pad-xs) var(--cds-pad-sm); border-radius: 999px; border: 1px solid var(--color-border-line); background: none; color: var(--color-fg-muted); cursor: pointer; }
@@ -58,7 +65,8 @@
     <h1 class="pd-title">Self-improvement project</h1>
     <p class="pd-goal">Goal: a fully automatic system that adds, removes and changes your skills and rules files so your real work in Claude Code goes better, and proves each change with tests.</p>
     <p class="pd-take" id="takeaway">
-      Gate to start building again: <b class="dash-skeleton" data-source="headline" data-field="gate_met">—</b> of <b class="dash-skeleton" data-source="headline" data-field="gate_total">—</b> conditions met.
+      Loop gaps closed: <b class="dash-skeleton" data-source="loop_counts" data-field="done">—</b> of <b class="dash-skeleton" data-source="loop_counts" data-field="total">—</b>.
+      Routines healthy: <b class="dash-skeleton" data-source="routine_health" data-field="ok">—</b> of <b class="dash-skeleton" data-source="routine_health" data-field="active">—</b>.
       Tests used <b class="dash-skeleton" data-source="cap_use" data-field="spent">—</b> of <b class="dash-skeleton" data-source="cap_use" data-field="cap">—</b> allowance points this week.
       On each skill test's latest run, the skill beat no skill in <b class="dash-skeleton" data-source="eval_latest_summary" data-field="helped">—</b> of <b class="dash-skeleton" data-source="eval_latest_summary" data-field="tests">—</b>.
       <b class="dash-skeleton" data-source="headline" data-field="waiting">—</b> items wait on you.
@@ -69,20 +77,41 @@
     <button class="pd-tab" role="tab" id="tab-overview" data-page="overview">Overview</button>
     <button class="pd-tab" role="tab" id="tab-loop" data-page="loop">Self-improvement loop</button>
     <button class="pd-tab" role="tab" id="tab-impact" data-page="impact">Real-work impact</button>
+    <button class="pd-tab" role="tab" id="tab-costbenefit" data-page="costbenefit">Cost and benefit</button>
     <button class="pd-tab" role="tab" id="tab-evals" data-page="evals">Test results</button>
     <button class="pd-tab" role="tab" id="tab-cleanup" data-page="cleanup">Cleanup</button>
     <button class="pd-tab" role="tab" id="tab-work" data-page="work">PRs and issues</button>
     <button class="pd-tab" role="tab" id="tab-routines" data-page="routines">Routines</button>
+    <button class="pd-tab" role="tab" id="tab-console" data-page="console">Console</button>
     <button class="pd-tab" role="tab" id="tab-decisions" data-page="decisions">Decisions</button>
   </nav>
 
   <!-- OVERVIEW -->
   <section class="pd-page" id="overview" data-page-id="overview">
+    <div class="pd-card pd-alert" id="card-halfbuilt" role="region" aria-labelledby="hb-title" data-state="loading">
+      <h2 id="hb-title">Half-built and broken features</h2>
+      <p class="pd-alert-line">
+        <span><span class="pd-alert-num dash-skeleton" data-source="half_built_summary" data-field="open">—</span> open</span>
+        <span><b data-source="half_built_summary" data-field="high">—</b> high severity</span>
+        <span><b data-source="half_built_summary" data-field="broken">—</b> broken</span>
+        <span><b data-source="half_built_summary" data-field="needs_owner">—</b> need you</span>
+        <span><b data-source="half_built_summary" data-field="fixed_7d">—</b> fixed in the last 7 days</span>
+      </p>
+      <p class="pd-note" id="hb-checked">Last checked: —</p>
+      <p class="pd-note" id="hb-empty" hidden></p>
+      <div class="pd-scroll" id="hb-wrap" style="max-height: 20rem" hidden>
+        <table class="pd-table" id="tbl-halfbuilt" data-source="half_built_issues" data-row-key="key">
+          <thead><tr><th data-field="repo">Repo</th><th data-field="kind">Kind</th><th data-field="severity">Severity</th><th data-field="needs_owner">Needs you</th><th data-field="title">Finding</th><th data-field="age_days">Age</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="pd-tiles">
-      <button class="pd-tile" data-go="decisions" id="tile-gate">
-        <span class="pd-tile-label">Gate to build again</span>
-        <span class="pd-tile-num"><span class="dash-skeleton" data-source="headline" data-field="gate_met">—</span> <small>of <span data-source="headline" data-field="gate_total">—</span> met</small></span>
-        <span class="pd-tile-note">One improvement judged, two sweeps inside the cap</span>
+      <button class="pd-tile" data-go="routines" id="tile-routines">
+        <span class="pd-tile-label">Routines healthy</span>
+        <span class="pd-tile-num"><span class="dash-skeleton" data-source="routine_health" data-field="ok">—</span> <small>of <span data-source="routine_health" data-field="active">—</span></small></span>
+        <span class="pd-tile-note"><span data-source="routine_health" data-field="attention">—</span> late, failing or to check; retired and not-yet-run ones not counted</span>
       </button>
       <button class="pd-tile" data-go="loop" id="tile-loop">
         <span class="pd-tile-label">Loop gaps closed</span>
@@ -168,6 +197,27 @@
       </div>
     </div>
 
+    <div class="pd-card" id="card-fixture-requests" role="region" aria-labelledby="fq-title">
+      <h2 id="fq-title">Fixture requests</h2>
+      <p class="pd-note">When an eval finds a skill too easy to measure, the loop asks for harder fixtures, ideally rebuilt from real fleet work. This tracks each ask through to fixtures that ran.</p>
+      <p class="pd-alert-line">
+        <span><b data-source="fixture_queue_summary" data-field="requests_open">—</b> open</span>
+        <span><b data-source="fixture_queue_summary" data-field="requests_closed">—</b> closed</span>
+        <span><b data-source="fixture_queue_summary" data-field="prs_merged">—</b> PRs merged</span>
+        <span><b data-source="fixture_queue_summary" data-field="fixtures_real_work">—</b> fixtures from real work</span>
+        <span><b data-source="fixture_queue_summary" data-field="fixtures_invented">—</b> invented</span>
+        <span><b data-source="fixture_queue_summary" data-field="fixture_runs">—</b> runs</span>
+        <span><b id="fq-cost">—</b> cost</span>
+      </p>
+      <p class="pd-note" id="fq-status" hidden></p>
+      <div class="pd-scroll" id="fq-wrap" style="max-height: 20rem" hidden>
+        <table class="pd-table" id="tbl-fixture-requests" data-source="fixture_requests" data-row-key="key">
+          <thead><tr><th data-field="subject">Subject</th><th data-field="kind">Kind</th><th data-field="state">State</th><th class="num" data-field="age_days">Age</th><th data-field="prs">PR</th><th class="num" data-field="fixtures">Fixtures (real work)</th><th class="num" data-field="runs">Runs</th><th class="num" data-field="cost_usd">Cost</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="pd-card" id="card-loop-grid">
       <h2>What works for skills, guidance and memories</h2>
       <p class="pd-note">The loop has to work for three kinds of thing. Memories have no test step: the weekly memory audit makes the call.</p>
@@ -181,18 +231,18 @@
 
     <div class="pd-card" id="card-loop-lanes">
       <h2>Who is building each lane</h2>
-      <p class="pd-note">One project thread per lane. "Latest" and "State" are from the snapshot taken at each refresh.</p>
+      <p class="pd-note">One project thread per lane. "Latest" is the lane's last notable result; "State" and "Last active" come from the thread list at each refresh.</p>
       <div class="pd-scroll" style="max-height: none">
         <table class="pd-table" id="tbl-loop-lanes" data-source="loop_lanes_live" data-row-key="thread">
-          <thead><tr><th data-field="lane">Lane</th><th data-field="thread">Thread</th><th data-field="does">Builds</th><th data-field="latest">Latest</th><th data-field="state">State</th></tr></thead>
+          <thead><tr><th data-field="lane">Lane</th><th data-field="thread">Thread</th><th data-field="does">Builds</th><th data-field="latest">Latest</th><th data-field="state">State</th><th data-field="last_active">Last active</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
     </div>
 
     <div class="pd-card" id="card-loop-gaps">
-      <h2>Gaps, G1 to G13</h2>
-      <p class="pd-note">From the loop's gap list. The loop thread updates each status as its PRs merge.</p>
+      <h2>Gaps</h2>
+      <p class="pd-note">From the loop's gap list (G1 to G13, plus the bare baseline). Each status changes as the PRs that close it merge.</p>
       <div class="pd-scroll" style="max-height: none">
         <table class="pd-table" id="tbl-loop-gaps" data-source="loop_gaps" data-row-key="gap">
           <thead><tr><th data-field="gap">#</th><th data-field="title">Gap</th><th data-field="status">Status</th><th data-field="owner">Owner</th></tr></thead>
@@ -281,6 +331,45 @@
     </div>
   </section>
 
+  <!-- COST AND BENEFIT -->
+  <section class="pd-page" id="costbenefit" data-page-id="costbenefit" hidden>
+    <div class="pd-card" id="card-costbenefit-summary">
+      <h2>What the eval system costs and what it gives back</h2>
+      <p class="pd-note">Weeks run Monday 5 PM UTC to the next Monday, when your account's usage resets. Dollars are API-equivalent, not what you pay. Points are your account's usage meter. Project threads counts every thread in the project, not only the eval system's own work, and it misses scheduled-task sessions (routines and watch passes). Points per dollar is worked out from your account meter, so it is an upper bound.</p>
+      <div class="pd-tiles" id="costbenefit-tiles">
+        <div class="pd-tile"><span class="pd-tile-label">Cost per decided verdict</span><span class="pd-tile-num" data-source="costbenefit_tiles" data-field="cost_per_verdict">—</span><span class="pd-tile-note" data-source="costbenefit_tiles" data-field="cost_per_verdict_note">—</span></div>
+        <div class="pd-tile"><span class="pd-tile-label">Decision yield</span><span class="pd-tile-num" data-source="costbenefit_tiles" data-field="decision_yield">—</span><span class="pd-tile-note">loop changes merged, out of decided verdicts</span></div>
+        <div class="pd-tile"><span class="pd-tile-label">Real-work reach</span><span class="pd-tile-num" data-source="costbenefit_tiles" data-field="real_work_reach">—</span><span class="pd-tile-note">uses of changed skills and guidance, latest complete week</span></div>
+        <div class="pd-tile"><span class="pd-tile-label">Project-thread points</span><span class="pd-tile-num" data-source="costbenefit_tiles" data-field="build_points">—</span><span class="pd-tile-note">latest complete week</span></div>
+      </div>
+    </div>
+
+    <div class="pd-card" id="card-costbenefit-fixtures">
+      <p class="pd-note" id="cb-fixtures">Fixture requests: —</p>
+    </div>
+
+    <div class="pd-card" id="card-costbenefit-bar">
+      <h2>The Dec 15 bar</h2>
+      <div class="pd-scroll">
+        <table class="pd-table" id="tbl-costbenefit-bar" data-source="cost_benefit_summary" data-row-key="key">
+          <thead><tr><th data-field="label">Measure</th><th class="num" data-field="value">Value</th><th data-field="target">Target</th><th data-field="status">Status</th><th data-field="note">Note</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="pd-card" id="card-costbenefit-weeks">
+      <h2>By week, newest first</h2>
+      <p class="pd-note">* estimated from session totals, not measured between samples</p>
+      <div class="pd-scroll">
+        <table class="pd-table" id="tbl-costbenefit-weeks" data-source="cost_benefit_weeks" data-row-key="week">
+          <thead><tr><th data-field="week">Week</th><th class="num" data-field="run_count">Eval runs</th><th class="num" data-field="run_points_est">Run points</th><th class="num" data-field="api_usd">API $</th><th class="num" data-field="build_usd">Project threads $</th><th class="num" data-field="build_points">Project-thread points</th><th class="num" data-field="changes">Changes</th><th class="num" data-field="real_work_reach">Real-work reach</th><th class="num" data-field="owner_messages">Your messages</th><th class="num" data-field="decisions">Decisions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <!-- EVALS -->
   <section class="pd-page" id="evals" data-page-id="evals" hidden>
     <div class="pd-card" id="card-allowance">
@@ -294,7 +383,7 @@
         <div class="pd-meter-top"><span>Whole account this week: <b data-source="cap_use" data-field="account_used">—</b>%</span><span>Stop line: <b data-source="cap_use" data-field="stop">—</b>%</span></div>
         <div class="pd-bar"><div class="pd-bar-fill" id="fill-account"></div><div class="pd-bar-mark" id="mark-stop"></div></div>
       </div>
-      <p class="pd-note">Room for new tests now: about <span data-source="cap_use" data-field="room_now">—</span> points (the larger of what's left under the cap and the pace room of <span data-source="cap_use" data-field="pace_room">—</span>). Each test reserves <span data-source="cap_use" data-field="reservation">—</span>. Fires still running are not subtracted here. Account reading taken <span data-source="eval_allowance" data-field="account_reading_at" id="reading-at">—</span>; the week resets <span data-source="eval_allowance" data-field="week_resets_at" id="resets-at">—</span>. This week the cap is raised to 60 points until the Nov 2 reset (#456, #466, #470), then returns to 30; each test gets 3 points plus 0.5 point of overrun, and tests stop when the account is at 80%. A test that saves no results gives its reserved points back after 45 minutes (#452).</p>
+      <p class="pd-note">Room for new tests now: about <span data-source="cap_use" data-field="room_now">—</span> points (the larger of what's left under the cap and the pace room of <span data-source="cap_use" data-field="pace_room">—</span>). Each test reserves <span data-source="cap_use" data-field="reservation">—</span>. Fires still running are not subtracted here. Account reading taken <span data-source="eval_allowance" data-field="account_reading_at" id="reading-at">—</span>; the week resets <span data-source="eval_allowance" data-field="week_resets_at" id="resets-at">—</span>. A test that saves no results gives its reserved points back after 45 minutes (#452).</p>
     </div>
 
     <div class="pd-card" id="card-roster">
@@ -402,7 +491,7 @@
       <input class="pd-search" id="search-prs" type="search" placeholder="Filter PRs" aria-label="Filter PRs">
       <div class="pd-scroll">
         <table class="pd-table" id="tbl-prs" data-source="open_prs" data-row-key="repo,number">
-          <thead><tr><th data-field="repo">Repo</th><th class="num" data-field="number">#</th><th data-field="title">Title</th><th data-field="author">Opened by</th><th data-field="created_at">Opened</th><th data-field="labels">Labels</th></tr></thead>
+          <thead><tr><th data-field="repo">Repo</th><th class="num" data-field="number">#</th><th data-field="title">Title</th><th data-field="author">Opened by</th><th data-source="pr_origin" data-field="origin">Made by</th><th data-field="created_at">Opened</th><th data-field="checks">Checks</th><th data-field="labels">Labels</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -462,23 +551,39 @@
     </div>
   </section>
 
-  <!-- DECISIONS -->
-  <section class="pd-page" id="decisions" data-page-id="decisions" hidden>
-    <div class="pd-card" id="card-gate">
-      <h2>The gate: nothing new gets built until</h2>
-      <div class="pd-scroll" style="max-height: none">
-        <table class="pd-table" id="tbl-gate" data-source="gate" data-row-key="condition">
-          <thead><tr><th data-field="condition">Condition</th><th data-field="status">Status</th><th data-field="detail">Detail</th></tr></thead>
+  <!-- CONSOLE -->
+  <section class="pd-page" id="console" data-page-id="console" hidden>
+    <div class="pd-card" id="card-console">
+      <h2>Run console</h2>
+      <p class="pd-note">Every GitHub Actions run in the attached repos and every scheduled-task run from the last 7 days, newest first. Claude's watcher refreshes it every hour and chases failures.</p>
+      <label class="pd-check"><input type="checkbox" id="console-problems"> Problems only</label>
+      <div class="pd-scroll">
+        <table class="pd-table pd-console" id="tbl-console" data-source="run_stream" data-row-key="key">
+          <thead><tr><th data-field="at">When</th><th data-field="state">State</th><th data-field="source">Where</th><th data-field="name">Job</th><th data-field="title">Run</th><th data-field="duration_s">Took</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
     </div>
+  </section>
+
+  <!-- DECISIONS -->
+  <section class="pd-page" id="decisions" data-page-id="decisions" hidden>
     <div class="pd-card" id="card-decisions">
       <h2>Your decisions</h2>
       <p class="pd-note">The full strategy, options and survey are in the project's files (strategy/projects-era-strategy-2026-10-20.md).</p>
       <div class="pd-scroll" style="max-height: none">
         <table class="pd-table" id="tbl-decisions" data-source="decisions" data-row-key="date,decision">
           <thead><tr><th data-field="date">Date</th><th data-field="decision">Decision</th><th data-field="link">Record</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="pd-card" id="card-gate">
+      <h2>The build gate, met Oct 28</h2>
+      <p class="pd-note">Two conditions you set on Oct 24 before anything new got built. Both are met, so new work is no longer held back.</p>
+      <div class="pd-scroll" style="max-height: none">
+        <table class="pd-table" id="tbl-gate" data-source="gate" data-row-key="condition">
+          <thead><tr><th data-field="condition">Condition</th><th data-field="status">Status</th><th data-field="detail">Detail</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -491,7 +596,7 @@
 // dashboard/build.py writes one placeholder row (key field "none") instead of an empty
 // list, because an empty dataset reads as "failed to load". Calcs and tables never see them.
 (() => {
-  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', threads: 'id', loop_gaps: 'gap' };
+  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', half_built_issues: 'key', fixture_requests: 'key', cost_benefit_weeks: 'week', cost_benefit_summary: 'key', threads: 'id', loop_gaps: 'gap' };
   const real = (id, rows) => (PH[id] && Array.isArray(rows) ? rows.filter((r) => r[PH[id]] !== 'none') : rows);
   try {
     const calc = dash.calc.bind(dash);
@@ -502,17 +607,46 @@
 })();
 // ---- Live data: answers from the GitHub connector, reshaped into rows ----
 dash.loader('open_prs', {
-  description: 'The GitHub search answer as one row per pull request, with the repo name taken from its address',
-  fn: ({ answer }) => {
+  description: 'The GitHub search answer as one row per pull request, with the repo name taken from its address; then, per pull request, its head branch, its check runs and commit statuses summed up as one checks result, and any Claude session or Actions run link in its description',
+  fn: async ({ answer, call }) => {
     let a = answer;
     if (a && Array.isArray(a.content)) { const t = a.content.find((c) => c.type === 'text' && /^[\[{]/.test(String(c.text).trim())); if (t) a = t.text; }
     if (typeof a === 'string') { try { a = JSON.parse(a); } catch (e) { throw new Error('GitHub answered with text, not results: ' + a.slice(0, 160)); } }
     if (!a || !Array.isArray(a.items)) throw new Error('GitHub search returned no items');
-    return a.items.map((p) => ({
-      repo: String(p.repository_url || '').split('/').pop(), number: p.number, title: p.title,
-      author: (p.user && p.user.login) || '', draft: !!p.draft,
-      labels: (p.labels || []).map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean).join(', '),
-      created_at: p.created_at, updated_at: p.updated_at, url: p.html_url,
+    const unwrap = (x) => {
+      let b = x;
+      if (b && Array.isArray(b.content)) { const t = b.content.find((c) => c.type === 'text' && /^[\[{]/.test(String(c.text).trim())); if (t) b = t.text; }
+      if (typeof b === 'string') b = JSON.parse(b);
+      return b;
+    };
+    // A check run that ended badly fails the PR; a cancelled one is usually superseded, so it is ignored.
+    const BAD = new Set(['failure', 'timed_out', 'startup_failure', 'action_required']);
+    const checksOf = (runs, status) => {
+      const list = (runs && runs.check_runs) || [];
+      const statuses = status && status.total_count > 0 ? status.statuses || [] : [];
+      const failed = list.filter((r) => BAD.has(r.conclusion)).length + statuses.filter((x) => x.state === 'failure' || x.state === 'error').length;
+      const running = list.filter((r) => r.status !== 'completed').length + statuses.filter((x) => x.state === 'pending').length;
+      if (failed) return 'Failed: ' + failed;
+      if (running) return 'In progress: ' + running;
+      return list.length + statuses.length ? 'Passed' : 'No checks';
+    };
+    return Promise.all(a.items.map(async (p) => {
+      const parts = String(p.repository_url || '').split('/');
+      const owner = parts[parts.length - 2], repo = parts[parts.length - 1];
+      const body = String(p.body || '');
+      const session = (body.match(/claude\.ai\/code\/session_([A-Za-z0-9]+)/) || [])[1] || '';
+      const run_url = (body.match(/https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+/) || [])[0] || '';
+      const q = { owner, repo, pullNumber: p.number };
+      const [pr, runs, status] = await Promise.all(['get', 'get_check_runs', 'get_status']
+        .map((method) => call('pull_request_read', { ...q, method }).then(unwrap, () => null)));
+      return {
+        repo, number: p.number, title: p.title,
+        author: (p.user && p.user.login) || '', draft: !!p.draft,
+        labels: (p.labels || []).map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean).join(', '),
+        created_at: p.created_at, updated_at: p.updated_at, url: p.html_url,
+        branch: (pr && pr.head && pr.head.ref) || '', session, run_url,
+        checks: runs || status ? checksOf(runs, status) : 'Unknown', checks_url: p.html_url + '/checks',
+      };
     }));
   },
 });
@@ -685,7 +819,7 @@ dash.calc('loop_lanes_live', {
   inputs: ['loop_lanes', 'threads'],
   fn: (loop_lanes, threads) => {
     const t = new Map(threads.map((r) => [r.title, r]));
-    return loop_lanes.map((l) => ({ ...l, state: (t.get(l.thread) || {}).state || '' }));
+    return loop_lanes.map((l) => ({ ...l, state: (t.get(l.thread) || {}).state || '', last_active: (t.get(l.thread) || {}).last_active || '' }));
   },
 });
 // Sum a list of usage rows; a field stays null (not collected) unless some row has it.
@@ -738,6 +872,21 @@ dash.calc('usage_summary', {
       weeks: weeks.length, latest_week: weeks.length ? weeks[weeks.length - 1] : null }];
   },
 });
+dash.calc('costbenefit_tiles', {
+  title: 'Cost and benefit tiles',
+  description: 'The four headline numbers of the Cost and benefit tab, as text.',
+  inputs: ['cost_benefit_summary'],
+  fn: (summary) => {
+    const by = Object.fromEntries(summary.map((r) => [r.key, r]));
+    const num = (v, f) => (v == null ? '—' : f(v));
+    const latest = (by.bar_build || {}).value;
+    return [{ cost_per_verdict: num((by.cost_per_verdict || {}).value, d3.format('$,.2f')),
+      cost_per_verdict_note: (by.cost_per_verdict || {}).note || '—',
+      decision_yield: (by.decision_yield || {}).value ?? '—',
+      real_work_reach: num((by.real_work_reach || {}).value, d3.format(',')),
+      build_points: num(latest, d3.format(',.1f')) }];
+  },
+});
 dash.calc('headline', {
   title: 'Gate, cleanup and waiting counts',
   description: 'Gate conditions met, cleanup items done or partly done, and items waiting on you.',
@@ -748,6 +897,44 @@ dash.calc('headline', {
     cleanup_partly: cleanup.filter((c) => c.status === 'Partly done').length,
     cleanup_total: cleanup.length, waiting: waiting.filter((w) => w.id !== 'none').length,
   }],
+});
+dash.calc('routine_health', {
+  title: 'Routine health counts',
+  description: 'Routines not retired and already run once, how many are healthy, and how many are late, failing, paused or need a check.',
+  inputs: ['routines'],
+  fn: (routines) => {
+    const active = routines.filter((r) => r.health !== 'Retired');
+    // A routine that has not had its first run yet is neither healthy nor a problem.
+    const ok = active.filter((r) => r.health === 'OK').length;
+    const fresh = active.filter((r) => r.health === 'Not run yet').length;
+    return [{ active: active.length - fresh, ok, attention: active.length - fresh - ok }];
+  },
+});
+// Branch prefixes the loop's own workflows open pull requests from (skills-evals AGENTS.md).
+const ROUTINE_BRANCHES = [
+  ['eval-guidance-improve/', 'Guidance improve gate', 'https://github.com/example-adopter/skills-evals/actions/workflows/routine-guidance-improve-gate.yml'],
+  ['eval-improve/', 'Skill improve gate', 'https://github.com/example-adopter/skills-evals/actions/workflows/routine-improve-gate.yml'],
+  ['draft-skill/', 'New-skill draft gate', 'https://github.com/example-adopter/skills-evals/actions/workflows/routine-draft-skill-gate.yml'],
+  ['retire-skill/', 'Keep-or-remove (skill coverage)', 'https://github.com/example-adopter/skills-evals/actions/workflows/skill-coverage.yml'],
+  ['claude/scaffold-', 'Fixture scaffold gate', 'https://github.com/example-adopter/skills-evals/actions/workflows/routine-scaffold-gate.yml'],
+  ['roster/', 'Roster refresh', 'https://github.com/example-adopter/skills-evals/actions/workflows/roster-refresh.yml'],
+  ['agents-md-sync/', 'Guidance sync', 'https://github.com/example-adopter/_agent-guidance/actions/workflows/sync.yml'],
+  ['dependabot/', 'Dependabot', ''],
+];
+dash.calc('pr_origin', {
+  title: 'Who made each open PR',
+  description: 'The thread whose Claude session is linked in the PR description or whose own branch the PR comes from; else the loop workflow its branch belongs to, the Actions run it links, or the Claude session it links; else its branch name.',
+  inputs: ['open_prs', 'threads'],
+  fn: (open_prs, threads) => open_prs.map((p) => {
+    const t = threads.find((x) => (p.session && x.session === p.session) || (p.branch && x.branch === p.branch));
+    const r = ROUTINE_BRANCHES.find(([pre]) => p.branch.startsWith(pre));
+    const [origin, origin_url] = t ? [t.title, t.link]
+      : r ? [r[1], p.run_url || r[2]]
+      : p.run_url ? ['Workflow run', p.run_url]
+      : p.session ? ['Claude session', 'https://claude.ai/code/session_' + p.session]
+      : [p.branch ? 'Branch ' + p.branch : '', ''];
+    return { repo: p.repo, number: p.number, origin, origin_url };
+  }),
 });
 dash.calc('pr_counts', {
   title: 'Open PR counts',
@@ -795,6 +982,16 @@ dash.calc('new_runs', {
   const two = d3.format('.2f');
   const usd = d3.format('$.2f');
   const dt = (s) => (s ? fmtTime(new Date(s)) : '');
+  // "3 hours ago" / "in 2 days", from the browser's built-in Intl.RelativeTimeFormat.
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+  const AGO_UNITS = [['year', 31536e6], ['month', 2592e6], ['week', 6048e5], ['day', 864e5], ['hour', 36e5], ['minute', 6e4]];
+  const ago = (s) => {
+    const t = s ? new Date(s).getTime() : NaN;
+    if (Number.isNaN(t)) return '';
+    const diff = t - Date.now();
+    const u = AGO_UNITS.find(([, ms]) => Math.abs(diff) >= ms);
+    return u ? rtf.format(Math.trunc(diff / u[1]), u[0]) : 'just now';
+  };
   const day = (s) => (s ? fmtDate(new Date(s)) : '');
   const safeUrl = (u) => (typeof u === 'string' && /^https:\/\/(github\.com|claude\.ai)\//.test(u) ? u : null);
   const status = (id) => dash.data(id).status;
@@ -839,7 +1036,7 @@ dash.calc('new_runs', {
       const v = rows[0] ? rows[0][field] : null;
       el.classList.remove('dash-skeleton');
       if (v == null) { el.textContent = '—'; return; }
-      if (field.endsWith('_at')) el.textContent = dt(v);
+      if (field.endsWith('_at')) { el.textContent = ago(v); el.title = dt(v); }
       else if (typeof v === 'number') el.textContent = fills[field] ? fills[field](v) : d3.format(',')(v);
       else el.textContent = v;
     });
@@ -852,9 +1049,9 @@ dash.calc('new_runs', {
     const s = document.createElement('span');
     s.className = 'pd-pill';
     const t = String(txt || '');
-    if (/^(Done|OK|Met|Succeeded|ok)$/i.test(t)) s.classList.add('pd-good');
-    else if (/stalled|stopped|not started|failed/i.test(t)) s.classList.add('pd-bad');
-    else if (/waiting|partly|needs|not yet|in progress/i.test(t)) s.classList.add('pd-warn');
+    if (/^(Done|OK|Met|Succeeded|Passed|ok|clear)$/i.test(t)) s.classList.add('pd-good');
+    else if (/stalled|stopped|not started|failed|^(high|broken)$/i.test(t)) s.classList.add('pd-bad');
+    else if (/waiting|partly|needs|not yet|in progress|^(Running|Queued|medium)$/i.test(t)) s.classList.add('pd-warn');
     s.textContent = t;
     return s;
   };
@@ -874,6 +1071,7 @@ dash.calc('new_runs', {
       return;
     }
     let rows = Array.isArray(d.data) ? [...d.data] : [];
+    if (opts.join) { const m = new Map(rowsOf(opts.join).map((x) => [keyFn(x), x])); rows = rows.map((r) => ({ ...r, ...(m.get(keyFn(r)) || {}) })); }
     if (opts.filter) rows = rows.filter(opts.filter);
     const q = (searchState[id] || '').toLowerCase();
     if (q) rows = rows.filter((r) => cols.some((c) => String(r[c.field] ?? '').toLowerCase().includes(q)));
@@ -891,18 +1089,22 @@ dash.calc('new_runs', {
         const td = document.createElement('td');
         if (c.num) td.className = 'num';
         const v = r[c.field];
-        if (c.pill) td.append(pill(v));
+        if (c.ago) { td.textContent = v ? ago(v) : '—'; if (v) td.title = dt(v); }
+        else if (c.pill && c.link && safeUrl(r[c.link])) {
+          const a = document.createElement('a'); a.href = safeUrl(r[c.link]); a.target = '_blank'; a.rel = 'noopener'; a.append(pill(v)); td.append(a);
+        } else if (c.pill) td.append(pill(v));
         else if (c.link) {
           const u = safeUrl(r[c.link]);
           const txt = c.fmt ? c.fmt(v, r) : (v ?? '');
           if (u) { const a = document.createElement('a'); a.href = u; a.target = '_blank'; a.rel = 'noopener'; a.textContent = txt; td.append(a); }
           else td.textContent = txt;
-        } else td.textContent = v == null ? '' : c.fmt ? c.fmt(v, r) : v;
+        } else td.textContent = v == null && !c.fmtNull ? '' : c.fmt ? c.fmt(v, r) : v;
         tr.append(td);
       }
       tbody.append(tr);
     }
   };
+  document.getElementById('console-problems').addEventListener('change', () => draw());
   document.querySelectorAll('.pd-table').forEach((table) => {
     table.querySelectorAll('th').forEach((th) => th.addEventListener('click', () => {
       const cur = sortState[table.id];
@@ -1079,6 +1281,53 @@ dash.calc('new_runs', {
     const tr = e.target.closest('tr[data-key]');
     if (tr) dash.setParams({ orepo: dash.params().orepo === tr.dataset.key ? '' : tr.dataset.key });
   });
+  const drawCostBenefit = () => {
+    const money = (v) => (v == null ? '—' : d3.format('$,.2f')(v));
+    const dec = (v) => (v == null ? '—' : d3.format(',.2f')(v));
+    renderTable('tbl-costbenefit-bar', 'cost_benefit_summary', [{ field: 'label' }, { field: 'value', num: true, fmt: (v) => (v == null ? '—' : typeof v === 'number' ? d3.format(',')(v) : v) }, { field: 'target' }, { field: 'status', pill: true }, { field: 'note' }], (r) => r.key);
+    renderTable('tbl-costbenefit-weeks', 'cost_benefit_weeks', [
+      { field: 'week' }, { field: 'run_count', num: true }, { field: 'run_points_est', num: true, fmt: dec }, { field: 'api_usd', num: true, fmt: money },
+      { field: 'build_usd', num: true, fmt: (v, r) => money(v) + (r.build_estimated ? '*' : '') }, { field: 'build_points', num: true, fmt: dec },
+      { field: 'changes', num: true }, { field: 'real_work_reach', num: true }, { field: 'owner_messages', num: true }, { field: 'decisions', num: true },
+    ], (r) => r.week, { sort: { field: 'week', dir: 'desc' } });
+  };
+  const drawFixtureRequests = () => {
+    const money = (v) => (v == null ? '—' : d3.format('$,.2f')(v));
+    const note = document.getElementById('fq-status'), wrap = document.getElementById('fq-wrap');
+    const line = document.getElementById('cb-fixtures');
+    if (status('fixture_queue_summary') !== 'ok') return;
+    const sm = one_('fixture_queue_summary');
+    document.getElementById('fq-cost').textContent = money(sm.cost_usd);
+    const msg = sm.status === 'not-reported' ? 'The latest explorer data does not report the fixture queue yet.'
+      : sm.status === 'attention' ? sm.findings + ' finding' + (sm.findings === 1 ? '' : 's') + ' (' + sm.findings_high + ' high severity) need a look.' : '';
+    note.textContent = msg; note.hidden = !msg;
+    wrap.hidden = !rowsOf('fixture_requests').length;
+    line.textContent = sm.status === 'not-reported' ? 'Fixture requests: not reported yet.'
+      : 'Fixture requests: ' + d3.format(',')(sm.fixture_runs || 0) + ' runs, ' + money(sm.cost_usd) + ' so far.';
+    renderTable('tbl-fixture-requests', 'fixture_requests', [
+      { field: 'subject', link: 'issue_url' }, { field: 'kind' }, { field: 'state', pill: true },
+      { field: 'age_days', num: true, fmt: (v) => (v == null ? '' : Math.round(v) + ' d') },
+      { field: 'prs', fmt: (v, r) => (v ? (r.merged ? 'merged' : 'open') + (v > 1 ? ' (' + v + ')' : '') : ''), link: 'pr_url' },
+      { field: 'fixtures', num: true, fmt: (v, r) => v + ' (' + r.real_work + ')' }, { field: 'runs', num: true }, { field: 'cost_usd', num: true, fmt: money },
+    ], (r) => r.key);
+  };
+  const drawHalfBuilt = () => {
+    const card = document.getElementById('card-halfbuilt');
+    const empty = document.getElementById('hb-empty'), wrap = document.getElementById('hb-wrap');
+    if (status('half_built_summary') !== 'ok') { card.dataset.state = 'loading'; return; }
+    const sm = one_('half_built_summary');
+    card.dataset.state = sm.status || 'loading';
+    document.getElementById('hb-checked').textContent = sm.checked_at
+      ? 'Last checked ' + dt(sm.checked_at) + (sm.incomplete ? '. The list may be incomplete: the search hit a limit.' : '')
+      : 'Last checked: never';
+    const msg = { clear: 'No open findings.', 'not-checked': 'The weekly check has not run yet.' }[sm.status] || '';
+    empty.textContent = msg; empty.hidden = !msg;
+    wrap.hidden = !rowsOf('half_built_issues').length;
+    renderTable('tbl-halfbuilt', 'half_built_issues', [
+      { field: 'repo' }, { field: 'kind' }, { field: 'severity', pill: true }, { field: 'needs_owner', pill: true }, { field: 'title', link: 'url' },
+      { field: 'age_days', num: true, fmt: (v, r) => (r.state === 'closed' ? 'fixed ' + String(r.closed_at || '').slice(0, 10) : v == null ? '' : v + ' d') },
+    ], (r) => r.key);
+  };
   const drawImpact = () => {
     const page = document.getElementById('impact');
     if (page.hidden) return;
@@ -1100,11 +1349,12 @@ dash.calc('new_runs', {
     renderTable('tbl-impact-names', 'usage_by_name', [{ field: 'kind', fmt: (v) => (v === 'hook' ? 'git hook' : v) }, { field: 'name' }, { field: 'invocations', num: true, fmt: nn }, { field: 'sessions', num: true, fmt: nn }, { field: 'blocked', num: true, fmt: nn }, { field: 'overridden', num: true, fmt: nn }, { field: 'repos', num: true }, { field: 'last_week' }], (r) => r.key, { sort: { field: 'invocations', dir: 'desc' }, filter: (r) => !kind || r.kind === kind });
     document.querySelectorAll('#tbl-impact-names tbody tr').forEach((tr) => tr.setAttribute('aria-selected', String(tr.dataset.key === sel)));
     // Without a selection, the repo and week tables sum every skill and check in scope.
+    // A guidance-check row counts the same sessions as the guidance rows, so a sum of sessions leaves it out.
     const roll = (src, keyOf) => {
       const rows = rowsOf(src).filter(inScope);
       if (sel) return rows;
       return [...d3.group(rows, keyOf)].map(([key, rs]) => ({ key, ...rs[0], invocations: d3.sum(rs, (r) => r.invocations || 0),
-        sessions: usageSum(rs, 'sessions'), blocked: usageSum(rs, 'blocked') }));
+        sessions: usageSum(rs.filter((r) => r.kind !== 'guidance-check'), 'sessions'), blocked: usageSum(rs, 'blocked') }));
     };
     const fillRows = (id, rows, cols) => {
       const tbody = document.querySelector('#' + id + ' tbody');
@@ -1135,25 +1385,28 @@ dash.calc('new_runs', {
   function draw() {
     drawImpact();
     fillMarks();
+    drawHalfBuilt();
+    drawFixtureRequests();
+    drawCostBenefit();
     drawMeters();
     drawDumbbell();
     drawTrend();
     renderTable('tbl-coverage', 'eval_coverage', [
-      { field: 'skill' }, { field: 'status', pill: true }, { field: 'runs', num: true }, { field: 'last_run', fmt: (v) => (v ? day(v) : '—') },
+      { field: 'skill' }, { field: 'status', pill: true }, { field: 'runs', num: true }, { field: 'last_run', ago: true },
       { field: 'with_share', num: true, fmt: (v) => (v == null ? '—' : pct(v)) }, { field: 'without_share', num: true, fmt: (v) => (v == null ? '—' : pct(v)) },
       { field: 'gain', num: true, fmt: (v) => (v == null ? '—' : (v >= 0 ? '+' : '') + d3.format('.0f')(v * 100) + ' pts') },
     ], (r) => r.skill, { sort: { field: 'runs', dir: 'asc' } });
-    renderTable('tbl-waiting', 'waiting', [{ field: 'item' }, { field: 'where', link: 'link' }, { field: 'since', fmt: day }], (r) => r.item);
-    renderTable('tbl-routines-mini', 'routines', [{ field: 'name', link: 'link' }, { field: 'health', pill: true }, { field: 'last_run', fmt: dt }], (r) => r.name);
-    renderTable('tbl-ingests', 'eval_ingests', [{ field: 'run_id', link: 'url', fmt: (v, r) => v || r.message }, { field: 'ingested_at', fmt: dt }], (r) => r.sha);
+    renderTable('tbl-waiting', 'waiting', [{ field: 'item' }, { field: 'where', link: 'link' }, { field: 'since', ago: true }], (r) => r.item);
+    renderTable('tbl-routines-mini', 'routines', [{ field: 'name', link: 'link' }, { field: 'health', pill: true }, { field: 'last_run', ago: true }], (r) => r.name);
+    renderTable('tbl-ingests', 'eval_ingests', [{ field: 'run_id', link: 'url', fmt: (v, r) => v || r.message }, { field: 'ingested_at', ago: true }], (r) => r.sha);
     renderTable('tbl-loop-stages', 'loop_stages', [{ field: 'kind' }, { field: 'stage', link: 'link' }, { field: 'status', pill: true }, { field: 'what' }, { field: 'gaps' }], (r) => r.order);
     renderTable('tbl-loop-grid', 'loop_grid', [{ field: 'stage' }, { field: 'skills' }, { field: 'guidance' }, { field: 'memories' }], (r) => r.stage);
-    renderTable('tbl-loop-lanes', 'loop_lanes_live', [{ field: 'lane' }, { field: 'thread', link: 'link' }, { field: 'does' }, { field: 'latest', link: 'latest_link' }, { field: 'state', pill: true }], (r) => r.thread);
+    renderTable('tbl-loop-lanes', 'loop_lanes_live', [{ field: 'lane' }, { field: 'thread', link: 'link' }, { field: 'does' }, { field: 'latest', link: 'latest_link' }, { field: 'state', pill: true }, { field: 'last_active', ago: true }], (r) => r.thread);
     renderTable('tbl-loop-gaps', 'loop_gaps', [{ field: 'gap' }, { field: 'title', link: 'link' }, { field: 'status', pill: true }, { field: 'owner' }], (r) => r.gap);
     renderTable('tbl-roster', 'roster', [{ field: 'model', link: 'link' }, { field: 'role' }, { field: 'status', pill: true }, { field: 'why' }], (r) => r.id);
     renderTable('tbl-models', 'eval_summary', [{ field: 'model' }, { field: 'runs', num: true }, { field: 'helped', num: true }, { field: 'tied', num: true }, { field: 'hurt', num: true }, { field: 'with_avg', num: true, fmt: pct }, { field: 'without_avg', num: true, fmt: pct }, { field: 'lift', num: true, fmt: (v) => (v >= 0 ? '+' : '') + d3.format('.1f')(v * 100) + ' pts' }], (r) => r.model, { sort: { field: 'runs', dir: 'desc' } });
     renderTable('tbl-runs', 'eval_runs', [
-      { field: 'fired_at', fmt: dt }, { field: 'fixture' }, { field: 'model', fmt: (v) => String(v).replace('claude-', '') },
+      { field: 'fired_at', ago: true }, { field: 'fixture' }, { field: 'model', fmt: (v) => String(v).replace('claude-', '') },
       { field: 'with_skill', num: true, fmt: one }, { field: 'without_skill', num: true, fmt: one }, { field: 'checks', num: true },
       { field: 'judge', fmt: (v, r) => (v === 'ran' ? one(r.with_judge) + ' vs ' + one(r.without_judge) : 'not needed') },
       { field: 'cost_usd', num: true, fmt: usd }, { field: 'meter_points', num: true, fmt: one },
@@ -1166,24 +1419,28 @@ dash.calc('new_runs', {
       { field: 'bare_won', num: true },
     ], (r) => r.model, { sort: { field: 'pairs', dir: 'desc' } });
     renderTable('tbl-bare', 'bare_runs', [
-      { field: 'fired_at', fmt: dt }, { field: 'fixture' }, { field: 'model', fmt: (v) => (v ? String(v).replace('claude-', '') : '—') },
+      { field: 'fired_at', ago: true }, { field: 'fixture' }, { field: 'model', fmt: (v) => (v ? String(v).replace('claude-', '') : '—') },
       { field: 'bare_share', num: true, fmt: (v) => (v == null ? '—' : pct(v)) }, { field: 'without_share', num: true, fmt: (v) => (v == null ? '—' : pct(v)) }, { field: 'with_share', num: true, fmt: (v) => (v == null ? '—' : pct(v)) },
-      { field: 'paired_at', fmt: (v) => (v ? dt(v) : '—') },
+      { field: 'paired_at', ago: true },
       { field: 'trials', num: true }, { field: 'cost_usd', num: true, fmt: (v) => (v == null ? '—' : usd(v)) },
       { field: 'report_url', link: 'report_url', fmt: (v) => (v ? 'Report' : '—') },
     ], (r) => r.run_id, { sort: { field: 'fired_at', dir: 'desc' } });
     renderTable('tbl-cleanup', 'cleanup', [{ field: 'id', link: 'link' }, { field: 'item' }, { field: 'done_when' }, { field: 'status', pill: true }, { field: 'detail' }], (r) => r.id);
-    renderTable('tbl-prs', 'open_prs', [{ field: 'repo' }, { field: 'number', num: true, link: 'url' }, { field: 'title', link: 'url' }, { field: 'author', fmt: (v) => String(v).replace('[bot]', ' (bot)') }, { field: 'created_at', fmt: day }, { field: 'labels' }], (r) => enc(r.repo) + ',' + r.number, { sort: { field: 'created_at', dir: 'asc' } });
-    renderTable('tbl-merged', 'merged_prs', [{ field: 'repo' }, { field: 'number', num: true, link: 'url' }, { field: 'title', link: 'url' }, { field: 'closed_at', fmt: day }], (r) => enc(r.repo) + ',' + r.number, { sort: { field: 'closed_at', dir: 'desc' } });
-    renderTable('tbl-issues', 'open_issues', [{ field: 'repo' }, { field: 'number', num: true, link: 'url' }, { field: 'title', link: 'url' }, { field: 'labels' }, { field: 'updated_at', fmt: day }], (r) => enc(r.repo) + ',' + r.number, { sort: { field: 'updated_at', dir: 'desc' } });
-    renderTable('tbl-threads', 'threads', [{ field: 'title', link: 'link' }, { field: 'state', pill: true }, { field: 'last_active', fmt: dt }], (r) => r.title);
-    renderTable('tbl-routines', 'routines', [{ field: 'name', link: 'link' }, { field: 'what' }, { field: 'schedule' }, { field: 'last_run', fmt: dt }, { field: 'health', pill: true }, { field: 'note' }], (r) => r.name);
-    renderTable('tbl-checkins', 'checkins', [{ field: 'when', fmt: dt }, { field: 'what' }], (r) => r.id, { sort: { field: 'when', dir: 'asc' } });
+    renderTable('tbl-prs', 'open_prs', [{ field: 'repo' }, { field: 'number', num: true, link: 'url' }, { field: 'title', link: 'url' }, { field: 'author', fmt: (v) => String(v).replace('[bot]', ' (bot)') }, { field: 'origin', link: 'origin_url' }, { field: 'created_at', ago: true }, { field: 'checks', pill: true, link: 'checks_url' }, { field: 'labels' }], (r) => enc(r.repo) + ',' + r.number, { sort: { field: 'created_at', dir: 'asc' }, join: 'pr_origin' });
+    renderTable('tbl-merged', 'merged_prs', [{ field: 'repo' }, { field: 'number', num: true, link: 'url' }, { field: 'title', link: 'url' }, { field: 'closed_at', ago: true }], (r) => enc(r.repo) + ',' + r.number, { sort: { field: 'closed_at', dir: 'desc' } });
+    renderTable('tbl-issues', 'open_issues', [{ field: 'repo' }, { field: 'number', num: true, link: 'url' }, { field: 'title', link: 'url' }, { field: 'labels' }, { field: 'updated_at', ago: true }], (r) => enc(r.repo) + ',' + r.number, { sort: { field: 'updated_at', dir: 'desc' } });
+    renderTable('tbl-threads', 'threads', [{ field: 'title', link: 'link' }, { field: 'state', pill: true }, { field: 'last_active', ago: true }], (r) => r.title);
+    renderTable('tbl-routines', 'routines', [{ field: 'name', link: 'link' }, { field: 'what' }, { field: 'schedule' }, { field: 'last_run', ago: true }, { field: 'health', pill: true }, { field: 'note' }], (r) => r.name);
+    const problemsOnly = document.getElementById('console-problems').checked;
+    const took = (v, r) => (v == null ? (r.state === 'Queued' ? 'queued' : 'running') : v >= 3600 ? Math.floor(v / 3600) + 'h ' + String(Math.floor(v % 3600 / 60)).padStart(2, '0') + 'm' : Math.floor(v / 60) + 'm ' + String(v % 60).padStart(2, '0') + 's');
+    renderTable('tbl-console', 'run_stream', [{ field: 'at', ago: true }, { field: 'state', pill: true }, { field: 'source' }, { field: 'name' }, { field: 'title', link: 'link' }, { field: 'duration_s', num: true, fmtNull: true, fmt: took }], (r) => r.key, { sort: { field: 'at', dir: 'desc' }, filter: (r) => !problemsOnly || ['Failed', 'Cancelled', 'Needs approval'].includes(r.state) });
+    renderTable('tbl-checkins', 'checkins', [{ field: 'when', ago: true }, { field: 'what' }], (r) => r.id, { sort: { field: 'when', dir: 'asc' } });
     renderTable('tbl-gate', 'gate', [{ field: 'condition', link: 'link' }, { field: 'status', pill: true }, { field: 'detail' }], (r) => r.condition);
-    renderTable('tbl-decisions', 'decisions', [{ field: 'date' }, { field: 'decision' }, { field: 'link', link: 'link', fmt: (v) => (/github\.com/.test(v) ? v.replace(/^https:\/\/github\.com\/[^/]+\//, '').replace('/pull/', '#') : 'Thread') }], (r) => enc(r.date) + ',' + enc(r.decision), { sort: { field: 'date', dir: 'desc' } });
+    renderTable('tbl-decisions', 'decisions', [{ field: 'date' }, { field: 'decision' }, { field: 'link', link: 'link', fmt: (v) => (/github\.com/.test(v) ? v.replace(/^https:\/\/github\.com\/[^/]+\//, '').replace(/\/(pull|issues)\//, '#') : 'Thread') }], (r) => enc(r.date) + ',' + enc(r.decision), { sort: { field: 'date', dir: 'desc' } });
   }
 
   dash.onData(draw);
+  setInterval(draw, 60000);
   show(location.hash.slice(1) || 'overview', false);
 })();
 </script>

@@ -64,6 +64,14 @@ ALLOWED: dict[str, dict[str, int]] = {
     # email.
     "starter/skills-evals/test/issues/test_issue_real_work_scaffold.py": {"email": 1},
     "starter/skills-evals/test/issues/test_issue_repo_tests.py": {"email": 1},
+    # agentskills: an ssh remote (user `git`) on the reserved `.invalid`
+    # domain, the input of a URL-rewrite test. It is a git remote, not an
+    # email.
+    "starter/agent-skills/scripts/test_fleet_guidance_hook.py": {"email": 2},
+    # skills-evals: two invented addresses, one at a public mail domain and
+    # one at a mixed-case example domain, that the guidance gate's privacy
+    # check must catch.
+    "starter/skills-evals/test/issues/test_issue_124_guidance_gates.py": {"email": 2},
 }
 MANIFESTS_DIR = "export/manifests/"
 

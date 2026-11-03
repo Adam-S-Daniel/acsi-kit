@@ -523,8 +523,11 @@ class AnswerLeakTests(_BuildCase):
     def test_a_task_text_quoting_the_new_test_is_refused(self):
         self.assertRefused(r"four-word run", task_text="Check that self.assertEqual(add(2, 3), 5) holds.")
 
-    def test_an_interface_string_exempts_it(self):
-        self.build(task_text=self.LEAKY, interface_strings=["sum the two operands"])
+    def test_a_prose_interface_string_no_longer_exempts_it(self):
+        # skills-evals#595: a new message or phrase the task asks for is
+        # not in the seed and is not a callable, so it exempts nothing.
+        self.assertRefused(r"interface string", task_text=self.LEAKY,
+                           interface_strings=["sum the two operands"])
 
     def test_the_issues_earlier_text_exempts_it(self):
         self.set_graphql(graphql(body="Please sum the two operands."))
@@ -852,11 +855,135 @@ class RedGreenTests(_BuildCase):
         self.assertRefused("plain package==version", deps=[{"manager": "pip", "requirements": ["pytest>=9"]}])
         self.assertFalse(self.dest.exists(), "invalid pins are refused before writing the destination")
 
+    def test_static_problems_applies_the_answer_rules(self):
+        target = self.build()
+        self.assertEqual(scaffold.static_problems(target), ([], []))
+        path = target / "fixture.yaml"
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        doc["prompt"] += " Evidence at /tmp/example/shots."
+        path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+        problems, _ = scaffold.static_problems(target)
+        self.assertEqual(problems, ["the prompt contains a local filesystem path"])
+
     def test_gate_refuses_preinstalled_python_environment(self):
         target = self.build()
         (target / "seed" / ".fixture-python").mkdir()
         problems, _ = scaffold.static_problems(target)
         self.assertTrue(any("does not load" in problem for problem in problems), problems)
+
+
+# Historical drafts written before the lexical admission rules; their evidence
+# stays, none is scheduled, and they no longer pass admission.
+HISTORICAL_ADMISSION_FAILURES = {
+    # skills-evals#595: its "first and only commit" is a new message the task
+    # asks for, which no longer exempts a leaked run (the integrator,
+    # 2026-11-02: the scaffolder rewrites the task text instead).
+    "_agent-guidance-196": {"substantive code tokens",
+                            "interface string(s) exempt a leaked run"},
+    "example-site-platform-221": {"local filesystem", "substantive code tokens"},
+    "example-site-platform-761": {"substantive code tokens"},
+}
+
+
+class InterfaceProvenanceTests(unittest.TestCase):
+    """skills-evals#595: an interface string that exempts a leaked run must be
+    in the seed, or a callable the checker calls or supplies as a function,
+    found by a real parse (Python ast, Acorn, Ruby Ripper)."""
+
+    LEAK = "make_widget(alpha, beta, gamma)"
+
+    def fixture(self, checker: dict, seed: dict | None = None, strings=None,
+                prompt=None, leak=None) -> tuple[dict, Path]:
+        leak = leak or self.LEAK
+        root = Path(tempfile.mkdtemp(prefix="provenance-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        seed_files = {"tool.py": "def old(alpha, beta, gamma):\n    pass\n", **(seed or {})}
+        for name, body in seed_files.items():
+            (root / "seed" / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / "seed" / name).write_text(body, encoding="utf-8")
+        for name, body in checker.items():
+            (root / "checker" / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / "checker" / name).write_text(body, encoding="utf-8")
+        (root / "solution.patch").write_text(
+            "diff --git a/tool.py b/tool.py\n--- a/tool.py\n+++ b/tool.py\n@@ -1,2 +1,2 @@\n"
+            f"+def {leak}:\n+    return 'sum the two operands'\n", encoding="utf-8")
+        fixture = {"prompt": prompt or (f"Add {leak} so it can sum the two operands "
+                                        "for the widget."),
+                   "interface_strings": strings if strings is not None else [leak]}
+        return fixture, root
+
+    def problems(self, *args, **kw):
+        fixture, root = self.fixture(*args, **kw)
+        return scaffold.interface_provenance(fixture, root)
+
+    def test_a_signature_the_python_checker_calls_is_admitted(self):
+        self.assertEqual(self.problems({"test_tool.py": "from tool import make_widget\n"
+                                        "def test_it():\n    assert make_widget(1, 2, 3)\n"}), [])
+
+    def test_a_signature_the_checker_never_calls_is_refused(self):
+        problems = self.problems({"test_tool.py": "def test_it():\n    assert other(1)\n"})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("1 interface string(s)", problems[0])
+
+    def test_a_name_in_a_comment_or_string_is_not_a_call(self):
+        self.assertTrue(self.problems({"test_tool.py": "# make_widget(1, 2, 3)\n"
+                                       "NOTE = 'make_widget(1, 2, 3)'\n"}))
+
+    def test_the_javascript_checker_calls_or_supplies_it(self):
+        self.assertEqual(self.problems({"t.test.js": "test('x', () => make_widget(1, 2, 3));\n"}), [])
+        supplied = ("const deps = { make_widget: overrides.make_widget || (() => null) };\n"
+                    "run(deps);\n")
+        self.assertEqual(self.problems({"t.test.js": supplied}), [])
+        self.assertTrue(self.problems({"t.test.js": "const make_widget = 3;\n"}))
+
+    @unittest.skipUnless(shutil.which("ruby"), "needs ruby")
+    def test_the_ruby_checker_calls_it(self):
+        self.assertEqual(self.problems({"test_tool.rb": "def test_it\n  make_widget(1, 2, 3)\nend\n"}), [])
+
+    def test_a_string_already_in_the_seed_is_admitted(self):
+        self.assertEqual(self.problems({}, seed={"api.md": f"Call {self.LEAK} to build one.\n"}), [])
+
+    def test_prose_and_literals_are_never_callables(self):
+        self.assertTrue(self.problems({"test_tool.py": "make_widget(1)\n"},
+                                      strings=["sum the two operands"]))
+        self.assertTrue(self.problems({"test_tool.py": "make_widget(1)\n"},
+                                      leak="make_widget(alpha, True, gamma)"))
+
+    def test_qualifiers_must_already_be_in_the_seed(self):
+        # Review round 2: a qualifier chain was free text before its name.
+        leak = "the.fix.is.to.check.length.len(n)"
+        self.assertTrue(self.problems({"test_tool.py": "len(x)\n"}, leak=leak))
+        self.assertEqual(self.problems({"test_tool.py": "tools.make_widget(1, 2, 3)\n"},
+                                       seed={"main.py": "import tools\n"},
+                                       leak="tools.make_widget(alpha, beta, gamma)"), [])
+
+    def test_parameter_names_must_already_be_in_the_seed(self):
+        # Review round 2: `equal(first, and, only, commit)` with `equal`
+        # called by the checker exempted the prose "first and only commit".
+        self.assertTrue(self.problems({"test_tool.py": "equal(1, 1)\n"},
+                                      leak="equal(first, then, only, commit)"))
+
+    def test_one_identifier_cannot_carry_a_four_word_run(self):
+        leak = "check_length_before_indexing(n)"
+        self.assertTrue(self.problems({"test_tool.py": "check_length_before_indexing(1)\n"},
+                                      leak=leak))
+        self.assertTrue(self.problems({"test_tool.py": "f(1)\n"},
+                                      leak="f\u00e0checkingthings(alpha, beta, gamma)"))
+
+    def test_a_string_that_exempts_nothing_is_not_checked(self):
+        self.assertEqual(self.problems({}, strings=["unrelated_name"],
+                                       prompt="Fix the widget please."), [])
+
+    def test_an_unparseable_checker_fails_closed_with_fixed_text(self):
+        problems = self.problems({"test_tool.py": "def broken(:\n"})
+        self.assertEqual(problems, ["the checker could not be parsed to prove an interface string"])
+
+    def test_a_missing_parser_fails_closed(self):
+        fixture, root = self.fixture({"t.test.js": "make_widget(1, 2, 3);\n"})
+        with mock.patch.object(scaffold.subprocess, "run",
+                               side_effect=FileNotFoundError("node")):
+            self.assertEqual(scaffold.interface_provenance(fixture, root),
+                             ["the checker could not be parsed to prove an interface string"])
 
 
 class CommittedFixturesTests(unittest.TestCase):
@@ -873,13 +1000,79 @@ class CommittedFixturesTests(unittest.TestCase):
                 # one shape the scaffold never writes: `draft: false`.
                 promoted = yaml.safe_load((REAL_WORK / name / "fixture.yaml").read_text(
                     encoding="utf-8")).get("draft") is False
-                wanted = [scaffold.NOT_DRAFT_PROBLEM] if promoted else []
-                self.assertEqual(scaffold.static_problems(REAL_WORK / name, detail=True),
-                                 (wanted, []))
+                reasons = HISTORICAL_ADMISSION_FAILURES.get(name, set())
+                allowed = reasons | ({scaffold.NOT_DRAFT_PROBLEM} if promoted else set())
+                problems, warnings = scaffold.static_problems(REAL_WORK / name, detail=True)
+                self.assertEqual(warnings, [])
+                self.assertTrue(all(any(reason in problem for reason in allowed)
+                                    for problem in problems), problems)
+                self.assertEqual({reason for reason in reasons
+                                  if any(reason in problem for problem in problems)}, reasons)
+                if promoted:
+                    self.assertIn(scaffold.NOT_DRAFT_PROBLEM, problems)
 
     def test_the_miner_never_mines_a_scaffold_branch(self):
         self.assertTrue(mine_real_work.is_bot({"head": {"ref": "claude/scaffold-toy-7"}}))
         self.assertFalse(mine_real_work.is_bot({"head": {"ref": "claude/fix-toy"}}))
+
+
+class ScaffoldAnswerRulesTests(_Case):
+    """Offline inputs from scaffold branches 759/764 and controls 761/760.
+
+    Retain the actual prompt, snapshot, patch, checker and relevant seed files;
+    do not run the checkers or fetch their dependencies. CI's test job discovers
+    this module through test/run_tests.py.
+    """
+
+    def real(self, number):
+        records = json.loads((TEST_DIR / "fixtures" / "scaffold-answer-leaks.json").read_text())
+        record = records[str(number)]
+        root = self.tmp / str(number)
+        self.write(root, {"fixture.yaml": yaml.safe_dump(record["fixture"]),
+                          "solution.patch": record["patch"],
+                          "issue-before-fix.txt": record["snapshot"]})
+        self.write(root / "seed", record["seed"])
+        self.write(root / "checker", record["checker"])
+        return root, record["fixture"]
+
+    def rules(self, root, fixture):
+        return scaffold.answer_rules(fixture, root)
+
+    def test_real_759_local_evidence_path_is_rejected(self):
+        root, fixture = self.real(759)
+        self.assertTrue(any("local filesystem" in p for p in self.rules(root, fixture)))
+
+    def test_real_764_followup_snapshot_discloses_the_fix(self):
+        root, fixture = self.real(764)
+        self.assertTrue(any("substantive code tokens" in p for p in self.rules(root, fixture)))
+
+    def test_real_api_signature_controls_pass(self):
+        for number in (761, 760):
+            with self.subTest(number=number):
+                root, fixture = self.real(number)
+                self.assertEqual(self.rules(root, fixture), [])
+
+    def test_removed_solution_details_in_the_snapshot_do_not_reject(self):
+        root, fixture = self.real(764)
+        fixture["prompt"] = "Keep the trailing space while later listeners receive input."
+        self.assertFalse(any("substantive code tokens" in p for p in self.rules(root, fixture)))
+
+    def test_each_local_path_prefix_is_rejected(self):
+        root, fixture = self.real(761)
+        for prefix in ("~/", "/home/", "/tmp/", "file:///tmp/"):
+            with self.subTest(prefix=prefix):
+                fixture["prompt"] = "Evidence at " + prefix + "example/shots."
+                self.assertTrue(any("local filesystem" in p for p in self.rules(root, fixture)))
+
+    def test_substantive_overlap_boundary_is_two_distinct_tokens(self):
+        root, fixture = self.real(761)
+        (root / "solution.patch").write_text(
+            "+++ b/tool.js\n+ firstCall(); secondCall(); thirdCall();\n")
+        (root / "issue-before-fix.txt").write_text("firstCall secondCall thirdCall")
+        fixture["prompt"] = "firstCall secondCall"
+        self.assertFalse(any("substantive code tokens" in p for p in self.rules(root, fixture)))
+        fixture["prompt"] += " thirdCall"
+        self.assertTrue(any("substantive code tokens" in p for p in self.rules(root, fixture)))
 
 
 class _GateCase(_BuildCase):
@@ -1516,7 +1709,9 @@ class WorkflowShapeTests(unittest.TestCase):
         text = GATE.read_text(encoding="utf-8")
         lines = text.splitlines()
         found = list(uses_nodes(yaml.compose(text)))
-        self.assertEqual(len(found), 4)
+        # checkout x2, setup-python, setup-node (#595's checker parse),
+        # create-github-app-token.
+        self.assertEqual(len(found), 5)
         for node in found:
             with self.subTest(uses=node.value):
                 self.assertIsNone(lock_problem(node.value, GATE))

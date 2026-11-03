@@ -19,14 +19,55 @@ asked about.
      "rows": [{"week": "2026-08-31", "kind": "skill", "name": "<name|other>",
                "repo": null, "surface": "local", "invocations": n,
                "sessions": n, "blocked": null, "overridden": null,
-               "outcome": null}]}
+               "outcome": null, "runner": null}]}
 
 A `hook` row counts local git-hook runs from the agent-checks log: `name`
 is a check id (or `other`, or `all` for every run that week), `repo` an
 allowlisted public `owner/name`, `other` or null, `invocations` the runs in
 which the check ran and `blocked` the runs in which it failed; `sessions` is
-null. A second source, `scope: "hooks"` with `runs_scanned`, is present only
+null; `runner` is the first 12 hex of the runner's digest, or null when the
+log line had none (an absent `runner` reads as unknown, since rows written
+elsewhere omit it). Non-hook rows carry `runner: null`. A `guidance` row
+counts sessions per loaded-guidance state (`name` is
+`full`, `stub-only`, `neither` or `unknown`; `invocations` is null). A second source, `scope: "hooks"` with `runs_scanned`, is present only
 when a hook log was read, so an absent one means unknown, not zero.
+
+CLOUD GUIDANCE rows come from the records cloud sessions write to the private
+`persistent/usage-events` branch, never from a transcript: a `guidance` row
+with `surface: "cloud"` (`name` is the state, or `invalid`) and a
+`guidance-check` row with `surface: "cloud"` (`name` is `match`, `mismatch`,
+`none`, `absent` or `unknown`), each counting sessions, `invocations` null. A
+`guidance-check` row is a second view of the SAME sessions, so a sum of
+sessions over week and surface leaves it out. Their source,
+`scope: "guidance-records"` with `surface: "cloud"`, `records_scanned` (the
+distinct sessions counted) and a `from` that is a week boundary, is present
+only when the branch was read; its `from` is the later of the census window's
+start and the Monday of the earliest record's week, because the records carry
+no promise of coverage before the first one: coverage is unknown, not zero.
+The registry commit a session installed is not recorded (`registry_sha` is
+always null); a per-source install record is a follow-up.
+
+LOADED SKILL COPIES (#562, 2026-11-02): a `skill-digest` row counts the
+local uses of one allowlisted skill, in one week, by which copy the session
+loaded: `digest` is the first 12 hex of the lock digest
+(`harness/skill_digest.py`) or `unknown:<reason>` (`UNKNOWN_REASONS`, a fixed
+list: a new reason is a schema change), `repo` the canonical `owner/repo` of
+a `private: false` registry or null, `invocations` the uses and `sessions` the
+distinct sessions; `digest` exists on this kind only. A prefix is published
+only when the content once existed on a public branch of that registry (see
+`scripts/model_usage_census.py`). For every published name and every week on
+or after its source's `from`, the `skill-digest` invocations sum to the
+`skill` row's. Their source is `scope: "skill-records"` with
+`events_scanned` (the uses counted); absent means unknown, not zero.
+`check_public` is the last gate before the file is published.
+
+CLOUD `skill-digest` rows (#562 PR B) have `surface: "cloud"` and their own
+`skill-records` source with `surface: "cloud"`. They count the uses cloud
+sessions uploaded (one per distinct id, a use also recorded locally counted
+only as local), so for each name and week their invocations equal the
+distinct cloud ids counted. Coverage is records seen, never complete: uses
+after a session's last successful upload are lost with the container. There
+are no cloud `skill` rows, so no sum rule ties them to one.
 
 `week` is the Monday (UTC) of the ISO week. Rows are sorted by week, kind,
 name, repo. `sessions` is the number of distinct transcript files that invoked the
@@ -44,15 +85,34 @@ Stdlib only, no network; the caller supplies `now`.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from timeweeks import parse_ts, week_monday, window_weeks
 
 SCHEMA = 1
 SURFACE_LOCAL = "local"
+SURFACE_CLOUD = "cloud"
+#: Kinds that count sessions: their invocations are always null.
+SESSION_KINDS = ("guidance", "guidance-check")
+CLOUD_SCOPE = "guidance-records"
+#: #562: the source of the `skill-digest` rows, one per surface.
+DIGEST_SCOPE = "skill-records"
+DIGEST_KIND = "skill-digest"
+#: Why a `skill-digest` row names no prefix. The first eight are the private
+#: records' `DIGEST_NULL_REASONS` (scripts/model_usage_census.py; a test keeps
+#: them equal); the last three are decided when the rows are built. Fixed: a
+#: new reason is a schema change, never a free string from a record.
+UNKNOWN_REASONS = ("no-base-dir", "builtin", "outside-known-roots", "gone",
+                   "changed-since-load", "refused-by-registry-rules", "too-large",
+                   "bad-name", "conflict", "unlisted-registry", "unverified-commit")
+_PREFIX_RE = re.compile(r"[0-9a-f]{12}")
+#: Any hex run longer than a published prefix: a full digest, a commit, a
+#: session id's hex. Nothing in the file may carry one (#562).
+_LONG_HEX_RE = re.compile(r"[0-9a-fA-F]{13,}")
 ROW_FIELDS = ("week", "kind", "name", "repo", "surface", "invocations",
-              "sessions", "blocked", "overridden", "outcome")
+              "sessions", "blocked", "overridden", "outcome", "runner")
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -62,31 +122,174 @@ def row(iso_week_label: str, kind: str, name: str, invocations: int,
     return {"week": week_monday(iso_week_label), "kind": kind, "name": name,
             "repo": None, "surface": SURFACE_LOCAL, "invocations": invocations,
             "sessions": sessions, "blocked": None, "overridden": None,
-            "outcome": None}
+            "outcome": None, "runner": None}
 
 
 def hook_row(iso_week_label: str, name: str, repo: str | None, runs: int,
-             blocked: int) -> dict:
-    """One local hook row: runs in which check `name` ran, and failed."""
+             blocked: int, runner: str | None = None) -> dict:
+    """One local hook row: runs in which check `name` ran, and failed, by
+    the runner build `runner` (12 hex of its digest, None when unknown)."""
     return {**row(iso_week_label, "hook", name, runs, None), "repo": repo,
-            "blocked": blocked}
+            "blocked": blocked, "runner": runner}
+
+
+def guidance_row(iso_week_label: str, state: str, sessions: int,
+                 surface: str = SURFACE_LOCAL) -> dict:
+    """One guidance row: `sessions` sessions that week whose loaded memory
+    was in `state` (full, stub-only, neither or unknown; a cloud row may also
+    be `invalid`), on `surface`."""
+    return {**row(iso_week_label, "guidance", state, None, sessions),
+            "surface": surface}
+
+
+def guidance_check_row(iso_week_label: str, result: str, sessions: int) -> dict:
+    """One cloud guidance-check row: `sessions` sessions that week whose
+    check value report was `result` (match, mismatch, none, absent or unknown)."""
+    return {**guidance_row(iso_week_label, result, sessions, SURFACE_CLOUD),
+            "kind": "guidance-check"}
+
+
+def digest_row(week_monday_text: str, name: str, repo: str | None, digest: str,
+               invocations: int, sessions: int, surface: str = SURFACE_LOCAL) -> dict:
+    """One `skill-digest` row (#562): `invocations` uses of `name` in the week
+    starting `week_monday_text` whose session loaded the copy `digest` (12
+    hex, or `unknown:<reason>`), in `sessions` distinct sessions."""
+    return {"week": week_monday_text, "kind": DIGEST_KIND, "name": name, "repo": repo,
+            "surface": surface, "invocations": invocations, "sessions": sessions,
+            "digest": digest, "blocked": None, "overridden": None, "outcome": None,
+            "runner": None}
+
+
+def digest_source(floor: datetime, now: datetime, events_scanned: int,
+                  surface: str = SURFACE_LOCAL) -> dict:
+    """The source of the `skill-digest` rows: `from` is the floor (no week
+    before it has rows), `events_scanned` the uses counted on or after it."""
+    return {"surface": surface, "scope": DIGEST_SCOPE, "from": floor.strftime(STAMP),
+            "to": now.strftime(STAMP), "events_scanned": events_scanned}
+
+
+def add_rows(doc: dict, rows: list[dict], source: dict) -> None:
+    """Add `rows` and their `source` to a built document, keeping the order."""
+    doc["sources"].append(source)
+    doc["rows"] = sorted(doc["rows"] + rows, key=_sort_key)
+
+
+def cloud_source(window_from: datetime, now: datetime, records_scanned: int) -> dict:
+    """The source of the cloud guidance rows. `to` is when they were read; the
+    carry-forward below ages a source by it."""
+    return {"surface": SURFACE_CLOUD, "scope": CLOUD_SCOPE,
+            "from": window_from.strftime(STAMP), "to": now.strftime(STAMP),
+            "records_scanned": records_scanned}
 
 
 def document(rows: list[dict], now: datetime, window_from: datetime,
-             sessions_scanned: int, hook_runs_scanned: int | None = None) -> dict:
-    """The whole file: exactly `generated_at`, `schema`, `sources`, `rows`."""
+             sessions_scanned: int, hook_runs_scanned: int | None = None,
+             cloud_guidance: dict | None = None) -> dict:
+    """The whole file: exactly `generated_at`, `schema`, `sources`, `rows`.
+
+    `cloud_guidance` is {"from": datetime, "records_scanned": n}, passed only
+    when the private records were read."""
     window = {"surface": SURFACE_LOCAL, "from": window_from.strftime(STAMP),
               "to": now.strftime(STAMP)}
     sources = [{**window, "scope": "transcripts", "sessions_scanned": sessions_scanned}]
     if hook_runs_scanned is not None:
         sources.append({**window, "scope": "hooks", "runs_scanned": hook_runs_scanned})
+    if cloud_guidance is not None:
+        sources.append(cloud_source(cloud_guidance["from"], now,
+                                    cloud_guidance["records_scanned"]))
     return {
         "generated_at": now.strftime(STAMP),
         "schema": SCHEMA,
         "sources": sources,
-        "rows": sorted(rows, key=lambda r: (r["week"], r["kind"], r["name"],
-                                            r["repo"] or "")),
+        "rows": sorted(rows, key=_sort_key),
     }
+
+
+def _sort_key(entry: dict) -> tuple:
+    return (entry["week"], entry["kind"], entry["name"], entry["repo"] or "",
+            entry["surface"], entry.get("digest") or "", entry["runner"] or "")
+
+
+#: What a publish whose private store could not be read carries forward from
+#: the document last published (#562 generalized #536's cloud-only carry):
+#: (summary label, source scope, row kinds, surface). Each entry is matched by
+#: scope AND surface and aged by its own source's `to`, so a local guidance
+#: row is never carried.
+CARRIED = (("cloud", CLOUD_SCOPE, SESSION_KINDS, SURFACE_CLOUD),
+           ("skill copies", DIGEST_SCOPE, (DIGEST_KIND,), SURFACE_LOCAL),
+           ("cloud skill copies", DIGEST_SCOPE, (DIGEST_KIND,), SURFACE_CLOUD))
+
+
+def carry(previous, new: dict, max_age_days: int = 14) -> dict:
+    """Copy each CARRIED part of `previous` (the document last published)
+    into `new`, verbatim, and return {label: rows carried, or None when that
+    part was not carried}. For when the private records could not be read
+    this run: the rows are already public, and a census older than 14 days
+    counts as missing, so a failed fetch must not drop them from a publish
+    that goes ahead. A part is not carried when `previous` has no such
+    source, `new` already has one, or the source was read more than
+    `max_age_days` before `new` was generated: an old count must not look
+    current. The carried source keeps its old `to`, so a reader sees it is
+    stale; the sum invariant is not re-checked on carried rows."""
+    now = parse_ts(new.get("generated_at"))
+    out = {}
+    for label, scope, kinds, surface in CARRIED:
+        out[label] = None
+        if not isinstance(previous, dict) or now is None:
+            continue
+        if any(s.get("scope") == scope and s.get("surface") == surface
+               for s in new["sources"]):
+            continue
+        source = next((s for s in previous.get("sources", [])
+                       if isinstance(s, dict) and s.get("surface") == surface
+                       and s.get("scope") == scope), None)
+        read = parse_ts(source.get("to")) if source else None
+        if read is None or read > now or now - read > timedelta(days=max_age_days):
+            continue
+        carried = [r for r in previous.get("rows", []) if isinstance(r, dict)
+                   and r.get("surface") == surface and r.get("kind") in kinds]
+        new["sources"].append(source)
+        new["rows"] = sorted(new["rows"] + carried, key=_sort_key)
+        out[label] = len(carried)
+    return out
+
+
+def check_public(doc, allowlist, public_repos) -> list[str]:
+    """Why `doc` must not be published, as fixed phrases (never a value from
+    the document); empty when it may. `public_repos` holds the canonical
+    `owner/repo` of every `private: false` registry, `allowlist` the skill
+    names that may be keys. The publisher calls it last, before `git add`
+    (#562): a full digest, a commit, a fork's name or a private skill's name
+    must fail here even if every builder above it has a bug."""
+    problems = []
+    if not isinstance(doc, dict) or not isinstance(doc.get("rows"), list):
+        return ["not a usage document"]
+    if _LONG_HEX_RE.search(json.dumps(doc, sort_keys=True)):
+        problems.append("a hex run longer than 12")
+    unknown = {f"unknown:{reason}" for reason in UNKNOWN_REASONS}
+    for row in doc["rows"]:
+        if not isinstance(row, dict):
+            problems.append("a row that is not an object")
+            continue
+        kind = row.get("kind")
+        if kind != DIGEST_KIND:
+            if "digest" in row:
+                problems.append("a digest on a row that is not skill-digest")
+            if kind == "skill" and not (row.get("name") == "other"
+                                        or row.get("name") in allowlist):
+                problems.append("a skill name outside the allowlist")
+            continue
+        name, repo, digest = row.get("name"), row.get("repo"), row.get("digest")
+        if name not in allowlist:
+            problems.append("a skill-digest name outside the allowlist")
+        if repo is not None and repo not in public_repos:
+            problems.append("a skill-digest repo outside the public registries")
+        if isinstance(digest, str) and _PREFIX_RE.fullmatch(digest):
+            if repo is None:
+                problems.append("a prefix with no public repo")
+        elif digest not in unknown:
+            problems.append("a digest that is neither a prefix nor a known reason")
+    return problems
 
 
 def _count(value) -> bool:
@@ -115,7 +318,11 @@ def load(path) -> dict | None:
             return None
         if not all(isinstance(entry.get(field), str) for field in ("week", "kind", "name")):
             return None
-        if not _count(entry.get("invocations")):
+        # A guidance row counts sessions, so its invocations are null.
+        if entry["kind"] in SESSION_KINDS:
+            if entry.get("invocations") is not None:
+                return None
+        elif not _count(entry.get("invocations")):
             return None
     return doc
 
@@ -138,6 +345,12 @@ def weight(doc, skill: str, now: datetime, weeks: int = 4) -> int | None:
     """Invocations of `skill` over the `weeks` ISO weeks ending with `now`'s,
     summed across every surface and repo.
 
+    Local uses come from the `skill` rows. Cloud uses come from the cloud
+    `skill-digest` rows, because no cloud `skill` rows are written. There is no
+    double count: the census counts a use whose id was also seen locally once,
+    as local, so a cloud digest row never repeats a local use, and local
+    `skill-digest` rows (which would repeat the `skill` rows) are never added.
+
     None when `doc` is None or stale (unknown); 0 when a fresh census has no
     row for it.
     """
@@ -145,9 +358,69 @@ def weight(doc, skill: str, now: datetime, weeks: int = 4) -> int | None:
         return None
     mondays = {week_monday(label) for label in window_weeks(now, weeks)}
     return sum(entry["invocations"] for entry in doc["rows"]
-               if isinstance(entry, dict) and entry.get("kind") == "skill"
+               if isinstance(entry, dict)
+               and (entry.get("kind") == "skill"
+                    or (entry.get("kind") == DIGEST_KIND
+                        and entry.get("surface") == SURFACE_CLOUD))
                and entry.get("name") == skill and entry.get("week") in mondays
                and _count(entry.get("invocations")))
+
+
+def counted_from(doc, surface: str) -> datetime | None:
+    """The first moment from which `doc` counts skill uses on `surface`.
+
+    Local: the `from` of the local `transcripts` source, the start of the
+    census window. Cloud: the `from` of the cloud `skill-records` source plus
+    7 days. That `from` is the Monday of the week of the earliest cloud record,
+    and the records started mid-week (the hook was new), so that first week is
+    only partly covered; counting from the next week is the conservative
+    reading.
+
+    None when the source is missing, its `from` is unparseable, or `surface`
+    is neither.
+    """
+    if not isinstance(doc, dict):
+        return None
+    if surface == SURFACE_LOCAL:
+        scope, extra = "transcripts", timedelta(0)
+    elif surface == SURFACE_CLOUD:
+        scope, extra = DIGEST_SCOPE, timedelta(days=7)
+    else:
+        return None
+    for source in doc.get("sources") or []:
+        if (isinstance(source, dict) and source.get("scope") == scope
+                and source.get("surface") == surface):
+            start = parse_ts(source.get("from"))
+            return None if start is None else start + extra
+    return None
+
+
+def zero_use(doc, skill: str, now: datetime, weeks: int = 4,
+             surfaces: tuple = (SURFACE_LOCAL, SURFACE_CLOUD)) -> bool | None:
+    """True when `skill` had no use on any of `surfaces` over the `weeks`
+    window ending with `now`'s week; False when it had one; None when that
+    cannot be known.
+
+    This is the contract the eval-scope automation uses to stop evals on
+    skills nobody uses. Unknown (None) when `doc` is None or stale, or when
+    any surface in `surfaces` is not counted back to the window's start
+    (`counted_from` is missing or later than the Monday of its earliest week):
+    a surface that was not yet counting must not read as zero. Pass only the
+    surfaces the skill actually reaches, for example `(SURFACE_LOCAL,)` for a
+    plugin delivered only to the owner's machines. Cloud coverage means
+    sessions that can push to the private usage store: records seen, never
+    complete.
+    """
+    if doc is None or not is_fresh(doc, now):
+        return None
+    earliest = week_monday(window_weeks(now, weeks)[-1])
+    start = datetime.fromisoformat(earliest).replace(tzinfo=timezone.utc)
+    for surface in surfaces:
+        counted = counted_from(doc, surface)
+        if counted is None or counted > start:
+            return None
+    used = weight(doc, skill, now, weeks)
+    return None if used is None else used == 0
 
 
 def session_rate(doc, now: datetime, days: int = 28) -> float | None:

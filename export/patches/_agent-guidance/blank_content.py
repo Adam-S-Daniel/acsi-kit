@@ -75,6 +75,7 @@ SECTIONS = [
     ("Automation vs branch protection", "automation-vs-branch-protection", "core"),
     ("Two GitHub connectors, and which one you are holding", "two-github-connectors", "none"),
     ("Agent-made GitHub contributions carry a marker", "agent-contribution-markers", "core"),
+    ("PR descriptions open with a TLDR", "pr-tldr", "core"),
     ('A GitHub 404 means "not authorized", not "not there"', "github-404-means-not-authorized", "recommended"),
     ("The fleet spans TWO owners, and a scoped search will not say so", "fleet-spans-two-owners", "none"),
     ('"The watch finished" is not "CI passed"', "watch-finished-is-not-ci-passed", "core"),
@@ -178,8 +179,8 @@ IMPACT_ENTRY = """## {date} — {id} — create
 
 RUNNER_EDITS = [
     # The run-log example names only checks the kit ships.
-    ('#    "checks":["rules-dir","secret-file","skill-shell"],"failed":["secret-file"]}\n',
-     '#    "checks":["secret-file","skill-shell"],"failed":["secret-file"]}\n'),
+    ('#    "checks":["rules-dir","secret-file","skill-shell"],"failed":["secret-file"],\n',
+     '#    "checks":["secret-file","skill-shell"],"failed":["secret-file"],\n'),
     # The path checks: the opinionated rules-dir arm goes to the library.
     ('''# Reads NUL-separated paths on stdin and refuses the ones that must never be
 # committed.
@@ -392,8 +393,12 @@ def apply(root: Path, ctx) -> None:
         if tier != "core":
             continue
         row = rows.get(rid)
-        if row is None or "  status: covered\n" not in row or "  fixture: " not in row:
-            raise SystemExit(f"blank_content: the {rid} row is not a covered row with a fixture")
+        # A core row is covered by a fixture, or skipped with the source's
+        # reason (pr-tldr: a check enforces it, re-pin 2026-11-03).
+        covered = row is not None and "  status: covered\n" in row and "  fixture: " in row
+        skipped = row is not None and "  status: skipped\n" in row and "  reason: " in row
+        if not (covered or skipped):
+            raise SystemExit(f"blank_content: the {rid} row is neither covered with a fixture nor skipped with a reason")
         out_rows.append(row)
     for f in sections:
         heading = f.read_text(encoding="utf-8").splitlines()[0]
@@ -432,6 +437,6 @@ def apply(root: Path, ctx) -> None:
         {"op": "insert-before", "file": runner_rel, "anchor": RULES_DIR_ANCHOR, "fragment": "check.sh"},
         {"op": "insert-before", "file": runner_rel, "anchor": "  note_ran secret-file\n", "fragment": "note-ran.sh"},
         {"op": "replace", "file": runner_rel,
-         "old": '#    "checks":["secret-file","skill-shell"],"failed":["secret-file"]}\n',
-         "new": '#    "checks":["rules-dir","secret-file","skill-shell"],"failed":["secret-file"]}\n'},
+         "old": '#    "checks":["secret-file","skill-shell"],"failed":["secret-file"],\n',
+         "new": '#    "checks":["rules-dir","secret-file","skill-shell"],"failed":["secret-file"],\n'},
     ])

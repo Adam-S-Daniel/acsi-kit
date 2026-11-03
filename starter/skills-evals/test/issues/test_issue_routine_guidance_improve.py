@@ -217,11 +217,11 @@ class OutcomeAndGuardTests(unittest.TestCase):
         state = {"cap": 1.0, "spent": 0.0, "pending": 0.0, "pace_room": 0.0,
                  "improve_charge": 0.5, "reservation": 0.05, "runs": 0}
         # 0.4 left: eight eval reservations fit, one improve charge does not.
-        self.assertTrue(guard.check({**state, "pending": 0.6}, "eval"))
+        self.assertIsNone(guard.check({**state, "pending": 0.6}, "eval"))
         for mode in guard.IMPROVE_MODES:
             with self.subTest(mode=mode):
-                self.assertTrue(guard.check(state, mode))
-                self.assertFalse(guard.check({**state, "pending": 0.6}, mode))
+                self.assertIsNone(guard.check(state, mode))
+                self.assertIsNotNone(guard.check({**state, "pending": 0.6}, mode))
 
     def test_every_fire_workflow_mode_is_a_guard_mode(self):
         # Regression: `draft` was missing, so argparse refused every draft
@@ -332,6 +332,17 @@ class ValidateTests(GitCase):
                 self.commit(good_files(**{"summary.json":
                                           json.dumps(record(**changes)).encode()}))
                 self.assertRejected("not accepted|did not pass")
+
+    def test_a_held_out_fixture_that_already_passed_everything_is_rejected(self):
+        full = {FIXTURES[2]: {"passed": 30, "total": 30}}
+        self.commit(good_files(**{"summary.json":
+                                  json.dumps(record(baseline=full)).encode()}))
+        self.assertRejected("held-out fixture passed every check")
+        self.git("reset", "-q", "--hard", "main")
+        partial = {FIXTURES[2]: {"passed": 29, "total": 30}}
+        self.commit(good_files(**{"summary.json":
+                                  json.dumps(record(baseline=partial)).encode()}))
+        self.assertEqual(self.validate()["section"], SECTION)
 
     def test_a_split_that_is_not_the_committed_fixtures_is_rejected(self):
         split = {"rotation": 0, "train": FIXTURES[:1], "validation": FIXTURES[2],

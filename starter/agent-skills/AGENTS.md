@@ -9,6 +9,8 @@
 > Edit only below the `## Repo-specific additions` header.
 > Everything above it will be overwritten on the next sync.
 
+guidance-marker: fleet-stub (transcript counts use this line; keep it)
+
 ## Fleet guidance is delivered once per session — not by this file
 
 The account's full guidance — incidents, fleet policy, machine layout, the
@@ -34,6 +36,14 @@ line:
   would when degraded — just don't report it as a problem or try to "fix" it.
 
 No verdict at all means the hook never ran — treat that as DEGRADED.
+
+**Say what loaded, in your first reply to the user in a session.** The
+installed guidance ends with a line `fleet-guidance check value: <8 hex>`.
+Begin that reply with `fleet-guidance check: <the value>`, copied from that
+line, or `fleet-guidance check: none` when no such line is in your context.
+Never guess a value or copy one from anywhere else: the session's record
+compares it with what actually loaded. Only in replies to the user — never in
+commits, PR or issue text, files or prompts for other agents.
 
 ## Codex reads the same block, from `~/.codex/AGENTS.md`
 
@@ -136,6 +146,8 @@ it means to answer both harnesses. Claude-only hooks go in a file the
 
 The API-credit lane (`bin/claude-credit`, `hooks/credit-lane/`, `hooks/claude-code.json`) is [ADR 0018](docs/decisions/0018-api-credit-lane-for-claude-code.md).
 
+The fleet-guidance hook (`plugins/acsi-anything-anywhere/hooks/fleet-guidance/`, wired in that plugin's `hooks/claude-code.json`) is [ADR 0023](docs/decisions/0023-deliver-the-fleet-guidance-from-a-plugin-hook-that-fetches-it.md). It is Claude-only: at session start it fetches `_agent-guidance`'s `main` HEAD commit with a commit-only git fetch and `base.md` at that commit from `raw.githubusercontent.com`, and installs it through the bundled `fleet-memory.sh`. It never reads the project directory. That script and the bundled `fleet-guidance.md` fallback are verbatim copies from `_agent-guidance`, refreshed only in a reviewed pull request and never edited here.
+
 ### Operational gotchas
 
 - **The ADR 0013 layout is data, not test source.** Which skills each plugin
@@ -172,12 +184,10 @@ The API-credit lane (`bin/claude-credit`, `hooks/credit-lane/`, `hooks/claude-co
   owner machine right away (a plain `bash setup.sh` only removes the skill
   links earlier versions made; it links none since
   [ADR 0017](docs/decisions/0017-harness-aware-plugin-hooks-because-codex-loads-them-too.md)).
-  Before [ADR 0014](docs/decisions/0014-retire-the-account-zip-upload-channel.md),
-  a stale global sync-skills pre-push hook kept pointing at the old plugin
-  path and failed every `git push` from every repo until re-registered;
-  `setup.sh --owner-machine` now only removes that retired hook's global
-  git-config sections, so a machine that ran an earlier version still needs
-  one `--owner-machine` run to stop failing pushes.
+  If every `git push` from every repo fails on a machine, run
+  `setup.sh --owner-machine` once: it removes the global git-config sections
+  of the retired sync-skills pre-push hook
+  ([ADR 0014](docs/decisions/0014-retire-the-account-zip-upload-channel.md)).
 - **`python3 scripts/test_<x>.py` cannot fail, so never verify with it.** This
   is the fleet guidance's "Prove the verifier can fail first" rule. Its
   worked example there is `test_foo.py` (this repo's own deleted example is in
@@ -307,6 +317,24 @@ The method (instrument classes, fixture mining, harness rules) is skills-evals'
   never loaded at inference. Do **not** mass-backfill `PURPOSE.md` across
   untouched skills: every added file moves that skill's digest, which stales
   `skills.lock` in every consumer until re-pinned. On-touch only.
+- **CI enforces the above.** `scripts/check_skill_gates.py`, run in the
+  required `pytest` check, fails a PR whose created, edited or removed
+  SKILL.md lacks a new impact entry, a PURPOSE.md or an Eval line in an
+  accepted form, and keeps `docs/skill-impact.md` append-only. The accepted
+  forms are under "Rules" in that file and in the script's docstring.
+
+### Eval-protected skills take correctness fixes only
+
+The required `pytest` job ends with `_agent-guidance`'s `scripts/eval-protected.js`
+([ADR 0034](https://github.com/example-adopter/_agent-guidance/blob/main/docs/decisions/0034-the-eval-protection-gate-runs-in-required-ci.md)),
+checked out at a pinned commit. A PR that edits a skill directory whose skill the
+public explorer shows as `keep`, or as having runs on its current text, fails
+unless its body has `Correctness fix: <skill> — <class>: <what was wrong>`
+(class `wrong-command`, `broken-path`, `contradiction` or `safety-gap`). Any edit
+restarts that skill's eval evidence; a wording change goes through skills-evals'
+improve lane instead, whose bot-opened `eval-improve/`, `retire-skill/` and
+`draft-skill/` PRs are exempt. After adding the line, re-run the check: it reads
+the body from the API.
 
 ### Action pins
 

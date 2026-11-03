@@ -304,6 +304,50 @@ class WorkspaceGitBoundaryTests(_WorkspaceGitFixture, unittest.TestCase):
         run_eval._git('status', '--short', cwd=self.repo)
         self.assertIn('+after', run_eval._git('diff', cwd=self.repo).stdout)
 
+    def test_sandbox_placeholder_alternates_passes(self):
+        # Since CLI 2.1.316 the sandbox also leaves an empty regular
+        # `.git/objects/info/alternates`; it names no object store.
+        import workspace_git
+        workspace_git.run('init', '-q', cwd=self.repo, check=True)
+        workspace_git.seal(self.repo)
+        self.addCleanup(workspace_git.release, self.repo)
+        for name in ('alternates', 'http-alternates'):
+            with self.subTest(name=name):
+                path = self.repo / '.git' / 'objects' / 'info' / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'')
+                try:
+                    workspace_git.validate(self.repo)
+                    run_eval._git('status', '--short', cwd=self.repo)
+                    self.assertIn('+after', run_eval._git('diff', cwd=self.repo).stdout)
+                finally:
+                    path.unlink()
+
+    def test_alternates_other_than_the_placeholder_refused(self):
+        import workspace_git
+        info = self.repo / '.git' / 'objects' / 'info'
+        info.mkdir(parents=True, exist_ok=True)
+        elsewhere = self.root / 'empty-elsewhere'
+        elsewhere.write_bytes(b'')
+        cases = {'content': lambda path: path.write_text(str(self.root) + '\n'),
+                 'symlink to an empty file': lambda path: path.symlink_to(elsewhere),
+                 'hard-linked empty file': lambda path: os.link(elsewhere, path),
+                 'directory': Path.mkdir}
+        for name in ('alternates', 'http-alternates'):
+            for label, make in cases.items():
+                with self.subTest(name=name, label=label):
+                    path = info / name
+                    make(path)
+                    try:
+                        self.assertFalse(workspace_git._sandbox_placeholder(path))
+                        with self.assertRaisesRegex(RuntimeError, 'workspace_git_tampered'):
+                            run_eval._git('status', cwd=self.repo)
+                    finally:
+                        if path.is_dir() and not path.is_symlink():
+                            path.rmdir()
+                        else:
+                            path.unlink()
+
     def test_only_the_exact_placeholder_shape_passes(self):
         import workspace_git
         gitdir = self.repo / '.git'
@@ -416,6 +460,60 @@ class WorkspaceGitBoundaryTests(_WorkspaceGitFixture, unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'workspace_git_tampered'):
             run_eval._git('diff', cwd=self.repo)
 
+    def test_the_cli_sandbox_info_directory_is_not_tampering(self):
+        # CLI 2.1.317 (2026-11-03) leaves an empty `.git/info/
+        # .claude-sandbox-noreplace` directory on every sandboxed launch, and
+        # every arm on it failed workspace_git_tampered. Only that empty,
+        # owned directory is ignored; anything else by that name still counts.
+        import workspace_git
+        placeholder = self.repo / '.git' / 'info' / '.claude-sandbox-noreplace'
+        workspace_git.seal(self.repo)
+        self.addCleanup(workspace_git.release, self.repo)
+        placeholder.mkdir()
+        self.assertIn('', run_eval._git('diff', cwd=self.repo).stdout)
+        (placeholder / 'payload').write_text('x\n')
+        with self.assertRaisesRegex(RuntimeError, r"'info/\.claude-sandbox-noreplace' added"):
+            run_eval._git('diff', cwd=self.repo)
+        (placeholder / 'payload').unlink()
+        placeholder.rmdir()
+        placeholder.write_bytes(b'')
+        with self.assertRaisesRegex(RuntimeError, 'workspace_git_tampered'):
+            run_eval._git('diff', cwd=self.repo)
+        placeholder.unlink()
+        hooks = self.repo / '.git' / 'hooks' / '.claude-sandbox-noreplace'
+        hooks.mkdir()
+        hooks.joinpath('pre-commit').write_text('#!/bin/sh\n')
+        with self.assertRaisesRegex(RuntimeError, 'workspace_git_tampered'):
+            run_eval._git('diff', cwd=self.repo)
+
+    def test_the_refusal_names_what_changed(self):
+        # 2026-11-03: an in-place arm failed with only "baseline
+        # configuration, info, or hooks changed" and no trace survived, so
+        # nothing said which entry moved. The refusal now names it.
+        import workspace_git
+        cases = [
+            ("info/attributes", lambda: (self.repo / '.git' / 'info' / 'attributes').write_bytes(b''),
+             r"'info/attributes' added \(0 bytes [0-9a-f]{12}\)"),
+            ("config", lambda: self.raw('config', 'user.name', 'changed'),
+             r"'config' changed \(\d+ bytes [0-9a-f]{12} -> \d+ bytes [0-9a-f]{12}\)"),
+            ("hook", lambda: shutil.copyfile(self.script, self.repo / '.git' / 'hooks' / 'pre-commit'),
+             r"'hooks/pre-commit' added"),
+            ("exclude", lambda: (self.repo / '.git' / 'info' / 'exclude').unlink(),
+             r"'info/exclude' removed"),
+        ]
+        for name, change, pattern in cases:
+            with self.subTest(name=name):
+                workspace_git.seal(self.repo)
+                self.addCleanup(workspace_git.release, self.repo)
+                change()
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        r'workspace_git_tampered: baseline configuration, info, or hooks '
+                        r'changed: .*' + pattern):
+                    run_eval._git('diff', cwd=self.repo)
+                workspace_git.release(self.repo)
+        self.assertFalse(self.marker.exists())
+
     def test_baseline_git_directory_replaced(self):
         import workspace_git
         workspace_git.seal(self.repo)
@@ -506,6 +604,80 @@ class WorkspaceGitBoundaryTests(_WorkspaceGitFixture, unittest.TestCase):
                                      'str(cwd), *args], env=_env(), stdin=subprocess.DEVNULL, '
                                      'capture_output=True, encoding="utf-8", errors="surrogateescape")',
                                      mode='eval').body
+                self.assertEqual(ast.dump(sinks[0]), ast.dump(expected))
+                allowed_reads.add(id(sinks[0]))
+            if path == harness / 'skill_digest.py':
+                # The lock digest's ignored-file listing (#536): one sink that
+                # must match the registry generator's `ignored_paths`, so it
+                # keeps the user's global excludes. Never a workspace. #562
+                # (2026-11-02) hoisted its two EOL flags into GIT_VERBATIM.
+                method = next(node for node in tree.body
+                              if isinstance(node, ast.FunctionDef) and node.name == 'git_ignored')
+                sinks = [node for node in ast.walk(method) if isinstance(node, ast.Call)
+                         and isinstance(node.func, ast.Attribute)
+                         and isinstance(node.func.value, ast.Name)
+                         and (node.func.value.id, node.func.attr) == ('subprocess', 'run')]
+                self.assertEqual(len(sinks), 1)
+                expected = ast.parse('subprocess.run(["git", *GIT_VERBATIM, '
+                                     '"-c", "core.fsmonitor=false", '
+                                     '"-c", "core.hooksPath=/dev/null", "-C", str(repo), '
+                                     '"ls-files", "--others", "--ignored", "--exclude-standard", '
+                                     '"-z"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, '
+                                     'stdin=subprocess.DEVNULL, check=False)', mode='eval').body
+                self.assertEqual(ast.dump(sinks[0]), ast.dump(expected))
+                allowed_reads.add(id(sinks[0]))
+                verbatim = next(node.value for node in tree.body if isinstance(node, ast.Assign)
+                                and [t.id for t in node.targets if isinstance(t, ast.Name)]
+                                == ['GIT_VERBATIM'])
+                self.assertEqual(ast.literal_eval(verbatim),
+                                 ("-c", "core.autocrlf=false", "-c", "core.eol=lf"))
+                # #562: every registry mirror or checkout read (tree_digest,
+                # skill_relpath, content_digests, commit_on_branch, and the
+                # explorer's main history) goes through this one sink: no
+                # caller GIT_*, no global or system config, no credential
+                # helper, no hooks or fsmonitor, stderr captured.
+                method = next(node for node in tree.body
+                              if isinstance(node, ast.FunctionDef) and node.name == 'git_read')
+                sinks = [node for node in ast.walk(method) if isinstance(node, ast.Call)
+                         and isinstance(node.func, ast.Attribute)
+                         and isinstance(node.func.value, ast.Name)
+                         and (node.func.value.id, node.func.attr) == ('subprocess', 'run')]
+                self.assertEqual(len(sinks), 1)
+                expected = ast.parse('subprocess.run(["git", *GIT_VERBATIM, *_GIT_HARDENED, "-C", '
+                                     'str(repo), *args], env=_git_env(lazy), '
+                                     'stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, '
+                                     'stderr=subprocess.PIPE, check=False)', mode='eval').body
+                self.assertEqual(ast.dump(sinks[0]), ast.dump(expected))
+                allowed_reads.add(id(sinks[0]))
+                hardened = next(node.value for node in tree.body if isinstance(node, ast.Assign)
+                                and [t.id for t in node.targets if isinstance(t, ast.Name)]
+                                == ['_GIT_HARDENED'])
+                self.assertEqual(ast.literal_eval(hardened),
+                                 ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+                                  "-c", "credential.helper="))
+                env = next(node for node in tree.body
+                           if isinstance(node, ast.FunctionDef) and node.name == '_git_env')
+                assigned = {kw.arg: kw.value for node in ast.walk(env) if isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute) and node.func.attr == 'update'
+                            for kw in node.keywords}
+                self.assertEqual(sorted(assigned), ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM',
+                                                    'GIT_NO_REPLACE_OBJECTS', 'GIT_TERMINAL_PROMPT'])
+                self.assertEqual(ast.dump(assigned['GIT_CONFIG_GLOBAL']),
+                                 ast.dump(ast.parse('os.devnull', mode='eval').body))
+            if path == harness / 'run_eval.py':
+                # #535: the arm's `git --version`, the binary's own version
+                # with no caller `GIT_*` and no system or global config.
+                # Never a workspace and never a repository.
+                method = next(node for node in tree.body
+                              if isinstance(node, ast.FunctionDef) and node.name == 'git_version')
+                sinks = [node for node in ast.walk(method) if isinstance(node, ast.Call)
+                         and isinstance(node.func, ast.Attribute)
+                         and isinstance(node.func.value, ast.Name)
+                         and (node.func.value.id, node.func.attr) == ('subprocess', 'run')]
+                self.assertEqual(len(sinks), 1)
+                expected = ast.parse('subprocess.run(["git", "--version"], env=env, '
+                                     'stdin=subprocess.DEVNULL, capture_output=True, text=True, '
+                                     'timeout=VERSION_TIMEOUT_S)', mode='eval').body
                 self.assertEqual(ast.dump(sinks[0]), ast.dump(expected))
                 allowed_reads.add(id(sinks[0]))
             bindings = {}
@@ -651,6 +823,7 @@ class WorkspaceGitBoundaryTests(_WorkspaceGitFixture, unittest.TestCase):
                 mock.patch.object(run_eval.guidance, 'deliver', return_value=delivery), \
                 mock.patch.object(run_eval.guidance, 'run_guard', return_value={'ok': True}), \
                 mock.patch.object(run_eval, 'run_agent', agent), \
+                mock.patch.object(run_eval.guidance, 'receipt_verdict', return_value={"proof": "transcript", "ok": True, "reason": None, "detail": None, "files": []}), \
                 mock.patch.object(run_eval.judge, 'score') as judge:
             result = run_eval._run_guidance_arm(arm, fixture, seed, ctx, args, 'test')
         self.assertEqual(result['error']['type'], 'workspace_git_tampered')

@@ -718,3 +718,161 @@ routine run and no real pull request.
   noisy or near-threshold measurement, plus one proposal call: 49 agent
   sessions for a four-fixture section, 73 at six. The prompt raises this
   mode's nested-agent limit to 100 and keeps the 90-minute stop.
+
+## Held-out screen addendum (2026-10-30)
+
+The owner, on the first loop-shipped improvement (adam-agentskills#87): its
+held-out fixture, `drift-report-capture`, passed 21 of 21 checks before and
+after the edit. A held-out fixture that already passes every check can catch
+a regression but can never show that an edit carries over to a task the
+proposer did not see. His ask: refuse such a held-out fixture, pick a harder
+one, and measure the held-out fixture before spending tokens on anything
+else.
+
+- **Held-out first.** Both proposers measure the rotating validation
+  fixture's baseline before anything else. `propose_skill_edit.py` now
+  measures its baseline one fixture per `local_eval.py --fixture` call (each
+  fixture still once, so no extra tokens), validation first;
+  `propose_guidance_edit.py` runs the validation fixture's baseline trials
+  before its proposal call and reuses them as that fixture's first
+  `--trials` baseline trials (so on that one fixture the baseline precedes
+  the candidate rather than interleaving with it; the regression guard reads
+  it, and a re-measure would cost a fixture's worth of trials).
+- **Saturated is refused.** `propose_skill_edit.saturated`: every objective
+  check passed in every trial, with no error. The judge is not consulted
+  (the motivating case had a judge mean of 8.6), and `decide` still guards
+  it. A saturated validation fixture is swapped for the next in rotation
+  order (`validation_order`, never the fixed holdout), and train becomes the
+  rest; the skill proposer passes over, unmeasured, a candidate whose
+  fixture-derived trigger set would be unusable. The record keeps the order
+  tried as `heldout_screen`.
+- **When nothing is harder.** Every candidate saturated, or the chosen one
+  errored: the run is rejected with phase `held-out` ("no held-out
+  headroom", or "inconclusive") before any train, trigger, proposal or
+  candidate spend. The fix is a harder fixture, the same as for the "no
+  train headroom" stop.
+- **The gates refuse it too.** `improve_gate.py` and
+  `guidance_improve_gate.py` reject an accepted record whose validation
+  fixture's baseline passed every check, so an older or edited copy of the
+  loop cannot land such an edit.
+- **Existing cases.** The routine runs with an empty results directory, so
+  the default rotation is always 0 and every run held out the first fixture
+  by name; for review-bash-ci-reliability that is the saturated
+  `drift-report-capture`. From this change the screen moves past it on the
+  next run. Of the accepted records on `claude/eval-improve-*` and
+  `claude/eval-guidance-improve-*` branches on 2026-10-30, only #87's had a
+  saturated held-out fixture.
+
+
+## Text-only skill changes addendum (2026-11-03)
+
+The owner, 2026-11-03, on a decision card: "Should text-only loop skill PRs in
+plugins with hooks auto-merge?" "Yes, auto-merge them." This replaces
+"Draft when the plugin runs code" above. A whole plugin was lowered to a
+draft for having a `hooks/` or `bin/` directory, a settings or package file
+or a manifest `hooks` or `settings` key, so every skill in
+`acsi-coding-local` became a draft, even a new SKILL.md that nothing runs
+([adam-agentskills#111](https://github.com/Adam-S-Daniel/adam-agentskills/pull/111),
+whose plugin-runtime-approval check passed without asking anyone).
+`improve_gate.py` `auto_refusal` now lowers to a draft only when
+acsi-agentskills' `scripts/plugin_runtime_gate.py` would hold the change:
+the skill has its own `hooks/` or `bin/`, or a hook file, manifest or
+settings file of its plugin names a path under `skills/<skill>/`. The
+required `plugin-runtime-approval` check still gates every pull request, so
+anything the gate does hold waits for the owner whatever this decides.
+
+## Trigger-only improve mode addendum (2026-11-03)
+
+The owner, 2026-11-03, on a decision card for
+[skills-evals#662](https://github.com/Adam-S-Daniel/skills-evals/issues/662):
+"Build a trigger-only improve fire": a fire that runs only skill-creator's
+description loop and is accepted when held-out trigger accuracy rises by
+0.15 or more with no drop on should-not-trigger queries, its pull request
+merging like any other loop pull request.
+
+Why: the planner's trigger lane finds skills that almost never trigger
+(usage weight at most `TRIGGER_MAX_WEIGHT`) and, for those with a reviewed
+`evals/<skill>/trigger-eval-set.json`, wanted a description fix. An
+ordinary improve run cannot give one: it stops at "no train headroom"
+before its trigger half whenever the skill already passes its own
+fixtures, and it needs at least three fixtures, which a rarely used skill
+often lacks. So the item sat as "needs routine prompt change" with
+nothing to run it.
+
+What it is:
+
+- Fire mode stays `improve`, with a new dispatch input `trigger_only`
+  (`true` sends `"trigger_only": true` as the payload's last key; the
+  default payload is unchanged). The run title is `Fire eval routine:
+  improve trigger <skill>`, so `improve_outcomes.py` counts it as an
+  improve attempt of that skill: it shares the cooldown, the stop rule,
+  the improve charge and the improve cap, and the planner never plans it
+  beside an ordinary improve fire for the same skill (both would write
+  `eval-improve/<skill>`).
+- `propose_skill_edit.py --trigger-only --trigger-eval-set FILE` needs no
+  fixtures. The set must hold at least `TRIGGER_ONLY_MIN_CLASS` (8)
+  queries of each class, so skill-creator's 0.4 split holds out at least
+  three of each. It runs the loop once and compares `history[0]` (the
+  original description) with the entry the loop picked as best:
+  accepted when the held-out pass rate rose by at least
+  `TRIGGER_ONLY_MIN_GAIN` (0.15) and no fewer should-not-trigger queries
+  pass (train plus held-out). The best is picked on the same held-out
+  queries it is judged on, an optimistic bias the 0.15 margin and the
+  should-not-trigger floor are there to absorb.
+- `routine-improve-gate.yml` takes the same three files. `improve_gate.py`
+  checks a `mode: trigger-only` record against its own key set, re-derives
+  the acceptance from its counts, and refuses a patch that moves anything
+  in SKILL.md but the description.
+- A skill in the lane without a set gets a `needs-trigger-set` issue for
+  the fleet worker; a pull request that adds exactly that one file, valid
+  by the loop's own reader and size floor, merges itself through
+  `fixture-pr-gate.yml` (repo-settings ADR 0018).
+
+## Description trim mode addendum (2026-11-03)
+
+[skills-evals#687](https://github.com/Adam-S-Daniel/skills-evals/issues/687),
+built at the integrator's request: queue the ten length-waived description
+trims through the improve lane.
+[adam-agentskills#119](https://github.com/Adam-S-Daniel/adam-agentskills/pull/119)
+capped descriptions at 400 characters; ten eval-protected skills were left
+long with a `length-limit` waiver, because a hand edit would reset their
+eval evidence (_agent-guidance ADR 0034).
+
+What it is:
+
+- Fire mode stays `improve`, with a new dispatch input `trim_description`
+  (`true` sends `"trim_description": true` as the payload's last key, never
+  together with `trigger_only`, and no holdout). The run title is `Fire eval
+  routine: improve trim <skill>`, so it shares the improve cooldown, stop
+  rule, charge and cap.
+- `propose_skill_edit.py --trim-description` makes one proposal call (the
+  roster's judge model) for a description of at most `TRIM_MAX_CHARS` (400)
+  characters, keeping every trigger and boundary, as the reply
+  `{"description": "..."}` parsed strictly. It measures the current and the
+  trimmed text on every fixture of the skill (at least `MIN_FIXTURES`), with
+  the call an ordinary candidate is measured with and no judge.
+- The acceptance rule is AGGREGATE non-inferiority: no fixture errored, the
+  candidate's objective passes summed over all fixtures and trials are at
+  least the baseline's (`TRIM_TOLERANCE_CHECKS`, 0), and no single fixture
+  loses more than `TRIM_FIXTURE_DROP_CHECKS` (1) of its passes. Strict
+  per-fixture non-inferiority was the other option. It was turned down
+  because three trials of a fixture move its summed checks by one on noise
+  alone, so requiring every fixture to hold exactly would reject most
+  faithful trims for a flake. The per-fixture bound of one keeps a trim from
+  losing a fixture's behavior and buying it back on another.
+- `improve_gate.py` checks a `mode: trim` record against its own key set,
+  re-derives the decision from the per-fixture counts with mirrored
+  constants, refuses a patch that changes the body or leaves the description
+  over the cap, and, in `prepare`, removes exactly the skill's `length-limit`
+  waiver from acsi-agentskills' `scripts/skills_waivers.yml` as text,
+  checked by reloading the file. That path is allowed in the registry change
+  only for a trim.
+- The planner reads the waivers from its acsi-agentskills checkout and plans
+  one trim fire per eligible waived skill BEFORE the value-ranked improve
+  fires (a fixed chore, not ranked by value), still under the improve cap
+  and the outage hold. Its `trims` map and `description-trim` work items
+  track each skill until the waiver is gone; they are never filed as issues.
+
+Not done here: a rejected trim keeps its waiver, but nothing yet writes the
+rejection's reason into acsi-agentskills' `docs/skill-impact.md`, as the
+issue asks; the rejection is in the loop's record and the plan's `trims` map.

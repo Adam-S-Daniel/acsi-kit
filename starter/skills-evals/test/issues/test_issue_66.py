@@ -208,23 +208,27 @@ def _tree(root: Path) -> list[str]:
 def _stable_bytes(path: Path) -> bytes:
     """A result file's bytes without what differs from one run to the next
     whatever the harness does: a summary's `run` and `usage` blocks (#370:
-    the harness commit, wall-clock times) and the report's two lines made
+    the harness commit, wall-clock times) and the report's three lines made
     from them. Both blocks are a summary's last two keys, so the rest
     re-serializes to the bytes the harness wrote before them. Also without
     `judge_selection` (#371), the key before those two, which names the judge
     chosen and is tested in test_issue_371_judge_tier.py, and without
     `fixture_digest` and `judge_conditional` (#70), which follow it and are
-    tested in test_issue_70_retirement.py."""
+    tested in test_issue_70_retirement.py. And without `harness.git_version`
+    (#535), the host's own `git --version`, tested in
+    test_issue_535_git_provisioning.py."""
     if path.name == "summary.json":
         summary = json.loads(path.read_text(encoding="utf-8"))
         for block in ("run", "usage", "judge_selection"):
             summary.pop(block)
+        summary["harness"].pop("git_version", None)
         for block in ("fixture_digest", "judge_conditional"):
             summary.pop(block, None)
         return json.dumps(summary, indent=2).encode("utf-8")
     if path.name == "report.md":
         return b"".join(line for line in path.read_bytes().splitlines(keepends=True)
-                        if not line.startswith((b"- Run: ", b"- Account meter")))
+                        if not line.startswith((b"- Run: ", b"- Account meter",
+                                                        b"- Estimated cost")))
     return path.read_bytes()
 
 
@@ -1111,6 +1115,76 @@ class TestIssue66Trials(_HarnessCase):
 # 4. the statistics, for shapes the entry point cannot easily be made to write
 
 
+class TestRunnerErrorClass(_HarnessCase):
+    """An errored arm prints its error class beside "Runner-level error"
+    (cloud readers cannot download the diagnostics artifact), never its
+    detail; `--retry-transient` (eval.yml) runs a timeout or a retryable API
+    status once more."""
+
+    SKILL = "error-class-skill"
+    ARGS = ("--arm", "without_skill", "--no-judge", "--timestamp", TS)
+
+    def setUp(self):
+        super().setUp()
+        self.fixture_dir = _write_fixture(self.evals / self.SKILL, self.SKILL)
+        self.arm_dir = self.results / self.SKILL / TS / "without_skill"
+
+    def test_the_log_names_the_class_and_never_the_body(self):
+        self._script(agents=[{"mode": "api_error"}])
+        proc = self._run(self.fixture_dir, *self.ARGS)
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("Runner-level error in arm(s): without_skill\n"
+                      "  without_skill: agent_error, HTTP 529\n", proc.stdout)
+        self.assertNotIn("BODY-MUST-NOT-BE-LOGGED", proc.stdout + proc.stderr)
+        # Without the flag there is no retry.
+        self.assertEqual(len(self._calls("agents")), 1)
+
+    def test_a_cli_failure_prints_its_type_and_is_not_retried(self):
+        self._script(agents=[{"mode": "error"}])
+        proc = self._run(self.fixture_dir, *self.ARGS, "--retry-transient")
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("  without_skill: nonzero_exit\n", proc.stdout)
+        # Not a retryable class: one call only.
+        self.assertEqual(len(self._calls("agents")), 1)
+
+    def test_a_transient_error_is_retried_once_and_the_retry_is_scored(self):
+        self._script(agents=[{"mode": "api_error"}, {"write": "marker.txt"}])
+        proc = self._run(self.fixture_dir, *self.ARGS, "--retry-transient")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("retrying without_skill once after agent_error, HTTP 529",
+                      proc.stdout)
+        self.assertEqual(len(self._calls("agents")), 2)
+        summary = json.loads((self.arm_dir / "summary.json").read_text(encoding="utf-8"))
+        self.assertIsNone(summary["error"])
+
+    def test_a_second_transient_error_fails_the_leg(self):
+        self._script(agents=[{"mode": "api_error"}, {"mode": "api_error"}])
+        proc = self._run(self.fixture_dir, *self.ARGS, "--retry-transient")
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertEqual(len(self._calls("agents")), 2)
+        self.assertIn("  without_skill: agent_error, HTTP 529\n", proc.stdout)
+
+    def test_error_class_reads_only_the_type_status_and_exit(self):
+        cls = run_eval.error_class
+        self.assertIsNone(cls(None))
+        self.assertEqual(cls({"type": "timeout", "detail": "agent timed out after 60s"}),
+                         {"type": "timeout", "status": None})
+        self.assertEqual(cls({"type": "nonzero_exit", "detail": "API Error: 503 down"}),
+                         {"type": "nonzero_exit", "status": 503})
+        self.assertEqual(cls({"type": "bad type\nwith a body", "detail": ""})["type"],
+                         "unknown")
+        transient = run_eval.is_transient
+        self.assertTrue(transient({"type": "timeout", "detail": ""}))
+        self.assertTrue(transient({"type": "agent_error", "detail": "API Error: 429 slow"}))
+        self.assertFalse(transient({"type": "agent_error", "detail": "API Error: 400 bad"}))
+        self.assertFalse(transient({"type": "agent_error", "detail": "could not read"}))
+        self.assertFalse(transient({"type": "setup_failed", "detail": "API Error: 529"}))
+
+    def test_eval_yml_passes_the_flag(self):
+        text = (REPO_ROOT / ".github" / "workflows" / "eval.yml").read_text(encoding="utf-8")
+        self.assertIn("--retry-transient", text)
+
+
 class TestIssue66Timeouts(_HarnessCase):
     """The real trial loop and subprocess.run timeout handler, without a child
     process or any elapsed-time dependency."""
@@ -1138,6 +1212,10 @@ class TestIssue66Timeouts(_HarnessCase):
                         self.args = cmd
                         self.workspace = kwargs["cwd"]
                         self.index = len(children)
+                        # Never a real process: the group helper is a
+                        # recorder below, and os.kill/os.killpg are patched.
+                        self.pid = 424240 + self.index
+                        self.new_session = kwargs.get("start_new_session")
                         self.returncode = None
                         self.killed = self.reaped = False
                         self.timeouts = []
@@ -1190,6 +1268,9 @@ class TestIssue66Timeouts(_HarnessCase):
                       mock.patch.dict(os.environ,
                                       {"CLAUDE_BIN": str(FAKE_CLAUDE)}),
                       mock.patch.object(subprocess, "Popen", InstantChild),
+                      mock.patch.object(run_eval, "_kill_process_group") as reap,
+                      mock.patch("os.killpg") as killpg,
+                      mock.patch("os.kill") as kill,
                       mock.patch.object(run_eval.objective, "run_checks",
                                         return_value=[{"id": "only",
                                                        "passed": True,
@@ -1205,6 +1286,13 @@ class TestIssue66Timeouts(_HarnessCase):
                          "name": None}, {}, args, TS, (None, None, None))
 
                 self.assertEqual(len(children), 3)
+                # #594: each child in its own session, its group ended after,
+                # the timed-out one included; no real signal sent.
+                self.assertEqual([c.new_session for c in children], [True] * 3)
+                self.assertEqual([call.args for call in reap.call_args_list],
+                                 [(c.pid,) for c in children])
+                killpg.assert_not_called()
+                kill.assert_not_called()
                 self.assertEqual([c.timeouts for c in children],
                                  [[expected], [expected], [expected]])
                 self.assertTrue(children[1].killed)

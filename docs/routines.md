@@ -22,9 +22,9 @@ starts before you leave it on a schedule.
 | Setting | Value |
 |---|---|
 | Trigger | API trigger only; no schedule |
-| Prompt | everything inside the fence in `skills-evals`' [`docs/routine-prompt.md`](../starter/skills-evals/docs/routine-prompt.md) |
+| Prompt | everything inside the fence in `skills-evals`' [`docs/routine/eval-runner-prompt.md`](../starter/skills-evals/docs/routine/eval-runner-prompt.md), a short stub that reads the routine's instructions, [`docs/routine/eval-runner-instructions.md`](../starter/skills-evals/docs/routine/eval-runner-instructions.md), from `main` at the start of each run |
 | Model | `claude-sonnet-5-5`, or a newer default |
-| Repos attached | the ones its RULES line names, default branches only: `skills-evals`, `_agent-guidance`, `acsi-agentskills`, `wsl-automation`, and the example platform and site unless you removed them (edit the RULES line to match) |
+| Repos attached | the ones the instructions' RULES line names, default branches only: `skills-evals`, `_agent-guidance`, `acsi-agentskills`, `wsl-automation`, and the example platform and site unless you removed them (edit the RULES line to match) |
 | Environment | the allowlist, plus nested `claude -p`, `node` and `npm` |
 
 The API trigger shows its bearer once. Keep it and the routine's
@@ -36,8 +36,10 @@ bash bootstrap/set-secrets.sh --only routine-fire
 ```
 
 `routine-eval-fire.yml` refuses to fire while either is missing. Limits: 30
-fires an hour per routine, 100 API fires an hour per account. When you
-change the prompt, change `docs/routine-prompt.md` in the same pull request.
+fires an hour per routine, 100 API fires an hour per account. A change to how
+the routine works is a pull request to `docs/routine/eval-runner-instructions.md`,
+and takes effect on the next fire after it merges; paste the stub again only
+when the stub itself changes.
 
 ## Fleet worker
 

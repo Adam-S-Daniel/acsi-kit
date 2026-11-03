@@ -24,7 +24,7 @@
 #                  differ. Afterwards the nightly skills-lock-bump.yml keeps it
 #                  current with scripts/bump-hook-pin.sh.
 #   run-health-sha the forty-zero placeholder in scheduled-run-health.yml
-#                  (repo-settings, skills-evals, acsi-agentskills) becomes your
+#                  (repo-settings, skills-evals, acsi-agentskills, wsl-automation) becomes your
 #                  _agent-guidance default branch's commit: a cross-repo
 #                  reusable workflow takes a full sha.
 #   codex-pin      wsl-automation scripts/sync-codex-cloud-environments.sh:
@@ -201,7 +201,7 @@ task_run_health_sha() {
   local r pinned
   need _agent-guidance .github/workflows/scheduled-run-health-reusable.yml
   AG_SHA=$(git -C "$CLONE" rev-parse HEAD); local ag=$CLONE
-  for r in repo-settings skills-evals acsi-agentskills; do
+  for r in repo-settings skills-evals acsi-agentskills wsl-automation; do
     need "$r" "$RH"
     pinned=$(grep -oE 'scheduled-run-health-reusable\.yml@[0-9a-f]{40}' "$CLONE/$RH" | head -n1 | cut -d@ -f2 || true)
     if [ -n "$pinned" ] && [ "$pinned" != "$ZERO40" ] && git -C "$ag" cat-file -e "$pinned^{commit}" 2>/dev/null; then

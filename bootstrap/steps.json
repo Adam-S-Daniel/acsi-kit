@@ -285,7 +285,7 @@
     {
       "id": "16",
       "title": "Pin the scheduled-run-health reusable",
-      "run": "`bootstrap/regenerate.sh run-health-sha`, then merge the three pull requests",
+      "run": "`bootstrap/regenerate.sh run-health-sha`, then merge the four pull requests",
       "kind": "script",
       "part": "generated files",
       "track": "base",
@@ -401,7 +401,7 @@
     {
       "id": "24",
       "title": "Create the eval runner routine",
-      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine-prompt.md`; keep the bearer it shows once and its `trig_...` id",
+      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id",
       "kind": "browser",
       "part": "routines",
       "track": "evals",

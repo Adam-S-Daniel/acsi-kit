@@ -59,6 +59,16 @@
   fixture: evals/guidance/agent-contribution-markers/
   bytes: 631
 
+- id: pr-tldr
+  heading: PR descriptions open with a TLDR
+  file: agents-md/base.md
+  status: skipped
+  reason: >-
+    Enforced mechanically by agent-checks' pr-tldr check, whose refusal message
+    teaches the rule when a PR breaks it.
+  since: 2026-11-02
+  bytes: 324
+
 - id: watch-finished-is-not-ci-passed
   heading: '"The watch finished" is not "CI passed"'
   file: agents-md/base.md
@@ -83,8 +93,11 @@
 - id: skills-ecosystem
   heading: Skills ecosystem
   file: agents-md/base.md
-  status: covered
-  fixture: evals/guidance/skills-ecosystem/
+  status: skipped
+  reason: >-
+    Account facts the model cannot know otherwise, so an eval's outcome is known
+    in advance; the risk is the fact going stale, checked for freshness instead.
+  since: 2026-11-03
   bytes: 1230
 
 - id: two-setup-gaps

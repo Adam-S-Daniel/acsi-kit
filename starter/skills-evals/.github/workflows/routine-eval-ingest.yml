@@ -20,7 +20,8 @@ name: Ingest routine eval results
 #   differs, so a re-run is a no-op and a conflicting one fails.
 #   Only summary.json and report.md are kept (KEEP_LONG_TERM); a validated
 #   tool_trace.json is dropped. `git add` runs without -f, so
-#   persistent/eval-results' .gitignore stays in force.
+#   persistent/eval-results' .gitignore stays in force. `estimate` then adds
+#   `cost_estimate.json` beside the run, computed from the tree alone.
 # * Branch names, shas and file content are never interpolated into a `run:`
 #   block: the event is read from $GITHUB_EVENT_PATH by the validator, which
 #   emits only values that matched a strict pattern, and every later step
@@ -32,22 +33,40 @@ name: Ingest routine eval results
 # * No `concurrency` group: GitHub keeps only the newest pending run in a
 #   group, so a burst of pushes would cancel ingests silently. A push that
 #   loses a race to eval.yml's publish is rebuilt on the new tip and retried
-#   (three attempts); each run writes only its own run id's directory.
+#   (six attempts with backoff); each run writes only its own run id's directory.
 # * The source branch is NOT deleted after ingest: that is an owner decision
 #   still open.
+# * Improve cost records (#572 part 1, 2026-11-02): the routine pushes
+#   `claude/eval-cost-<run id>` on every improve exit, signalled by
+#   routine-eval-cost-pushed.yml. This stays the ONE ingest, so `validate`
+#   stays the single trust gate: `resolve` and `validate` dispatch on the
+#   branch regex and emit `kind` (eval or cost) and `dest`, the validated
+#   destination (`routine-results/<run id>` or `improve-costs/<run id>.json`,
+#   built from the run id, never the branch text). A cost branch must add
+#   exactly `improve-cost/<run id>/cost.json` passing
+#   scripts/improve_cost.py's check_record, and its target must not be a
+#   private skill. A rejection of either kind ends the run red (the alarm).
+#   `place --kind cost` keeps the first record for a run id: a differing
+#   second one is logged with a fixed line and the run succeeds. `estimate`
+#   runs for eval only. pyyaml is installed for cost only (the private-skill
+#   check parses fixture.yaml). A cost ingest, like an eval one, wakes
+#   explorer-data.yml and routine-eval-weekly.yml's top-up re-plan
+#   (accepted, 2026-11-02).
 # * `workflow_dispatch` re-ingests a branch by name (for a missed or failed
 #   run); only the default branch's copy may run, as for the fire workflow.
 
 on:
   workflow_run:
-    workflows: [Routine eval results pushed]
+    workflows: [Routine eval results pushed, Routine eval cost pushed]
     types: [completed]
     branches:
       - claude/eval-*
   workflow_dispatch:
     inputs:
       branch:
-        description: The routine results branch, claude/eval-<run id>.
+        description: >-
+          The routine branch, claude/eval-<run id> (results) or
+          claude/eval-cost-<run id> (an improve run's cost record).
         required: true
         type: string
 
@@ -73,7 +92,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -88,6 +107,10 @@ jobs:
             --event-name "$EVENT_NAME" --event-path "$GITHUB_EVENT_PATH" \
             > "$RUNNER_TEMP/resolve.out"
           cat "$RUNNER_TEMP/resolve.out" >> "$GITHUB_OUTPUT"
+
+      - name: Install the private-skill check's YAML parser
+        if: steps.resolve.outputs.kind == 'cost'
+        run: python3 -m pip install pyyaml==6.0.3
 
       - name: Fetch the results branch into a private ref
         working-directory: skills-evals
@@ -119,28 +142,51 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_ID: ${{ steps.validate.outputs.run_id }}
           SOURCE_SHA: ${{ steps.validate.outputs.sha }}
+          KIND: ${{ steps.validate.outputs.kind }}
+          DEST: ${{ steps.validate.outputs.dest }}
         run: |
           set -euo pipefail
           tree="$RUNNER_TEMP/results-tree"
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           refspec="+refs/heads/persistent/eval-results:refs/remotes/origin/persistent/eval-results"
-          for attempt in 1 2 3; do
+          for attempt in 1 2 3 4 5 6; do
+            # Other publishers push this branch every minute or two, so wait
+            # (about 2, 4, 8, 16 and 32 s plus jitter) before each retry.
+            if [ "$attempt" -gt 1 ]; then
+              sleep $(( (1 << attempt) + RANDOM % 5 ))
+            fi
             git fetch --no-tags origin "$refspec"
             if [ -d "$tree" ]; then
               git worktree remove --force "$tree"
             fi
             git worktree add --detach "$tree" refs/remotes/origin/persistent/eval-results
             placed="$(python3 scripts/ingest_routine_results.py place \
-              --staged "$RUNNER_TEMP/staged" --tree "$tree")"
+              --staged "$RUNNER_TEMP/staged" --tree "$tree" --kind "$KIND")"
+            if grep -qxF -- "conflict=true" <<<"$placed"; then
+              echo "a different cost record for run ${RUN_ID} is already on persistent/eval-results; the first one stands"
+              exit 0
+            fi
             if grep -qxF -- "changed=false" <<<"$placed"; then
               echo "run ${RUN_ID} is already on persistent/eval-results; nothing to commit"
               exit 0
             fi
-            git -C "$tree" add -- "routine-results/${RUN_ID}"
+            if [ "$KIND" = eval ]; then
+              # The run's points estimate, calibrated on the runs already on
+              # the tree; written once, beside the run it estimates. Its
+              # failure costs the estimate, never the results.
+              if ! python3 scripts/ingest_routine_results.py estimate \
+                   --tree "$tree" --run-id "$RUN_ID"; then
+                echo "::warning::no cost_estimate.json was written for run ${RUN_ID}"
+              fi
+              message="ingest: routine run ${RUN_ID} from ${SOURCE_SHA} [skip ci]"
+            else
+              message="ingest: improve cost ${RUN_ID} from ${SOURCE_SHA} [skip ci]"
+            fi
+            git -C "$tree" add -- "$DEST"
             git -C "$tree" \
               -c user.name="skills-evals routine-ingest bot" \
               -c user.email="skills-evals@users.noreply.github.com" \
-              commit -q -m "ingest: routine run ${RUN_ID} from ${SOURCE_SHA} [skip ci]"
+              commit -q -m "$message"
             commit="$(git -C "$tree" rev-parse HEAD)"
             if git -C "$tree" -c "http.https://github.com/.extraheader=$auth" \
                  push origin HEAD:refs/heads/persistent/eval-results; then
@@ -148,12 +194,12 @@ jobs:
               if git merge-base --is-ancestor "$commit" refs/remotes/origin/persistent/eval-results; then
                 echo "ingested run ${RUN_ID} as ${commit}"
                 {
-                  echo "### Routine results ingested"
+                  echo "### Routine ${KIND} branch ingested"
                   echo
                   echo "- Run id: \`${RUN_ID}\`"
                   echo "- Source commit: \`${SOURCE_SHA}\`"
                   echo "- persistent/eval-results commit: \`${commit}\`"
-                  echo "- Path: \`routine-results/${RUN_ID}/\`"
+                  echo "- Path: \`${DEST}\`"
                 } >> "$GITHUB_STEP_SUMMARY"
                 exit 0
               fi
@@ -162,5 +208,5 @@ jobs:
             fi
             echo "push attempt ${attempt} was rejected; rebuilding on the new tip"
           done
-          echo "::error::could not push to persistent/eval-results after 3 attempts"
+          echo "::error::could not push to persistent/eval-results after 6 attempts"
           exit 1

@@ -96,6 +96,7 @@ Messages never quote file content.
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import hashlib
 import json
@@ -845,6 +846,225 @@ def _walk(root: Path):
             yield Path(directory) / name
 
 
+# Lexical policy: at most two distinct code-shaped tokens in the issue part
+# may also occur in solution additions. Ordinary words and symptom prose are
+# not code tokens. See DESIGN.md for calibration and limitations.
+CODE_OVERLAP_LIMIT = 2
+CODE_TOKEN = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*(?:[./:-][A-Za-z0-9_$-]+)*")
+LOCAL_PATH = re.compile(r"(?<![A-Za-z0-9:])(?:~/|/home/|/tmp/)")
+
+
+def substantive_tokens(text: str) -> set[str]:
+    """Code-shaped lexical tokens; Markdown formatting does not affect them."""
+    marked = {token for span in re.findall(r"`+([^`]+)`+", text)
+              for token in CODE_TOKEN.findall(span)}
+    return {token for token in CODE_TOKEN.findall(text)
+            if re.search(r"[./:_$]|[a-z][A-Z]", token) or "-" in token and token in marked}
+
+
+def shared_code_tokens(fixture: dict, fixture_dir: Path) -> set[str]:
+    snapshot = answer_leak.preexisting_text(fixture, fixture_dir)
+    # Only snapshot code still carried in the prompt counts: authors may omit
+    # a follow-up's solution instructions rather than discard its whole issue.
+    issue_tokens = substantive_tokens(snapshot) & substantive_tokens(fixture["prompt"])
+    additions = "\n".join(answer_leak.added_lines(
+        (fixture_dir / PATCH_FILE).read_text(encoding="utf-8")))
+    return issue_tokens & set(CODE_TOKEN.findall(additions))
+
+
+#: An interface string written as a callable: a dotted or `::`-qualified
+#: name, optionally followed by a parameter list of bare names (a trailing
+#: `:` marks a Ruby keyword parameter). Lexical: it
+#: reads the declared string, never code (the checker's calls come from
+#: `checker_call_names`, which parses).
+SIGNATURE = re.compile(r"((?:[A-Za-z_$][A-Za-z0-9_$]*(?:\.|::))*)([A-Za-z_$][A-Za-z0-9_$]*)"
+                       r"(?:\(\s*([A-Za-z_$][A-Za-z0-9_$]*:?\s*(?:,\s*[A-Za-z_$][A-Za-z0-9_$]*:?\s*)*)?\))?")
+IDENTIFIER = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+#: The most lint words one identifier of a signature may contribute, so no
+#: single name, qualifier or parameter makes a four-word run by itself
+#: (`check_length_before_indexing` is four words to the lint).
+MAX_IDENTIFIER_WORDS = 3
+#: Literals a parameter list may not name: a signature brings a callable and
+#: its parameter names, never a value.
+SIGNATURE_LITERALS = {"true", "false", "True", "False", "null", "undefined", "None", "nil"}
+CHECKER_PARSE_TIMEOUT = 20
+
+
+class CheckerParseError(Exception):
+    """A checker file that could not be parsed, or a parser that could not run."""
+
+
+def _python_calls(source: str) -> set[str]:
+    """Called names, and names a test supplies as a function: a keyword
+    argument or a dict key whose value is a lambda (an injected dependency)."""
+    tree = ast.parse(source)
+    calls = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                calls.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                calls.add(node.func.attr)
+            calls.update(k.arg for k in node.keywords
+                         if k.arg and isinstance(k.value, ast.Lambda))
+        elif isinstance(node, ast.Dict):
+            calls.update(k.value for k, v in zip(node.keys, node.values)
+                         if isinstance(k, ast.Constant) and isinstance(k.value, str)
+                         and isinstance(v, ast.Lambda))
+    return calls
+
+
+#: Ripper's call shapes; the method name is the `@ident` (or `@const`) child.
+_RUBY_CALLS = {"call", "fcall", "vcall", "command", "command_call", "method_add_arg"}
+
+
+def _ruby_calls(source: str) -> set[str]:
+    # Ripper parses stdin only; it never loads the fixture or a test framework.
+    result = subprocess.run(
+        ["ruby", "-rripper", "-rjson", "-e",
+         "tree = Ripper.sexp(STDIN.read); exit 1 unless tree; print JSON.generate(tree)"],
+        input=source, text=True, capture_output=True, timeout=CHECKER_PARSE_TIMEOUT, check=True)
+    calls = set()
+    stack = [json.loads(result.stdout)]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, list):
+            continue
+        if node and isinstance(node[0], str) and node[0] in _RUBY_CALLS:
+            for child in node[1:]:
+                if isinstance(child, list) and len(child) >= 2 and child[0] in ("@ident", "@const"):
+                    calls.add(child[1])
+        stack.extend(node)
+    return calls
+
+
+def checker_call_names(fixture_dir: Path) -> set[str]:
+    """Every name the fixture's checker files call, by one parse per
+    language: Python's `ast`, Acorn for JavaScript (scripts/checker_call_names.js)
+    and Ruby's Ripper. No fixture code runs. Selection and skips are not
+    modeled (skills-evals#595): a name called anywhere in a checker file
+    counts. CheckerParseError when a file does not parse or a parser cannot
+    run; other suffixes are not read."""
+    calls: set[str] = set()
+    js: dict[str, str] = {}
+    root = fixture_dir / CHECKER_DIR
+    try:
+        for path in sorted(_walk(root)):
+            if not path.is_file() or path.is_symlink():
+                continue
+            suffix = path.suffix.lower()
+            if suffix not in (".py", ".js", ".mjs", ".cjs", ".rb"):
+                continue
+            source = path.read_text(encoding="utf-8")
+            if suffix == ".py":
+                calls |= _python_calls(source)
+            elif suffix == ".rb":
+                calls |= _ruby_calls(source)
+            else:
+                js[path.relative_to(root).as_posix()] = source
+        if js:
+            result = subprocess.run(
+                ["node", str(REPO_ROOT / "scripts" / "checker_call_names.js")],
+                input=json.dumps({"sources": js}), text=True, capture_output=True,
+                timeout=CHECKER_PARSE_TIMEOUT, check=True)
+            calls |= set(json.loads(result.stdout)["calls"])
+    except (OSError, UnicodeDecodeError, ValueError, SyntaxError, RecursionError,
+            KeyError, TypeError, subprocess.SubprocessError) as error:
+        raise CheckerParseError(type(error).__name__) from None
+    return calls
+
+
+def exempting_interface_strings(fixture: dict, fixture_dir: Path) -> list[str]:
+    """The declared interface strings that exempt a four-word run the lint
+    would otherwise report: a string that exempts nothing changes no verdict,
+    so only these are checked (skills-evals#595)."""
+    strings = fixture.get(answer_leak.KEY) or ()
+    if not strings:
+        return []
+    bare = set(answer_leak.leaked_runs(
+        fixture["prompt"], "\n".join(answer_leak.fixture_added_lines(fixture_dir)), (),
+        answer_leak.preexisting_text(fixture, fixture_dir)))
+    return [text for text in strings
+            if any(" ".join(run) in bare for run in answer_leak._runs(answer_leak.words(text)))]
+
+
+def interface_provenance(fixture: dict, fixture_dir: Path) -> list[str]:
+    """skills-evals#595: an interface string that exempts a leaked run must
+    already occur in the seed (as whole words, or as a seed file's path), or
+    be a callable the checker calls: a name, or a signature of a name and
+    bare parameter names, whose name a checker file calls or supplies as a
+    function (an injected dependency the code under test calls). Its
+    qualifiers (`Mod::Class.`) and parameter names must each be an
+    identifier the seed already holds, so only the name itself can be new,
+    and no identifier may be a literal or more than `MAX_IDENTIFIER_WORDS`
+    lint words. Anything else, a
+    new message, selector or literal the task asks for, exempts nothing; the
+    scaffolder rewrites the task text instead (the integrator, 2026-11-02).
+    Fixed, count-only messages: the gate reads an untrusted branch."""
+    exempting = exempting_interface_strings(fixture, fixture_dir)
+    if not exempting:
+        return []
+    seed = fixture_dir / SEED_DIR
+    seed_files = [p for p in _walk(seed) if p.is_file() and not p.is_symlink()]
+    seed_paths = {p.relative_to(seed).as_posix() for p in seed_files}
+    seed_texts = [p.read_text(encoding="utf-8", errors="replace") for p in seed_files]
+    unproven = []
+    for text in exempting:
+        if text in seed_paths or any(
+                re.search(r"(?<![\w$])" + re.escape(text) + r"(?![\w$])", body)
+                for body in seed_texts):
+            continue
+        unproven.append(text)
+    if not unproven:
+        return []
+    seed_identifiers = {token for body in seed_texts for token in IDENTIFIER.findall(body)}
+    calls = None
+    problems = 0
+    for text in unproven:
+        match = SIGNATURE.fullmatch(text.strip())
+        if not match:
+            problems += 1
+            continue
+        qualifiers = IDENTIFIER.findall(match[1])
+        params = IDENTIFIER.findall(match[3] or "")
+        identifiers = [*qualifiers, match[2], *params]
+        # Qualifiers and parameter names name what already exists (a
+        # module, a class, a value the code passes): the seed must hold
+        # each, so only the callable's own name can be new. No identifier
+        # is a literal or several lint words.
+        if (set(identifiers) & SIGNATURE_LITERALS
+                or any(i not in seed_identifiers for i in (*qualifiers, *params))
+                or any(len(answer_leak.words(i)) > MAX_IDENTIFIER_WORDS for i in identifiers)):
+            problems += 1
+            continue
+        if calls is None:
+            try:
+                calls = checker_call_names(fixture_dir)
+            except CheckerParseError:
+                return ["the checker could not be parsed to prove an interface string"]
+        if match[2] not in calls:
+            problems += 1
+    return ([f"{problems} interface string(s) exempt a leaked run but are neither in the seed "
+             "nor a callable the checker calls"] if problems else [])
+
+
+def answer_rules(fixture: dict, fixture_dir: Path) -> list[str]:
+    """Lexical admission rules, shared by build, check and the static gate.
+
+    Messages are fixed/count-only because the gate reads an untrusted branch.
+    These conservative checks establish eligibility, not semantic correctness.
+    """
+    problems = []
+    if LOCAL_PATH.search(fixture["prompt"]):
+        problems.append("the prompt contains a local filesystem path")
+    overlap = shared_code_tokens(fixture, fixture_dir)
+    if len(overlap) > CODE_OVERLAP_LIMIT:
+        problems.append(f"the issue part of the task shares {len(overlap)} substantive code tokens "
+                        f"with solution additions (limit {CODE_OVERLAP_LIMIT})")
+    problems += interface_provenance(fixture, fixture_dir)
+    return problems
+
+
 def static_problems(fixture_dir: Path, detail: bool = False) -> tuple[list[str], list[str]]:
     """(problems, warnings) for one fixture directory, executing nothing.
 
@@ -922,10 +1142,11 @@ def static_problems(fixture_dir: Path, detail: bool = False) -> tuple[list[str],
     if any(path.name == FIXTURE_FILE for path in _walk(seed)):
         problems.append(f"seed carries an eval {FIXTURE_FILE}")
     try:
+        problems += answer_rules(fixture, fixture_dir)
         hits = answer_leak.leaked_runs(
             fixture["prompt"], "\n".join(answer_leak.fixture_added_lines(fixture_dir)),
             fixture.get("interface_strings", ()), answer_leak.preexisting_text(fixture, fixture_dir))
-    except (UnicodeDecodeError, OSError) as error:
+    except (guidance.GuidanceError, UnicodeDecodeError, OSError) as error:
         return problems + [f"the answer-leak lint could not read the fixture: "
                            f"{type(error).__name__}"], []
     warnings = []
@@ -1542,7 +1763,8 @@ def fired_candidates(titles: list[str]) -> set[str]:
 
 
 def pick(candidates: list, evals: Path, branches: set[str], fired: set[str], limit: int,
-         usage: Mapping[str, int] | None = None) -> list[str]:
+         usage: Mapping[str, int] | None = None,
+         lessons: Mapping[str, int] | None = None) -> list[str]:
     """Up to `limit` miner keys to scaffold, best first.
 
     A candidate is skipped when the routine would refuse it or has it already:
@@ -1552,12 +1774,16 @@ def pick(candidates: list, evals: Path, branches: set[str], fired: set[str], lim
     fire refuses them), a pull request of this repository (SELF_REPO), a
     truncated file list, an existing `evals/real-work/<id>/`, an existing
     `claude/scaffold-<id>` branch, or a fire within REFIRE_AFTER_DAYS. The
-    rest rank by their subject skills (SUBJECT_BY_TOUCH): most used first
-    (`usage`, a count per skill; none is known today, so every count is 0),
-    then fewest existing fixtures for that skill, then newest merge, then key.
+    rest rank by their subject skills (SUBJECT_BY_TOUCH): most real-session
+    failure evidence first (`lessons`, the session miner's
+    `fixture-candidate` evidence_count per skill, scripts/lesson_evidence.py,
+    #657), then most used (`usage`, a count per skill; none is known today,
+    so every count is 0), then fewest existing fixtures for that skill, then
+    newest merge, then key.
     """
     counts = _fixture_counts(evals)
     usage = usage or {}
+    lessons = lessons or {}
     ranked = []
     for row in candidates:
         if not isinstance(row, dict) or not isinstance(row.get("key"), str):
@@ -1583,10 +1809,11 @@ def pick(candidates: list, evals: Path, branches: set[str], fired: set[str], lim
         touches = row.get("touches") if isinstance(row.get("touches"), list) else []
         subjects = sorted({SUBJECT_BY_TOUCH[t] for t in touches if t in SUBJECT_BY_TOUCH})
         if subjects:
-            rank = min((-usage.get(skill, 0), counts.get(skill, 0)) for skill in subjects)
+            rank = min((-lessons.get(skill, 0), -usage.get(skill, 0), counts.get(skill, 0))
+                       for skill in subjects)
             rank = (0, *rank)
         else:
-            rank = (1, 0, 0)
+            rank = (1, 0, 0, 0)
         merged = row.get("merged_at") if isinstance(row.get("merged_at"), str) else ""
         ranked.append((rank, merged, key))
     # Stable sorts, last key first: key, then newest merge, then rank.
@@ -1664,7 +1891,8 @@ def clean_runs(tree: Path, fixture_dir: Path, evals: Path, as_of: str) -> int:
 def promotable(root: Path, tree: Path, as_of: str) -> list[tuple[str, int]]:
     """(fixture path, clean runs) for every committed `draft: true` fixture
     under `root`/evals with at least MIN_PROMOTION_RUNS clean runs, outside
-    NEVER_PROMOTE. Its red/green check passed when it was scaffolded, and
+    NEVER_PROMOTE, that declare a valid `context` with a non-null
+    `guidance_revision`. Its red/green check passed when it was scaffolded, and
     `test` scores it red and green again on every pull request."""
     import plan_scheduled_evals as planner  # noqa: PLC0415
 
@@ -1680,6 +1908,14 @@ def promotable(root: Path, tree: Path, as_of: str) -> list[tuple[str, int]]:
         except (OSError, UnicodeDecodeError, yaml.YAMLError):
             continue
         if not isinstance(doc, dict) or doc.get("draft") is not True:
+            continue
+        # A scheduled fixture needs a context whose guidance is proven (the
+        # `subject: any` orchestrator scenarios have none).
+        if not isinstance(doc.get("context"), dict) or doc["context"].get("guidance_revision") is None:
+            continue
+        try:
+            context.validate_context(doc, directory / FIXTURE_FILE)
+        except context.ContextError:
             continue
         count = clean_runs(tree, directory, evals, as_of)
         if count >= MIN_PROMOTION_RUNS:
@@ -1746,10 +1982,14 @@ def _read_lines(path: Path) -> list[str]:
 
 
 def supply_plan(candidates: Path, branches: Path, fired: Path, tree: Path, limit: int,
-                now=None) -> dict:
+                now=None, lessons: Path | None = None) -> dict:
     """PICK's whole plan: the picks cut to what the routine and the weekly
     allowance allow now, as a fire matrix. Fails closed: an allowance that
-    cannot be read plans nothing (allowance_guard.GuardError)."""
+    cannot be read plans nothing (allowance_guard.GuardError). `lessons` is
+    acsi-agentskills-private's lessons/proposals/ (#657); only its
+    fixture-candidate counts for SUBJECT_BY_TOUCH's public skills are used,
+    and the log line gains only how many picks they steered."""
+    import lesson_evidence  # noqa: PLC0415
     import allowance_guard  # noqa: PLC0415
     from datetime import datetime, timezone  # noqa: PLC0415
 
@@ -1767,7 +2007,12 @@ def supply_plan(candidates: Path, branches: Path, fired: Path, tree: Path, limit
         ref = line.split("\t", 1)[-1].strip()
         if ref.startswith("refs/heads/"):
             names.add(ref[len("refs/heads/"):])
-    picks = pick(rows, REPO_ROOT / "evals", names, fired_candidates(_read_lines(fired)), limit)
+    public = set(SUBJECT_BY_TOUCH.values())
+    evidence = {skill: n for skill, n in
+                lesson_evidence.skill_evidence(lessons, "fixture-candidate").items()
+                if skill in public}
+    picks = pick(rows, REPO_ROOT / "evals", names, fired_candidates(_read_lines(fired)), limit,
+                 lessons=evidence)
     try:
         state = allowance_state(tree, now or datetime.now(timezone.utc))
     except (allowance_guard.GuardError, allowance_guard.budget_file.BudgetError) as error:
@@ -1775,7 +2020,8 @@ def supply_plan(candidates: Path, branches: Path, fired: Path, tree: Path, limit
     room = min(allowance_guard.fits(state), MAX_IN_FLIGHT - state["recent"])
     picks = picks[:max(0, room)]
     return {"include": [{"candidate": key, "slot": slot} for slot, key in enumerate(picks)],
-            "line": allowance_guard.describe(state)}
+            "line": allowance_guard.describe(state)
+            + f"; fixture-candidate lessons for {len(evidence)} skill(s)"}
 
 
 # ---------------------------------------------------------------------------
@@ -1825,6 +2071,8 @@ def main(argv: list[str] | None = None) -> int:
     pk.add_argument("--fired", type=Path, required=True)
     pk.add_argument("--results-tree", type=Path, required=True)
     pk.add_argument("--max", type=int, default=MAX_IN_FLIGHT)
+    pk.add_argument("--lessons", type=Path, default=None,
+                    help="acsi-agentskills-private lessons/proposals/ (fixture-candidate lessons)")
     pr = sub.add_parser("promote", help="promote drafts that ran cleanly")
     pr.add_argument("--results-tree", type=Path, required=True)
     pr.add_argument("--as-of", required=True)
@@ -1856,7 +2104,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "pick":
             plan = supply_plan(args.candidates, args.branches, args.fired,
-                               args.results_tree, args.max)
+                               args.results_tree, args.max, lessons=args.lessons)
             # Numbers only on stderr; stdout is the workflow's $GITHUB_OUTPUT.
             print(plan.pop("line"), file=sys.stderr)
             print("matrix=" + json.dumps(plan, separators=(",", ":")))

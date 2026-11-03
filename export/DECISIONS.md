@@ -1524,3 +1524,201 @@ guidance to the source owner's fleet. What changed with the move:
   `.gitignore` is the repo's), and the license test only checks that
   `LICENSE` exists. `test-bootstrap.sh` adds the clone and nested-repo cases
   for `add-content.sh`.
+
+## Re-pin (2026-11-03)
+
+Every public manifest's `source_sha` moved to its source's current `main`,
+and the export was rerun. `agentskills-private` was not re-exported (see the
+end of this section).
+
+| Repo | Old | New |
+|---|---|---|
+| `_agent-guidance` | `0082194ce1dcb122e802886e48f62eadb6db9b99` | `2e2045a0870db995547d0e79d8a5148f89e94b0b` |
+| `agentskills` (the public registry) | `0e81a5e9989c5f92a2af774f9d714e137a7262f9` | `151d20ca550905bfdad78709460b880b5150ae75` |
+| `repo-settings` | `075636253c63a91e84d32fd331ca80e0174737ac` | `4308b61cd0a482b38c9c683094f85ed96132958e` |
+| `skills-evals` | `d965ccf6aeb0c3f5e2d744063405923525620b94` | `8f6351af9677c042c104f20bc09bd104706ed16e` |
+| `wsl-automation` | `305090ad7e62dc773462508909d947fbaa13ca56` | `913a417181edc26fcd84f32e01e2105dcc2bc125` |
+| platform `imports:` (C4) | `fe15bb1cad82e3ee6934063b6ce6ae130096c433` | `e0d772c22312cc6585d0b4f70de8bc22d0f18368` |
+
+Each overlay `NOTICE` names the new commit. The `_agent-guidance` source is
+now past the kit's move to its own repo: it no longer carries the kit folder,
+only a pointer page (`docs/reference/adopt-the-whole-system.md`), which the
+manifest excludes instead.
+
+### C4: the source's own reusable, with the script copied in
+
+The source moved the scheduled-run-health reusable into `_agent-guidance`
+itself (`scheduled-run-health-reusable.yml`). It checks the audit scripts out
+of the platform repo at the release named in `.github/health-audit-platform-ref`,
+and three more files keep that copy in step with the platform's
+(`health-reusable-parity.yml`, `scripts/check-health-reusable-parity.js` and
+its test). Every other repo's caller now calls it at a full `_agent-guidance`
+commit (`7254006`).
+
+- **The kit ships the source's reusable**, with edits instead of importing
+  the platform's copy. The checkout that fetched the platform release now
+  sparse-checks out `scripts/audit-scheduled-runs.js` from this repo's
+  default branch (`.self`), and the step that ran it reads it from there.
+  The platform-release resolution, the platform currency check and its
+  inputs (`currency_scan`, `behind_days`) are cut: the kit has no platform
+  repo.
+- **One import is left:** `scripts/audit-scheduled-runs.js`, from the
+  platform at `e0d772c` (`v0.1.170`, the release the source's pin file
+  names). The reusable and `check-platform-currency.js` are no longer
+  imported.
+- **Excluded:** `.github/health-audit-platform-ref`, the parity workflow,
+  script and test. The output stage removes the parity workflow's
+  `actions.lock` entry, and the edits to `test/run-tests.sh` remove its call
+  and function. The edits that put the caller and the `actions.lock` entry in
+  place are dropped: the source has them.
+- **Callers:** the `agentskills`, `repo-settings`, `skills-evals` and (new)
+  `wsl-automation` manifests share one three-edit block. It replaces the
+  source owner's `_agent-guidance` commit with the forty-zero placeholder
+  (REGENERATE.md), and it rewords the two comments that name the platform.
+
+### `kit_ci.py` is removed
+
+The source's CI no longer runs the kit's tests, since it no longer has the
+kit. This is the re-pin past the move that "Own repo (2026-10-30)" waited
+for, so the patch is deleted.
+
+### `_agent-guidance`: content and config
+
+- **New guidance section "PR descriptions open with a TLDR"**
+  (`blank_content.py` SECTIONS, id `pr-tldr`), tiered **core,
+  provisionally**. The owner should confirm the tier. Its agent-checks check
+  (`pr-tldr`) ships as the source has it, and `machinery_tests.py` adds it to
+  the core check ids. The core-row check now accepts a `skipped` coverage row
+  that gives a reason, as well as a `covered` row with a fixture.
+  **Caution:** the PR bodies in `bootstrap/lib/pr.sh` and
+  `bootstrap/lib/copy-starter.sh` have no `## TLDR` heading, so an adopter's
+  starter pull requests opened after the check's cutoff (2026-11-03) would
+  fail `pr-tldr`. They are not changed here.
+- **The runner edits** in `blank_content.py` follow the source's new
+  `"runner"` line (`"failed":["secret-file"],` is the anchor now).
+- **C11, `kit_repos.py`:** cuts the new `cron_coverage.fleet` entry for the
+  source owner's security-alerts snapshot repo, with its comment, and the
+  sync's new exclusion of the kit's own repo (`exclude: [acsi-kit]` becomes
+  `exclude: []`, with its comment). The kit is the adopter's setup tool, not
+  a repo of the adopter's fleet.
+- **Excluded:** `docs/routines/fleet-health-audit.md`. It is the owner's
+  weekly audit of their own fleet: its first run seeds from the owner's hand
+  audit, and it reads the task health snapshot that the kit's
+  `wsl-automation` does not publish (below). Nothing links to it.
+- **Shipped as the source has it:** the session-start usage record
+  (`.claude/hooks/guidance-load-record.sh`, ADRs 0035 to 0037). It records
+  to the private registry's `persistent/usage-events` branch, or to an S3
+  bucket only when its environment variables name one. Also shipped: the
+  eval-protection gate (`scripts/eval-protected.js`, ADRs 0033 and 0034), the CI
+  scope step (`scripts/ci-scope.sh`) and ADRs 0030 to 0037.
+
+### `agentskills`
+
+- **New skills, not shipped:** `fan-out-triage` (untiered, so not shipped
+  until the owner tiers it) and the red-CI skill named for the source owner's site (it diagnoses CI on the
+  source owner's own platform site, like X4's platform skills). The new
+  `tool-powershell` skill sits under the excluded `coding-local` skills.
+- **The anything-anywhere plugin's new SessionStart hook** (ADR 0023)
+  installs the fleet guidance from a bundled copy when its fetch is off or
+  fails. Two new `copy_from_kit` steps regenerate that copy from the kit's
+  `_agent-guidance` (`agents-md/base.md` and `.claude/hooks/fleet-memory.sh`).
+  Without them the bundle would carry the source owner's full guidance. The
+  README plugin-table edit and `blank_registry.py`'s plugin description
+  follow the source's new wording.
+
+### `repo-settings`
+
+`kit_config.py`'s cut of the test row includes the source's new
+`acsi-kit` entry (C11). The two counts the cut no longer changes follow the
+source: the checked-repo count is 23 (was 22) and the all-repos rule count is
+20 (was 19). Both are still replaced by the kit's 8 and 6.
+
+### `skills-evals`
+
+- **The schedule:** the source took some fixtures off the schedule into a
+  new `evals/unscheduled.yml`. `empty_config.py` no longer keeps a fixed
+  list (`KEEP_SCHEDULED`). It keeps a row of either file when that row's
+  fixture folder ships (has a `fixture.yaml`), and it fails if no scheduled
+  row is kept. `unscheduled.yml` is written as `fixtures: []` when nothing is
+  kept. `library_fixtures.py` carries a library item's `unscheduled.yml`
+  rows too (`unscheduled-rows.yml`, appended on install).
+- **C6, the budget:** the source raised the weekly cap and the stop
+  threshold for the week ending 2026-11-09, and planned 0.25 as its steady
+  state. The edits are source-stage now and keep the kit's standing defaults
+  (`weekly_cap: 0.30`, `stop_when_account_above: 0.80`). The dropped comments
+  recorded the source owner's spending decisions. The kit does not adopt
+  the 0.25 steady state, which is the source owner's plan, not yet a
+  standing default. The owner may want to revisit that.
+- **Retargets and renames follow the source:** `test_issue_70` reads
+  `unscheduled.yml`, the scheduled-fixtures REVIEWED list follows the
+  source's new list, `test_issue_dev_setup`'s import hunk is dropped (the
+  source imports `sys` itself), and `removed_tests.txt` names the renamed
+  schedule-count test.
+- **New substitutions** rename two test methods and a constant that carried
+  the owner's first name, which the leak scan caught.
+- **`cold_start_registries.py`:** the site-entry pattern allows the
+  source's new `private: false` line, and the comment anchor and eval.yml's
+  checkout count ("All five checkouts") follow the source.
+- **Smaller:** the browser-testing `ci.yml` edit uses `setup-node@v7.1.0`.
+  The routine-eval-fire environment edit includes the job's new `outputs:`
+  block. The dashboard placeholder-key edit follows the source's new keys
+  and still appends `threads` and `loop_gaps`.
+
+### The eval runner's prompt is the source's stub
+
+The kit carried the eval runner routine's prompt as an input
+(`inputs/skills-evals/docs/routine-prompt.md`), because the source kept the
+prompt only in claude.ai. The source now commits it: a short stub
+(`docs/routine/eval-runner-prompt.md`) that reads the routine's real
+instructions (`docs/routine/eval-runner-instructions.md`) from `main` at the
+start of each run. The kit's copy, as of 2026-10-29, also lacked the new
+improve-cost lane (`claude/eval-cost-*`, `routine-eval-cost-pushed.yml`).
+The input is removed. `docs/routines.md`, `docs/quick-start.md`,
+`bootstrap/steps.json`, `bootstrap/set-secrets.sh`, REGENERATE.md and the
+`routine-eval-fire.yml` header edit now name the stub.
+`docs/evals-and-loop.md` gains the cost lane. `check-branch-prefixes.py`
+reads the lanes the instructions push to, scans `docs/` recursively, and
+expects six lanes.
+
+### `wsl-automation`
+
+The source added a session miner, a weekly memory curation and a daily task
+health publish, each with a scheduled task. It also added local-time triggers
+(`ConvertTo-WslLocalTimeTrigger`) and a stub `.git` guard in the keeper
+(`Test-ClaudeStubGitDir`).
+
+- **Session miner:** the source now ships its own wrapper and test. The
+  kit's overlay copies, which generalize them for an adopter, replace them,
+  and the task keeps the kit's 07:17 time and 30 minute limit.
+  `tasks_installer.py` and `pester_tests.py` now edit the source's miner
+  task, parameters and tests instead of adding their own, and `docs.py`
+  replaces the source's README section with the kit's.
+- **Memory curation ships** as the source has it. Its routine ships in the
+  kit's `_agent-guidance`. The only edit replaces the owner's clone drive in
+  its fallback clone root (`/mnt/d/repos` becomes `/mnt/c/repos`), as the
+  repo's substitution for the owner's Windows clone drive does. Its test joins the manifest's suite
+  command.
+- **Task health is left out**, with its script and test, as part of X10:
+  it reads the left-out restic repository and keeper log, and it feeds the
+  source owner's fleet health audit (excluded above). The installer, the
+  wrapper, the Pester tests, `ci.yml` and both docs lose it.
+- **The stub `.git` guard is left out** (X10): its only caller is the
+  keeper. `ci.yml`'s Linux Pester step loses its test, and AGENTS.md loses
+  its section.
+- **Local-time triggers ship.** They apply to every kept task.
+- **The scheduled-run-health caller is new here.** It takes the shared C4
+  edit block, and `bootstrap/regenerate.sh run-health-sha` now pins it too
+  (`docs/generated-files.md`, `docs/quick-start.md` and `steps.json` say four
+  pull requests).
+
+### Not re-exported: `agentskills-private`
+
+Its `copy_from_kit` files are now behind the re-pinned public starters.
+These are the fleet guidance payload, the agent-checks runner with
+`pr-tldr`, the dated-phrasing allowlist, and the `guidance-load-record.sh`
+hook its siblings now carry. Its NOTICE and pin are unchanged until it is
+re-exported. Every overlay `NOTICE` also still cites the export as
+`docs/reference/adopt-the-whole-system/export/export.py in _agent-guidance`,
+a path from before the move.
+
+The same day, skills-evals moved again to 341f4bd (skills-evals#720: only `skill-coverage.yml` writes `coverage/latest.json` and `badges/coverage.json`; `propagation.yml`'s census writes `fixture-census/`, guarded by `test_issue_660_single_writer.py`). The manifest needed no other change.

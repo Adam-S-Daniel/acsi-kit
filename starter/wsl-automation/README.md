@@ -8,6 +8,8 @@ scheduled jobs available natively on Linux and macOS:
   "Waiting feed task" below).
 - A daily session miner run that turns this machine's Claude Code transcripts
   into short, redacted lesson records (see "Session miner task" below).
+- A weekly memory curation run that tidies Claude Code's private memory notes
+  in both Claude homes on this machine (see "Memory curation task" below).
 - A sync of the WSL ccstatusline layout to Windows, and a twice-daily sync of
   Codex Cloud environments.
 - A scheduled-task installer that wires all of the above into Windows Task
@@ -77,9 +79,9 @@ instead (see "Linux and macOS" below).
 ### Checkout update before every scripted task
 
 Every task action runs a repo script (ccstatusline sync, Codex Cloud sync,
-usage census, waiting feed, and session miner), and first updates that same
+usage census, session miner, memory curation, and waiting feed), and first updates that same
 checkout through one updater, `Update-WslAutomationRepo`, before it loads any
-task code. All five run from the one Windows checkout; the Bash
+task code. All six run from the one Windows checkout; the Bash
 tasks reach it through its `/mnt` path, so there is no second clone to keep
 current. Whatever lands on `main` runs with the Claude login and the git
 credential in reach, so keep `main` protected.
@@ -90,7 +92,9 @@ updater:
 | Entry | Bootstrap | Tries | Bounded by |
 | --- | --- | --- | --- |
 | PowerShell (ccstatusline, Codex Cloud) | `scripts/update-task-checkout.ps1` (`Initialize-WslAutomationTask`) | every run | 30 s per Git call |
-| Bash in WSL: usage census and session miner (daily) | `scripts/update-task-checkout.sh` | every run | 300 s overall |
+| Bash in WSL: usage census (daily) | `scripts/update-task-checkout.sh` | every run | 300 s overall |
+| Bash in WSL: session miner (daily) | `scripts/update-task-checkout.sh` | every run | 300 s overall |
+| Bash in WSL: memory curation (weekly) | `scripts/update-task-checkout.sh` | every run | 300 s overall |
 | Bash in WSL: waiting feed (every minute) | `scripts/update-task-checkout.sh` | at most every 5 minutes | 120 s overall |
 
 The task actions themselves are unchanged, so **no re-registration is needed**
@@ -256,6 +260,108 @@ up the new PATH.
   - `git ls-remote https://github.com/example-adopter/skills-evals persistent/eval-results`
     shows the branch head moving after a publish.
 
+### Session miner task (default name: `Session Miner`)
+
+- Runs `scripts/run-session-miner.sh` inside the distro once a day at 07:17
+  (`-SessionMinerTime`). Like the census, the wrapper shallow-clones
+  skills-evals `main` and runs that copy's `scripts/run_session_miner.sh`
+  (skills-evals ADR 0015), so a scheduled run always executes the reviewed
+  `main` version.
+- It reads this machine's real Claude Code transcripts. What leaves the
+  machine is short, redacted, hashed lesson records, pushed to the
+  `persistent/lessons` branch of your private skills registry. The wrapper never
+  copies a transcript anywhere, and it refuses to run in CI or in a cloud
+  session (`CI`, `GITHUB_ACTIONS`, `CLAUDE_CODE_REMOTE` or
+  `CLAUDE_CODE_REMOTE_SESSION_ID` set).
+- The action is `wsl.exe` directly, as for the census:
+
+  ```
+  C:\Windows\System32\wsl.exe --distribution Ubuntu --cd "<scripts dir>" --exec /bin/bash ./run-session-miner.sh
+  ```
+
+- Runs as a background S4U task for the current Windows user (session 0).
+  Allowed on battery, 30 minute execution limit, ignores a second overlapping
+  instance, no `-StartWhenAvailable` (a missed day stays missed; the next run
+  reads what it missed).
+- **One-time setup, in the distro.** Until a dry run has succeeded, a
+  scheduled run exits 3 ("not set up yet") and mines nothing.
+  1. A privacy denylist, one pattern per line, kept **outside every
+     repository**: `~/.config/privacy-denylist.txt` (`PRIVACY_DENYLIST_FILE`).
+     Without a readable one the wrapper exits 2 and nothing is mined.
+  2. A clone of your private skills registry whose `origin` receives
+     `persistent/lessons`: `~/repos/acsi-agentskills-private` (`LESSONS_CLONE`).
+     Its git credential must work with no desktop session: `gh auth setup-git`
+     with a file-stored token, as for the census.
+  3. python3 with PyYAML (`sudo apt install python3-yaml`).
+  4. Optionally, settings in `~/.config/wsl-automation/session-miner.env`
+     (`SESSION_MINER_CONFIG`), one `KEY=value` per line. A scheduled action has
+     no environment of its own, so this is where settings go. The file is read
+     as data, never sourced; only `PRIVACY_DENYLIST_FILE`, `LESSONS_CLONE`,
+     `GUIDANCE_MANIFEST`, `MINER_REGISTRIES`, `WIN_HOME`, `MINER_STATE`,
+     `SKILLS_EVALS_URL`, `PYTHON` and `FILE_ISSUES` are accepted, a leading
+     `~/` is expanded, and a variable already in the environment wins.
+  5. One run by hand: `bash scripts/run-session-miner.sh --dry-run`. It mines
+     and reports without pushing, and on success records
+     `~/.local/state/session-miner/dry-run-ok`, which arms the scheduled run.
+- **`WIN_HOME`** (the Windows profile as a WSL path, for example
+  `/mnt/c/Users/<you>`) adds the Windows transcripts and the desktop app's
+  metadata, which lets the miner drop scheduled-task sessions as noise.
+  Without it the wrapper reads only `~/.claude/projects` in WSL, rather than
+  have the miner ask `cmd.exe` from a session 0 logon, and says so in its log
+  line.
+- **Filing issues stays off.** `--file-issues` exits 2 unless `FILE_ISSUES=on`
+  is set; turn it on only after you have rated a sample of records for
+  usefulness and privacy.
+- Appends one line per run to `~/.cache/session-miner.log`: UTC time, exit
+  code, and the miner's own `session miner: ...` count lines. Any other output
+  (a Python traceback, for example) could carry a path or an excerpt, so it is
+  counted, not copied. Exit codes: 0 success; 1 a missing prerequisite (the
+  registry clone, PyYAML) or a failed clone of skills-evals; 2 a refusal (CI or
+  cloud, no denylist, a bad settings line, `--file-issues` while off); 3 not
+  set up yet; anything else is the miner's own exit code.
+- Run it now: `Start-ScheduledTask -TaskName 'Session Miner'`; check
+  `(Get-ScheduledTaskInfo -TaskName 'Session Miner').LastTaskResult` is `0`
+  and `tail ~/.cache/session-miner.log` in WSL.
+
+### Memory curation task (default name: `Memory Curation`)
+
+- Runs `scripts/run-memory-curation.sh` inside the distro once a week, on
+  Monday at 13:47 (`-MemoryCurationTime`). It
+  is the machine half of the routine in
+  [_agent-guidance's `docs/routines/memory-curation.md`](https://github.com/example-adopter/_agent-guidance/blob/main/docs/routines/memory-curation.md):
+  the wrapper shallow-clones `_agent-guidance` `main` and starts a headless
+  Claude session in that copy, with a short prompt that points at the doc.
+- **It covers both Claude homes on this machine.** Claude Code keeps memory in
+  the WSL home (`${CLAUDE_CONFIG_DIR:-~/.claude}`) and in the Windows home
+  (`%USERPROFILE%\.claude`). The wrapper resolves the Windows home at run time
+  (`cmd.exe` through WSL interop, then `wslpath`; override it with
+  `WINDOWS_CLAUDE_HOME`), passes every `projects/*/memory/` directory of both
+  homes to the session, and runs on the WSL home alone, with
+  `windows_home=unresolved` in the log, if the Windows one cannot be resolved.
+- **Memory is private.** Claude's final summary is written to
+  `~/.cache/memory-curation/last-summary.md` (mode 600) and printed to stdout.
+  The log, `~/.cache/memory-curation.log`, gets one line per run (UTC time, exit
+  code, mode, and counts of homes, memory directories, notes and archived
+  notes before and after) and never a path, note name, note text, or Claude
+  output.
+- The action is `wsl.exe` directly, as for the session miner:
+
+  ```
+  C:\Windows\System32\wsl.exe --distribution Ubuntu --cd "<scripts dir>" --exec /bin/bash ./run-memory-curation.sh
+  ```
+
+- Runs as a background S4U task for the current Windows user (session 0), with
+  the session miner's settings except for a 3 hour execution limit: allowed on
+  battery, ignores a second overlapping instance, no `-StartWhenAvailable`. The
+  wrapper stops Claude itself after 2 hours (`MEMORY_CURATION_TIMEOUT`).
+- Run it now: `Start-ScheduledTask -TaskName 'Memory Curation'`. To try it
+  without starting Claude, run `bash scripts/run-memory-curation.sh --dry-run`
+  in WSL: it runs the routine's `memory_audit.py` over every memory directory
+  and exits `1` if any audit fails.
+- Check it:
+  - `(Get-ScheduledTaskInfo -TaskName 'Memory Curation').LastTaskResult` is `0`.
+  - In WSL, `tail ~/.cache/memory-curation.log`.
+
 ### Waiting feed task (default name: `Claude Waiting Feed Publish`)
 
 - Runs `scripts/publish-waiting-feed.sh` inside the distro every minute,
@@ -358,69 +464,6 @@ up the new PATH.
 - Run it now: `Start-ScheduledTask -TaskName 'Claude Waiting Feed Publish'`;
   check `(Get-ScheduledTaskInfo -TaskName 'Claude Waiting Feed Publish').LastTaskResult`
   is `0` and `tail ~/.cache/waiting-feed.log` in WSL.
-
-### Session miner task (default name: `Session Miner`)
-
-- Runs `scripts/run-session-miner.sh` inside the distro once a day at 07:17
-  (`-SessionMinerTime`). Like the census, the wrapper shallow-clones
-  skills-evals `main` and runs that copy's `scripts/run_session_miner.sh`
-  (skills-evals ADR 0015), so a scheduled run always executes the reviewed
-  `main` version.
-- It reads this machine's real Claude Code transcripts. What leaves the
-  machine is short, redacted, hashed lesson records, pushed to the
-  `persistent/lessons` branch of your private skills registry. The wrapper never
-  copies a transcript anywhere, and it refuses to run in CI or in a cloud
-  session (`CI`, `GITHUB_ACTIONS`, `CLAUDE_CODE_REMOTE` or
-  `CLAUDE_CODE_REMOTE_SESSION_ID` set).
-- The action is `wsl.exe` directly, as for the census:
-
-  ```
-  C:\Windows\System32\wsl.exe --distribution Ubuntu --cd "<scripts dir>" --exec /bin/bash ./run-session-miner.sh
-  ```
-
-- Runs as a background S4U task for the current Windows user (session 0).
-  Allowed on battery, 30 minute execution limit, ignores a second overlapping
-  instance, no `-StartWhenAvailable` (a missed day stays missed; the next run
-  reads what it missed).
-- **One-time setup, in the distro.** Until a dry run has succeeded, a
-  scheduled run exits 3 ("not set up yet") and mines nothing.
-  1. A privacy denylist, one pattern per line, kept **outside every
-     repository**: `~/.config/privacy-denylist.txt` (`PRIVACY_DENYLIST_FILE`).
-     Without a readable one the wrapper exits 2 and nothing is mined.
-  2. A clone of your private skills registry whose `origin` receives
-     `persistent/lessons`: `~/repos/acsi-agentskills-private` (`LESSONS_CLONE`).
-     Its git credential must work with no desktop session: `gh auth setup-git`
-     with a file-stored token, as for the census.
-  3. python3 with PyYAML (`sudo apt install python3-yaml`).
-  4. Optionally, settings in `~/.config/wsl-automation/session-miner.env`
-     (`SESSION_MINER_CONFIG`), one `KEY=value` per line. A scheduled action has
-     no environment of its own, so this is where settings go. The file is read
-     as data, never sourced; only `PRIVACY_DENYLIST_FILE`, `LESSONS_CLONE`,
-     `GUIDANCE_MANIFEST`, `MINER_REGISTRIES`, `WIN_HOME`, `MINER_STATE`,
-     `SKILLS_EVALS_URL`, `PYTHON` and `FILE_ISSUES` are accepted, a leading
-     `~/` is expanded, and a variable already in the environment wins.
-  5. One run by hand: `bash scripts/run-session-miner.sh --dry-run`. It mines
-     and reports without pushing, and on success records
-     `~/.local/state/session-miner/dry-run-ok`, which arms the scheduled run.
-- **`WIN_HOME`** (the Windows profile as a WSL path, for example
-  `/mnt/c/Users/<you>`) adds the Windows transcripts and the desktop app's
-  metadata, which lets the miner drop scheduled-task sessions as noise.
-  Without it the wrapper reads only `~/.claude/projects` in WSL, rather than
-  have the miner ask `cmd.exe` from a session 0 logon, and says so in its log
-  line.
-- **Filing issues stays off.** `--file-issues` exits 2 unless `FILE_ISSUES=on`
-  is set; turn it on only after you have rated a sample of records for
-  usefulness and privacy.
-- Appends one line per run to `~/.cache/session-miner.log`: UTC time, exit
-  code, and the miner's own `session miner: ...` count lines. Any other output
-  (a Python traceback, for example) could carry a path or an excerpt, so it is
-  counted, not copied. Exit codes: 0 success; 1 a missing prerequisite (the
-  registry clone, PyYAML) or a failed clone of skills-evals; 2 a refusal (CI or
-  cloud, no denylist, a bad settings line, `--file-issues` while off); 3 not
-  set up yet; anything else is the miner's own exit code.
-- Run it now: `Start-ScheduledTask -TaskName 'Session Miner'`; check
-  `(Get-ScheduledTaskInfo -TaskName 'Session Miner').LastTaskResult` is `0`
-  and `tail ~/.cache/session-miner.log` in WSL.
 
 ### Legacy scripts
 
@@ -602,7 +645,8 @@ seam - and all filesystem paths used by the tests live under Pester's
 `TestDrive:`. The bash scripts have their own tests (`bash tests/<name>.test.sh`),
 which put stubs on `PATH` instead of running Windows programs or reaching the
 network; `tests/unix-schedule.test.sh` covers the Linux and macOS runner and
-installer, and `tests/run-session-miner.test.sh` the session miner wrapper.
+installer, `tests/run-session-miner.test.sh` the session miner wrapper, and
+`tests/run-memory-curation.test.sh` the memory curation wrapper.
 
 ## Requirements
 
@@ -620,5 +664,6 @@ installer, and `tests/run-session-miner.test.sh` the session miner wrapper.
 - For the waiting feed: `curl`, `jq`, `flock` and coreutils `timeout` in the
   distro, and a signed-in Claude Code there.
 - For the session miner: python3 with PyYAML and the setup in its section.
+- For the memory curation: a signed-in Claude Code and python3 in the distro.
 - On Linux or macOS instead: bash, git, `flock` and coreutils `timeout`
   (`brew install flock coreutils` on macOS).

@@ -20,11 +20,10 @@ anything but `auto` is `proposal`), lowered to `proposal` in two cases (the
 removal path's `effective_mode`, as scripts/improve_gate.py lowers an
 improvement to a draft):
 
-  * the skill's plugin runs code (improve_gate.py's `auto_refusal`: a
-    `hooks/` or `bin/` directory, a settings or package file, or a manifest
-    `hooks` or `settings` key). Removing one of its skills would wait on
-    acsi-agentskills' plugin-runtime-review, which auto-merge cannot approve
-    (acsi-agentskills ADR 0021, decision 4);
+  * removing the skill would wait on acsi-agentskills' plugin-runtime-review,
+    which auto-merge cannot approve (acsi-agentskills ADR 0021, decision 4):
+    improve_gate.py's `auto_refusal`, a skill with its own `hooks/` or `bin/`
+    or one a hook of its plugin names a path in;
   * the caller has no write credential for acsi-agentskills this run
     (`--fallback-to-proposal` without `--allow-mode auto`): the scheduled
     workflow passes it when the GitHub App token was not minted.
@@ -153,7 +152,12 @@ named `guidance_*` below, kept apart from the skill path). The gates file's
     specific additions` heading LINE (never the first occurrence of the
     substring, which the managed header quotes); pushed, opened, labeled
     `agent-authored` and armed to auto-merge (merge commit, matched to the
-    removal head, read back), one at a time (`retire-guidance/` heads).
+    removal head, read back), one at a time (`retire-guidance/` heads),
+    and then a removal notice filed here (#557: an `agent-authored` issue,
+    `GUIDANCE_NOTICE_MARKER`, that mentions the owner, links the removal pull
+    request and says how to reverse it: close it, or press Revert once it
+    has merged). The explorer lists every removed section from the impact
+    file's `remove` entries (scripts/explorer_data.py `removed_sections`).
     These writes to _agent-guidance go through `registry_gh` and the push
     with `REGISTRY_TOKEN`, as the skill path's do; the issues stay on `gh`.
     With `--fallback-to-proposal`, `auto` mode without `auto` allowed (no
@@ -218,6 +222,8 @@ NO_CREDENTIAL = ("no write credential for acsi-agentskills reached this run (the
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 ISSUE_MARKER = "<!-- skills-evals:retire-skill:{skill} -->"
 IMPACT_FILE = "docs/skill-impact.md"
+#: Who a removal notice mentions, so GitHub notifies him (#557).
+NOTICE_OWNER = "example-adopter"
 LAYOUT_FILE = "scripts/plugin_layout.json"
 README_FILE = "README.md"
 LOCK_FILE = "skills.lock"
@@ -355,8 +361,7 @@ def retiring(gates: dict) -> str | None:
                               "no-benefit")
         fixture = c.get("fixture")
         if not (fixture is None or isinstance(fixture, str) and NAME_RE.fullmatch(fixture)) \
-                or not isinstance(c.get("model"), str) \
-                or not isinstance(c.get("looks"), list):
+                or not isinstance(c.get("model"), str):
             raise RetireError(f"{skill}: a retire verdict with a malformed cell")
     pairs = [(c["fixture"], c["model"]) for c in cells]
     fixtures = {f for f, _ in pairs}
@@ -436,10 +441,11 @@ def closed_removal_prs(gh, skill: str) -> list:
     return [p for p in _json_lines(text) if p.get("head") == f"{BRANCH_PREFIX}{skill}"]
 
 
-def runtime_refusal(checkout: Path, plugin: str) -> str | None:
-    """improve_gate.py's `auto_refusal`: why `plugin` runs code, or None."""
+def runtime_refusal(checkout: Path, plugin: str, skill: str) -> str | None:
+    """improve_gate.py's `auto_refusal`: why removing `skill` would wait on
+    plugin-runtime-review, or None."""
     try:
-        return improve_gate.auto_refusal(checkout, plugin)
+        return improve_gate.auto_refusal(checkout, plugin, skill)
     except improve_gate.Rejected as exc:
         raise RetireError(str(exc)) from None
 
@@ -475,16 +481,14 @@ def _figure(block, field):
 def evidence(gates: dict, skill: str) -> str:
     """A Markdown table of the verdict's cells."""
     rows = ["| Fixture | Model | Runs with | Runs without | Objective upper | "
-            "Judge upper | Looks |", "|---|---|---|---|---|---|---|"]
+            "Judge upper |", "|---|---|---|---|---|---|"]
     for cell in gates["skills"][skill]["cells"]:
         arms = [cell.get(a) if isinstance(cell.get(a), dict) else {}
                 for a in ("with", "without")]
-        looks = ", ".join(str(look.get("n")) for look in cell.get("looks") or []
-                          if isinstance(look, dict))
         rows.append(f"| {cell.get('fixture') or '(flat)'} | {cell.get('model')} | "
                     f"{arms[0].get('runs', 'n/a')} | {arms[1].get('runs', 'n/a')} | "
                     f"{_figure(cell.get('objective'), 'retire_upper')} | "
-                    f"{_figure(cell.get('judge'), 'retire_upper')} | {looks} |")
+                    f"{_figure(cell.get('judge'), 'retire_upper')} |")
     return "\n".join(rows)
 
 
@@ -510,7 +514,7 @@ def impact_entry(gates: dict, skill: str, plugin: str, run_url: str | None,
             f"- Motivation: the retirement verdict is `retire` "
             f"([skills-evals ADR 0014](https://github.com/{EVALS_REPO}/blob/main/docs/decisions/0014-removal-pull-requests-merge-without-review.md)): every cell "
             f"({len(fixtures)} fixture(s) x {len(gates['roster_models'])} roster model(s)) "
-            f"shows no benefit at two fixed looks.\n"
+            f"shows no benefit at the retire confidence level.\n"
             f"- Change: `plugins/{plugin}/skills/{skill}/` removed, the skill dropped from "
             f"`{LAYOUT_FILE}` and the README table, bundle `{plugin}` {versions[0]} -> "
             f"{versions[1]} (a removal is a breaking change), by skills-evals' "
@@ -845,7 +849,7 @@ def plan(gates: dict, registries: dict, gh, run_url: str | None = None,
     if mode == "auto":
         location = locate(registries, skill)
         checkout = Path(registries[TARGET]["path"])
-        mode_reason = runtime_refusal(checkout, location["plugin"])
+        mode_reason = runtime_refusal(checkout, location["plugin"], skill)
         if mode_reason:
             mode = _lowered(mode_reason, allowed)
     if mode == "proposal":
@@ -884,8 +888,40 @@ def plan(gates: dict, registries: dict, gh, run_url: str | None = None,
     return {"action": "removal", "mode": mode, "skill": skill, **location,
             "branch": f"{BRANCH_PREFIX}{skill}", "versions": versions,
             "impact_entry": entry, "repin": repin,
+            "notice": skill_notice(gates, skill, location, run_url),
             "title": f"Remove {location['plugin']}/{skill}: no benefit (skills-evals#70)",
             "body": _pr_body(gates, skill, location, versions, run_url, repin)}
+
+
+#: The issue that tells the owner a skill is being removed and how to reverse it
+#: (#557; the owner, 2026-11-02, as for guidance sections). `{removal_pr}` is
+#: filled once the pull request exists.
+SKILL_NOTICE_MARKER = "<!-- skills-evals:removed-skill:{skill} -->"
+
+
+def skill_notice(gates: dict, skill: str, location: dict, run_url: str | None) -> dict:
+    """The removal notice (#557): an issue here that mentions the owner,
+    links the removal pull request and says how to reverse it."""
+    verdict = gates["skills"][skill]
+    marker = SKILL_NOTICE_MARKER.format(skill=skill)
+    return {"marker": marker,
+            "title": f"Skill {location['plugin']}/{skill} is being removed automatically (#557)",
+            "body": (f"{marker}\n@{NOTICE_OWNER}: the skill `{location['plugin']}/{skill}` "
+                     f"is being removed from acsi-agentskills: its verdict is **retire** as of "
+                     f"{gates['as_of']} ({verdict.get('reason')}). The rule is 90% confidence "
+                     "that it does not improve results by 0.15 or more "
+                     "(`evals/gate-policy.yml` `skills:`; the owner, 2026-11-02).\n\n"
+                     "Removal pull request: {removal_pr} (auto-merges once its checks "
+                     "pass).\n\n**To reverse it:** before it merges, close that pull "
+                     "request. After it merges, open it and press **Revert**: GitHub opens "
+                     "a pull request that restores the skill, its layout and README rows "
+                     "and the bundle version; merge that. The removal is recorded as a "
+                     f"`remove` entry in acsi-agentskills' `{IMPACT_FILE}` and on the "
+                     "explorer's list of removed skills.\n\n"
+                     + evidence(gates, skill)
+                     + (f"\n\nWorkflow run: {run_url}" if run_url else "")
+                     + "\n\nFiled by scripts/retire_skill.py on the scheduled workflow."
+                       "\n\n" + AGENT_MARKER + "\n")}
 
 
 def prepare_branch(checkout: Path, action: dict) -> None:
@@ -923,7 +959,7 @@ def prepare_branch(checkout: Path, action: dict) -> None:
     _commit(checkout,
             f"Remove {action['plugin']}/{action['skill']}: no benefit on every roster model\n\n"
             "skills-evals#70's scheduled retirement found no benefit in every cell at "
-            "two fixed looks.")
+            "the retire confidence level.")
     if action.get("repin"):
         run_registry_script(checkout, LOCK_GENERATOR, "--repin")
         run_registry_script(checkout, LOCK_GENERATOR, "--check-current")
@@ -975,7 +1011,9 @@ def commands(action: dict) -> list:
                 ["gh", "pr", "merge", "<new pull request url>", "-R", REGISTRY_REPO,
                  "--auto", "--merge", "--match-head-commit", "<removal head sha>"],
                 ["gh", "pr", "view", "<new pull request url>", "-R", REGISTRY_REPO,
-                 "--json", "autoMergeRequest"]]
+                 "--json", "autoMergeRequest"],
+                ["gh", "issue", "create", "-R", EVALS_REPO, "--title",
+                 action["notice"]["title"], "--label", AGENT_LABEL, "--body-file", "-"]]
     return []
 
 
@@ -1014,7 +1052,13 @@ def execute(action: dict, registries: dict, gh, push, env, registry_gh=None) -> 
                           '.autoMergeRequest.mergeMethod // ""']).strip()
     if method != "MERGE":
         raise RetireError(f"auto-merge (merge commit) is not enabled on {url}")
-    return f"opened {url} with auto-merge"
+    # The notice goes out once the removal is armed, through the job's own
+    # token (skills-evals issues), never the registry one (#557).
+    notice = action["notice"]
+    gh(["issue", "create", "-R", EVALS_REPO, "--title", notice["title"],
+        "--label", AGENT_LABEL, "--body-file", "-"],
+       notice["body"].replace("{removal_pr}", url))
+    return f"opened {url} with auto-merge, and filed the removal notice"
 
 
 # ---------------------------------------------------------------------------
@@ -1026,6 +1070,12 @@ GUIDANCE_REPO = "example-adopter/_agent-guidance"
 GUIDANCE_BRANCH_PREFIX = "retire-guidance/"
 GUIDANCE_ISSUE_MARKER = "<!-- skills-evals:retire-guidance:{section} -->"
 SHORTEN_ISSUE_MARKER = "<!-- skills-evals:shorten-guidance:{section} -->"
+#: The issue that tells the owner a section is being removed and how to reverse
+#: it (#557; the owner, 2026-11-02: "notify and track removals so I can always
+#: decide to reverse something"). `{removal_pr}` is filled once the pull
+#: request exists.
+GUIDANCE_NOTICE_MARKER = "<!-- skills-evals:removed-guidance:{section} -->"
+GUIDANCE_NOTICE_OWNER = NOTICE_OWNER
 GUIDANCE_MANIFEST = "agents-md/eval-coverage.yml"
 GUIDANCE_IMPACT = "docs/guidance-impact.md"
 GUIDANCE_AGENTS = "AGENTS.md"
@@ -1194,7 +1244,7 @@ def guidance_impact_entry(gates: dict, section: str, run_url: str | None) -> str
             f"- Motivation: skills-evals#124's retirement verdict is `retire`: the whole "
             f"guidance with and without the section shows no benefit in every cell "
             f"({len(fixtures)} fixture(s) x {len(gates['roster_models'])} roster model(s)) "
-            f"at two fixed looks.\n"
+            f"at the retire confidence level.\n"
             f"- Change: removed the section and its eval-coverage.yml row, by "
             f"skills-evals' scheduled retirement ({where}).\n"
             f"- Eval: n={runs} pooled arm runs (full vs full-minus-section) as of "
@@ -1310,6 +1360,7 @@ def guidance_plan(gates: dict, checkout: Path | None, gh, run_url: str | None = 
     row = guidance_row(checkout, section)
     verdict = guidance_block(gates)[section]
     return {"action": "guidance-removal", "mode": mode, "section": section,
+            "notice": guidance_notice(gates, section, row, run_url),
             "file": row["file"], "heading": row["heading"],
             "branch": f"{GUIDANCE_BRANCH_PREFIX}{section}",
             "impact_entry": guidance_impact_entry(gates, section, run_url),
@@ -1326,6 +1377,33 @@ def guidance_plan(gates: dict, checkout: Path | None, gh, run_url: str | None = 
                      + (f"\n\nWorkflow run: {run_url}" if run_url else "")
                      + "\n\nOpened by skills-evals' scripts/retire_skill.py --target "
                        "guidance on its scheduled workflow.\n\n" + AGENT_MARKER + "\n")}
+
+
+def guidance_notice(gates: dict, section: str, row: dict, run_url: str | None) -> dict:
+    """The removal notice (#557): an issue in skills-evals that mentions the
+    owner, links the removal pull request (`{removal_pr}`) and says how to
+    reverse it in one click."""
+    verdict = guidance_block(gates)[section]
+    marker = GUIDANCE_NOTICE_MARKER.format(section=section)
+    return {"marker": marker,
+            "title": f"Guidance section {section} is being removed automatically (#557)",
+            "body": (f"{marker}\n@{GUIDANCE_NOTICE_OWNER}: the guidance section `{section}` "
+                     f"(`## {row['heading']}` in `{row['file']}`) is being removed: its "
+                     f"verdict is **retire** as of {gates['as_of']} ({verdict.get('reason')}). "
+                     "The rule is 90% confidence that it does not improve results by 0.15 "
+                     "or more, pooled over every version of the rest of the guidance "
+                     "(`evals/gate-policy.yml` `guidance:`; the owner, 2026-11-02).\n\n"
+                     "Removal pull request: {removal_pr} (auto-merges once its checks "
+                     "pass).\n\n**To reverse it:** before it merges, close that pull "
+                     "request. After it merges, open it and press **Revert**: GitHub opens "
+                     "a pull request that restores the section, its coverage row and the "
+                     "regenerated files; merge that. The removal is recorded as a `remove` "
+                     f"entry in `{GUIDANCE_IMPACT}` and on the explorer's list of removed "
+                     "sections.\n\n"
+                     + guidance_evidence(verdict)
+                     + (f"\n\nWorkflow run: {run_url}" if run_url else "")
+                     + "\n\nFiled by scripts/retire_skill.py --target guidance on the "
+                       "scheduled workflow.\n\n" + AGENT_MARKER + "\n")}
 
 
 def guidance_prepare_branch(checkout: Path, action: dict) -> None:
@@ -1357,7 +1435,7 @@ def guidance_prepare_branch(checkout: Path, action: dict) -> None:
          "commit", "-q", "-m",
          f"Remove guidance section {action['section']}: no marginal benefit\n\n"
          "skills-evals#124's scheduled retirement found no benefit of the whole "
-         "guidance with the section over it without, in every cell at two fixed looks."
+         "guidance with the section over it without, in every cell at the retire confidence level."
          f"\n\n{AGENT_TRAILER}")
 
 
@@ -1391,7 +1469,9 @@ def guidance_commands(action: dict) -> list:
                 ["gh", "pr", "merge", "<new pull request url>", "-R", GUIDANCE_REPO,
                  "--auto", "--merge", "--match-head-commit", "<removal head sha>"],
                 ["gh", "pr", "view", "<new pull request url>", "-R", GUIDANCE_REPO,
-                 "--json", "autoMergeRequest"]]
+                 "--json", "autoMergeRequest"],
+                ["gh", "issue", "create", "-R", EVALS_REPO, "--title",
+                 action["notice"]["title"], "--label", AGENT_LABEL, "--body-file", "-"]]
     return []
 
 
@@ -1431,7 +1511,13 @@ def guidance_execute(action: dict, checkout: Path | None, gh, push, env,
                           '.autoMergeRequest.mergeMethod // ""']).strip()
     if method != "MERGE":
         raise RetireError(f"auto-merge (merge commit) is not enabled on {url}")
-    return f"opened {url} with auto-merge"
+    # The notice goes out once the removal is armed, through the job's own
+    # token (skills-evals issues), never the _agent-guidance one.
+    notice = action["notice"]
+    gh(["issue", "create", "-R", EVALS_REPO, "--title", notice["title"],
+        "--label", AGENT_LABEL, "--body-file", "-"],
+       notice["body"].replace("{removal_pr}", url))
+    return f"opened {url} with auto-merge, and filed the removal notice"
 
 
 def main(argv: list | None = None, *, env=None, gh=default_gh, push=None,

@@ -1,3 +1,4 @@
+acsi-usage-sink-2026-11.s3.us-east-1.amazonaws.com
 *.example-site-a
 example-site-a
 *.agents.md

@@ -18,6 +18,12 @@ runs it from the default branch on the `workflow_run` of
   * `resolve` takes the branch only from a same-repository push or a
     dispatch input, through a strict pattern;
   * `place` is idempotent and never overwrites a differing file;
+  * a `claude/eval-cost-<run id>` branch (#572 part 1, 2026-11-02) is
+    judged by `validate_cost` alone: exactly one
+    `improve-cost/<run id>/cost.json` passing improve_cost.check_record, for
+    the branch's run id, under 4 KiB, never a private skill or a target with
+    no committed fixtures; staged at `improve-costs/<run id>.json`; a
+    rejection exits 1 (red); `place --kind cost` keeps the first record;
   * both workflows, parsed with PyYAML (never line-scanned), hold the
     trust boundary: workflow_run for the writing job, `permissions: {}` at
     the top and `contents: write` only on `ingest`, bare-SHA pins with no
@@ -40,6 +46,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from fnmatch import fnmatch
 from pathlib import Path
 from unittest import mock
 
@@ -50,14 +57,17 @@ REPO_ROOT = TEST_DIR.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 INGEST = WORKFLOWS / "routine-eval-ingest.yml"
 SIGNAL = WORKFLOWS / "routine-eval-results-pushed.yml"
+COST_SIGNAL = WORKFLOWS / "routine-eval-cost-pushed.yml"
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 sys.path.insert(0, str(REPO_ROOT / "harness"))
 sys.path.insert(0, str(TEST_DIR))
 from lockfile_pins import lock_problem  # noqa: E402
 
 import cli_json  # noqa: E402
+import improve_cost  # noqa: E402
 import ingest_routine_results as ingest  # noqa: E402
 import run_eval  # noqa: E402
+from scorers.bash_ast import parse_bash  # noqa: E402
 
 RUN_ID = "20261006T194256Z-f944ea"
 BRANCH = f"claude/eval-{RUN_ID}"
@@ -238,6 +248,44 @@ class AcceptTests(GitCase):
                     if not name.endswith("tool_trace.json")}
         self.assertEqual(staged, expected)
 
+    def test_an_over_cap_detail_is_cut_on_ingest_not_rejected(self):
+        # 2026-11-03: a passing files_unchanged naming every file wrote a
+        # 6129-char detail, and the run's paid results were rejected whole.
+        files = good_files()
+        name = next(n for n in files if n.endswith("with_skill/summary.json"))
+        long = "unchanged (" + ", ".join(f"node_modules/f{i}.js" for i in range(400)) + ")"
+        doc = summary(objective_checks=[
+            {"id": "instrument-unchanged", "passed": True, "detail": long},
+            {"id": "short", "passed": True, "detail": "ok"}],
+            error={"type": "nonzero_exit", "detail": "e" * 5000})
+        files[name] = json.dumps(doc, indent=2).encode()
+        sha = self.commit(files)
+        out = self.tmp / "staged"
+        self.assertEqual(self.validate(expect=sha, out=out)["files"], "3")
+        (staged,) = [p for p in out.rglob("summary.json") if "with_skill" in str(p)]
+        got = json.loads(staged.read_text(encoding="utf-8"))
+        cut = got["objective_checks"][0]["detail"]
+        self.assertEqual(len(cut), ingest.MAX_STRING)
+        self.assertTrue(cut.startswith(long[:1000]))
+        self.assertTrue(cut.endswith(f" [truncated: {len(long)} chars]"))
+        self.assertEqual(got["objective_checks"][1]["detail"], "ok")
+        self.assertTrue(got["error"]["detail"].endswith(" [truncated: 5000 chars]"))
+        self.assertEqual(len(got["error"]["detail"]), ingest.MAX_STRING)
+        rest = {k: v for k, v in got.items() if k not in ("objective_checks", "error")}
+        self.assertEqual(rest, {k: v for k, v in doc.items()
+                                if k not in ("objective_checks", "error")})
+
+    def test_an_at_cap_detail_is_staged_byte_for_byte(self):
+        files = good_files()
+        name = next(n for n in files if n.endswith("with_skill/summary.json"))
+        files[name] = json.dumps(summary(objective_checks=[
+            {"id": "a", "passed": True, "detail": "x" * ingest.MAX_STRING}])).encode()
+        sha = self.commit(files)
+        out = self.tmp / "staged"
+        self.validate(expect=sha, out=out)
+        (staged,) = [p for p in out.rglob("summary.json") if "with_skill" in str(p)]
+        self.assertEqual(staged.read_bytes(), files[name])
+
     def test_legacy_root_only_for_its_own_run(self):
         legacy = "20261006T192432Z-93755e"
         self.assertEqual(ingest.LEGACY_ROOTS,
@@ -268,6 +316,26 @@ class AcceptTests(GitCase):
                 self.commit({f"{base}/with_skill/summary.json":
                              json.dumps(doc).encode()})
                 self.assertEqual(self.validate(out=self.tmp / name)["files"], "1")
+
+    def test_guidance_digests_section_payload_is_optional_but_checked(self):
+        digest = "a" * 64
+        rel = f"guidance/sec/{STAMP}/with_guidance_section/summary.json"
+        parts = ingest.parse_result_path(rel)
+        doc = {k: v for k, v in summary("with_guidance_section").items()
+               if k not in ("skill", "n", "fixture")}
+        doc.update(subject="guidance", section="sec", fixture_name="fx",
+                   guidance_digests={"section": digest, "rest": digest})
+        ingest.check_summary(doc, rel, parts)
+        ingest.check_summary({**doc, "guidance_digests": {
+            **doc["guidance_digests"], "section_payload": digest}}, rel, parts)
+        for bad in ({"section_payload": "x"}, {"section_payload": None},
+                    {"section_payload_x": digest}):
+            with self.subTest(bad=bad), self.assertRaises(ingest.Rejected):
+                ingest.check_summary({**doc, "guidance_digests": {
+                    **doc["guidance_digests"], **bad}}, rel, parts)
+        with self.assertRaises(ingest.Rejected):  # the required keys stay required
+            ingest.check_summary({**doc, "guidance_digests": {
+                "section": digest, "section_payload": digest}}, rel, parts)
 
     def test_rejects_contradictory_token_accounting(self):
         base = f"eval-results/{RUN_ID}/writing-adrs/{STAMP}/bootstrap"
@@ -472,6 +540,32 @@ class HarnessWriterTests(GitCase):
         sha = self.commit({})
         self.assertEqual(self.validate(expect=sha)["files"], "3")
 
+    def test_the_harness_cuts_a_long_detail_to_the_ingest_cap(self):
+        long = "unchanged (" + "a/b.js, " * 900 + ")"
+        checks = [{"id": "instrument-unchanged", "passed": True, "detail": long}]
+        error = {"type": "nonzero_exit", "detail": "e" * 9000}
+        results = self.repo / ingest.SOURCE_ROOT / RUN_ID
+        for arm in ("with_skill", "without_skill"):
+            run_eval._write_summary(
+                results, "writing-adrs", arm, STAMP, error, None, checks, None,
+                None, extra={"n": 1}, harness_version="2.1.296 (Claude Code)")
+        self.assertEqual(len(checks[0]["detail"]), len(long), "caller's copy kept whole")
+        written = json.loads((results / "writing-adrs" / STAMP / "with_skill"
+                              / "summary.json").read_text(encoding="utf-8"))
+        cut = written["objective_checks"][0]["detail"]
+        self.assertEqual(len(cut), ingest.MAX_STRING)
+        self.assertTrue(cut.endswith(f" [truncated: {len(long)} chars]"))
+        self.assertEqual(len(written["error"]["detail"]), ingest.MAX_STRING)
+        self.assertEqual(run_eval.SUMMARY_DETAIL_MAX, ingest.MAX_STRING)
+        self.write({f"{ingest.SOURCE_ROOT}/{RUN_ID}/writing-adrs/{STAMP}/"
+                    "report.md": REPORT.encode()})
+        sha = self.commit({})
+        out = self.tmp / "staged"
+        self.assertEqual(self.validate(expect=sha, out=out)["files"], "3")
+        (staged,) = [p for p in out.rglob("summary.json") if "with_skill" in str(p)]
+        self.assertEqual(json.loads(staged.read_text(encoding="utf-8")), written,
+                         "a summary already within the cap is not cut again")
+
 
 class InPlaceSemanticConsistencyTests(unittest.TestCase):
     """The trusted ingester checks that arm proofs agree with the frozen context."""
@@ -532,6 +626,27 @@ class InPlaceSemanticConsistencyTests(unittest.TestCase):
         self.check(self.guidance_record("with"))
         doc = self.guidance_record("without")
         self.check(doc)
+
+    def test_subject_source_and_revision_are_optional_and_checked(self):
+        # skills-evals#548: older summaries lack both keys.
+        def with_keys(**keys):
+            doc = self.record("with")
+            doc["context_subject"].update(keys)
+            return doc
+
+        self.check(with_keys(subject_source="main", subject_revision="a" * 40))
+        self.check(with_keys(subject_source="candidate", subject_revision=None))
+        self.check(self.record("with"))
+        for keys, message in (
+                ({"subject_source": "other", "subject_revision": None}, "main or candidate"),
+                ({"subject_source": "main", "subject_revision": "abc1234"}, "malformed"),
+                ({"subject_source": "main", "subject_revision": "A" * 40}, "malformed"),
+                ({"subject_source": "candidate", "subject_revision": "a" * 40}, "no revision"),
+                ({"subject_source": "main"}, "go together"),
+                ({"subject_revision": "a" * 40}, "go together")):
+            with self.subTest(keys=keys):
+                with self.assertRaisesRegex(ingest.Rejected, message):
+                    self.check(with_keys(**keys))
 
     def test_rejects_added_subject_without_arm_guidance_change(self):
         doc = self.guidance_record("without")
@@ -762,6 +877,8 @@ class RejectContentTests(GitCase):
             ("judge score", {"judge": {"dimensions": [{"score": -2}]}}),
             ("passed not a bool", {"objective_checks": [{"id": "a",
                                                          "passed": "yes"}]}),
+            ("objective detail", {"objective_checks": [{"id": "a", "passed": True,
+                                                        "detail": 5}]}),
             ("models_used", {"models_used": ["has space"]}),
             ("models_used", {"models_used": "model-a"}),
             ("harness: missing", {"harness": {"name": "claude-code",
@@ -967,6 +1084,247 @@ class PlaceTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# The improve cost branch (#572 part 1, 2026-11-02).
+
+COST_BRANCH = f"claude/eval-cost-{RUN_ID}"
+COST_PATH = f"improve-cost/{RUN_ID}/cost.json"
+PUBLIC_SKILL = "public-skill"
+PRIVATE_SKILL = "private-skill"
+SECTION = "some-section"
+
+
+def cost_record(**changes) -> dict:
+    """A valid record, built by the summarizer itself over an empty tree."""
+    with tempfile.TemporaryDirectory() as empty:
+        doc = improve_cost.summarize(
+            Path(empty), RUN_ID, changes.pop("mode", "improve"),
+            changes.pop("target", PUBLIC_SKILL), 1,
+            improve_cost.stamp_of(RUN_ID) + improve_cost.timedelta(minutes=30))
+    doc.update(changes)
+    return doc
+
+
+def cost_bytes(doc: dict) -> bytes:
+    return improve_cost.encode(doc)
+
+
+class CostBranchTests(GitCase):
+
+    def setUp(self):
+        super().setUp()
+        self.evals = self.tmp / "evals"
+        for skill, url in ((PUBLIC_SKILL, "https://github.com/example-adopter/acsi-agentskills"),
+                           (PRIVATE_SKILL, ingest_private_url())):
+            path = self.evals / skill / "one" / "fixture.yaml"
+            path.parent.mkdir(parents=True)
+            path.write_text(f"skill: {skill}\nregistry: {url}\n", encoding="utf-8")
+        path = self.evals / "guidance" / SECTION / "one" / "fixture.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text("guidance_section: x\n", encoding="utf-8")
+        self.git("checkout", "-q", "main")
+        self.git("checkout", "-q", "-b", COST_BRANCH)
+
+    def validate_cost(self, branch=COST_BRANCH, out=None):
+        return ingest.validate_cost(str(self.repo), "main", branch, branch, None,
+                                    out or self.tmp / "staged", self.evals)
+
+    def assertCostRejected(self, pattern):
+        with self.assertRaisesRegex(ingest.Rejected, pattern):
+            self.validate_cost()
+        staged = self.tmp / "staged"
+        self.assertFalse(staged.exists() and any(staged.rglob("*.json")))
+
+    def test_accepts_one_record_and_stages_its_exact_bytes(self):
+        data = cost_bytes(cost_record())
+        sha = self.commit({COST_PATH: data})
+        result, dest = self.validate_cost()
+        self.assertEqual(result, {"run_id": RUN_ID, "sha": sha, "files": "1"})
+        self.assertEqual(dest, f"improve-costs/{RUN_ID}.json")
+        staged = {str(p.relative_to(self.tmp / "staged")): p.read_bytes()
+                  for p in (self.tmp / "staged").rglob("*") if p.is_file()}
+        self.assertEqual(staged, {dest: data})
+
+    def test_accepts_a_guidance_section_with_fixtures(self):
+        self.commit({COST_PATH: cost_bytes(cost_record(mode="guidance-improve",
+                                                       target=SECTION))})
+        self.assertEqual(self.validate_cost()[1], f"improve-costs/{RUN_ID}.json")
+
+    def test_rejects_a_private_skill(self):
+        # Negative control: the same record, public target, is accepted
+        # (test_accepts_one_record_and_stages_its_exact_bytes).
+        self.commit({COST_PATH: cost_bytes(cost_record(target=PRIVATE_SKILL))})
+        self.assertCostRejected("private skill")
+
+    def test_rejects_a_target_with_no_committed_fixtures(self):
+        for mode, target in (("improve", "no-such-skill"),
+                             ("guidance-improve", "no-such-section")):
+            with self.subTest(mode=mode):
+                self.git("reset", "-q", "--hard", "main")
+                self.commit({COST_PATH: cost_bytes(cost_record(mode=mode, target=target))})
+                self.assertCostRejected("no committed fixture set")
+
+    def test_rejects_a_second_file(self):
+        self.commit({COST_PATH: cost_bytes(cost_record()),
+                     f"improve-cost/{RUN_ID}/extra.json": b"{}\n"})
+        self.assertCostRejected("exactly one file")
+
+    def test_rejects_a_wrong_path(self):
+        for path in (f"improve-cost/{RUN_ID}/other.json", f"improve-cost/{RUN_ID}.json",
+                     f"eval-results/{RUN_ID}/cost.json",
+                     "improve-cost/20261006T194256Z-aaaaaa/cost.json"):
+            with self.subTest(path=path):
+                self.git("reset", "-q", "--hard", "main")
+                self.commit({path: cost_bytes(cost_record())})
+                self.assertCostRejected("not 'improve-cost/")
+
+    def test_rejects_a_run_id_mismatch_inside_the_record(self):
+        other = "20261006T194300Z-abcdef"
+        doc = cost_record()
+        doc["run_id"] = other
+        doc["ended_at"] = cost_record()["ended_at"]
+        self.commit({COST_PATH: cost_bytes(doc)})
+        self.assertCostRejected("run_id is not the branch's")
+
+    def test_rejects_an_oversized_file(self):
+        data = cost_bytes(cost_record()) + b" " * ingest.COST_CAP
+        self.commit({COST_PATH: data})
+        self.assertCostRejected("over the 4096-byte cap")
+
+    def test_rejects_an_executable_bit(self):
+        self.write({COST_PATH: cost_bytes(cost_record())})
+        os.chmod(self.repo / COST_PATH, 0o755)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "x")
+        self.assertCostRejected("mode 100755")
+
+    def test_rejects_a_schema_breach_without_quoting_it(self):
+        for change in ({"extra": 1}, {"agent_usd": MARKER}, {"exit_code": True},
+                       {"target": "../" + MARKER}):
+            with self.subTest(change=str(change)[:40]):
+                self.git("reset", "-q", "--hard", "main")
+                doc = {**cost_record(), **change}
+                self.commit({COST_PATH: cost_bytes(doc)})
+                with self.assertRaises(ingest.Rejected) as caught:
+                    self.validate_cost()
+                self.assertNotIn(MARKER, str(caught.exception))
+
+    def test_rejects_duplicate_keys_and_non_finite_numbers(self):
+        good = cost_bytes(cost_record()).decode()
+        for text in (good.replace('"agent_usd": 0', '"agent_usd": 0, "agent_usd": 0', 1),
+                     good.replace('"agent_usd": 0', '"agent_usd": NaN', 1)):
+            with self.subTest(text=text[:20]):
+                self.assertNotEqual(text, good)
+                self.git("reset", "-q", "--hard", "main")
+                self.commit({COST_PATH: text.encode()})
+                self.assertCostRejected("duplicate|non-finite")
+
+    def test_an_eval_branch_name_is_never_a_cost_branch_and_back(self):
+        self.assertIsNone(ingest.COST_BRANCH_RE.fullmatch(BRANCH))
+        self.assertIsNone(ingest.BRANCH_RE.fullmatch(COST_BRANCH))
+        for bad in (COST_BRANCH + "-x", COST_BRANCH + "x", "claude/eval-cost-",
+                    "claude/eval-cost-" + RUN_ID.upper()):
+            self.assertIsNone(ingest.COST_BRANCH_RE.fullmatch(bad))
+        with self.assertRaisesRegex(ingest.Rejected, "claude/eval-cost-"):
+            ingest.validate_cost(str(self.repo), "main", "HEAD", COST_BRANCH + "-x",
+                                 None, self.tmp / "staged", self.evals)
+
+    def test_main_validate_prints_kind_and_dest_and_a_rejection_is_red(self):
+        self.commit({COST_PATH: cost_bytes(cost_record())})
+        out = io.StringIO()
+        with mock.patch.object(ingest, "check_cost_target"), \
+                contextlib.redirect_stdout(out):
+            code = ingest.main(["validate", "--repo", str(self.repo), "--base", "main",
+                                "--source", COST_BRANCH, "--branch", COST_BRANCH,
+                                "--out", str(self.tmp / "staged")])
+        self.assertEqual(code, 0)
+        lines = dict(line.split("=", 1) for line in out.getvalue().splitlines())
+        self.assertEqual((lines["kind"], lines["dest"]),
+                         ("cost", f"improve-costs/{RUN_ID}.json"))
+        self.commit({f"improve-cost/{RUN_ID}/extra.json": b"{}\n"})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = ingest.main(["validate", "--repo", str(self.repo), "--base", "main",
+                                "--source", COST_BRANCH, "--branch", COST_BRANCH,
+                                "--out", str(self.tmp / "staged2")])
+        self.assertEqual(code, 1)
+        self.assertTrue(err.getvalue().startswith("rejected: "))
+
+
+def ingest_private_url() -> str:
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    import plan_week  # noqa: PLC0415
+    return plan_week.PRIVATE_REGISTRY_URL
+
+
+class CostResolveAndPlaceTests(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def event(self, branch) -> str:
+        path = self.tmp / "event.json"
+        path.write_text(json.dumps({"inputs": {"branch": branch}}), encoding="utf-8")
+        return str(path)
+
+    def test_resolve_names_the_kind(self):
+        self.assertEqual(ingest.resolve_ingest("workflow_dispatch", self.event(COST_BRANCH)),
+                         {"branch": COST_BRANCH, "sha": "", "run_id": RUN_ID, "kind": "cost"})
+        self.assertEqual(ingest.resolve_ingest("workflow_dispatch", self.event(BRANCH)),
+                         {"branch": BRANCH, "sha": "", "run_id": RUN_ID, "kind": "eval"})
+        for bad in (COST_BRANCH + "-x", "claude/eval-improve-" + RUN_ID):
+            with self.assertRaises(ingest.Rejected):
+                ingest.resolve_ingest("workflow_dispatch", self.event(bad))
+
+    def stage(self, data: bytes) -> Path:
+        staged = self.tmp / "staged"
+        (staged / "improve-costs").mkdir(parents=True, exist_ok=True)
+        (staged / "improve-costs" / f"{RUN_ID}.json").write_bytes(data)
+        return staged
+
+    def test_first_cost_record_wins_and_exits_zero(self):
+        tree = self.tmp / "tree"
+        target = tree / "improve-costs" / f"{RUN_ID}.json"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"first\n")
+        staged = self.stage(b"second\n")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = ingest.main(["place", "--staged", str(staged), "--tree", str(tree),
+                                "--kind", "cost"])
+        self.assertEqual(code, 0)
+        self.assertIn("conflict=true", out.getvalue().splitlines())
+        self.assertIn("changed=false", out.getvalue().splitlines())
+        self.assertEqual(target.read_bytes(), b"first\n")
+        # Without --kind cost the same conflict is the eval rule: rejected.
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(ingest.main(["place", "--staged", str(staged),
+                                          "--tree", str(tree)]), 1)
+
+
+def commands(script: str) -> list[tuple[list[str], list[str]]]:
+    """Every simple command in `script`, as (argv texts, the condition texts
+    of every enclosing `if`), from the tree-sitter-bash AST."""
+    root = parse_bash(script)
+    out = []
+
+    def walk(node, conditions):
+        if node.type == "if_statement":
+            cond = node.child_by_field_name("condition")
+            texts = [c.text.decode() for c in node.children_by_field_name("condition")]
+            conditions = conditions + (texts or ([cond.text.decode()] if cond else []))
+        if node.type == "command":
+            argv = [child.text.decode() for child in node.named_children
+                    if child.type not in ("variable_assignment", "file_redirect")]
+            out.append((argv, conditions))
+        for child in node.named_children:
+            walk(child, conditions)
+
+    walk(root, [])
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Workflow shape, from the parsed YAML.
 
 PUSH_TARGET = re.compile(r"\bpush\s+origin\s+([^\s;]+)")
@@ -996,6 +1354,130 @@ def uses_nodes(node):
             yield from uses_nodes(item)
 
 
+class EstimateTests(unittest.TestCase):
+    """`estimate`: a placed run's cost_estimate.json, its points at the rate
+    the runs already on the tree measured (owner decision, 2026-11-01)."""
+
+    EARLIER = "20261005T000000Z-aaaaaa"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.tree = self.tmp / "tree"
+
+    @staticmethod
+    def cost(usd: float, metered=None) -> dict:
+        reasons = dict.fromkeys(("points_per_usd", "points"),
+                                run_eval._POINTS_AT_INGEST)
+        if metered is None:
+            reasons["metered_usd"] = "no meter delta spans a call"
+        return {"usd": usd, "agent_usd": usd, "judge_usd": 0, "guard_usd": 0,
+                "metered_usd": metered, "last_agent_call_usd": usd,
+                "calls_with_cost": 1, "calls_without_cost": 0,
+                "points_per_usd": None, "points": None,
+                "basis": run_eval.COST_ESTIMATE_BASIS, "reasons": reasons}
+
+    def run_dir(self, run_id: str, *invocations) -> Path:
+        """A run on the tree: one summary per (moved, cost_estimate or None)."""
+        root = self.tree / "routine-results" / run_id
+        for k, (moved, estimate) in enumerate(invocations):
+            usage = {"started_at": f"invocation-{k}", "meter_delta": None
+                     if moved is None else {"windows": {"seven_day": {
+                         "delta": moved, "window_reset": False}}}}
+            if estimate is not None:
+                usage["cost_estimate"] = estimate
+            path = root / "s" / f"t{k}" / "with_skill" / "summary.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"usage": {**usage, "measured": {}}}),
+                            encoding="utf-8")
+        return root
+
+    def written(self) -> dict:
+        path = self.tree / "routine-results" / RUN_ID / ingest.ESTIMATE_NAME
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_points_are_dollars_at_the_rate_earlier_runs_measured(self):
+        # 0.02 points over 0.5 metered dollars, and 0.01 over 0.25: 0.04.
+        self.run_dir(self.EARLIER, (0.02, self.cost(0.8, 0.5)),
+                     (0.01, self.cost(0.3, 0.25)))
+        self.run_dir(RUN_ID, (0.03, self.cost(1.5, 0.75)), (0.0, self.cost(0.5)))
+        self.assertEqual(ingest.estimate(self.tree, RUN_ID), {"estimated": "true"})
+        doc = self.written()
+        self.assertEqual(doc["calibration"]["invocations"], 2)
+        self.assertAlmostEqual(doc["calibration"]["points_per_usd"], 0.04, places=12)
+        self.assertEqual(doc["calibration"]["basis"], ingest.CALIBRATION_BASIS)
+        self.assertEqual(doc["usd"], 2.0)
+        self.assertAlmostEqual(doc["points"], 0.08, places=12)
+        first, second = doc["invocations"]
+        self.assertAlmostEqual(first["points"], 0.06, places=12)
+        self.assertAlmostEqual(second["points"], 0.02, places=12)
+        self.assertEqual(first["points_per_usd"], doc["calibration"]["points_per_usd"])
+        # Its own figures are carried as the harness wrote them.
+        self.assertEqual((first["usd"], first["metered_usd"]), (1.5, 0.75))
+        self.assertEqual(set(first["reasons"]), set())
+        self.assertEqual(set(second["reasons"]), {"metered_usd"})
+
+    def test_the_run_itself_and_unmeasured_invocations_are_not_calibrated_on(self):
+        self.run_dir(self.EARLIER, (None, self.cost(0.8, 0.5)),
+                     (0.02, self.cost(0.8)), (0.02, None))
+        self.run_dir(RUN_ID, (0.03, self.cost(1.5, 0.75)))
+        ingest.estimate(self.tree, RUN_ID)
+        doc = self.written()
+        self.assertEqual(doc["calibration"]["invocations"], 0)
+        self.assertIsNone(doc["calibration"]["points_per_usd"])
+        self.assertIsNone(doc["points"])
+        only = doc["invocations"][0]
+        self.assertIsNone(only["points"])
+        self.assertIn("no run ingested before this one", only["reasons"]["points"])
+        self.assertEqual(only["reasons"]["points"], only["reasons"]["points_per_usd"])
+
+    def test_it_is_written_once_and_never_rewritten(self):
+        self.run_dir(RUN_ID, (0.03, self.cost(1.5, 0.75)))
+        self.assertEqual(ingest.estimate(self.tree, RUN_ID), {"estimated": "true"})
+        before = self.written()
+        self.run_dir(self.EARLIER, (0.02, self.cost(0.8, 0.5)))
+        self.assertEqual(ingest.estimate(self.tree, RUN_ID), {"estimated": "false"})
+        self.assertEqual(self.written(), before)
+
+    def test_a_run_from_before_the_estimate_gets_no_file(self):
+        self.run_dir(RUN_ID, (0.03, None))
+        self.assertEqual(ingest.estimate(self.tree, RUN_ID), {"estimated": "false"})
+        self.assertFalse((self.tree / "routine-results" / RUN_ID /
+                          ingest.ESTIMATE_NAME).exists())
+
+    def test_a_malformed_earlier_run_is_skipped_not_trusted(self):
+        earlier = self.run_dir(self.EARLIER, (0.02, self.cost(0.8, 0.5)))
+        (earlier / "s" / "t0" / "with_skill" / "summary.json").write_text(
+            "{not json", encoding="utf-8")
+        odd = self.cost(0.8, "lots")
+        self.run_dir("20261005T000001Z-bbbbbb", (True, self.cost(0.8, 0.5)),
+                     (0.02, odd), (0.02, self.cost(0.8, float("inf"))))
+        self.run_dir(RUN_ID, (0.03, self.cost(1.5, 0.75)))
+        ingest.estimate(self.tree, RUN_ID)
+        self.assertEqual(self.written()["calibration"]["invocations"], 0)
+
+    def test_a_run_id_that_is_not_one_is_rejected(self):
+        with self.assertRaises(ingest.Rejected):
+            ingest.estimate(self.tree, "../elsewhere")
+
+    def test_the_cli_prints_what_it_did(self):
+        self.run_dir(RUN_ID, (0.03, self.cost(1.5, 0.75)))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = ingest.main(["estimate", "--tree", str(self.tree), "--run-id", RUN_ID])
+        self.assertEqual((code, out.getvalue()), (0, "estimated=true\n"))
+
+    def test_the_workflow_estimates_after_placing_and_before_adding(self):
+        bodies = [body for _, body in run_blocks(load(INGEST))
+                  if "ingest_routine_results.py estimate" in body]
+        self.assertEqual(len(bodies), 1)
+        body = bodies[0]
+        self.assertLess(body.index("ingest_routine_results.py place"),
+                        body.index("ingest_routine_results.py estimate"))
+        self.assertLess(body.index("ingest_routine_results.py estimate"),
+                        body.index('git -C "$tree" add'))
+
+
 class WorkflowShapeTests(unittest.TestCase):
 
     @classmethod
@@ -1007,7 +1489,8 @@ class WorkflowShapeTests(unittest.TestCase):
     def test_the_writing_job_runs_on_workflow_run_of_the_signal(self):
         on = triggers(self.ingest)
         self.assertEqual(set(on), {"workflow_run", "workflow_dispatch"})
-        self.assertEqual(on["workflow_run"]["workflows"], [self.signal["name"]])
+        self.assertEqual(on["workflow_run"]["workflows"],
+                         [self.signal["name"], load(COST_SIGNAL)["name"]])
         self.assertEqual(on["workflow_run"]["types"], ["completed"])
         self.assertEqual(on["workflow_run"]["branches"], ["claude/eval-*"])
         self.assertEqual(set(on["workflow_dispatch"]["inputs"]), {"branch"})
@@ -1015,14 +1498,50 @@ class WorkflowShapeTests(unittest.TestCase):
     def test_signal_is_a_filtered_push_with_no_reach(self):
         on = triggers(self.signal)
         self.assertEqual(set(on), {"push"})
-        self.assertEqual(on["push"]["branches"], ["claude/eval-*"])
+        self.assertEqual(on["push"]["branches"],
+                         ["claude/eval-*", "!claude/eval-cost-*"])
         self.assertEqual(on["push"]["paths"],
                          [f"{ingest.SOURCE_ROOT}/**"])
-        self.assertEqual(self.signal["permissions"], {})
-        for job in self.signal["jobs"].values():
-            self.assertNotIn("permissions", job)
-            for step in job["steps"]:
-                self.assertNotIn("uses", step, "the signal checks nothing out")
+        cost = triggers(load(COST_SIGNAL))
+        self.assertEqual(set(cost), {"push"})
+        self.assertEqual(cost["push"]["branches"], ["claude/eval-cost-*"])
+        self.assertEqual(cost["push"]["paths"], [f"{ingest.COST_SOURCE_ROOT}/**"])
+        for doc in (self.signal, load(COST_SIGNAL)):
+            self.assertEqual(doc["permissions"], {})
+            for job in doc["jobs"].values():
+                self.assertNotIn("permissions", job)
+                for step in job["steps"]:
+                    self.assertNotIn("uses", step, "the signal checks nothing out")
+
+    def test_cost_and_eval_signals_never_share_a_push(self):
+        """GitHub's filter: a branch triggers when it matches a positive
+        pattern and the LAST matching pattern is not a `!` one."""
+        def fires(branches, branch):
+            hit = False
+            for pattern in branches:
+                negated = pattern.startswith("!")
+                if fnmatch(branch, pattern.lstrip("!")):
+                    hit = not negated
+            return hit
+        eval_on = triggers(self.signal)["push"]
+        cost_on = triggers(load(COST_SIGNAL))["push"]
+        cost_branch, eval_branch = f"claude/eval-cost-{RUN_ID}", BRANCH
+        self.assertFalse(fires(eval_on["branches"], cost_branch))
+        self.assertTrue(fires(eval_on["branches"], eval_branch))
+        self.assertTrue(fires(cost_on["branches"], cost_branch))
+        self.assertFalse(fires(cost_on["branches"], eval_branch))
+        cost_file = f"{ingest.COST_SOURCE_ROOT}/{RUN_ID}/{ingest.COST_SOURCE_NAME}"
+        self.assertFalse(any(fnmatch(cost_file, p) for p in eval_on["paths"]))
+        for other in WORKFLOWS.glob("routine-*-pushed.yml"):
+            if other in (SIGNAL, COST_SIGNAL):
+                continue
+            push = triggers(load(other))["push"]
+            with self.subTest(other=other.name):
+                self.assertFalse(fires(push["branches"], cost_branch)
+                                 and ("paths" not in push or any(
+                                     fnmatch(cost_file, p) for p in push["paths"])))
+        # Negative control on the matcher itself.
+        self.assertTrue(fires(["claude/eval-*"], cost_branch))
 
     def test_permissions_are_minimal(self):
         self.assertEqual(self.ingest["permissions"], {})
@@ -1035,7 +1554,7 @@ class WorkflowShapeTests(unittest.TestCase):
                       self.job["if"])
 
     def test_no_concurrency_group(self):
-        for doc in (self.ingest, self.signal):
+        for doc in (self.ingest, self.signal, load(COST_SIGNAL)):
             self.assertNotIn("concurrency", doc)
             for job in doc["jobs"].values():
                 self.assertNotIn("concurrency", job)
@@ -1043,10 +1562,10 @@ class WorkflowShapeTests(unittest.TestCase):
     def test_every_uses_is_locked_and_already_pinned_elsewhere(self):
         pinned = set()
         for other in WORKFLOWS.glob("*.yml"):
-            if other not in (INGEST, SIGNAL):
+            if other not in (INGEST, SIGNAL, COST_SIGNAL):
                 pinned |= {n.value for n in uses_nodes(
                     yaml.compose(other.read_text(encoding="utf-8")))}
-        for path in (INGEST, SIGNAL):
+        for path in (INGEST, SIGNAL, COST_SIGNAL):
             text = path.read_text(encoding="utf-8")
             lines = text.splitlines()
             for node in uses_nodes(yaml.compose(text)):
@@ -1058,7 +1577,7 @@ class WorkflowShapeTests(unittest.TestCase):
                     self.assertIn(node.value, pinned)
 
     def test_no_expressions_in_run_blocks(self):
-        for doc in (self.ingest, self.signal):
+        for doc in (self.ingest, self.signal, load(COST_SIGNAL)):
             blocks = run_blocks(doc)
             self.assertTrue(blocks)
             for job, body in blocks:
@@ -1084,6 +1603,39 @@ class WorkflowShapeTests(unittest.TestCase):
         targets = [t for _, body in run_blocks(self.ingest)
                    for t in PUSH_TARGET.findall(body)]
         self.assertEqual(targets, ["HEAD:refs/heads/persistent/eval-results"])
+
+    def _commit_step(self) -> dict:
+        steps = [s for s in self.job["steps"]
+                 if s.get("name") == "Commit to persistent/eval-results and push"]
+        self.assertEqual(len(steps), 1)
+        return steps[0]
+
+    def test_kind_and_dest_come_from_validate_through_env(self):
+        step = self._commit_step()
+        self.assertEqual(step["env"]["KIND"], "${{ steps.validate.outputs.kind }}")
+        self.assertEqual(step["env"]["DEST"], "${{ steps.validate.outputs.dest }}")
+        install = [s for s in self.job["steps"] if "pip install" in s.get("run", "")]
+        self.assertEqual(len(install), 1)
+        self.assertEqual(install[0]["if"], "steps.resolve.outputs.kind == 'cost'")
+        names = [s.get("name") for s in self.job["steps"]]
+        self.assertLess(names.index(install[0]["name"]),
+                        names.index("Validate and stage the results"))
+
+    def test_commit_step_adds_dest_and_estimates_eval_only(self):
+        """Parsed with tree-sitter-bash, never line-scanned: `git add` takes
+        exactly `-- "$DEST"`, `place` gets `--kind "$KIND"`, and the one
+        `estimate` call sits inside an `if` testing KIND against eval."""
+        found = commands(self._commit_step()["run"])
+        adds = [argv[4:] for argv, _ in found
+                if argv[:4] == ["git", "-C", '"$tree"', "add"]]
+        self.assertEqual(adds, [["--", '"$DEST"']])
+        places = [argv for argv, _ in found if "place" in argv]
+        self.assertEqual(len(places), 1)
+        self.assertEqual(places[0][places[0].index("--kind") + 1], '"$KIND"')
+        estimates = [(argv, ifs) for argv, ifs in found if "estimate" in argv]
+        self.assertEqual(len(estimates), 1)
+        self.assertTrue(any('"$KIND"' in cond and "eval" in cond
+                            for cond in estimates[0][1]))
 
     def test_the_guards_can_fail(self):
         # Negative controls on the helpers the shape tests lean on.

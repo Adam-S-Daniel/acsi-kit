@@ -14,18 +14,32 @@ name: Weekly routine evals
 #   decision 4 addendum): no human in the loop. So is guidance-improve mode
 #   (ADR 0005, "Routine guidance improve mode addendum"): an eligible
 #   _agent-guidance section is an improve-band fire, one at a time, sent
-#   `trials=3` like an improve fire.
+#   `trials=3` like an improve fire. So is the trigger lane
+#   (skills-evals#662): a rarely used skill with a reviewed
+#   evals/<skill>/trigger-eval-set.json is an improve fire sent
+#   `trigger_only=true` and no holdout, which runs only skill-creator's
+#   description loop; one with no set is a `needs-trigger-set` work item.
+#   So are description trims (skills-evals#687): a skill with a
+#   `length-limit` waiver in acsi-agentskills is an improve fire sent
+#   `trim_description=true` and no holdout, planned before the value-ranked
+#   improve fires; its `description-trim` work item is never filed as an issue.
 # * The plan job reads the whole results branch (ingested runs, the usage
 #   census) and the three public registries as data, computes the
 #   retirement verdicts as scripts/compute_gates.py does, and reads the
 #   GitHub evidence (fire runs, improve and guidance-improve branches,
 #   acsi-agentskills and _agent-guidance pull requests, open on-hold
-#   issues) with its read-only token. A read failure
+#   issues) with its read-only token. With the read-only registry App it
+#   also reads the session miner's `skill-edit` lessons from
+#   acsi-agentskills-private's persistent/lessons, as an evidence count per
+#   public skill that boosts its improve value (#657). A read failure
 #   plans nothing (fail closed). When nothing fits, `count` is 0 and the
 #   dispatch job is skipped.
 # * Dispatch: one leg at a time (`max-parallel: 1`). Each leg waits until
-#   fewer than three fires are in flight (`plan_week.py wait-slot`), fires,
+#   fewer than MAX_IN_FLIGHT fires are in flight (`plan_week.py wait-slot`), fires,
 #   then waits 60 seconds before the next leg (the routine's fire limit).
+#   All legs share 25 minutes of waiting from the plan; a leg that finds the
+#   cap still full after that skips its fire and ends green, and the next
+#   re-plan (an ingest or the watchdog) plans the cell again.
 #   Improve fires are planned last, so a long improve run never holds up
 #   the evals.
 # * A manual dispatch runs the same sweep (no inputs). GitHub did not start
@@ -33,13 +47,38 @@ name: Weekly routine evals
 #   week's plan with no way to run until the next Tuesday. The plan job's
 #   default-branch condition and the fire workflow's allowance guard bound a
 #   manual run exactly as a scheduled one.
+# * Top-up (the owner, 2026-10-31: "use what is available rather than stopping
+#   short"): the planner books each fire at its estimated cost, so the
+#   Tuesday sweep stops once those estimates fill the room, even when the
+#   fires then cost less. So the sweep plans again from the newest ingested
+#   results and meter reading each time a result is ingested (`workflow_run`
+#   of the ingest workflow), and once a day after the scheduled-run health
+#   audit as a backstop for a chain that stopped because every fire was
+#   refused. A three-hourly cron did this first, but GitHub never started
+#   it (15:37, 18:37 and 21:37 UTC on 2026-10-31, even after re-enabling
+#   the workflow) while other schedules in this repo ran. A top-up with
+#   nothing due or no room plans nothing (`count` 0). The last job arms
+#   routine-eval-watchdog.yml, which re-plans when a guard hold still
+#   running at the sweep's end expires, or 50 minutes on (2026-11-01: a fire
+#   that never pushed results left nothing to wake a sweep for 2h22m). The concurrency group keeps two sweeps from
+#   planning the same cells at once: a queued sweep waits for the running
+#   one (cancel-in-progress false), and a newer queued sweep replaces an
+#   older one. A `workflow_run` run uses the default branch's copy of this
+#   file, so the plan job's default-branch condition holds.
 # * Not a pull_request or push workflow, so no path filter and no required
 #   check. Inputs are never interpolated into `run:`; matrix values reach
 #   the shell through `env` and are revalidated before the dispatch.
 on:
   schedule:
     - cron: "0 7 * * 2"
+  workflow_run:
+    workflows: ["Ingest routine eval results", "Scheduled-run health audit"]
+    types: [completed]
   workflow_dispatch:
+
+concurrency:
+  group: routine-eval-weekly
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -56,6 +95,8 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
+      batch_started: ${{ steps.plan.outputs.batch_started }}
+      sweep_started: ${{ steps.sweep.outputs.started }}
     steps:
       - name: Check out the default branch
         uses: actions/checkout@v7.0.1
@@ -63,8 +104,13 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
+      # The dispatch legs share one wait budget counted from here
+      # (plan_week.py SWEEP_MAX_WAIT).
+      - name: Record the sweep start
+        id: sweep
+        run: echo "started=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
       - name: Install PyYAML
@@ -75,6 +121,86 @@ jobs:
           ref: persistent/eval-results
           path: eval-results-branch
           persist-credentials: false
+      # Private-skill evals (the owner, 2026-10-31): acsi-agentskills-private
+      # holds both the skill and its ingested results, which never land on
+      # this repository's branch or in a public output. The read-only
+      # registry App token, minted as routine-eval-fire.yml mints it
+      # (that repository alone, contents read), reaches only the lookup and
+      # the two checkouts below. No App configured: the private cells stay
+      # without evidence, and plan_week publishes nothing about them.
+      - name: Mint the read-only token for the private registry
+        id: private-token
+        if: vars.REGISTRY_READ_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@v3.3.0
+        with:
+          client-id: ${{ vars.REGISTRY_READ_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REGISTRY_READ_APP_PEM }}
+          owner: example-adopter
+          repositories: acsi-agentskills-private
+          permission-contents: read
+      - name: Look for the private results branch
+        id: private-results
+        if: steps.private-token.outputs.token != ''
+        env:
+          PRIVATE_READ_TOKEN: ${{ steps.private-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if GH_TOKEN="$PRIVATE_READ_TOKEN" gh api repos/example-adopter/acsi-agentskills-private/branches/persistent/eval-results \
+               --silent 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out the private results (data only)
+        if: steps.private-results.outputs.exists == 'true'
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/acsi-agentskills-private
+          ref: persistent/eval-results
+          path: private-eval-results
+          persist-credentials: false
+          sparse-checkout: routine-results
+          token: ${{ steps.private-token.outputs.token }}
+      - name: Add the private runs to the results tree
+        if: steps.private-results.outputs.exists == 'true'
+        run: python3 scripts/overlay_private_results.py --private private-eval-results --tree eval-results-branch
+      - name: Check out acsi-agentskills-private (the private skills, read for digests)
+        if: steps.private-token.outputs.token != ''
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/acsi-agentskills-private
+          path: registry-private
+          persist-credentials: false
+          sparse-checkout: plugins
+          token: ${{ steps.private-token.outputs.token }}
+      # The session miner's skill-edit lessons (#657) boost a public skill's
+      # improve candidate (plan_week.py, SKILL-EDIT LESSONS). Data only, from
+      # persistent/lessons; plan_week reads the newest day's skill-edit
+      # proposals for an evidence count and nothing else. No branch (or no
+      # App) plans without them.
+      - name: Look for the lessons branch
+        id: lessons-branch
+        if: steps.private-token.outputs.token != ''
+        env:
+          PRIVATE_READ_TOKEN: ${{ steps.private-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if GH_TOKEN="$PRIVATE_READ_TOKEN" gh api repos/example-adopter/acsi-agentskills-private/branches/persistent/lessons \
+               --silent 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out the lessons (data only)
+        if: steps.lessons-branch.outputs.exists == 'true'
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/acsi-agentskills-private
+          ref: persistent/lessons
+          path: private-lessons
+          persist-credentials: false
+          sparse-checkout: lessons/proposals
+          token: ${{ steps.private-token.outputs.token }}
       - name: Check out acsi-agentskills
         uses: actions/checkout@v7.0.1
         with:
@@ -98,12 +224,28 @@ jobs:
         run: |
           set -euo pipefail
           as_of="$(git -C eval-results-branch log -1 --format=%cI)"
+          if [ -d private-eval-results/.git ]; then
+            # The later tip of the two branches, so private runs ingested
+            # after the public tip's last commit are read too.
+            as_of="$(python3 -c 'import sys, datetime as d; print(max(sys.argv[1:], key=d.datetime.fromisoformat))' \
+              "$as_of" "$(git -C private-eval-results log -1 --format=%cI)")"
+          fi
+          private=()
+          if [ -d registry-private/plugins ]; then
+            private=(--registry "acsi-agentskills-private=$GITHUB_WORKSPACE/registry-private")
+          fi
+          if [ -d private-lessons/lessons/proposals ]; then
+            private+=(--lessons "$GITHUB_WORKSPACE/private-lessons/lessons/proposals")
+          fi
           python3 scripts/plan_week.py plan --results-tree eval-results-branch \
             --as-of "$as_of" --max-fires 30 \
             --registry "acsi-agentskills=$GITHUB_WORKSPACE/registry-agentskills" \
+            "${private[@]}" \
             --guidance "$GITHUB_WORKSPACE/agent-guidance" \
             --out "$RUNNER_TEMP/plan.json" \
-            --ranking-out "$RUNNER_TEMP/improve-ranking.json"
+            --ranking-out "$RUNNER_TEMP/improve-ranking.json" \
+            --batch-policy evals/batch-policy.yml \
+            --batch-out "$RUNNER_TEMP/batch.json"
       - name: Upload the improve ranking
         uses: actions/upload-artifact@v7.0.2
         with:
@@ -111,6 +253,151 @@ jobs:
           path: ${{ runner.temp }}/improve-ranking.json
           retention-days: 30
           if-no-files-found: error
+      # Issue-routed work items for the work-issues job: lost fires
+      # (fixture-broken cells, routine outages), fixture needs
+      # (needs-fixtures, needs-harder-fixtures, #659) and trigger sets to
+      # write (needs-trigger-set, #662), plus the skills and sections whose
+      # headroom the plan measured and the skills its trigger lane judged
+      # (`triggers`), the only ones whose issue may close. Public by
+      # construction: a private cell enters no band, an outage names no
+      # fixture, a fixture need names only an acsi-agentskills skill or a
+      # guidance section, and the trigger lane never judges a private skill.
+      - name: Extract the issue-routed work items
+        run: |
+          set -euo pipefail
+          jq '{routine_down: (.routine_down == true),
+               subjects: {skills: [(.skills // {}) | to_entries[] | select(.value.headroom != null) | .key],
+                          guidance: [(.guidance // {}) | to_entries[] | select(.value.headroom != null) | .key],
+                          triggers: [(.triggers // {}) | keys[]]},
+               work: [.work[] | select(.kind == "fixture-broken" or .kind == "routine-outage"
+                                       or .kind == "needs-fixtures" or .kind == "needs-harder-fixtures"
+                                       or .kind == "needs-trigger-set")]}' \
+            "$RUNNER_TEMP/plan.json" > "$RUNNER_TEMP/work-items.json"
+      - name: Upload the issue-routed work items
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: work-items
+          path: ${{ runner.temp }}/work-items.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Upload the new batch record
+        if: steps.plan.outputs.batch_started == 'true'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: batch
+          path: ${{ runner.temp }}/batch.json
+          retention-days: 30
+          if-no-files-found: error
+
+  # LOST FIRES (the owner, 2026-11-03: "addressed so in the future it won't
+  # require special detection and intervention"): one issue per
+  # fixture-broken cell and routine outage the plan lists, and one
+  # `agent-ready` issue per fixture need (#659) or trigger set to write
+  # (#662), closed when the plan stops listing it (scripts/work_item_issues.py). The planner has
+  # already re-fired a lost fire once, so an issue means a second loss.
+  work-issues:
+    needs: plan
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install the pins regression_issue.py's imports need
+        run: python3 -m pip install pyyaml==6.0.3 markdown-it-py==4.2.0
+      - name: Download the issue-routed work items
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: work-items
+          path: ${{ runner.temp }}/work-items
+      - name: File, keep or close the issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python3 scripts/work_item_issues.py --items "$RUNNER_TEMP/work-items/work-items.json" \
+            --run-url "$RUN_URL"
+
+  # THE BATCH (scripts/plan_week.py): a plan that started a two-week batch
+  # commits its record to persistent/eval-results, where the next plan reads
+  # it. Only then: a sweep that keeps the open batch writes nothing. The
+  # sweeps' concurrency group keeps two from starting batches at once; the
+  # ingest and explorer jobs also push to the branch, so the push retries
+  # from a fresh fetch. The job token's pushes start no workflow.
+  batch-publish:
+    needs: plan
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && needs.plan.outputs.batch_started == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Download the batch record
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: batch
+          path: ${{ runner.temp }}/batch
+      - name: Publish batches/current.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/batch/batch.json"
+          number="$(jq -er '.number | select(type == "number" and . >= 1 and . == floor)' "$source")"
+          jq -e '.schema_version == 1 and (.members | type == "array")' "$source" >/dev/null
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git config user.name "skills-evals real-eval bot"
+          git config user.email "skills-evals@users.noreply.github.com"
+          for attempt in 1 2 3 4 5 6; do
+            # Other publishers push this branch every minute or two, so wait
+            # (about 2, 4, 8, 16 and 32 s plus jitter) before each retry.
+            if [ "$attempt" -gt 1 ]; then
+              sleep $(( (1 << attempt) + RANDOM % 5 ))
+            fi
+            git fetch origin refs/heads/persistent/eval-results:refs/remotes/origin/persistent/eval-results
+            git checkout -B persistent/eval-results origin/persistent/eval-results
+            if [ -L batches ] || { [ -e batches ] && [ ! -d batches ]; }; then
+              echo "Unsafe batch output path." >&2
+              exit 1
+            fi
+            for name in current.json "$number.json"; do
+              if [ -L "batches/$name" ] || { [ -e "batches/$name" ] && [ ! -f "batches/$name" ]; }; then
+                echo "Unsafe batch output path." >&2
+                exit 1
+              fi
+            done
+            mkdir -p batches
+            cp "$source" batches/current.json
+            cp "$source" "batches/$number.json"
+            git add -f batches/current.json "batches/$number.json"
+            if git diff --cached --quiet; then
+              echo "No batch change to commit."
+              exit 0
+            fi
+            git commit -m "batches: start batch $number [skip ci]"
+            if git -c "http.https://github.com/.extraheader=$auth" push origin HEAD:refs/heads/persistent/eval-results; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed; retrying from a fresh fetch." >&2
+          done
+          echo "Could not publish batches/current.json after 6 attempts." >&2
+          exit 1
 
   dispatch:
     needs: plan
@@ -132,12 +419,13 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
       - name: Install PyYAML
         run: python3 -m pip install pyyaml==6.0.3
       - name: Revalidate the planned fire
+        id: valid
         env:
           MODE: ${{ matrix.mode }}
           ARMS: ${{ matrix.arms }}
@@ -147,12 +435,22 @@ jobs:
           SKILL: ${{ matrix.skill }}
           SECTION: ${{ matrix.section }}
           HOLDOUT: ${{ matrix.holdout }}
+          TRIGGER_ONLY: ${{ matrix.trigger_only }}
+          TRIM_DESCRIPTION: ${{ matrix.trim_description }}
         run: python3 scripts/plan_week.py validate-fire
-      - name: Wait until fewer than three fires are in flight
+      # A leg whose fixture was unscheduled after the plan exits 0 with
+      # fire=false and skips the rest. A cap still full when the sweep's
+      # wait budget is spent skips this leg's fire (exit 0, open=false);
+      # the next re-plan plans it again.
+      - name: Wait until a fire slot is free
+        id: slot
+        if: steps.valid.outputs.fire == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/plan_week.py wait-slot --max-wait 1500
+          SWEEP_STARTED: ${{ needs.plan.outputs.sweep_started }}
+        run: python3 scripts/plan_week.py wait-slot --max-wait 1500 --sweep-started "$SWEEP_STARTED"
       - name: Dispatch the validated fire
+        if: steps.valid.outputs.fire == 'true' && steps.slot.outputs.open == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -163,6 +461,8 @@ jobs:
           SKILL: ${{ matrix.skill }}
           SECTION: ${{ matrix.section }}
           HOLDOUT: ${{ matrix.holdout }}
+          TRIGGER_ONLY: ${{ matrix.trigger_only }}
+          TRIM_DESCRIPTION: ${{ matrix.trim_description }}
         run: |
           set -euo pipefail
           case "$MODE" in
@@ -180,8 +480,22 @@ jobs:
                       --raw-field "model=$MODEL" --raw-field "arms=$ARMS"
                       --raw-field "trials=$trials") ;;
             improve)
-              fields=(--raw-field mode=improve --raw-field "skill=$SKILL"
-                      --raw-field "holdout=$HOLDOUT" --raw-field arms=both --raw-field trials=3) ;;
+              # A trigger-only fire (the trigger lane, #662) and a description
+              # trim (#687) send no holdout; validate-fire refused one that
+              # carried any, and a leg that is both.
+              if [ "${TRIGGER_ONLY:-}" = "true" ]; then
+                fields=(--raw-field mode=improve --raw-field "skill=$SKILL"
+                        --raw-field holdout= --raw-field arms=both --raw-field trials=3
+                        --raw-field trigger_only=true --raw-field trim_description=false)
+              elif [ "${TRIM_DESCRIPTION:-}" = "true" ]; then
+                fields=(--raw-field mode=improve --raw-field "skill=$SKILL"
+                        --raw-field holdout= --raw-field arms=both --raw-field trials=3
+                        --raw-field trigger_only=false --raw-field trim_description=true)
+              else
+                fields=(--raw-field mode=improve --raw-field "skill=$SKILL"
+                        --raw-field "holdout=$HOLDOUT" --raw-field arms=both --raw-field trials=3
+                        --raw-field trigger_only=false --raw-field trim_description=false)
+              fi ;;
             guidance-improve)
               fields=(--raw-field mode=guidance-improve --raw-field "section=$SECTION"
                       --raw-field "holdout=$HOLDOUT" --raw-field arms=both --raw-field trials=3) ;;
@@ -196,4 +510,28 @@ jobs:
           fi
       # The routine's fire limit: about one fire a minute.
       - name: Space the next fire
+        if: steps.slot.outputs.open == 'true'
         run: sleep 60
+
+  # Arms the re-plan timer (routine-eval-watchdog.yml) at every sweep's end,
+  # whatever the plan or dispatch concluded: a fire that never pushes results
+  # wakes no ingest, so its hold ending would otherwise re-plan nothing.
+  watchdog:
+    needs: [plan, dispatch]
+    if: always() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Arm the re-plan watchdog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if ! gh workflow run routine-eval-watchdog.yml \
+            --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH" > /dev/null 2>&1; then
+            echo "::error::Watchdog dispatch failed"
+            exit 1
+          fi

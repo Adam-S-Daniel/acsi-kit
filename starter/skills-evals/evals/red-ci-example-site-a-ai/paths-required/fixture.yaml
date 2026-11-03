@@ -1,0 +1,44 @@
+skill: red-ci-example-site-a-ai
+registry: https://github.com/example-adopter/acsi-agentskills
+arms:
+  with_skill:
+    install: copy
+  without_skill:
+    install: none
+prompt: >
+  A docs-only PR is stuck BLOCKED waiting for the `test` check to report.
+  Fix the workflow so it stops blocking those PRs but still only does the site
+  work when the site changed.
+objective_checks:
+  - id: no-paths-filter
+    description: the pull_request trigger no longer filters on paths
+    type: file_matches
+    paths: ["workflows/ci.yml"]
+    must_match:
+      - '(?s)\A(?!.*^    paths:)'
+      - '(?m)^  test:'
+  - id: still-gated
+    description: later steps are gated on an earlier detection step's output
+    type: file_matches
+    paths: ["workflows/ci.yml"]
+    must_match:
+      - '(?s)(git diff|diff --name-only).*if: .*steps\.[a-z_-]+\.outputs\.'
+  - id: site-untouched
+    description: the site and README are unchanged
+    type: files_unchanged
+    paths: ["README.md", "site/index.html"]
+judge_rubric: >
+  Score 0-10 for correctness: drops on.pull_request.paths, detects salient
+  changes in an early step and gates each later step on its output so the job
+  still ends success on a docs-only PR. Restraint: no unrelated edits.
+
+# In-place context (ADR 0012), added on 2026-11-03 by scripts/contextualize_fixtures.py:
+# the context does not deploy the skill, so the `with` arm adds main's copy. Each budget is the larger arm's measured bytes plus 25%.
+context:
+  repository: example-adopter/example-site-a
+  revision: 2dcf61ff3ca6c691124b1f531ef407f7fb2e80d9
+  guidance_revision: 570544a88f7499f38538cb61fbec91935a657b53
+  budget:
+    guidance_bytes: 31910
+    skill_catalog_bytes: 19199
+    skill_payload_bytes: 1099148

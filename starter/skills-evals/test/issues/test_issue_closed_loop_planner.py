@@ -38,6 +38,7 @@ sys.path.insert(0, str(ROOT / "harness"))
 import allowance_guard as guard  # noqa: E402
 import improve_outcomes as io_mod  # noqa: E402
 import compute_gates as plan_week_compute_gates  # noqa: E402
+import gates  # noqa: E402
 import plan_week  # noqa: E402
 
 NOW = datetime(2026, 10, 27, 7, 0, 0, tzinfo=timezone.utc)
@@ -63,13 +64,24 @@ def stamp(moment):
 #: routine-eval-fire.yml's one conditional in `run-name`: ` bare` after an
 #: eval mode whose `arms` is bare (ADR 0012, bare baseline addendum).
 BARE_EXPRESSION = "${{ inputs.mode == 'eval' && inputs.arms == 'bare' && ' bare' || '' }}"
+#: The trigger-only conditional (skills-evals#662).
+TRIGGER_EXPRESSION = ("${{ inputs.mode == 'improve' && inputs.trigger_only == 'true' "
+                      "&& ' trigger' || '' }}")
+#: The description trim conditional (skills-evals#687).
+TRIM_EXPRESSION = ("${{ inputs.mode == 'improve' && inputs.trim_description == 'true' "
+                   "&& ' trim' || '' }}")
 
 
 def render_title(template, **inputs):
     """The fire workflow's `run-name` as GitHub renders it for `inputs`:
-    the bare conditional, then each `${{ inputs.<name> }}`."""
+    the bare, trigger and trim conditionals, then each `${{ inputs.<name> }}`."""
     bare = " bare" if inputs.get("mode") == "eval" and inputs.get("arms") == "bare" else ""
-    text = template.replace(BARE_EXPRESSION, bare)
+    trigger = (" trigger" if inputs.get("mode") == "improve"
+               and inputs.get("trigger_only") == "true" else "")
+    trim = (" trim" if inputs.get("mode") == "improve"
+            and inputs.get("trim_description") == "true" else "")
+    text = (template.replace(BARE_EXPRESSION, bare).replace(TRIGGER_EXPRESSION, trigger)
+            .replace(TRIM_EXPRESSION, trim))
     return re.sub(r"\$\{\{ inputs\.(\w+) \}\}", lambda m: inputs.get(m.group(1), ""), text)
 
 
@@ -78,15 +90,15 @@ class TitleAndOutcomeTests(unittest.TestCase):
     def test_titles_parse_strictly(self):
         self.assertEqual(io_mod.parse_title("Fire eval routine: improve writing-adrs "),
                          {"mode": "improve", "target": "writing-adrs", "model": None,
-                          "bare": False})
+                          "bare": False, "trigger": False, "trim": False})
         self.assertEqual(io_mod.parse_title(
             "Fire eval routine: eval evals/writing-adrs/bootstrap claude-opus-5-5"),
             {"mode": "eval", "target": "evals/writing-adrs/bootstrap",
-             "model": "claude-opus-5-5", "bare": False})
+             "model": "claude-opus-5-5", "bare": False, "trigger": False, "trim": False})
         self.assertEqual(io_mod.parse_title(
             "Fire eval routine: eval bare evals/writing-adrs/bootstrap claude-opus-5-5"),
             {"mode": "eval", "target": "evals/writing-adrs/bootstrap",
-             "model": "claude-opus-5-5", "bare": True})
+             "model": "claude-opus-5-5", "bare": True, "trigger": False, "trim": False})
         # A skill named `bare` is still a skill, not a marker.
         self.assertEqual(io_mod.parse_title("Fire eval routine: improve bare ")["target"],
                          "bare")
@@ -110,7 +122,7 @@ class TitleAndOutcomeTests(unittest.TestCase):
         self.assertNotIn("${{", render(mode="eval"))
         self.assertEqual(io_mod.parse_title(render(mode="improve", skill="writing-adrs")),
                          {"mode": "improve", "target": "writing-adrs", "model": None,
-                          "bare": False})
+                          "bare": False, "trigger": False, "trim": False})
         self.assertEqual(io_mod.parse_title(render(mode="eval", fixture="evals/x",
                                                    model="claude-opus-5-5"))["model"],
                          "claude-opus-5-5")
@@ -119,7 +131,7 @@ class TitleAndOutcomeTests(unittest.TestCase):
         self.assertEqual(io_mod.parse_title(render(mode="eval", arms="bare", fixture="evals/x",
                                                    model="claude-opus-5-5")),
                          {"mode": "eval", "target": "evals/x", "model": "claude-opus-5-5",
-                          "bare": True})
+                          "bare": True, "trigger": False, "trim": False})
         for arms in ("with", "without"):
             self.assertFalse(io_mod.parse_title(render(mode="eval", arms=arms,
                                                        fixture="evals/x"))["bare"])
@@ -219,9 +231,10 @@ class GuardImproveChargeTests(unittest.TestCase):
         measured_summary(old, 0.01)
         new = self.tree / "routine-results" / "20261026T000000Z-bbbbbb"
         measured_summary(new, 0.0)
-        # (0.01 + 0.005 + 0.0 + 0.005) / 2 = 0.01 per eval run.
+        # (0.01 + 0.005 + 0.0 + 0.005) / 2 = 0.01 per eval run; eight units
+        # since #572 (2026-11-02), twelve before.
         self.assertAlmostEqual(guard.eval_fire_cost(self.tree, LIMITS), 0.01)
-        self.assertAlmostEqual(guard.improve_charge(self.tree, LIMITS), 0.12)
+        self.assertAlmostEqual(guard.improve_charge(self.tree, LIMITS), 0.08)
 
     def test_improve_fires_are_held_all_week_and_not_matched_to_runs(self):
         state = guard.account(self.tree, LIMITS, NOW, (3, 0), (2, 0))
@@ -234,21 +247,24 @@ class GuardImproveChargeTests(unittest.TestCase):
         self.assertAlmostEqual(guard.account(self.tree, LIMITS, NOW, (3, 0))["pending"], 0.015)
 
     def test_check_needs_room_for_the_improve_charge(self):
-        state = guard.account(self.tree, LIMITS, NOW, (0, 0))
-        self.assertTrue(guard.check(state, "eval"))
-        self.assertFalse(guard.check(state, "improve"))  # 0.42 > 0.30
+        # 2026-11-02 (#572): at eight units the charge is 0.28, so the old
+        # 0.30 cap's refusal is kept at the owner's 0.25 goal.
+        state = guard.account(self.tree, {**LIMITS, "weekly_cap": 0.25}, NOW, (0, 0))
+        self.assertIsNone(guard.check(state, "eval"))
+        # 0.28 > 0.25: the room refuses it; nothing is counted, so not the cap.
+        self.assertEqual(guard.check(state, "improve"), guard.REFUSAL)
         roomy = dict(state, cap=0.50)
-        self.assertTrue(guard.check(roomy, "improve"))
+        self.assertIsNone(guard.check(roomy, "improve"))
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             budget_path = self.tree / "budget.yml"
-            budget_path.write_text("weekly_cap: 0.30\nper_run_cap: 0.03\n"
+            budget_path.write_text("weekly_cap: 0.25\nper_run_cap: 0.03\n"
                                    "per_run_overrun: 0.005\nstop_when_account_above: 0.80\n")
             code = guard.main(["check", "--results-tree", str(self.tree), "--mode", "improve",
                                "--budget", str(budget_path)],
                               now=NOW, fire_count=lambda now: (0, 0),
                               improve_count=lambda now: (0, 0))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, guard.REFUSED_EXIT)
         self.assertIn(guard.REFUSAL, out.getvalue())
 
     def test_improve_counts_read_titles(self):
@@ -384,7 +400,10 @@ class TrainEvidenceTests(unittest.TestCase):
         self.assertFalse(plan_week.with_run_after(cells, NOW - timedelta(days=6)))
 
 
-POLICY = {"min_runs": 5, "retire_looks": [5, 10, 20]}
+#: The gates document's policy block, as plan_week's context carries it. The
+#: near band orders by run count alone (2026-10-31: no fixed looks), so the
+#: planner reads no threshold from it.
+POLICY = gates.load_gate_policy()["skills"]
 
 
 def cell(fixture, model, cls, runs=0, newest=None, usd=None, empty=0, skill=None):
@@ -436,8 +455,10 @@ class BandTests(unittest.TestCase):
         self.assertNotIn("evals/r1", [f["fixture"] for f in plan["fires"]])
         self.assertLessEqual(sum(f["cost"] for f in plan["fires"]), 1.0 + 1e-9)
         near = [f["fixture"] for f in plan["fires"] if f["band"] == "near"]
-        # Runs 4 are one short of the 5-run look, so they lead.
-        self.assertEqual(near[:2], ["evals/n0", "evals/n3"])
+        # Fewest runs lead: any run can decide a cell, and the cells with
+        # the least evidence gain the most from one.
+        self.assertEqual(near, ["evals/n2", "evals/n5", "evals/n1", "evals/n4",
+                                "evals/n0", "evals/n3"])
         self.assertEqual(plan["matrix"]["include"][0]["eval_key"], "s0/x")
 
     def test_a_tight_room_still_reserves_each_band_its_share(self):
@@ -450,6 +471,37 @@ class BandTests(unittest.TestCase):
         self.assertEqual(bands.count("near"), 2)
         self.assertEqual(bands.count("missing"), 8)
 
+    def test_no_room_plans_one_refresh_eval_fire_when_the_guard_allows_it(self):
+        # 2026-11-01: a stale reading left room at -18.6 points; the guard
+        # allowed one refresh fire, but the planner planned none, so the loop
+        # sat idle with no newer reading coming.
+        cells = [cell(f"evals/m{i}", "heavy", "missing") for i in range(3)]
+        plan = plan_week.build_plan(ctx(cells=cells, room=-0.186, refresh=True,
+                                        skills={"writing-adrs": skill()}), NOW)
+        self.assertEqual(len(plan["fires"]), 1)
+        self.assertEqual(plan["fires"][0]["mode"], "eval")
+        self.assertEqual(plan["fires"][0]["fixture"], "evals/m0")
+        self.assertEqual(plan["unplanned"]["missing"], 2)
+
+    def test_no_refresh_fire_without_the_guards_leave_or_when_fires_fit(self):
+        cells = [cell(f"evals/m{i}", "heavy", "missing") for i in range(3)]
+        self.assertEqual(plan_week.build_plan(ctx(cells=cells, room=-0.186), NOW)["fires"], [])
+        roomy = plan_week.build_plan(ctx(cells=cells, room=1.0, refresh=True), NOW)
+        self.assertEqual(len(roomy["fires"]), 3)
+
+    def test_near_cells_go_fewest_runs_first_then_heaviest_model(self):
+        # No `_next_look` (2026-10-31): the order is the smaller arm's run
+        # count, then model weight.
+        lopsided = {**cell("evals/c", "heavy", "insufficient", runs=1), "with_runs": 9}
+        cells = [cell("evals/a", "light", "insufficient", runs=3),
+                 cell("evals/a", "heavy", "insufficient", runs=3),
+                 cell("evals/b", "light", "insufficient", runs=1), lopsided]
+        plan = plan_week.build_plan(ctx(cells=cells, room=1.0), NOW)
+        self.assertEqual([(f["fixture"], f["model"]) for f in plan["fires"]
+                          if f["band"] == "near"],
+                         [("evals/c", "heavy"), ("evals/b", "light"),
+                          ("evals/a", "heavy"), ("evals/a", "light")])
+
     def test_missing_cells_go_heaviest_model_first_and_broken_ones_leave(self):
         cells = [cell("evals/a", "light", "missing"), cell("evals/a", "heavy", "missing"),
                  cell("evals/b", "heavy", "missing", empty=2)]
@@ -459,6 +511,51 @@ class BandTests(unittest.TestCase):
         self.assertEqual(plan["work"], [{"kind": "fixture-broken", "change_type": "fixture",
                                          "skill": "b", "fixture": "evals/b",
                                          "model": "heavy", "route": "issue"}])
+
+    def test_a_kept_subject_plans_no_missing_or_near_fire(self):
+        # 2026-10-31: one confident benefit keeps it; more runs cannot
+        # change that until the re-check.
+        old = "20260801T000000Z"
+        kept = [{**cell("evals/k/a", "heavy", "missing", skill="k"), "verdict": "keep"},
+                {**cell("evals/k/b", "light", "insufficient", runs=2, skill="k"),
+                 "verdict": "keep"},
+                {**cell("evals/k/c", "heavy", "benefit", runs=3, newest=old, skill="k"),
+                 "verdict": "keep"},
+                {**cell("evals/g", "heavy", "insufficient", runs=1, skill=""),
+                 "section": "sec", "verdict": "keep"}]
+        open_ = [{**cell("evals/o", "heavy", "insufficient", runs=1), "verdict": "insufficient"}]
+        plan = plan_week.build_plan(ctx(cells=kept + open_, room=1.0), NOW)
+        self.assertEqual([(f["fixture"], f["band"]) for f in plan["fires"]],
+                         [("evals/o", "near"), ("evals/k/c", "recheck")])
+        # A kept skill with an open removal pull request still gets safety.
+        plan = plan_week.build_plan(ctx(cells=kept[:1], removal_prs=["k"], room=1.0), NOW)
+        self.assertEqual([f["band"] for f in plan["fires"]], ["safety"])
+
+    def test_a_kept_subject_with_an_unsettled_cell_is_still_rechecked(self):
+        # A keep is not forever: an old enough unsettled cell of a kept
+        # subject comes back in the recheck band, a recent one does not.
+        old, recent = "20260801T000000Z", "20261020T000000Z"
+        cells = [{**cell("evals/k/a", "heavy", "insufficient", runs=1, newest=old, skill="k"),
+                  "verdict": "keep"},
+                 {**cell("evals/r/a", "heavy", "insufficient", runs=1, newest=recent,
+                         skill="r"), "verdict": "keep"}]
+        plan = plan_week.build_plan(ctx(cells=cells, room=1.0), NOW)
+        self.assertEqual([(f["fixture"], f["band"]) for f in plan["fires"]],
+                         [("evals/k/a", "recheck")])
+
+    def test_the_cheaper_model_goes_first(self):
+        priced = [{**cell("evals/a", "heavy", "insufficient", runs=1), "usd_per_arm_trial": 0.33},
+                  {**cell("evals/a", "light", "insufficient", runs=1), "usd_per_arm_trial": 0.11},
+                  {**cell("evals/b", "heavy", "missing"), "usd_per_arm_trial": None},
+                  {**cell("evals/b", "light", "missing"), "usd_per_arm_trial": None},
+                  {**cell("evals/c", "other", "missing")}]
+        self.assertEqual(plan_week.model_costs(priced), {"heavy": 0.33, "light": 0.11})
+        plan = plan_week.build_plan(ctx(cells=priced, room=1.0), NOW)
+        order = [(f["fixture"], f["model"]) for f in plan["fires"]]
+        # A model with no known cost goes after the priced ones.
+        self.assertLess(order.index(("evals/b", "light")), order.index(("evals/b", "heavy")))
+        self.assertLess(order.index(("evals/b", "heavy")), order.index(("evals/c", "other")))
+        self.assertLess(order.index(("evals/a", "light")), order.index(("evals/a", "heavy")))
 
     def test_historical_cost_is_clamped_and_breaks_ties(self):
         c = ctx(points_per_usd=0.01)
@@ -533,35 +630,24 @@ class BandTests(unittest.TestCase):
                                  {"a": 7, "b": 0, "c": None})
             self.assertEqual(seen, [tree / "usage" / "weekly-local.json"])
 
-    def test_agent_check_lessons_lead_the_work_list(self):
-        lessons = [{"schema_version": 1, "id": "L-2", "subject": "s2", "kind": "agent-check",
-                    "evidence_count": 2, "examples": [], "check_sketch": "x"},
-                   {"schema_version": 1, "id": "L-5", "subject": "s5", "kind": "agent-check",
-                    "evidence_count": 5},
-                   {"schema_version": 1, "id": "L-x", "subject": "s", "kind": "skill-edit",
-                    "evidence_count": 9},
-                   {"schema_version": 1, "id": "bad id", "subject": "s", "kind": "agent-check",
-                    "evidence_count": 9},
-                   {"schema_version": 1, "id": "L-0", "subject": "s", "kind": "agent-check",
-                    "evidence_count": True}, "junk"]
-        plan = plan_week.build_plan(ctx(skills={"few": skill(fixtures=2)}, lessons=lessons), NOW)
-        self.assertEqual([(w["kind"], w.get("id")) for w in plan["work"]],
-                         [("agent-check", "L-5"), ("agent-check", "L-2"),
-                          ("needs-fixtures", None)])
-        self.assertEqual(plan["work"][0]["change_type"], "agent-check")
-        self.assertNotIn("check_sketch", plan["work"][1])
-        lines = "\n".join(plan_week.summary_lines(plan))
-        self.assertIn("agent-check 2", lines)
-        self.assertNotIn("s5", lines)
-
-    def test_read_lessons_skips_unreadable_files(self):
+    def test_a_private_skill_weight_is_unknown_never_zero(self):
+        import skill_usage
+        doc = skill_usage.document([], NOW, NOW - timedelta(days=14), 50)
         with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            (base / "a").mkdir()
-            (base / "a" / "one.json").write_text('{"id": "x"}')
-            (base / "bad.json").write_text("{")
-            self.assertEqual(plan_week.read_lessons(base), [{"id": "x"}])
-        self.assertEqual(plan_week.read_lessons(None), [])
+            tree, evals = Path(tmp) / "tree", Path(tmp) / "evals"
+            (tree / "usage").mkdir(parents=True)
+            (tree / "usage" / "weekly-local.json").write_text(json.dumps(doc), encoding="utf-8")
+            for name, url in (("zz-private-skill", plan_week.PRIVATE_REGISTRY_URL),
+                              ("zz-public-skill", plan_week.REGISTRY_URL)):
+                (evals / name).mkdir(parents=True)
+                (evals / name / "fixture.yaml").write_text(
+                    f"skill: {name}\nregistry: {url}\n", encoding="utf-8")
+            private = plan_week.private_skills(evals)
+            self.assertEqual(private, {"zz-private-skill"})
+            self.assertEqual(
+                plan_week.skill_weights(tree, ["zz-private-skill", "zz-public-skill"], NOW,
+                                        private),
+                {"zz-private-skill": None, "zz-public-skill": 0})
 
 
 CHECKLIST_SKILL = """---
@@ -609,39 +695,103 @@ Close with the next step.
 
 class TriggerLaneTests(unittest.TestCase):
     """Skills that almost never trigger (usage tracking, 2026-10-26): a
-    trigger item when a reviewed trigger set exists, a fixture item to write
-    one when not, and hook candidates in the summary."""
+    trigger-only improve fire when a reviewed trigger set exists
+    (skills-evals#662), a fixture item to write one when not, and hook
+    candidates in the summary."""
 
     @staticmethod
     def triggers(**sets):
         return {name: {"trigger_set": has, "hook_candidate": name == "rules"}
                 for name, has in sets.items()}
 
-    def test_fresh_near_zero_usage_gets_a_trigger_item_unknown_gets_none(self):
+    def test_fresh_near_zero_usage_gets_a_trigger_fire_or_item_unknown_gets_none(self):
         triggers = self.triggers(quiet=True, silent=False, rules=False, unknown=True,
                                  busy=True, retiring=True)
         weights = {"quiet": 1, "silent": 0, "rules": 0, "unknown": None, "busy": 2,
                    "retiring": 0}
         skills = {"few": skill(fixtures=2), "retiring": skill(verdict="retire")}
         plan = plan_week.build_plan(ctx(skills=skills, triggers=triggers,
-                                        skill_weights=weights,
+                                        skill_weights=weights, room=1.0,
                                         cells=[cell("evals/b", "heavy", "missing", empty=2)]),
                                     NOW)
         got = [(w["kind"], w["skill"], w["change_type"], w.get("route")) for w in plan["work"]]
         self.assertEqual(got, [
             ("needs-trigger-set", "rules", "fixture", "issue"),
             ("needs-trigger-set", "silent", "fixture", "issue"),
-            ("trigger-optimize", "quiet", "trigger", plan_week.TRIGGER_ROUTE),
             ("needs-fixtures", "few", "fixture", "issue"),
             ("fixture-broken", "b", "fixture", "issue")])
         self.assertEqual(plan["work"][1]["trigger_set"], "evals/silent/trigger-eval-set.json")
         self.assertTrue(plan["work"][0]["hook_candidate"])
-        self.assertFalse(any(f["mode"] == "improve" and f["skill"] == "quiet"
-                             for f in plan["fires"]))
+        [trigger] = [f for f in plan["fires"] if f["mode"] == "improve"]
+        self.assertEqual({k: trigger[k] for k in ("band", "skill", "holdout", "trigger_only",
+                                                  "change_type", "cost", "value")},
+                         {"band": "improve", "skill": "quiet", "holdout": "",
+                          "trigger_only": "true", "change_type": "trigger", "cost": 0.10,
+                          "value": None})
+        leg = next(r for r in plan["matrix"]["include"] if r["mode"] == "improve")
+        self.assertEqual((leg["skill"], leg["holdout"], leg["trigger_only"]),
+                         ("quiet", "", "true"))
+        self.assertTrue(all(r["trigger_only"] == "false" for r in plan["matrix"]["include"]
+                            if r["mode"] != "improve"))
+        # Every skill with a known weight is judged; an unknown one is not.
+        self.assertEqual(sorted(plan["triggers"]),
+                         ["busy", "quiet", "retiring", "rules", "silent"])
+        self.assertEqual(plan["triggers"]["quiet"], {"eligible": True, "reasons": [],
+                                                     "weight": 1})
+        self.assertFalse(plan["triggers"]["busy"]["eligible"])
+        self.assertEqual(plan["triggers"]["retiring"]["reasons"],
+                         ["owned by retirement (retire)"])
+        self.assertEqual(plan["triggers"]["silent"]["reasons"], ["no reviewed trigger set yet"])
         self.assertEqual(plan["hook_candidates"], ["rules"])
         lines = "\n".join(plan_week.summary_lines(plan))
         self.assertIn("Hook candidates (mostly checklist or rules sections): rules", lines)
-        self.assertIn("trigger-optimize 1", lines)
+        self.assertIn("improve quiet (trigger only)", lines)
+        self.assertIn("Trigger-only eligible skills: quiet", lines)
+        self.assertIn("needs-trigger-set 2", lines)
+
+    def test_no_trigger_fire_when_paused_private_or_already_improving(self):
+        weights = {"t": 0}
+        cases = {
+            "paused": (dict(triggers={"t": {"trigger_set": True, "hook_candidate": False,
+                                            "pause": "cooling down after a rejection"}}),
+                       ["cooling down after a rejection"]),
+            # An ordinary improve fire of the same skill would share its branch.
+            "improving": (dict(triggers=self.triggers(t=True), skills={"t": skill()}),
+                          ["an ordinary improve fire is planned for it"]),
+        }
+        for name, (over, reasons) in cases.items():
+            with self.subTest(name=name):
+                plan = plan_week.build_plan(ctx(skill_weights=weights, room=1.0, **over), NOW)
+                self.assertFalse([f for f in plan["fires"] if f["trigger_only"] == "true"])
+                self.assertEqual(plan["triggers"]["t"]["reasons"], reasons)
+                self.assertFalse([w for w in plan["work"] if w["kind"] == "needs-trigger-set"])
+        # A private skill is never judged, so never named.
+        plan = plan_week.build_plan(ctx(skill_weights=weights, room=1.0,
+                                        triggers=self.triggers(t=True, u=False),
+                                        private_skills=frozenset({"t", "u"})), NOW)
+        self.assertEqual((plan["fires"], plan["work"], plan["triggers"]), ([], [], {}))
+
+    def test_trigger_fires_follow_improve_fires_least_used_first_under_the_cap(self):
+        plan = plan_week.build_plan(ctx(
+            skills={"a": skill()}, triggers=self.triggers(x=True, y=True),
+            skill_weights={"a": 0.5, "x": 1, "y": 0}, improve_charge=0.06, room=1.0), NOW)
+        self.assertEqual([(f["skill"], f["trigger_only"]) for f in plan["fires"]],
+                         [("a", "false"), ("y", "true"), ("x", "true")])
+        # The improve cap counts trigger fires as improve fires: one left.
+        capped = plan_week.build_plan(ctx(
+            triggers=self.triggers(x=True, y=True), skill_weights={"x": 1, "y": 0},
+            improve_charge=0.06, room=1.0,
+            improve_state=ImproveCapPlanTests.cap_state()), NOW)
+        self.assertEqual([f["skill"] for f in capped["fires"]], ["y"])
+        self.assertEqual(capped["unplanned"]["improve"], 1)
+
+    def test_the_routine_outage_holds_trigger_fires(self):
+        plan = plan_week.build_plan(ctx(
+            triggers=self.triggers(x=True), skill_weights={"x": 0}, room=1.0,
+            routine_down=NOW - timedelta(hours=1),
+            cells=[cell("evals/m", "heavy", "missing")]), NOW)
+        self.assertEqual([f["mode"] for f in plan["fires"]], ["eval"])
+        self.assertEqual(plan["unplanned"]["improve"], 1)
 
     def test_trigger_skills_do_not_move_the_improve_neutral_weight(self):
         skills = {"a": skill(headroom=0.5), "b": skill(headroom=0.3)}
@@ -683,13 +833,31 @@ class TriggerLaneTests(unittest.TestCase):
                 "example-prose": {"trigger_set": True, "hook_candidate": False}})
             self.assertEqual(plan_week.trigger_contexts(evals, {}), {})
 
-    def test_the_trigger_route_is_documented(self):
+    def test_the_trigger_lane_is_documented(self):
         text = (ROOT / "docs" / "how-it-works.md").read_text()
         self.assertIn("### The trigger lane", text)
-        self.assertIn(plan_week.TRIGGER_ROUTE, text)
+        self.assertIn("`trigger_only=true`", text)
+        self.assertNotIn("needs routine prompt change", text)
         self.assertIn("--trigger-eval-set evals/<skill>/trigger-eval-set.json", text)
 
+    def test_trigger_pauses_use_rule_c_with_a_usage_cooldown(self):
+        merged = NOW - timedelta(days=3)
+        records = [{"skill": "t", "outcome": "accepted", "at": iso(merged - timedelta(hours=1))}]
+        prs = [{"skill": "t", "state": "closed", "created_at": iso(merged - timedelta(minutes=30)),
+                "closed_at": iso(merged), "merged_at": iso(merged)}]
+        with tempfile.TemporaryDirectory() as tmp:
+            triggers = self.triggers(t=True, n=False)
+            plan_week.trigger_pauses(triggers, Path(tmp) / "evals", {}, records, prs, [], NOW)
+            self.assertEqual(triggers["t"]["pause"],
+                             "an improvement merged; waiting for the with arm to be re-measured")
+            self.assertIsNone(triggers["n"]["pause"])
+            later = NOW + plan_week.COOLDOWN
+            plan_week.trigger_pauses(triggers, Path(tmp) / "evals", {}, records, prs, [], later)
+            self.assertIsNone(triggers["t"]["pause"])
 
+
+# These tests fill a cap of three; MAX_IN_FLIGHT itself is a spending lever.
+@mock.patch.object(plan_week, "MAX_IN_FLIGHT", 3)
 class DispatchLegTests(unittest.TestCase):
 
     def test_in_flight_and_waiting(self):
@@ -720,6 +888,73 @@ class DispatchLegTests(unittest.TestCase):
         self.assertFalse(plan_week.wait_slot(fetch, 300, lambda: clock[0], sleep))
         self.assertEqual(slept, [60] * 5)
 
+    def full_cap(self):
+        """Three improve fires in flight for the next three hours."""
+        return [fire(n, "Fire eval routine: improve a ", NOW - timedelta(minutes=1))
+                for n in (1, 2, 3)]
+
+    def test_the_sweep_shares_one_wait_budget(self):
+        # Regression: the 2026-11-02 22:50 UTC sweep waited 25 minutes in
+        # each of its serial legs and ran until 04:30. Legs share
+        # SWEEP_MAX_WAIT from the plan; once it is spent a leg checks once.
+        runs = self.full_cap()
+        clock = [NOW]
+        slept = []
+
+        def sleep(seconds):
+            slept.append(seconds)
+            clock[0] += timedelta(seconds=seconds)
+        started = NOW
+        legs = []
+        for _ in range(5):
+            slept.clear()
+            legs.append(plan_week.wait_slot(lambda since: runs, 1500, lambda: clock[0],
+                                            sleep, sweep_started=started))
+            legs[-1] = (legs[-1], sum(slept))
+        self.assertEqual([ok for ok, _ in legs], [False] * 5)
+        self.assertEqual(legs[0][1], 1500)
+        self.assertEqual([waited for _, waited in legs[1:]], [0] * 4)
+        self.assertEqual(clock[0] - NOW, timedelta(seconds=plan_week.SWEEP_MAX_WAIT))
+        # Partway into the budget, a leg gets only what is left.
+        clock[0] = NOW + timedelta(seconds=1000)
+        slept.clear()
+        self.assertFalse(plan_week.wait_slot(lambda since: runs, 1500, lambda: clock[0],
+                                             sleep, sweep_started=started))
+        self.assertEqual(sum(slept), 480)
+        # A free slot past the budget still dispatches.
+        clock[0] = NOW + timedelta(hours=1)
+        self.assertTrue(plan_week.wait_slot(lambda since: [], 1500, lambda: clock[0],
+                                            sleep, sweep_started=started))
+
+    def test_a_full_cap_is_a_green_hold(self):
+        # Regression: legs 4, 9 and 10 of run 41540618531 exited 1 on a full
+        # cap. It is a hold: exit 0, a notice, and open=false so the
+        # dispatch and spacing steps skip.
+        # main() reads the real clock, so the fires start just before it.
+        recent = datetime.now(timezone.utc) - timedelta(minutes=1)
+        full = [fire(n, "Fire eval routine: improve a ", recent) for n in (1, 2, 3)]
+        for runs, expected in ((full, "false"), ([], "true")):
+            with tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp) / "out"
+                output.write_text("")
+                stdout = io.StringIO()
+                with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output), "GH_TOKEN": "t"}), \
+                        mock.patch.object(io_mod, "fetch_fire_runs", return_value=runs), \
+                        mock.patch.object(plan_week.time, "sleep"), \
+                        contextlib.redirect_stdout(stdout):
+                    code = plan_week.main(["wait-slot", "--max-wait", "0",
+                                           "--sweep-started", "2026-11-02T22:50:00Z"])
+                self.assertEqual(code, 0)
+                self.assertEqual(output.read_text(), f"open={expected}\n")
+                if expected == "false":
+                    self.assertIn("::notice::", stdout.getvalue())
+                    self.assertNotIn("::error::", stdout.getvalue())
+
+    def test_a_malformed_sweep_start_is_refused(self):
+        with mock.patch.object(io_mod, "fetch_fire_runs", return_value=[]), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertNotEqual(plan_week.main(["wait-slot", "--sweep-started", "soon"]), 0)
+
     def test_validate_fire_accepts_only_planned_shapes(self):
         good = {"MODE": "eval", "ARMS": "both", "FIXTURE": "evals/writing-adrs/bootstrap",
                 "EVAL_KEY": "writing-adrs/bootstrap", "MODEL": "claude-opus-5-5",
@@ -730,8 +965,8 @@ class DispatchLegTests(unittest.TestCase):
         guidance = {"FIXTURE": GUIDANCE_FIXTURE, "EVAL_KEY": GUIDANCE_FIXTURE[len("evals/"):]}
         plan_week.validate_fire({**good, **guidance})
         for change in ({"EVAL_KEY": "writing-adrs/supersede"}, {"MODEL": "claude-fable-5-1"},
-                       {"FIXTURE": "evals/writing-adrs/supersede",
-                        "EVAL_KEY": "writing-adrs/supersede"},
+                       # An unscheduled fixture (evals/unscheduled.yml).
+                       {"FIXTURE": "evals/browser-testing", "EVAL_KEY": "browser-testing"},
                        {"SKILL": "writing-adrs"}, {"MODE": "scaffold"},
                        {"ARMS": ""}, {"ARMS": "with"}, {"ARMS": "without"},
                        # A scheduled fixture with no `context` mapping.
@@ -770,6 +1005,104 @@ class DispatchLegTests(unittest.TestCase):
             with self.assertRaises(plan_week.PlanError, msg=change):
                 plan_week.validate_fire({**gleg, **change})
 
+    def test_validate_fire_takes_a_trigger_only_improve_leg(self):
+        # skills-evals#662: no holdout, and improve_gate's trigger-only check.
+        import improve_gate
+        leg = {"MODE": "improve", "ARMS": "", "FIXTURE": "", "EVAL_KEY": "", "MODEL": "",
+               "SKILL": "writing-adrs", "HOLDOUT": "", "TRIGGER_ONLY": "true"}
+        with mock.patch.object(improve_gate, "fire_check") as check:
+            plan_week.validate_fire(leg)
+            check.assert_called_once_with("writing-adrs", "", trigger_only=True)
+            for change in ({"HOLDOUT": "bootstrap"}, {"SKILL": "a;b"}, {"ARMS": "both"},
+                           {"MODEL": "claude-opus-5-5"}, {"TRIGGER_ONLY": "yes"},
+                           {"TRIGGER_ONLY": "True"}):
+                with self.assertRaises(plan_week.PlanError, msg=change):
+                    plan_week.validate_fire({**leg, **change})
+            # Only an improve leg may be trigger-only.
+            for other in ({**self.GOOD_LEG, "TRIGGER_ONLY": "true"},
+                          {"MODE": "guidance-improve", "SECTION": GUIDANCE_SECTION,
+                           "HOLDOUT": GUIDANCE_FIXTURE[len("evals/"):],
+                           "TRIGGER_ONLY": "true"}):
+                with self.assertRaises(plan_week.PlanError):
+                    plan_week.validate_fire(other)
+            self.assertEqual(check.call_count, 1)
+            check.side_effect = improve_gate.Rejected("x")
+            with self.assertRaises(plan_week.PlanError):
+                plan_week.validate_fire(leg)
+        # Unmocked: writing-adrs commits a trigger set; skills-doctor has none.
+        plan_week.validate_fire(leg)
+        with self.assertRaises(plan_week.PlanError):
+            plan_week.validate_fire({**leg, "SKILL": "skills-doctor"})
+        # "false" and absent are the ordinary improve leg, holdout required.
+        improve = {**leg, "HOLDOUT": "bootstrap", "TRIGGER_ONLY": "false"}
+        plan_week.validate_fire(improve)
+        plan_week.validate_fire({k: v for k, v in improve.items() if k != "TRIGGER_ONLY"})
+        with self.assertRaises(plan_week.PlanError):
+            plan_week.validate_fire({**improve, "HOLDOUT": ""})
+
+    def test_the_dispatch_legs_carry_trigger_only(self):
+        doc = yaml.safe_load(
+            (ROOT / ".github/workflows/routine-eval-weekly.yml").read_text())
+        steps = {s["name"]: s for s in doc["jobs"]["dispatch"]["steps"]}
+        for name in ("Revalidate the planned fire", "Dispatch the validated fire"):
+            self.assertEqual(steps[name]["env"]["TRIGGER_ONLY"], "${{ matrix.trigger_only }}")
+        # The dispatch script itself is run in test_issue_scheduled_fixtures.py.
+
+    GOOD_LEG = {"MODE": "eval", "ARMS": "both", "FIXTURE": "evals/writing-adrs/bootstrap",
+                "EVAL_KEY": "writing-adrs/bootstrap", "MODEL": "claude-opus-5-5",
+                "SKILL": "", "HOLDOUT": ""}
+    # Committed under evals/ but listed in evals/unscheduled.yml.
+    UNSCHEDULED_LEG = {"FIXTURE": "evals/browser-testing", "EVAL_KEY": "browser-testing"}
+
+    def run_validate_fire(self, leg):
+        """main(["validate-fire"]) under `leg`'s env: (exit code, GITHUB_OUTPUT, stdout)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "out"
+            output.write_text("")
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, {**leg, "GITHUB_OUTPUT": str(output)}), \
+                    contextlib.redirect_stdout(stdout):
+                code = plan_week.main(["validate-fire"])
+            return code, output.read_text(), stdout.getvalue()
+
+    def test_a_fixture_unscheduled_after_the_plan_is_stale_not_an_error(self):
+        leg = {**self.GOOD_LEG, **self.UNSCHEDULED_LEG}
+        with self.assertRaises(plan_week.PlanStale):
+            plan_week.validate_fire(leg)
+        code, output, stdout = self.run_validate_fire(leg)
+        self.assertEqual(code, 0)
+        self.assertEqual(output, "fire=false\n")
+        self.assertIn("::notice::", stdout)
+        self.assertNotIn("::error::", stdout)
+
+    def test_a_valid_leg_writes_fire_true(self):
+        code, output, _ = self.run_validate_fire(self.GOOD_LEG)
+        self.assertEqual((code, output), (0, "fire=true\n"))
+
+    def test_an_unknown_fixture_is_still_a_plain_plan_error(self):
+        leg = {**self.GOOD_LEG, "FIXTURE": "evals/no-such-skill/x", "EVAL_KEY": "no-such-skill/x"}
+        with self.assertRaises(plan_week.PlanError) as caught:
+            plan_week.validate_fire(leg)
+        self.assertNotIsInstance(caught.exception, plan_week.PlanStale)
+        code, output, stdout = self.run_validate_fire(leg)
+        self.assertEqual(code, 1)
+        self.assertEqual(output, "")
+        self.assertIn("::error::", stdout)
+
+    def test_the_dispatch_steps_follow_the_revalidation_output(self):
+        doc = yaml.safe_load(
+            (ROOT / ".github/workflows/routine-eval-weekly.yml").read_text())
+        steps = {s["name"]: s for s in doc["jobs"]["dispatch"]["steps"]}
+        self.assertEqual(steps["Revalidate the planned fire"].get("id"), "valid")
+        gate = "steps.valid.outputs.fire == 'true'"
+        self.assertIn(gate, steps["Wait until a fire slot is free"]["if"])
+        self.assertIn(gate, steps["Dispatch the validated fire"]["if"])
+        self.assertIn("steps.slot.outputs.open == 'true'",
+                      steps["Dispatch the validated fire"]["if"])
+        # The spacing step needs the slot step's output, which a skipped slot
+        # step never sets.
+        self.assertEqual(steps["Space the next fire"]["if"], "steps.slot.outputs.open == 'true'")
+
 
 class PlanCommandTests(unittest.TestCase):
     """The step's own command on the real evals directory, an empty results
@@ -795,7 +1128,15 @@ class PlanCommandTests(unittest.TestCase):
             matrix = json.loads(lines[0].removeprefix("matrix="))
             self.assertEqual(lines[1], f"count={len(matrix['include'])}")
             self.assertGreater(len(matrix["include"]), 0)
-            self.assertTrue(all(row["band"] == "missing" for row in matrix["include"]))
+            # On an empty tree every cell is missing: a skill's goes to the
+            # missing band, a guidance section's to the focus (two sections)
+            # or the guidance rest, never to missing.
+            guided: dict = {}
+            for row in matrix["include"]:
+                guided.setdefault(row["eval_key"].startswith("guidance/"), set()).add(
+                    row["band"])
+            self.assertEqual(guided.get(False), {"missing"})
+            self.assertLessEqual(guided.get(True, set()), {"focus", "guidance-rest"})
             for row in matrix["include"]:
                 plan_week.validate_fire({"MODE": row["mode"], "ARMS": row["arms"],
                                          "FIXTURE": row["fixture"],
@@ -804,6 +1145,10 @@ class PlanCommandTests(unittest.TestCase):
             self.assertIn("### Weekly plan:", summary.read_text())
             plan = json.loads(plan_file.read_text())
             self.assertEqual(plan["schema_version"], 1)
+            # gather hands build_plan the guard's improve counts (#572):
+            # none used, so each kind's floor is open.
+            self.assertEqual(plan["improve_allowed"],
+                             {"improve": True, "guidance-improve": True})
             # Every in-place cell is a bare candidate on an empty tree; the
             # missing band takes the room first, so none is planned yet.
             roster = yaml.safe_load((ROOT / "evals" / "roster.yml").read_text())
@@ -886,10 +1231,11 @@ class GuidanceFixtureTests(unittest.TestCase):
                  {**cell("evals/guidance/s/x", "heavy", "missing", empty=2), "skill": "",
                   "section": "s"}]
         # A removal PR named like the section is a skill's, not this cell's.
+        # A missing guidance cell enters the focus, never the missing band.
         plan = plan_week.build_plan(ctx(cells=cells, removal_prs=[section, ""]), NOW)
         self.assertEqual([(f["band"], f["mode"], f["fixture"], f["eval_key"])
                           for f in plan["fires"]],
-                         [("missing", "eval", GUIDANCE_FIXTURE,
+                         [("focus", "eval", GUIDANCE_FIXTURE,
                            "guidance/anything-you-name-gets-its-link/handoff")])
         self.assertEqual(plan["matrix"]["include"][0]["skill"], "")
         self.assertEqual(plan["work"], [{"kind": "fixture-broken", "change_type": "fixture",
@@ -966,7 +1312,7 @@ class ImproveValueTests(unittest.TestCase):
         self.assertEqual(plan["improve_ranking"], [{
             "subject": "skill", "name": "a", "value": 4 * 0.5 / cost, "use": 4,
             "use_known": True, "headroom": 0.5, "cost": cost, "cost_known": True,
-            "eligible": True, "reasons": []}])
+            "eligible": True, "reasons": [], "lesson_evidence": 0}])
         improve = [f for f in plan["fires"] if f["mode"] == "improve"]
         self.assertEqual([f["value"] for f in improve], [4 * 0.5 / cost])
         self.assertIsNone(plan["fires"][0]["value"] if plan["fires"][0]["mode"] == "eval"
@@ -1026,10 +1372,12 @@ class ImproveValueTests(unittest.TestCase):
         self.assertEqual(fire, {
             "slot": 0, "band": "improve", "mode": "guidance-improve", "arms": "",
             "fixture": "", "eval_key": "", "model": "", "skill": "", "section": "sec",
-            "holdout": "guidance/sec/zzz", "change_type": "guidance-edit", "cost": 0.1})
+            "holdout": "guidance/sec/zzz", "trigger_only": "false",
+            "trim_description": "false", "change_type": "guidance-edit", "cost": 0.1})
         self.assertEqual(plan["matrix"]["include"], [{
             "slot": 0, "band": "improve", "mode": "guidance-improve", "arms": "", "fixture": "", "eval_key": "",
-            "model": "", "skill": "", "section": "sec", "holdout": "guidance/sec/zzz"}])
+            "model": "", "skill": "", "section": "sec", "holdout": "guidance/sec/zzz",
+            "trigger_only": "false", "trim_description": "false"}])
         self.assertEqual(plan["guidance"], {"sec": {
             "eligible": True, "reasons": [], "headroom": 0.4, "fixtures": 4}})
         self.assertEqual(plan["skills"], {})
@@ -1204,6 +1552,45 @@ class ImproveValueTests(unittest.TestCase):
         self.assertEqual(got["finding-your-unknowns"]["verdict"], "insufficient")
         self.assertNotIn("_delivery", got)
 
+    def test_guidance_contexts_pool_every_rest_of_guidance_as_the_gate_does(self):
+        # #557: the gate pools an in-situ cell's current-content runs across
+        # every rest of the guidance (strata), so the improve evidence must
+        # count a run beside a minority rest too, not only `_joint_context`'s
+        # largest same-rest group.
+        section = "anything-you-name-gets-its-link"
+        expected = {n: {"fixture_digest": f"fd-{n}", "tested_digest": "t"}
+                    for n in ("done-summary", "handoff", "no-url", "waiting-on-review")}
+
+        def run(name, role, checks, rest, stamp):
+            return {"skill": section, "fixture": name, "model": "m", "role": role,
+                    "pair": "in_situ", "tested_digest": "t",
+                    "fixture_digest": f"fd-{name}", "arm_context_digest": rest,
+                    "pair_key": rest, "timestamp": stamp, "path": f"{name}-{stamp}",
+                    "trials": [trial(checks)]}
+        runs = [run("done-summary", "with", {"a": True, "b": True}, "rest-1", "20261020T000000Z"),
+                run("done-summary", "without", {"a": False, "b": False}, "rest-1",
+                    "20261020T000000Z"),
+                run("done-summary", "with", {"a": True, "b": True}, "rest-1", "20261021T000000Z"),
+                run("done-summary", "without", {"a": False, "b": False}, "rest-1",
+                    "20261021T000000Z"),
+                # The minority rest: its with-arm run fails both checks.
+                run("done-summary", "with", {"a": False, "b": False}, "rest-2",
+                    "20261022T000000Z"),
+                run("done-summary", "without", {"a": False, "b": False}, "rest-2",
+                    "20261022T000000Z")]
+        doc = {"roster_models": ["m"], "guidance": {section: {"verdict": "insufficient"}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            with mock.patch.object(plan_week_compute_gates, "build_index",
+                                   return_value={"guidance_runs": runs}), \
+                 mock.patch.object(plan_week_compute_gates, "expected_guidance",
+                                   return_value=expected):
+                got = plan_week.guidance_contexts(ROOT / "evals", tree, "20261026T120000Z",
+                                                  doc, tree)
+        # 4 of 6 with-arm checks passed over both rests: headroom 1/3. The
+        # largest group alone (rest-1) would read 0.
+        self.assertAlmostEqual(got[section]["evidence"]["headroom"], 1 / 3)
+
     def test_the_fire_check_refuses_a_section_with_no_train_headroom(self):
         # 2026-10-28: a hand-dispatched guidance-improve fire on a section at
         # 72/72 ran its whole loop before rejecting. The fire workflow now
@@ -1300,10 +1687,15 @@ class BareBaselineTests(unittest.TestCase):
 
     def test_the_scheduled_in_place_fixtures(self):
         in_place = self.scheduled_in_place()
+        # The eval scope pass (evals/scope-auto.yml) may pause one; it is
+        # then off the schedule by rule, not missing.
+        auto = yaml.safe_load((ROOT / "evals/scope-auto.yml").read_text(encoding="utf-8")) or {}
+        paused = {row["path"] for row in auto.get("rows") or []}
         # The example checkout's in-place skill fixtures (test/example_evals.py).
         for fixture in ("evals/workflow-path-audit/required-check-routing",
                         "evals/writing-adrs/bootstrap"):
-            self.assertIn(fixture, in_place)
+            if fixture not in paused:
+                self.assertIn(fixture, in_place)
         # Guidance fixtures declare no context: their arms are their own.
         self.assertFalse([f for f in in_place if f.startswith("evals/guidance/")])
 
@@ -1380,12 +1772,14 @@ class BareBaselineTests(unittest.TestCase):
     def test_a_bare_fire_is_not_an_empty_fire_of_the_cells_pair(self):
         fixture = "evals/writing-adrs/bootstrap"
         gates_doc = {"roster_models": ["m1"], "skills": {}}
-        old = NOW - timedelta(days=1)
+        # NOW is before EMPTY_FIRES_SINCE (#559), which would count neither.
+        now = plan_week.EMPTY_FIRES_SINCE + timedelta(days=2)
+        old = now - timedelta(days=1)
         bare = [fire(i, f"Fire eval routine: eval bare {fixture} m1", old) for i in (1, 2)]
         pair = [fire(i, f"Fire eval routine: eval {fixture} m1", old) for i in (3, 4)]
 
         def empty(runs):
-            cells = plan_week.eval_cells(ROOT / "evals", gates_doc, runs, NOW)
+            cells = plan_week.eval_cells(ROOT / "evals", gates_doc, runs, now)
             return next(c for c in cells if c["fixture"] == fixture)["empty_fires"]
         self.assertEqual(empty(bare), 0)
         self.assertEqual(empty(pair), 2)
@@ -1406,7 +1800,7 @@ class BareBaselineTests(unittest.TestCase):
             self.assertEqual(state, guard.account(tree, LIMITS, NOW,
                                                   plan_week._fire_pair(pair, NOW),
                                                   guard.improve_counts(pair, NOW)))
-            self.assertTrue(guard.check(state, "eval"))
+            self.assertIsNone(guard.check(state, "eval"))
 
     def test_evidence_start_times_bound_a_covered_improve_fire(self):
         # The planner passes the same evidence rows' start times to `account`.
@@ -1432,6 +1826,229 @@ class BareBaselineTests(unittest.TestCase):
                 state["pending"], min(state["improve_charge"], 0.05), places=12)
 
 
+class WatchdogTests(unittest.TestCase):
+    """routine-eval-watchdog.yml: re-plan when a guard hold ends or a sweep
+    has been idle WATCHDOG_IDLE, without overlapping sweeps (2026-11-01: a
+    fire that never pushed results stalled evals 16:11 to 18:33 UTC)."""
+
+    ANCHOR = datetime(2026, 11, 1, 16, 11, tzinfo=timezone.utc)
+
+    @staticmethod
+    def fire(started, conclusion="success"):
+        return {"status": "completed", "conclusion": conclusion,
+                "run_started_at": started.strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    @staticmethod
+    def sweep(created, ended=None, status="completed"):
+        stamp = lambda t: t.strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+        return {"status": status, "created_at": stamp(created),
+                "updated_at": stamp(ended or created)}
+
+    def test_the_stalled_fire_re_plans_two_minutes_after_its_hold(self):
+        fires = [self.fire(datetime(2026, 11, 1, 15, 55, tzinfo=timezone.utc))]
+        due = plan_week.watchdog_due(self.ANCHOR, fires)
+        self.assertEqual(due, datetime(2026, 11, 1, 16, 42, tzinfo=timezone.utc))
+        self.assertEqual(plan_week.watchdog_decide([], fires, due, self.ANCHOR),
+                         ("dispatch", due))
+        self.assertEqual(plan_week.watchdog_decide([], fires, due - timedelta(seconds=1),
+                                                   self.ANCHOR), ("wait", due))
+
+    def test_ended_failed_and_unparsable_fires_fall_back_to_the_idle_limit(self):
+        fires = [self.fire(self.ANCHOR - timedelta(minutes=45)),
+                 self.fire(self.ANCHOR - timedelta(minutes=5), conclusion="failure"),
+                 {"conclusion": "success", "run_started_at": "not a time"}, "junk"]
+        self.assertEqual(plan_week.watchdog_due(self.ANCHOR, fires),
+                         self.ANCHOR + timedelta(minutes=50))
+
+    def test_the_earliest_hold_wins(self):
+        fires = [self.fire(self.ANCHOR - timedelta(minutes=10)),
+                 self.fire(self.ANCHOR - timedelta(minutes=30))]
+        self.assertEqual(plan_week.watchdog_due(self.ANCHOR, fires),
+                         self.ANCHOR + timedelta(minutes=17))
+
+    def test_a_newer_sweep_stands_the_timer_down(self):
+        newer = [self.sweep(self.ANCHOR + timedelta(minutes=3), status="queued")]
+        self.assertEqual(plan_week.watchdog_decide(newer, [], self.ANCHOR + timedelta(hours=1),
+                                                   self.ANCHOR), ("stand-down", None))
+
+    def test_check_mode_anchors_on_the_newest_finished_sweep(self):
+        sweeps = [self.sweep(self.ANCHOR - timedelta(minutes=5), self.ANCHOR),
+                  self.sweep(self.ANCHOR - timedelta(hours=2), self.ANCHOR - timedelta(hours=1))]
+        late = self.ANCHOR + timedelta(minutes=50)
+        self.assertEqual(plan_week.watchdog_decide(sweeps, [], late), ("dispatch", late))
+        self.assertEqual(plan_week.watchdog_decide(sweeps, [], late - timedelta(minutes=1)),
+                         ("wait", late))
+        running = [self.sweep(self.ANCHOR, status="in_progress"), *sweeps]
+        self.assertEqual(plan_week.watchdog_decide(running, [], late), ("stand-down", None))
+        self.assertEqual(plan_week.watchdog_decide([], [], late), ("dispatch", late))
+
+    def test_wait_mode_sleeps_until_due_then_dispatches(self):
+        clock = [self.ANCHOR]
+        slept = []
+
+        def sleep(seconds):
+            slept.append(seconds)
+            clock[0] += timedelta(seconds=seconds)
+        fires = [self.fire(self.ANCHOR - timedelta(minutes=16))]
+        go, reason = plan_week.watchdog("wait", lambda since: [], lambda since: fires,
+                                        lambda: self.fail("wait mode reads no timers"),
+                                        3300, lambda: clock[0], sleep)
+        self.assertTrue(go, reason)
+        self.assertEqual(slept, [31 * 60])
+
+    def test_wait_mode_stands_down_when_a_sweep_starts_while_it_sleeps(self):
+        clock = [self.ANCHOR]
+        sweeps = []
+
+        def sleep(seconds):
+            clock[0] += timedelta(seconds=seconds)
+            sweeps.append(self.sweep(self.ANCHOR + timedelta(minutes=1), status="in_progress"))
+        go, _ = plan_week.watchdog("wait", lambda since: list(sweeps), lambda since: [],
+                                   lambda: False, 3300, lambda: clock[0], sleep)
+        self.assertFalse(go)
+
+    def test_wait_mode_gives_up_at_max_wait(self):
+        clock = [self.ANCHOR]
+
+        def sleep(seconds):
+            clock[0] += timedelta(seconds=seconds)
+        go, reason = plan_week.watchdog("wait", lambda since: [], lambda since: [],
+                                        lambda: False, 600, lambda: clock[0], sleep)
+        self.assertFalse(go)
+        self.assertIn("waited 600s", reason)
+
+    def test_check_mode_stands_down_while_a_timer_is_armed_and_never_sleeps(self):
+        never = lambda seconds: self.fail("check mode sleeps")  # noqa: E731
+        go, reason = plan_week.watchdog("check", lambda since: [], lambda since: [],
+                                        lambda: True, 3300, lambda: self.ANCHOR, never)
+        self.assertFalse(go)
+        self.assertIn("armed", reason)
+        old = [self.sweep(self.ANCHOR - timedelta(hours=2), self.ANCHOR - timedelta(hours=1))]
+        go, _ = plan_week.watchdog("check", lambda since: old, lambda since: [],
+                                   lambda: False, 3300, lambda: self.ANCHOR, never)
+        self.assertTrue(go)
+        fresh = [self.sweep(self.ANCHOR - timedelta(minutes=5), self.ANCHOR)]
+        go, _ = plan_week.watchdog("check", lambda since: fresh, lambda since: [],
+                                   lambda: False, 3300, lambda: self.ANCHOR, never)
+        self.assertFalse(go)
+
+    def test_fetch_runs_reads_one_page_and_fails_closed(self):
+        seen = []
+
+        def get(path, token):
+            seen.append(path)
+            return {"workflow_runs": [{"id": 1}]}
+        self.assertEqual(plan_week.fetch_runs("routine-eval-weekly.yml", "t",
+                                              {"created": ">=2026-11-01T00:00:00Z"}, get),
+                         [{"id": 1}])
+        self.assertIn("/actions/workflows/routine-eval-weekly.yml/runs?created=%3E%3D2026",
+                      seen[0])
+        self.assertIn("per_page=100", seen[0])
+        with self.assertRaises(io_mod.EvidenceError):
+            plan_week.fetch_runs("routine-eval-weekly.yml", "t", {}, lambda p, t: {})
+
+    def test_the_sweep_arms_the_watchdog_last_whatever_it_concluded(self):
+        doc = yaml.safe_load((ROOT / ".github/workflows/routine-eval-weekly.yml").read_text())
+        job = doc["jobs"]["watchdog"]
+        self.assertEqual(job["needs"], ["plan", "dispatch"])
+        self.assertTrue(job["if"].startswith("always() && "))
+        self.assertEqual(job["permissions"], {"actions": "write"})
+        self.assertIn("gh workflow run routine-eval-watchdog.yml", job["steps"][0]["run"])
+        self.assertEqual(doc["concurrency"], {"group": "routine-eval-weekly",
+                                              "cancel-in-progress": False})
+
+    def test_the_watchdog_workflow_shape(self):
+        doc = yaml.safe_load((ROOT / ".github/workflows/routine-eval-watchdog.yml").read_text())
+        triggers = doc.get("on", doc.get(True))
+        # workflow_run would be a fourth level after push, ingest and sweep.
+        self.assertEqual(sorted(triggers), ["schedule", "workflow_dispatch"])
+        self.assertEqual(doc["concurrency"], {
+            "group": "routine-eval-watchdog-${{ github.event_name }}",
+            "cancel-in-progress": True})
+        self.assertEqual(doc["permissions"], {})
+        job = doc["jobs"]["watch"]
+        self.assertEqual(job["permissions"], {"contents": "read", "actions": "write"})
+        self.assertGreater(job["timeout-minutes"] * 60, plan_week.WATCHDOG_MAX_WAIT)
+        steps = {s.get("id"): s for s in job["steps"]}
+        self.assertEqual(steps["watch"]["env"]["MODE"],
+                         "${{ github.event_name == 'schedule' && 'check' || 'wait' }}")
+        self.assertIn('plan_week.py watchdog --mode "$MODE"', steps["watch"]["run"])
+        replan = job["steps"][-1]
+        self.assertEqual(replan["if"], "steps.watch.outputs.dispatch == 'true'")
+        self.assertIn("gh workflow run routine-eval-weekly.yml", replan["run"])
+        for step in job["steps"]:
+            self.assertNotIn("${{", step.get("run", ""))
+        lock = (ROOT / ".github/workflows/actions.lock").read_text()
+        self.assertIn("'.github/workflows/routine-eval-watchdog.yml':", lock)
+
+    def test_main_writes_the_dispatch_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out_file = Path(tmp) / "out"
+            out_file.write_text("")
+            with mock.patch.object(plan_week, "watchdog", return_value=(True, "due")), \
+                 mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(out_file), "GH_TOKEN": ""}), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(plan_week.main(["watchdog", "--mode", "check"]), 0)
+            self.assertEqual(out_file.read_text(), "dispatch=true\n")
+
+
+class ImproveCapPlanTests(unittest.TestCase):
+    """#572, 2026-11-02: the planner applies the guard's improve cap
+    (`allowance_guard.improve_cap`) to the improve band before allocation,
+    item by item in allocate's order, so it never plans a fire the guard
+    would refuse."""
+
+    @staticmethod
+    def cap_state(by_kind=None, in_flight=None):
+        # 0.20 x 0.30 / 0.06 = 1 fire of both kinds together.
+        return {"cap": 0.30, "improve_charge": 0.06, "improve_by_kind": by_kind or {},
+                "improve_in_flight": in_flight or {}}
+
+    @staticmethod
+    def item(mode, name, rank):
+        return {"mode": mode, "skill": name if mode == "improve" else "", "fixture": "",
+                "model": "", "cost": 0.06, "order": (False, -rank, name)}
+
+    def test_the_walk_counts_each_kept_item_as_the_guard_would(self):
+        # The share allows 1 at week start: the first skill goes, the second
+        # does not, and the guidance section takes its kind's floor.
+        items = [self.item("guidance-improve", "sec", 1.0), self.item("improve", "b", 2.0),
+                 self.item("improve", "a", 3.0)]
+        kept, cut = plan_week.improve_capped(items, self.cap_state())
+        self.assertEqual([(i["mode"], i["skill"]) for i in kept],
+                         [("improve", "a"), ("guidance-improve", "")])
+        self.assertEqual([i["skill"] for i in cut], ["b"])
+        # The ctx's counts are copied, not changed.
+        state = self.cap_state()
+        plan_week.improve_capped(items, state)
+        self.assertEqual(state["improve_by_kind"], {})
+
+    def test_a_used_skill_floor_plans_the_guidance_fire_only(self):
+        plan = plan_week.build_plan(ctx(
+            skills={"a": skill()}, guidance={"sec": gsection(headroom=0.4)},
+            guidance_use=100.0, improve_charge=0.06, room=1.0,
+            improve_state=self.cap_state({"improve": 1})), NOW)
+        self.assertEqual([f["mode"] for f in plan["fires"]], ["guidance-improve"])
+        self.assertEqual(plan["improve_allowed"],
+                         {"improve": False, "guidance-improve": True})
+        # The cut skill fire is unplanned, not lost.
+        self.assertEqual(plan["unplanned"]["improve"], 1)
+
+    def test_an_in_flight_fire_uses_its_kind_floor(self):
+        plan = plan_week.build_plan(ctx(
+            skills={"a": skill()}, guidance={"sec": gsection(headroom=0.4)},
+            guidance_use=100.0, improve_charge=0.06, room=1.0,
+            improve_state=self.cap_state(in_flight={"guidance-improve": 1})), NOW)
+        self.assertEqual([f["mode"] for f in plan["fires"]], ["improve"])
+
+    def test_no_improve_state_means_no_cap(self):
+        plan = plan_week.build_plan(ctx(skills={"a": skill(), "b": skill(), "c": skill()},
+                                        improve_charge=0.06, room=1.0), NOW)
+        self.assertEqual(len([f for f in plan["fires"] if f["mode"] == "improve"]), 3)
+        self.assertIsNone(plan["improve_allowed"])
+        self.assertEqual(plan["unplanned"]["improve"], 0)
+
+
 class DocsTests(unittest.TestCase):
 
     def test_adr_0012_records_the_bare_baseline_addendum(self):
@@ -1441,7 +2058,7 @@ class DocsTests(unittest.TestCase):
         self.assertIn("one time per model\nper version of model", text)
         self.assertIn("Ablation, the in-place pair of decision 1, stays the main approach", text)
         doc = (ROOT / "docs/how-it-works.md").read_text()
-        self.assertIn("6. **Bare baselines**", doc)
+        self.assertIn("7. **Bare baselines**", doc)
         self.assertIn("bare-baseline-addendum-the-owner-2026-10-27", doc)
 
     def test_adr_0010_records_the_2026_10_26_addendum(self):
@@ -1456,6 +2073,104 @@ class DocsTests(unittest.TestCase):
         row = next(line for line in text.splitlines()
                    if line.startswith("  | `routine-eval-weekly.yml`"))
         self.assertIn("plan_week.py", row)
+
+    def test_agents_md_table_names_the_watchdog(self):
+        text = (ROOT / "AGENTS.md").read_text()
+        row = next(line for line in text.splitlines()
+                   if line.startswith("  | `routine-eval-watchdog.yml`"))
+        self.assertIn("plan_week.py watchdog", row)
+
+class SchedulabilityTests(unittest.TestCase):
+    """the owner, 2026-11-02: an isolation cell (no `context:`), a null-pin cell and
+    a private-registry cell are held: listed in eval_cells, in no band."""
+
+    PRIVATE = "https://github.com/example-adopter/acsi-agentskills-private"
+    IN_PLACE = {"revision": "a" * 40, "guidance_revision": "b" * 40}
+
+    def setUp(self):
+        import subprocess
+        tmp = tempfile.TemporaryDirectory(prefix="schedulable-")
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        rows = {
+            "iso": {"skill": "iso"},
+            "pin": {"skill": "pin", "context": {**self.IN_PLACE, "guidance_revision": None}},
+            "place": {"skill": "place", "context": self.IN_PLACE},
+            "priv": {"skill": "priv", "registry": self.PRIVATE, "context": self.IN_PLACE},
+            "rw": {"subject": "any", "draft": False, "prompt": "p"}}
+        for name, doc in rows.items():
+            path = self.root / "evals" / name / "a" / "fixture.yaml"
+            path.parent.mkdir(parents=True)
+            path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+        (self.root / "evals" / "scheduled.yml").write_text(yaml.safe_dump({"fixtures": [
+            {"path": f"evals/{name}/a", "readiness": "invented"} for name in rows]}),
+            encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "evals"], cwd=self.root, check=True)
+        self.gates_doc = {"roster_models": ["m"], "skills": {}}
+
+    def cells(self):
+        return plan_week.eval_cells(self.root / "evals", self.gates_doc, [], NOW)
+
+    def bands(self, cells, **over):
+        return plan_week.eval_items(ctx(cells=cells, model_weights={"m": 1.0}, **over), NOW)[0]
+
+    def test_held_cells_stay_in_the_list_with_a_reason(self):
+        got = {c["skill"]: (c["schedulable"], c["hold_reason"]) for c in self.cells()}
+        self.assertEqual(got, {"iso": (False, "no context"), "pin": (False, "null pin"),
+                               "place": (True, None), "priv": (False, "private, paused")})
+
+    def test_held_cells_enter_no_band_but_an_in_place_cell_does(self):
+        bands = self.bands(self.cells())
+        queued = [i["skill"] for items in bands.values() for i in items]
+        self.assertEqual(queued, ["place"])
+
+    def test_an_isolation_cell_of_a_skill_with_a_removal_pr_enters_no_band(self):
+        bands = self.bands(self.cells(), removal_prs=["iso", "place"])
+        self.assertEqual([(b, i["skill"]) for b, items in bands.items() for i in items],
+                         [("safety", "place")])
+
+    def test_a_bare_fire_is_kept_for_a_held_cell(self):
+        cells = self.cells()
+        plan = plan_week.build_plan(ctx(cells=cells, model_weights={"m": 1.0}, room=1.0,
+                                        bare=[{"fixture": "evals/iso/a", "model": "m",
+                                               "skill": "iso"}]), NOW)
+        self.assertEqual([(f["band"], f["arms"], f["fixture"]) for f in plan["fires"]],
+                         [("missing", "both", "evals/place/a"),
+                          ("bare", "bare", "evals/iso/a")])
+
+    def test_a_subject_any_row_neither_crashes_nor_plans_and_is_listed(self):
+        self.assertFalse([c for c in self.cells() if c["fixture"] == "evals/rw/a"])
+        self.assertEqual(plan_week.real_work_rows(self.root / "evals"), ["evals/rw/a"])
+        plan = plan_week.build_plan(ctx(real_work=["evals/rw/a"]), NOW)
+        lines = [l for l in plan_week.summary_lines(plan) if "evals/rw/a" in l]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("Real-work row, not planned by the skill planner", lines[0])
+
+    def test_validate_fire_refuses_a_held_both_arms_leg_only(self):
+        def leg(name, arms="both"):
+            return {"MODE": "eval", "ARMS": arms, "FIXTURE": f"evals/{name}/a",
+                    "EVAL_KEY": f"{name}/a", "MODEL": "claude-opus-5-5", "SKILL": "",
+                    "HOLDOUT": ""}
+        roster = mock.patch.object(plan_week.roster_arm, "is_arm", return_value=True) \
+            if hasattr(plan_week, "roster_arm") else mock.patch("roster_arm.is_arm",
+                                                                 return_value=True)
+        with roster:
+            plan_week.validate_fire(leg("place"), self.root)
+            plan_week.validate_fire(leg("iso", "bare") | {"FIXTURE": "evals/place/a",
+                                                          "EVAL_KEY": "place/a"}, self.root)
+            for name in ("iso", "pin", "priv"):
+                with self.assertRaises(plan_week.PlanError, msg=name):
+                    plan_week.validate_fire(leg(name), self.root)
+
+    def test_a_private_cell_leaves_no_name_in_a_public_output(self):
+        cells = self.cells()
+        plan = plan_week.build_plan(ctx(cells=cells, model_weights={"m": 1.0}, room=1.0,
+                                        real_work=plan_week.real_work_rows(self.root / "evals")),
+                                    NOW)
+        text = json.dumps(plan) + "\n".join(plan_week.summary_lines(plan))
+        self.assertNotIn("priv", text)
+        self.assertNotIn("private", text)
 
 
 if __name__ == "__main__":

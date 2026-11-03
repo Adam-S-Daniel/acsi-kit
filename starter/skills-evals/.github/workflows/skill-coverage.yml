@@ -64,7 +64,7 @@ jobs:
 
       - name: Mint the GitHub App token for acsi-agentskills-private
         id: registry-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ vars.REGISTRY_READ_APP_CLIENT_ID }}
           private-key: ${{ secrets.REGISTRY_READ_APP_PEM }}
@@ -88,7 +88,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -133,7 +133,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -141,7 +141,7 @@ jobs:
         run: python3 -m pip install pyyaml==6.0.3
 
       - name: Download the redacted census
-        uses: actions/download-artifact@v8.0.1
+        uses: actions/download-artifact@v8.0.2
         with:
           name: skill-coverage
           path: ${{ runner.temp }}/skill-coverage/
@@ -175,7 +175,7 @@ jobs:
   # that uses it and passed as REGISTRY_TOKEN; skills-evals issues still use
   # this job's own token. With no token (either secret unset, or the mint
   # failed) the script gets `--fallback-to-proposal` and files the issue
-  # instead, as it does for a skill whose plugin runs code. It opens nothing
+  # instead, as it does for a skill plugin-runtime-review would hold. It opens nothing
   # while any loop pull request (an improvement, a new skill or a removal)
   # is open there; scripts/retire_skill.py's LOOP_PREFIXES names the heads.
   retirement:
@@ -225,7 +225,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -269,7 +269,7 @@ jobs:
         id: app-token
         if: steps.credential.outputs.present == 'true'
         continue-on-error: true
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.EVAL_IMPROVE_APP_CLIENT_ID }}
           private-key: ${{ secrets.EVAL_IMPROVE_APP_PEM }}
@@ -307,7 +307,7 @@ jobs:
         id: guidance-token
         if: steps.credential.outputs.present == 'true'
         continue-on-error: true
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.EVAL_IMPROVE_APP_CLIENT_ID }}
           private-key: ${{ secrets.EVAL_IMPROVE_APP_PEM }}
@@ -338,3 +338,159 @@ jobs:
             --gates "$RUNNER_TEMP/gates/latest.json" \
             --guidance "$GITHUB_WORKSPACE/agent-guidance" \
             "${modes[@]}"
+
+  # Regression detection (#69, #121): has a skill or a guidance section
+  # stopped helping since its previous runs? scripts/regression_issue.py files
+  # one `Regression:` issue per subject here in skills-evals, updates it while
+  # the regression lasts and closes it on the next measurement that is none.
+  # It runs on the schedule and on dispatch, where it only prints its plan
+  # unless `dry_run` is false. The job token reaches this repository alone,
+  # which is why a guidance section's issue is filed here too.
+  regression:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out skills-evals
+        uses: actions/checkout@v7.0.1
+        with:
+          path: skills-evals
+          persist-credentials: false
+
+      - name: Check out the results branch
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: persistent/eval-results
+          path: eval-results
+          persist-credentials: false
+
+      - name: Check out acsi-agentskills
+        # Full history: the issue lists the skill's commits between the
+        # windows from `git log`.
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/acsi-agentskills
+          path: registry-agentskills
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out _agent-guidance
+        # Full history, for a guidance section's commit range.
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/_agent-guidance
+          path: agent-guidance
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the offline verdict dependency
+        run: python3 -m pip install pyyaml==6.0.3 markdown-it-py==4.2.0
+
+      - name: Detect and report regressions
+        working-directory: skills-evals
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          as_of=$(git -C "$GITHUB_WORKSPACE/eval-results" log -1 --format=%cI)
+          dry=(--dry-run)
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ] || [ "$DRY_RUN_INPUT" = "false" ]; then
+            dry=()
+          fi
+          python3 scripts/regression_issue.py \
+            --results-tree "$GITHUB_WORKSPACE/eval-results" \
+            --roster evals/roster.yml --policy evals/regression-policy.yml \
+            --as-of "$as_of" \
+            --registry "acsi-agentskills=$GITHUB_WORKSPACE/registry-agentskills" \
+            --guidance "$GITHUB_WORKSPACE/agent-guidance" \
+            --out "$RUNNER_TEMP/regressions/latest.json" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            "${dry[@]}"
+
+      - name: Upload the regression document
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: regressions
+          path: ${{ runner.temp }}/regressions/
+          if-no-files-found: error
+
+  # Publishes the regression document for the public explorer: the committed
+  # path `regressions/latest.json` on persistent/eval-results (schedule only).
+  # No `concurrency` group, as routine-eval-ingest.yml has none: GitHub keeps
+  # only the newest pending run in a group, so a burst would cancel runs
+  # silently. A push that loses a race to another writer of the branch is
+  # rebuilt on the new tip and retried (six attempts with backoff); this job writes only
+  # regressions/latest.json, so a retry cannot conflict.
+  regression-publish:
+    if: >-
+      github.ref == 'refs/heads/main' && github.event_name == 'schedule'
+      && needs.regression.result == 'success'
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the scheduled main commit
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download the regression document
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: regressions
+          path: ${{ runner.temp }}/regressions
+
+      - name: Publish regressions/latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/regressions/latest.json"
+          jq -e '.schema_version == 1 and (.rows | type == "array") and
+            (.subjects | type == "object")' "$source" >/dev/null
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git config user.name "skills-evals real-eval bot"
+          git config user.email "skills-evals@users.noreply.github.com"
+          for attempt in 1 2 3 4 5 6; do
+            # Other publishers push this branch every minute or two, so wait
+            # (about 2, 4, 8, 16 and 32 s plus jitter) before each retry.
+            if [ "$attempt" -gt 1 ]; then
+              sleep $(( (1 << attempt) + RANDOM % 5 ))
+            fi
+            git fetch origin refs/heads/persistent/eval-results:refs/remotes/origin/persistent/eval-results
+            git checkout -B persistent/eval-results origin/persistent/eval-results
+            if [ -L regressions ] || { [ -e regressions ] && [ ! -d regressions ]; }; then
+              echo "Unsafe regressions output path." >&2
+              exit 1
+            fi
+            if [ -L regressions/latest.json ] || { [ -e regressions/latest.json ] && [ ! -f regressions/latest.json ]; }; then
+              echo "Unsafe regressions output path." >&2
+              exit 1
+            fi
+            mkdir -p regressions
+            cp "$source" regressions/latest.json
+            git add -f regressions/latest.json
+            if git diff --cached --quiet; then
+              echo "No regression change to commit."
+              exit 0
+            fi
+            git commit -m "regressions: publish latest verdicts [skip ci]"
+            if git -c "http.https://github.com/.extraheader=$auth" push origin HEAD:refs/heads/persistent/eval-results; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed; retrying from a fresh fetch." >&2
+          done
+          echo "Could not publish regressions/latest.json after 6 attempts." >&2
+          exit 1

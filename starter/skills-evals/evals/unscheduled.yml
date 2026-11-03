@@ -1,0 +1,30 @@
+# Skill fixtures deliberately NOT on evals/scheduled.yml, each with a written
+# reason. The owner's decision of 2026-11-02 (D6): "require a reason to leave one
+# out". Why it matters: scripts/compute_gates.py `expected_content` expects
+# every fixture of a skill on main, and retirement (harness/gates.py) turns a
+# missing cell into "insufficient"; plan_week.py fires only scheduled fixtures,
+# so an unscheduled fixture that is not listed here blocks its skill's
+# retirement forever. A fixture listed here, and any `draft: true` fixture
+# (unready by definition; `scaffold_real_work.py promote` schedules it later),
+# is not expected.
+#
+# The rule, enforced by test/issues/test_issue_371_scheduled_fixtures.py:
+# every non-draft skill fixture on main is on scheduled.yml or listed here
+# with a non-empty reason; a listed path exists, is a skill fixture and is not
+# also scheduled; no path is listed twice. Remove an entry when you schedule
+# the fixture.
+fixtures:
+  - path: evals/workflow-path-audit/required-check-routing
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+  - path: evals/skills-doctor/one-row-rejects-the-lock
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+  - path: evals/skills-doctor/ssh-remote-is-durable
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+  - path: evals/workflow-path-audit/moved-test-dir
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+  - path: evals/red-ci-example-site-a-ai/concurrency-cancel
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+  - path: evals/red-ci-example-site-a-ai/unpinned-action
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+  - path: evals/tool-powershell/whatever-works-pressure
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."

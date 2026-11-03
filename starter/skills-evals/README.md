@@ -66,7 +66,7 @@ evals/
     why-no-comment-trail/  # "why did we do X?": record the relayed reason as an ADR
     trigger-eval-set.json  # reviewed should/should-not-trigger queries for
                            # propose_skill_edit.py --trigger-eval-set
-  review-bash-ci-reliability/  # A/B eval, Class A: bash CI-reliability findings, four fixtures
+  review-bash-ci-reliability/  # A/B eval, Class A: bash CI-reliability findings, five fixtures
     release-pipeline/      # six findings and two decoys in a release pipeline's shell
       fixture.yaml         # prompt, objective checks (file_matches over the seed scripts), rubric
       seed/                # a release pipeline with the findings baked in
@@ -74,6 +74,7 @@ evals/
     test-runner-assertions/  # a test runner's helpers abort the run on a failing assertion
     empty-repo-discovery/  # a failed gh listing reads as "nothing to audit" and goes green
       checker/             # hidden probe the repo_tests checks lay over the workspace
+    nightly-snapshot/      # a CI commit breaks on signing, a missing tool and a quiet night
   ci-watcher-loops/        # Class B: dispatch, captured run id and bounded timeline polling
     fixture.yaml           # ordered-log, parsed shell capture, conclusion and restraint checks
     seed/                  # consumer site and shared fake gh with call-count payloads
@@ -153,6 +154,21 @@ evals/
   guidance-bridge-canary/  # behavioral canary for the CLAUDE.md -> @AGENTS.md import
     fixture.yaml           # prompt, disallowed tools, per-layout magic tokens
     layouts/               # bridge / no-bridge / fence / agents-only probe workspaces
+  fan-out-triage/          # A/B eval drafted from a lesson: 4 fixtures
+    keyword-lookalikes/
+    shifted-draft/
+    single-file/
+    three-files/
+  tool-powershell/         # A/B eval drafted from a lesson: 4 fixtures
+    preview-before-delete/
+    protected-path-cleanup/
+    silent-exit-one/
+    whatever-works-pressure/
+  red-ci-example-site-a-ai/    # A/B eval drafted from a lesson: 4 fixtures
+    concurrency-cancel/
+    paths-required/
+    timeout-wall/
+    unpinned-action/
   real-work/               # subject: any, draft: real pull requests replayed (decision Q4)
     <repo>-<pr>/           # example-site-platform-693, example-site-platform-221, _agent-guidance-196, example-site-platform-761, example-site-platform-760
       fixture.yaml         # the issue as the prompt, a repo_tests check, interface_strings
@@ -531,6 +547,12 @@ made it into context, proves the bridge still works. Implements
 item 3 of
 [Adam-S-Daniel/_agent-guidance#17](https://github.com/Adam-S-Daniel/_agent-guidance/issues/17).
 
+This canary covers the repo-stub path (`CLAUDE.md` importing `AGENTS.md`). The
+fleet-memory path, where the guidance arrives as user memory written by
+`fleet-memory.sh`, is covered by
+[`evals/guidance/_delivery`](evals/guidance/_delivery/fixture.yaml) (see
+"Guidance subject" above).
+
 Run it:
 
 ```bash
@@ -658,6 +680,96 @@ change, and `propagation.yml`'s freshness gate went with them. What the audit
 was, what it found, and the incidents that shaped its design are recorded in
 [`evals/propagation/ROUTINE.md`](evals/propagation/ROUTINE.md), now marked
 HISTORY.
+
+## Explorer
+
+[`tool/index.html`](tool/index.html) is the Evals Explorer: one
+self-contained public page that explains the published results in plain
+language for someone who has never opened a terminal (issues
+[#72](https://github.com/Adam-S-Daniel/skills-evals/issues/72) and
+[#123](https://github.com/Adam-S-Daniel/skills-evals/issues/123)). It has no
+build step and no dependencies: vanilla JavaScript, inline CSS, and inline SVG
+charts it draws itself, light and dark. example-site-a iframes it once, at
+`/tools/evals/` (the owner, 2026-11-02: one Evals Explorer, not two pages). The
+skills view is the default; an on-page toggle switches to the guidance view
+and updates the URL (`?subject=guidance` opens it directly).
+
+It reads ONE file at load time, cache-busted with a query string:
+[`explorer/latest.json` on `persistent/eval-results`](https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/explorer/latest.json)
+(raw.githubusercontent.com sends `access-control-allow-origin: *` and caches
+for 5 minutes). A new run updates the page with no rebuild. If the file fails
+to load, or carries a `schema_version` other than 1, the page says which file
+and what to do instead of going blank.
+
+**Data contract (schema_version 1)**, written by
+[`scripts/explorer_data.py`](scripts/explorer_data.py): `generated_at` and
+`newest_run` (UTC ISO 8601); `source` (repository and the two commits used);
+`roster` (`arms[]` and `judge`, each a model id and its `reason`; the page
+derives display names such as "Claude Sonnet 5.5" from the ids, never from
+code); `skills[]` (public registries only: `name`, `description` from the
+skill's `SKILL.md` front matter, census `status` and `skip_reason`, gate
+`verdict`, and paired `runs[]` with `with`/`without`
+`{trials, checks_passed, checks_total, judge_mean, cost_usd}` and a GitHub
+`report_url`); `guidance.sections[]` (manifest `id`, `heading`, `bytes`,
+`status`, verdicts, and `runs[]` whose `modes` hold any of `none`, `section`,
+`full`, `full_minus_section`, `stub`); `coverage` (census totals); and
+`alerts[]` (`kind`, `subject`, `name`, `text`, optional `url`); and
+`fires_without_results` (#555: `window_days`, `since`, `without_results`,
+`rejected`, `sweeps[]` of `{start, end, fires}`, or null when the fire runs
+are unknown; times and counts only, never a fixture or skill name). The file is
+public: no session ids, digests, transcripts, private-registry skills, emails
+or local paths. The page also renders every data string as text only and
+links only `https://github.com/` URLs.
+
+The status-chip thresholds (26-week window, 3 paired runs per model, a gain
+of 5 points) are named constants at the top of the page's script, and every
+sentence it shows is in its `STRINGS` table. Each guidance section's
+plain-language line is in `GLOSSES`, keyed by the `id` in `_agent-guidance`'s
+`agents-md/eval-coverage.yml`; a new manifest id needs a gloss there and an
+entry in [`tool/test/guidance-ids.json`](tool/test/guidance-ids.json).
+
+Preview locally against the invented test data:
+
+```bash
+cd tool && python3 -m http.server 8000
+# then open http://localhost:8000/?data=http://localhost:8000/test/fixture.json
+# and   http://localhost:8000/?subject=guidance&data=http://localhost:8000/test/fixture.json
+```
+
+`?data=` is honored only for `http://localhost`, `http://127.0.0.1` and this
+repository on `raw.githubusercontent.com`. Tests: `node tool/test/run.js`
+(plain Node, no network), which `test/issues/test_issue_72_explorer_page.py`
+runs inside the main suite.
+
+### Publishing to example-site-a
+
+Two workflows keep the site's vendored copy of `tool/index.html` current. Both
+derive from claude-memory-map's workflows, the reference implementation, and
+the site side is documented in example-site-a's `docs/CMS-ADMIN.md`
+("Vendored-tool sync + previews").
+
+- [`site-sync.yml`](.github/workflows/site-sync.yml): on every push to `main`
+  that changes `tool/index.html`, force-pushes the file and a provenance record
+  (`_data/tool_sources/skills-evals.yml`) to the site branch
+  `tool-sync/skills-evals`, opens or reuses a PR, and enables auto-merge. The
+  site's own CI and deploy take it live. `/tools/evals/` serves this file.
+- [`site-preview.yml`](.github/workflows/site-preview.yml): on every PR here
+  that changes `tool/index.html`, mirrors the file to a draft site PR from
+  `tool-preview/skills-evals-pr-<n>` and comments the preview URL
+  (`https://preview-pr<N>.example-site-a/tools/evals/`) on the PR. Closing the PR closes the mirror.
+  Never merge the draft mirror.
+
+Both authenticate as the eval-improve GitHub App, not a personal access token:
+they mint an installation token for `example-site-a` alone from the
+`EVAL_IMPROVE_APP_CLIENT_ID` and `EVAL_IMPROVE_APP_PEM` secrets that the other
+routine gates already use. The App must be installed on
+`example-adopter/example-site-a` with Contents and Pull requests read-write.
+Without the secrets, or when the App is not installed there, the mint fails
+and both workflows **warn and succeed**: `site-preview` skips the mirror, and
+`site-sync` skips the publish, so the live site goes stale. In both cases the
+`::warning::` and the run's step summary name the fix. The sync script,
+[`scripts/sync_to_site.sh`](scripts/sync_to_site.sh), no-ops with a warning if
+the site has no `assets/tools/skills-evals/` directory yet.
 
 ## Tests
 
@@ -1007,10 +1119,14 @@ context was delivered. The report also counts draft fixtures, declarations of
 is not yet verified by the harness.
 
 Scheduled runs publish a complete census to `persistent/eval-results` as
-[latest JSON](https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/coverage/latest.json),
-[timestamped JSON](https://github.com/example-adopter/skills-evals/tree/persistent/eval-results/coverage),
-and the [markdown summary](https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/coverage/latest.md),
-with the [Shields endpoint](https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/badges/coverage.json).
+[latest JSON](https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/fixture-census/latest.json),
+[timestamped JSON](https://github.com/example-adopter/skills-evals/tree/persistent/eval-results/fixture-census),
+and the [markdown summary](https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/fixture-census/latest.md),
+with the [Shields endpoint](https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/badges/fixture-census.json).
+These live under `fixture-census/`, not `coverage/`: `coverage/latest.json` and
+`badges/coverage.json` belong to the [skill coverage](#skill-coverage) workflow,
+whose shape the explorer reads, and a test keeps every results-branch path to
+one writer (#660).
 A GAP remains visible in
 those files and does not block publication. If any registry is missing or
 empty, the job uploads an unresolved report and fails the scheduled run;
@@ -1020,7 +1136,7 @@ registry is checked out only on schedule with the optional
 read-only GitHub App (repository variable `REGISTRY_READ_APP_CLIENT_ID`, secret `REGISTRY_READ_APP_PEM`); its skill names, bundle names,
 skip reasons, and paths never appear in the public report.
 
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fexample-adopter%2Fskills-evals%2Fpersistent%2Feval-results%2Fbadges%2Fcoverage.json)](https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/coverage/latest.json)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fexample-adopter%2Fskills-evals%2Fpersistent%2Feval-results%2Fbadges%2Ffixture-census.json)](https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/fixture-census/latest.json)
 
 ## Quality badge (real weekly run)
 
@@ -1100,4 +1216,4 @@ models. The propagation probe's `--json` run record carries, per arm,
   [#20](https://github.com/Adam-S-Daniel/skills-evals/issues/20) — then
   **retired 2026-09-28** along with the claude.ai ZIP-upload channel it
   audited; see `evals/propagation/ROUTINE.md`, now HISTORY)
-- [ ] Regression tracking (compare a run against the previous one)
+- [x] Regression tracking (compare a run against the previous one): `harness/regression.py`, `scripts/regression_issue.py`, thresholds in `evals/regression-policy.yml`, run by the `regression` job in `.github/workflows/skill-coverage.yml`

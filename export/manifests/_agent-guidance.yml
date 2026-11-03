@@ -6,86 +6,236 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: 0082194ce1dcb122e802886e48f62eadb6db9b99
+source_sha: 2e2045a0870db995547d0e79d8a5148f89e94b0b
 
 exclude:
-  - path: docs/reference/adopt-the-whole-system/
-    why: The adoption kit itself, which lives inside this repo; it is not part of the exported repo.
+  - path: docs/reference/adopt-the-whole-system.md
+    why: A pointer to this kit's own repo (acsi-kit), where the kit moved; an adopter's copy has no use for it.
   - path: docs/evidence/2026-10-07-workstation-retirement-117.md
     why: DECISIONS X7 (a checkpoint on retiring the owner's own workstation; nothing links to it).
+  - path: docs/routines/fleet-health-audit.md
+    why: >-
+      DECISIONS "Re-pin (2026-11-03)". The owner's weekly audit of their own
+      fleet: its first run seeds from the owner's hand audit, and it reads the
+      task health snapshot that the kit's wsl-automation does not publish.
+      Nothing links to it.
+  - path: .github/health-audit-platform-ref
+    why: C4. The platform release the source fetches the audit scripts at; the kit copies the script into this repo instead.
+  - path: .github/workflows/health-reusable-parity.yml
+    why: C4. A daily check that the reusable matches the platform's and bump of the pin above; the kit has no platform to compare with.
+  - path: scripts/check-health-reusable-parity.js
+    why: C4. The parity workflow's script.
+  - path: test/test-health-reusable-parity.js
+    why: C4. The parity script's tests.
 
-# DECISIONS C4: the scheduled-run-health reusable and the two scripts it
-# sparse-checks-out from the repo it runs from. They come from the platform
-# repo at a pinned commit and go through the same substitution as the rest.
+# DECISIONS C4: the audit script the scheduled-run-health reusable runs. The
+# source fetches it from the platform repo, which is not in the kit, so it comes
+# from that repo at the release the source pins (.github/health-audit-platform-ref)
+# and the reusable reads it from this repo instead.
 imports:
   - repo: cms-platform
-    sha: fe15bb1cad82e3ee6934063b6ce6ae130096c433
-    path: .github/workflows/scheduled-run-health.yml
-    to: .github/workflows/scheduled-run-health-reusable.yml
-    why: >-
-      C4. The cron-coverage gate (scripts/check-cron-coverage.js) requires a
-      scheduled-run-health caller and the platform repo is not in the kit.
-      Named -reusable so it does not collide with this repo's own caller.
-  - repo: cms-platform
-    sha: fe15bb1cad82e3ee6934063b6ce6ae130096c433
+    sha: e0d772c22312cc6585d0b4f70de8bc22d0f18368
     path: scripts/audit-scheduled-runs.js
-    why: C4. The reusable sparse-checks-out this script from the repo it is called from, which is now this one.
-  - repo: cms-platform
-    sha: fe15bb1cad82e3ee6934063b6ce6ae130096c433
-    path: scripts/check-platform-currency.js
-    why: C4. The reusable's currency step runs this script, checked out the same way.
+    why: C4. The reusable's audit step runs this script; the source fetches it from the platform repo, which is not in the kit.
 
 edits:
-  # ---- C4: the reusable and its callers
+  # ---- C4: the reusable reads its scripts from this repo
   - path: .github/workflows/scheduled-run-health-reusable.yml
-    old: "# Scheduled-run + default-branch-push health audit (reusable).\n"
-    new: |
-      # Scheduled-run + default-branch-push health audit (reusable).
+    old: |
+      # WHERE THE AUDIT SCRIPT COMES FROM. The scripts stay in cms-platform, so
+      # there is one copy of the audit logic. The release they are fetched at is
+      # the one line in .github/health-audit-platform-ref, read from THIS repo's
+      # default branch rather than from the commit a caller pinned. So one merged
+      # bump moves every caller, and a caller's stale sha pin cannot leave it on an
+      # old release. It is a data file rather than a value in this workflow so a bot
+      # can move it without permission to edit workflows: the daily
+      # health-reusable-parity.yml opens that bump PR, and the currency lane below
+      # goes red if one has not merged within 14 days of a release.
       #
-      # Copied into this repo from the shared platform repo by the adoption
-      # kit's export (DECISIONS C4), so every repo in the fleet calls it here:
-      # this repo through ./.github/workflows/scheduled-run-health-reusable.yml,
-      # the others at a full commit sha of this repo. The history below is the
-      # platform's own and still applies.
-    why: Says where this file came from and how callers reach it now.
-  - path: .github/workflows/scheduled-run-health-reusable.yml
-    old: "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
-    new: "uses: actions/checkout@v7.0.1"
+      # KEEP IT IN STEP WITH THE PLATFORM. scripts/check-health-reusable-parity.js,
+      # run daily, fails when this file and cms-platform's scheduled-run-health.yml
+      # at its latest release stop doing the same thing.
+    new: |
+      # WHERE THE AUDIT SCRIPT COMES FROM. The adoption kit's export (DECISIONS
+      # C4) copied scripts/audit-scheduled-runs.js into this repo from the
+      # platform, which is not part of the kit, and this workflow reads it from
+      # THIS repo's default branch rather than from the commit a caller pinned,
+      # so one merged change moves every caller. With no platform release to
+      # fall behind, the platform's currency lane, the release pin and the daily
+      # parity check against the platform are left out.
     why: >-
-      This repo pins actions through .github/workflows/actions.lock (ADR 0024)
-      and must not mix that with legacy sha pins; v7.0.1 is the tag the lock
-      already maps to this same commit.
+      C4. The source fetches the audit scripts from the platform repo at the
+      release in .github/health-audit-platform-ref; the kit has no platform, so
+      the copied script is read from this repo and the pin and parity check go.
   - path: .github/workflows/scheduled-run-health-reusable.yml
-    old: "uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
-    new: "uses: actions/setup-node@v7.1.0"
-    why: Same lockfile rule; v7.1.0 is the setup-node tag every other workflow here is locked to, and the lock maps it to this same commit.
+    old: |2
+            # The currency lane, as on the platform: red when the release pinned in
+            # .github/health-audit-platform-ref has been superseded for longer
+            # than behind_days.
+            currency_scan: { type: boolean, default: true }
+            behind_days:   { type: string, default: "14" }
+    new: ""
+    why: C4. The currency lane's inputs; with the scripts in this repo there is no platform release to be current with.
+  - path: .github/workflows/scheduled-run-health-reusable.yml
+    old: "refusing to guess where the platform pin lives."
+    new: "refusing to guess where the audit script lives."
+    why: C4. The step now finds where the script is, not the platform pin.
+  - path: .github/workflows/scheduled-run-health-reusable.yml
+    old: |2
+            - name: Fetch the platform pin from that repo's default branch
+              uses: actions/checkout@v7.0.1
+              with:
+                repository: ${{ steps.home.outputs.repository }}
+                sparse-checkout: |
+                  .github/health-audit-platform-ref
+                sparse-checkout-cone-mode: false
+                path: .self
+                persist-credentials: false
+    new: |2
+            - name: Fetch the audit script from that repo's default branch
+              uses: actions/checkout@v7.0.1
+              with:
+                repository: ${{ steps.home.outputs.repository }}
+                sparse-checkout: |
+                  scripts/audit-scheduled-runs.js
+                sparse-checkout-cone-mode: false
+                path: .self
+                persist-credentials: false
+    why: C4. The script is read from this repo (the import above), where the source read only the platform pin.
+  - path: .github/workflows/scheduled-run-health-reusable.yml
+    old: |2
+            - name: Resolve the pinned cms-platform release
+              id: self
+              env:
+                GH_TOKEN: ${{ github.token }}
+                PLATFORM_REPO: Adam-S-Daniel/cms-platform
+              run: |
+                tag=$(tr -d '[:space:]' < .self/.github/health-audit-platform-ref)
+                if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                  echo "::error::.github/health-audit-platform-ref holds '${tag}', not a vX.Y.Z release tag."
+                  exit 1
+                fi
+                # Resolve to a commit so the checkout names an immutable object; an
+                # annotated tag is dereferenced to its commit.
+                sha=$(gh api "repos/$PLATFORM_REPO/commits/$tag" --jq '.sha')
+                if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+                  echo "::error::could not resolve $PLATFORM_REPO@${tag} to a commit ('${sha}')."
+                  exit 1
+                fi
+                {
+                  echo "repository=$PLATFORM_REPO"
+                  echo "ref=$tag"
+                  echo "sha=$sha"
+                } >>"$GITHUB_OUTPUT"
+                echo "Audit script: ${PLATFORM_REPO}@${tag} (${sha})"
+            - name: Fetch the audit script from the platform
+              uses: actions/checkout@v7.0.1
+              with:
+                repository: ${{ steps.self.outputs.repository }}
+                ref: ${{ steps.self.outputs.sha }}
+                sparse-checkout: |
+                  scripts/audit-scheduled-runs.js
+                  scripts/check-platform-currency.js
+                sparse-checkout-cone-mode: false
+                path: .cms-platform
+                persist-credentials: false
+    new: ""
+    why: C4. The steps that resolved the platform release and fetched the scripts from it; the platform repo is not in the kit.
+  - path: .github/workflows/scheduled-run-health-reusable.yml
+    old: "node .cms-platform/scripts/audit-scheduled-runs.js"
+    new: "node .self/scripts/audit-scheduled-runs.js"
+    why: C4. Where the step above checks the script out.
+  - path: .github/workflows/scheduled-run-health-reusable.yml
+    old: |2
+            - name: Check this caller is on a current platform release
+              # As on the platform: runs after the audit, so a stale pin still gets
+              # its scheduled-run health checked; the next day's audit reports this
+              # step's red into the same tracking issue.
+              env:
+                GH_TOKEN: ${{ github.token }}
+                CURRENCY_REPO: ${{ steps.self.outputs.repository }}
+                CURRENCY_REF: ${{ steps.self.outputs.ref }}
+                CURRENCY_BEHIND_DAYS: ${{ inputs.behind_days }}
+                CURRENCY_SCAN: ${{ inputs.currency_scan }}
+              run: |
+                if [[ "$CURRENCY_SCAN" != "true" ]]; then
+                  echo "Currency scan disabled by the caller (currency_scan: false)."
+                  exit 0
+                fi
+                node .cms-platform/scripts/check-platform-currency.js --platform-repo "$CURRENCY_REPO" --ref "$CURRENCY_REF" --behind-days "$CURRENCY_BEHIND_DAYS"
+    new: ""
+    why: C4. The currency lane asks whether the pinned platform release is current; the kit has no platform release.
   - path: .github/workflows/scheduled-run-health.yml
-    old: "    uses: Adam-S-Daniel/cms-platform/.github/workflows/scheduled-run-health.yml@v0.1.164\n"
-    new: "    uses: ./.github/workflows/scheduled-run-health-reusable.yml\n"
-    why: C4. The caller points at the copy of the reusable in this repo.
-  - path: .github/workflows/scheduled-run-health.yml
-    old: "# sweep once startup-failed 30/30 for a month unnoticed). The platform owns\n# the audit logic; this thin caller schedules it."
-    new: "# sweep once startup-failed 30/30 for a month unnoticed). The reusable beside\n# this file owns the audit logic; this thin caller schedules it."
+    old: "cms-platform owns\n# the audit script; this thin caller schedules it."
+    new: "The reusable beside\n# this file owns the audit logic; this thin caller schedules it."
     why: C4. The audit logic now lives in this repo.
+  - path: .github/workflows/scheduled-run-health.yml
+    old: " The reusable's header has the\n    # detail; the audit script still comes from cms-platform.\n"
+    new: " The reusable's header has the\n    # detail; the audit script lives in this repo too.\n"
+    why: C4. The audit script is copied into this repo.
   - path: .github/workflows/actions.lock
     stage: output
-    old: "    '.github/workflows/scheduled-run-health.yml': []\n"
-    new: "    '.github/workflows/scheduled-run-health-reusable.yml':\n        - 'actions/checkout@v7.0.1'\n        - 'actions/setup-node@v7.1.0'\n    '.github/workflows/scheduled-run-health.yml': []\n"
+    old: |2
+          '.github/workflows/health-reusable-parity.yml':
+              - 'actions/checkout@v7.0.1'
+              - 'actions/create-github-app-token@v3.3.0'
+              - 'actions/setup-node@v7.1.0'
+    new: ""
     why: >-
-      P3. The entry `gh actions-lock` writes for the copied reusable: both tags
-      are already locked in this file, so no new commit is named. Confirm with
-      `gh actions-lock --no-narrow` (REGENERATE.md).
+      P3. The entry of the left-out parity workflow, as `gh actions-lock`
+      would drop it; every tag it named is still locked for other workflows.
+      Confirm with `gh actions-lock --no-narrow` (REGENERATE.md).
   - path: README.md
-    old: "repo running crons actually calls cms-platform's `scheduled-run-health`\nreusable, and that the caller it has can fire and can file."
-    new: "repo running crons actually calls the `scheduled-run-health` reusable\n(`.github/workflows/scheduled-run-health-reusable.yml` in this repo), and\nthat the caller it has can fire and can file."
-    why: C4. Names where the reusable lives now.
+    old: |
+      the caller it has can fire and can file. A repo without an `actions.lock` calls
+      cms-platform's. A repo with one calls this repo's
+      `scheduled-run-health-reusable.yml`, because a reusable is covered by the
+      lockfile of the repo that defines it and cms-platform has none (ADR 0024's
+      2026-10-31 addendum). The daily `health-reusable-parity.yml` keeps that copy in
+      step with cms-platform's and moves its release pin,
+      `.github/health-audit-platform-ref`, in a self-merging PR.
+    new: |
+      the caller it has can fire and can file. Every repo calls this repo's
+      `scheduled-run-health-reusable.yml`, which runs the audit script copied into
+      this repo (`scripts/audit-scheduled-runs.js`).
+    why: C4. Names where the reusable and its script live in the kit; the platform reusable and the parity check are not part of it.
   - path: test/run-tests.sh
-    old: "    sed '/uses: Adam-S-Daniel/d' \"$caller\" \\\n"
-    new: "    sed '/^    uses: /d' \"$caller\" \\\n"
-    why: >-
-      C4. The test deletes the caller's job-level `uses:` line; it used to
-      find it by the owner name in the cross-repo ref, and the caller now
-      calls the local copy (./.github/...), so it matches the key instead.
+    old: |2
+          test_health_reusable_parity
+    new: ""
+    why: C4. The call of the left-out parity script's suite (its function is cut by the next edit).
+  - path: test/run-tests.sh
+    old: |
+      test_health_reusable_parity() {
+          echo ""
+          echo "=== Test: check-health-reusable-parity.js (node:test suite) ==="
+
+          # Same non-silent-skip rule as the discrepancy alert gate: the script
+          # parses both workflows with `yaml`, so a missing node_modules must fail
+          # loudly, never skip. CI installs it with `npm ci`.
+          if [[ ! -d "$REPO_ROOT/node_modules/yaml" ]]; then
+              fail "health reusable parity: node_modules/yaml is missing — run \`npm ci\` first"
+              return
+          fi
+
+          local out="$TEST_DIR/health-reusable-parity-tap.txt" rc=0
+          # Never piped: under pipefail the status would be the last command's.
+          node --test --test-reporter=tap "$REPO_ROOT/test/test-health-reusable-parity.js" > "$out" 2>&1 || rc=$?
+
+          local pass_n fail_n
+          pass_n=$(grep -oE '^# pass [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
+          fail_n=$(grep -oE '^# fail [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
+
+          # A minimum count proves the suite ran: zero defined tests exits 0 too.
+          if [[ "$rc" -eq 0 && "$fail_n" == "0" && -n "$pass_n" && "$pass_n" -ge 9 ]]; then
+              pass "health reusable parity: node:test suite is green ($pass_n passed)"
+          else
+              fail "health reusable parity: node:test suite — exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, fail=0, pass>=9): $(tail -20 "$out" | tr '\n' ' ')"
+          fi
+      }
+
+    new: ""
+    why: C4. The suite of the left-out parity script.
   - path: scripts/check-cron-coverage.js
     old: " * THE REMEDY. cms-platform's `scheduled-run-health` reusable: a daily audit of\n"
     new: " * THE REMEDY. The `scheduled-run-health` reusable (this repo's\n * .github/workflows/scheduled-run-health-reusable.yml): a daily audit of\n"
@@ -184,12 +334,6 @@ patches:
     why: >-
       C12. A handoff note's numeric ruleset id and two fixtures' real Claude
       Code session id become a description and an invented uuid.
-  - file: kit_ci.py
-    why: >-
-      Re-pin (2026-10-30). The source's CI runs the adoption kit's own tests
-      (three ci.yml steps, their setup-python lock entry, the .gitignore block
-      that tracks every kit file, and the test pinning those steps); the
-      exported repo has no kit, so they are cut whole.
 
 # P3: generated files rebuilt from the edited sources, in this order.
 regenerate:

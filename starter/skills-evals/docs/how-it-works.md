@@ -104,6 +104,11 @@ delivery guard runs on the fixture's own model.
 
 `.github/workflows/eval.yml` runs every Tuesday at 07:00 UTC and on manual
 dispatch (`gh workflow run eval.yml --ref main`, optional input `fixture=`).
+It runs isolation pairs only: its `plan` job refuses every in-place fixture
+(a top-level `context:` mapping) before any credential is minted and lists it
+in the step summary, because only the cloud routine hosts in-place delivery
+([#587](https://github.com/Adam-S-Daniel/skills-evals/issues/587)). When
+nothing is left to run, no later job runs and the run ends successfully.
 It bills the organisation's API workspace `skills-evals-ci` through workload
 identity federation, not the Claude Code subscription. A measured run on
 2026-09-22 (one fixture, one Sonnet 5 arm, Opus 4.8 judge) took 6 minutes 24
@@ -129,18 +134,22 @@ weekly allowance):
 | Key | Value | Meaning |
 |---|---|---|
 | `weekly_cap` | 0.30 | all automated evals, in each allowance week of the account (from Monday 17:00 UTC) |
-| `per_run_cap` | 0.03 | one run stops starting new work after this much |
-| `per_run_overrun` | 0.005 | added to every run: its last call is never measured |
-| `stop_when_account_above` | 0.80 | a run stops once the account's weekly meter reads this |
+| `per_run_cap` | 0.01 | one run stops starting new work after this much (the owner, 2026-11-01; was 0.03) |
+| `per_run_overrun` | 0.0018 | added to every run: its last call is never measured. The 95th percentile of each run's largest single call (the owner, 2026-11-01, standing rule; `scripts/run_costs.py` prints the value; was 0.005, then 0.002) |
+| `points_per_usd` | 0.00214 | the allowance one dollar of the CLI's reported call cost uses (`scripts/run_costs.py` prints it), so `per_run_cap` is charged the run's own spend (2026-11-03) |
+| `stop_when_account_above` | 0.80 | a run stops, and no fire starts, once the account's weekly meter reads this |
 
 Three layers enforce it:
 
 1. **The in-run stop** (`harness/run_eval.py`). The CLI prints the account's
    weekly meter as each agent call begins. Before each trial and each judge
-   call, a run checks the latest reading: once the meter has moved
-   `per_run_cap` since the run's first reading (after a window reset, the
-   new reading alone counts), or reads `stop_when_account_above`, nothing
-   more is started. Skipped trials are written with error `budget_stop`, a
+   call, a run checks its spend and the latest reading: once its own calls
+   have cost `per_run_cap` at `points_per_usd`, or the meter reads
+   `stop_when_account_above`, nothing more is started. The cap is charged the
+   run's own dollars because the meter reads whole points and moves with the
+   account's other use too; when any call's cost is unknown, or the file sets
+   no `points_per_usd`, the cap falls back to the meter's movement since the
+   run's first reading (after a window reset, the new reading alone counts). Skipped trials are written with error `budget_stop`, a
    skipped judge call as a judge error, and every summary of the run carries
    `usage.budget_stop` naming the limit. A guidance run, being one pair, ends
    with exit 2 instead. A run with no reading yet, or an API-billed one, is
@@ -157,11 +166,38 @@ Three layers enforce it:
    minutes, so a fire with no results two hours later failed or never
    started). An improve fire (or a guidance-improve fire) never lands
    results, so it is charged its own
-   cost for the whole week: twelve eval fires at their measured mean
-   (twelve full reservations until anything is measured). The fire goes
+   cost for the whole week: eight eval fires at their measured mean
+   (eight full reservations until anything is measured; twelve until
+   2026-11-02, when the account meter around improve fires measured 2.3 to
+   5.3 eval fires each, #572; eight is a ceiling until each improve run's
+   cost is recorded). The fire goes
    only if one more reservation (an improve fire's charge, in improve mode)
-   still fits under `weekly_cap`. If the GitHub API cannot be read, the
-   fire is refused. The log shows numbers only.
+   still fits under `weekly_cap`. An improve or guidance-improve fire must
+   also pass the **improve cap** (#572, 2026-11-02): the week's improve
+   fires of both kinds, successful or still running (a running one only
+   when its run id is lower than this fire's, so of two dispatched together
+   the earlier goes), stay under 20% of `weekly_cap` divided by the improve
+   charge, except that each kind gets one fire per account week however
+   small the share. The cap follows `weekly_cap` as configured, so a
+   temporary raise loosens it too. With both floors used at eight units,
+   about 2 × 0.04 = 0.08 of the allowance is held, 27% of a 0.30 cap: above
+   the 20% share, by the approved floor rule. In the week of 2026-10-26 eight
+   improve fires, all dispatched by hand or by an agent, held more than the
+   whole cap; the guard runs for every dispatcher, so the cap is there, and
+   the weekly plan applies the same test. A capped fire prints
+   `improve cap: share allows N, used M (this kind K)` and exits 3. Until
+   each improve run's cost is measured (#572 part 1), a fire that passed the
+   guard and then failed uses no slot. When a recent account meter reading is
+   usable, that sum is never taken above the reading plus the full charge
+   of everything not inside it (since 2026-11-01), so eval runs the reading
+   already holds are not counted twice. The same reading plus everything
+   after it must also stay under `stop_when_account_above`: one limit for
+   fires and runs, so no fire starts that the in-run stop would end at once
+   (the owner, 2026-11-01). If the GitHub API cannot be read, the
+   fire is refused. The log shows numbers only. A refusal (exit 3) ends the
+   run `cancelled` through the workflow's `end-refused` job (#524), so a
+   surplus planned fire is neither red nor counted as a fire; an error
+   (exit 1) still fails closed and red.
 3. **The weekly plan** (`scripts/plan_week.py`, see "The weekly plan"
    below). The Tuesday sweep spends the room left at each fire's historical
    cost; when nothing fits, the dispatch job is skipped.
@@ -179,24 +215,49 @@ Known gaps:
   eval spend. That overcounts, which is the safe direction.
 - **Fires racing each other**: a fire counts only fires that have finished
   successfully, so two dispatched at the same moment do not see each other.
-  The weekly plan accounts for its own fires up front.
+  The weekly plan accounts for its own fires up front. The improve cap
+  alone also counts running improve fires with a lower run id (#572).
+
+**The cost estimate** (the owner, 2026-11-01). The meter reads whole points, and
+only as each call starts, so a run's last agent call and any judge call after
+the last reading are never in its `usage.meter_delta`. Every summary's
+run-level `usage` therefore also carries `cost_estimate`: the CLI's own dollar
+figure (`total_cost_usd`, else its `modelUsage` costs) for every call of the run (agent, judge and guard),
+summed as `usd` and split as `agent_usd`, `judge_usd` and `guard_usd`, plus
+`last_agent_call_usd` (the run's final agent call, which the meter never
+sees; for a session with follow-ups, that call's own share), `metered_usd`
+(the calls the delta spans) and `calls_with_cost` / `calls_without_cost`. A
+trial's own dollars per role stay in `usage.measured.<role>.cost_usd`. Nothing
+is rounded until display: report.md shows the dollars to the cent, labeled as
+an estimate. The harness cannot calibrate points, so its `points_per_usd` and
+`points` are null with a reason. When a routine run is ingested,
+`scripts/ingest_routine_results.py estimate` writes
+`routine-results/<run id>/cost_estimate.json` beside it, once: each
+invocation's block with `points` = `usd` × the rate measured over the runs
+already ingested (their weekly meter movement, with no overrun added, over
+their `metered_usd`). The estimate is collected to size `per_run_overrun`;
+nothing charges from it.
 
 ### The weekly plan
 
 `routine-eval-weekly.yml` runs `scripts/plan_week.py` every Tuesday at 07:00
-UTC (G5, G6; the owner lifted the three-PR gate on 2026-10-26, see the
+UTC, and again after each ingested result (with the daily health audit as a
+backstop, and `routine-eval-watchdog.yml` re-planning when a guard hold left
+running at a sweep's end expires, or 50 minutes on) to spend room that fires costing less than their estimate left behind (G5, G6; the owner lifted the three-PR gate on 2026-10-26, see the
 [ADR 0010 addendum](decisions/0010-run-ai-eval-steps-in-a-routine-fired-by-actions.md#decision-4-addendum-2026-10-26)).
 It computes the retirement verdicts over the results branch, then plans
 eval fires (one reviewed fixture from `evals/scheduled.yml` on one roster
-model) and improve fires (one skill, with a fixed holdout) in six bands:
+model) and improve fires (one skill, with a fixed holdout) in eight bands:
 
 1. **Safety**: every cell of a skill with an open removal pull request.
-2. **Missing evidence** (at least 30% of the room): cells with no run,
+2. **Missing evidence** (at least 30% of the room): skill cells with no run,
    heaviest-used model first. A cell whose fires twice produced nothing
-   becomes a "fixture broken" work item instead.
-3. **Near a decision** (at least 20%): cells fewest runs short of their next
-   look.
-4. **Improvements** (at least 20%): skills with four or more fixtures, train
+   becomes a "fixture broken" work item instead (a guidance cell too).
+3. **Near a decision** (at least 20%): skill cells fewest runs short of
+   their next look.
+4. **Guidance focus** (at least 15%): the undecided guidance cells (no run,
+   or not yet decided) of the two sections nearest a verdict, below.
+5. **Improvements** (at least 20%): skills with four or more fixtures, train
    headroom, a check that fails often but can pass, no retirement verdict,
    and no pause, ordered by potential value: expected uses over four weeks
    times train headroom, per allowance point an improve run costs (three
@@ -205,7 +266,9 @@ model) and improve fires (one skill, with a fixed holdout) in six bands:
    are ranked in the same list (every session loads the guidance, so its use
    is the census's session count scaled to four weeks). The highest-value
    eligible section is a `guidance-improve` fire, one per plan, at three
-   trials and the improve charge
+   trials and the improve charge. Before allocation the band is walked in
+   value order through the guard's improve cap, counting each kept fire, and
+   fires it would refuse stay unplanned
    ([ADR 0005 addendum](decisions/0005-improvement-loop-reuses-skill-creator.md#routine-guidance-improve-mode-addendum-2026-10-27));
    only a section id the fire workflow refuses stays a work item for a
    local `scripts/propose_guidance_edit.py` run.
@@ -214,8 +277,9 @@ model) and improve fires (one skill, with a fixed holdout) in six bands:
    fewer fixtures becomes a "needs fixtures" work item. A skill that already
    passes at least 90% of its checks has no headroom for an edit to gain, so
    it becomes a "needs harder fixtures" work item: write a fixture it fails.
-5. **Re-checks**: decided cells not measured for eight weeks.
-6. **Bare baselines** (no minimum share, only the room left): one fire with
+6. **Re-checks**: decided cells not measured for eight weeks (four for a
+   high-stakes subject).
+7. **Bare baselines** (no minimum share, only the room left): one fire with
    `arms: bare` and three trials per scheduled fixture that runs in place
    and roster model, once per model id
    ([ADR 0012 addendum](decisions/0012-ab-runs-in-the-deployed-context-minus-the-subject.md#bare-baseline-addendum-the-owner-2026-10-27),
@@ -224,6 +288,114 @@ model) and improve fires (one skill, with a fixed holdout) in six bands:
    run already ingested, or a bare fire that succeeded or is still running,
    counts as done; a new roster model gets its own. Bare runs are listed
    apart (`bare_runs` in the verdict document) and never pooled into a cell.
+8. **Guidance rest** (no minimum share): every other undecided guidance
+   cell, cells with no run first. It gets only what every other band leaves,
+   so when the 30-fire cap binds a section outside the focus can wait weeks.
+
+**The guidance focus** (`guidance_focus` in `scripts/plan_week.py`; the owner's
+rule, 2026-11-02 18:42 UTC: a section is removed at 90% confidence that it
+does not improve results by 0.15 or more). Guidance fires used to spread over
+every section's cells, so none came near a verdict; the focus spends them on
+the two sections nearest one until those decide.
+
+- **Progress.** A cell's *retire progress* is the no-help confidence of the
+  figures that decide it, divided by `retire_confidence` from the verdict
+  document's `guidance_policy` (0.90 when absent): for a judge-carried cell
+  its judge's, min'd with its objective's when it has objective checks; for
+  any other cell its objective's min'd with its judge's. A cell with no
+  judge block scores 0, since `harness/gates.py` retires no cell without a
+  usable judge. Its *keep progress* is the larger of its objective's and its
+  judge's helps confidence divided by `benefit_confidence` (0.85 when
+  absent); that understates the per-check (Holm) keep route, which has no
+  single confidence to read. An absent value is 0.
+- **Score.** A section's score is the larger of its weakest cell's retire
+  progress (it retires only when every cell clears) and its strongest cell's
+  keep progress (one benefit keeps it). Ties go to the section with fewer
+  cells, deliberately, since a smaller section reaches a verdict on fewer
+  runs; then to more counted runs; then to the section id.
+- **Eligibility.** The section's verdict is still `insufficient` (or it has
+  none): keep, every retire verdict, `shorten-or-merge` and
+  cannot-discriminate are not focused. (Since 2026-11-03 no cell or verdict
+  is `ceiling`: a cell at the ceiling is decided by the removal rule, and a
+  `cannot-discriminate` cell is one whose arms both pass almost nothing over
+  three runs each, left out of the verdict as a broken fixture.) At least one of its cells must be
+  able to plan a fire (schedulable, stakes not `none`, not a "fixture
+  broken" missing cell), no `retire-guidance/<section>` pull request may be
+  open in _agent-guidance, and no cell may be BLOCKING: one whose no-benefit
+  was overruled by an agent-errored trial or a run skipped as anomalous, or
+  a ceiling or cannot-discriminate cell with at least three counted runs on
+  each arm. More runs on the current content cannot move a blocking cell
+  toward removal; under three runs one more can still change its class.
+- **Order.** The higher-scored section's fires go first; within a section the
+  binding cell first (the lowest retire progress, or the highest keep
+  progress when the score came from the keep side), then the cheaper model.
+  The plan records the two sections, with their scores, as `guidance_focus`,
+  and the job summary names them. There is no stall rule: the 2026-11-02
+  design review found one could not be built from the fire history without
+  benching healthy sections.
+- **One trial.** Focused fires stay at one trial. The harness refuses
+  `--trials > 1` for a guidance fixture, and trials collapse into one run
+  mean, so three trials cut the runs a verdict needs but not its cost (the
+  2026-11-02 design review measured it equal or worse in trial-equivalents).
+- **Today** (results branch at 3d68f1c, 2026-11-02): 29 sections, 64 in-situ
+  cells on the two roster models, 24 counted runs in all. Before #557's
+  with-ahead rule only 2 cells had a judge block, so every section's retire
+  progress read 0 and the focus was
+  `anything-you-name-gets-its-link` (8 cells, keep progress 0.144) and
+  `agent-contribution-markers` (score 0, first of the two-cell sections with
+  the most counted runs, by id), 10 fires in focus and 51 in the guidance
+  rest.
+- **Known limits.** A cell that is not judge-carried still needs a usable
+  judge to retire unless every judge call it is missing was skipped because
+  the with arm was ahead (#557, 2026-11-02): such a cell is decided on its
+  objective, and its retire progress reads the objective's. A cell whose
+  reason says the judge is still needed scores 0 for retire, and its section
+  stays eligible only through keep progress. The explorer's test queue reads
+  no pull requests, so it can show a focus place for a section whose removal
+  pull request is open, which the planner would not focus.
+
+**The two-week batch** (THE BATCH in `scripts/plan_week.py`; the owner's
+steady-state goal, 2026-11-02: at 25% of the weekly allowance, every two
+weeks pick a batch of skills and guidance sections numbering about three
+times the historical weekly addition rate, bring them all to a verdict, then
+start the next). `evals/batch-policy.yml` sets the start (the 2026-11-09
+17:00 UTC reset, when the cap returns to 25%), the 14-day period, the
+multiplier (3) and the weekly addition rates (skills 0.75, guidance 0.5), so
+a batch holds 2 skills and 2 sections. Only the weekly workflow passes the
+policy (`--batch-policy`).
+
+- **What it changes.** While a batch is open the missing, near, focus and
+  guidance-rest bands take only its members' cells, and every guidance
+  member is in the focus. Safety, re-checks, improvements and bare
+  baselines are unchanged.
+- **Who joins.** Open subjects only: verdict still open, no removal pull
+  request, no blocking cell, and some cell that would plan a fire. Never a
+  private skill. High stakes first, then the longest without a run.
+- **When it turns over.** When every member has left `open` (decided,
+  blocked, stalled or gone), or at the due time, whichever is first. Open
+  members are carried into the next batch first; new picks fill the rest.
+  Blocked and stalled members are dropped: their work items (fixture-broken,
+  ceiling) are the next step, not more runs.
+- **Where it lives.** `batches/current.json` and `batches/<number>.json` on
+  `persistent/eval-results`, written by the weekly workflow's
+  `batch-publish` job only when a plan starts a batch. Each record lists the
+  previous batch's members with their final status. The job summary names
+  the batch, each member's status and how many cells wait outside it.
+- **The explorer** queues only the published batch's members in those
+  bands. A finished batch stays published until the next sweep replaces it,
+  so for that gap the page shows the old batch's queue.
+
+**Stakes** (the owner, 2026-11-01). `evals/stakes.yml` gives a skill or guidance
+section a stakes level from what it is for, with a one-line reason; a
+subject with no row is `normal`. A `high` subject prevents irreversible or
+public harm: its cells go first within the missing, near, guidance focus,
+re-check and guidance rest bands, and it is re-checked after four weeks. A
+`none` subject needs no eval because a check enforces it everywhere it applies: its row must name that
+check as `<owner>/<repo>:<path>`, and the plan fires nothing for it.
+`scripts/stakes.py --check` refuses an unknown field, a name with no fixture
+directory here (so no private skill name can land in the public file), a
+`none` row without its check and a duplicate; the explorer cards show both
+levels.
 
 `routine-eval-fire.yml` accepts `arms: bare` in eval mode only, and only for
 a fixture whose `fixture.yaml` has a top-level `context` mapping; its run is
@@ -255,53 +427,189 @@ _agent-guidance alone: ready with auto-merge in `auto`, a draft otherwise, and
 nothing (with the reason in the job summary) while the App's secrets are unset
 or the mint fails.
 
-Work items (`needs-fixtures`, `needs-harder-fixtures`, `fixture-broken`, and
-`agent-check` items read from lesson proposals) are listed in the plan, not
-fired; each carries a `change_type`. The dispatch job fires one leg at a time, waits while three
-fires are in flight, and spaces fires a minute apart; improve fires go last.
+Work items (`needs-fixtures`, `needs-harder-fixtures`, `fixture-broken`,
+`routine-outage`) are listed in the plan, not fired; each carries a
+`change_type`. A skill run
+tests main's copy of its subject and refuses, with nothing spent, when the
+registry checkout is not clean at its main (ADR 0012, addendum "main's
+copy"); the routine's fire still reads as a success. So a cell with two such
+empty fires within 14 days becomes a `fixture-broken` item instead of being
+fired again, and is retried once those fires are 14 days old. A routine
+outage empties every fire at once (2026-11-01: six fixtures, no run), which
+says nothing about any fixture, so each empty fire is judged on its own
+window, 60 minutes either side of its start: with no fire in it that landed
+a run or is still young, and empty fires in it covering three or more cells,
+it is an outage fire. A fire that landed a run 45 minutes or more after the
+window's first empty fire may be the breaker's own probe and does not
+count, and an empty fire at most 60 minutes before an outage fire, with no
+delivery between, is one too (a slow onset). That excuses each cell's earliest such fire, one per
+cell in 14 days, and each chain of outage fires lists a `routine-outage`
+item (no fixture names) for a day. A further outage fire counts, so fixtures
+broken together still go `fixture-broken`, one fire later; a window of fewer
+than three cells cannot be told from broken fixtures and counts. From an
+outage fire until a paired eval fire on a known cell delivers, the routine
+counts as down; so it does, for this rule only, as soon as fires 45
+minutes old with no run landed cover three cells in one window with no
+delivery in or after it, so a burst into an outage trips it by the next
+plan. While down, a plan holds improve and bare fires and sends one probe:
+a paired eval fire on any schedulable cell, settled or fixture-broken ones
+too, fewest empty fires first, then the cell fired longest ago; none while
+a probe under 45 minutes old has landed nothing. Probes never count: an
+empty fire sent while the routine was down is a down fire, except an
+outage fire in the outage's first 45 minutes, which keeps the outage rule.
+Every plan while down lists a `routine-down` item (no fixture names), and
+the step summary says `Routine down: probe only`; with no schedulable
+cell at all the plan is not held. The
+dispatch job fires one leg at a time, waits while three fires are in flight,
+and spaces fires a minute apart; improve fires go last.
 
 ### The trigger lane
 
 Usage tracking (2026-10-26) counted about 55 skill calls in eight weeks over
 about 72,000 model turns: most skills almost never trigger, so a skill's
-description is probably the biggest lever. Every acsi-agentskills skill whose
-usage weight is fresh and at most one call in four weeks (an unknown weight
-is neutral and gets nothing) becomes a work item, placed just before the
-improve work items:
+description is probably the biggest lever. Every public acsi-agentskills
+skill whose usage weight is fresh and at most one call in four weeks (an
+unknown weight is neutral and gets nothing) is judged by the trigger lane
+(skills-evals#662; the owner, 2026-11-03: "New fire mode runs only
+skill-creator's description loop; accept when held-out trigger accuracy
+rises 0.15+ with no drop on should-not-trigger queries; PR auto-merges like
+other loop PRs"):
 
 - **`trigger-optimize`** (change type `trigger`) when
-  `evals/<skill>/trigger-eval-set.json` exists. It is routed
-  **needs routine prompt change**, not fired: improve mode's payload is
-  exactly `run_id`, `mode`, `skill`, `trials` and `holdout`, and the
-  routine's saved prompt (not in this repository) decides the loop's flags.
-  To fire it, the owner would add to the prompt's IMPROVE MODE: "When
-  `evals/<skill>/trigger-eval-set.json` exists in the skills-evals checkout,
-  pass `--trigger-eval-set evals/<skill>/trigger-eval-set.json` to
-  `scripts/propose_skill_edit.py`." That alone makes every improve fire of
-  such a skill use the reviewed set. A trigger-only fire for a skill that is
-  not improve-eligible would also need a payload field from
-  `routine-eval-fire.yml` and a description-only option in
-  `propose_skill_edit.py`; neither exists. Once fired, a trigger fire would
-  be charged and ordered as an improve fire.
-- **`needs-trigger-set`** (change type `fixture`) when there is no set: write
-  one, a JSON list of `{query, should_trigger}` objects.
+  `evals/<skill>/trigger-eval-set.json` exists: an improve-band **fire**,
+  sent to `routine-eval-fire.yml` as improve mode with `trigger_only=true`
+  and no holdout. It runs only the description loop on that set
+  (`--trigger-eval-set evals/<skill>/trigger-eval-set.json`), is charged
+  and capped as an improve fire, and sorts after the value-ranked improve
+  fires, least used first. It waits while rule C pauses the skill (the
+  same improve records and `eval-improve/<skill>` pull requests; a merged
+  edit waits 14 days for usage to show, since a skill with no fixtures is
+  never re-measured), and is skipped when the skill has an ordinary improve
+  fire in the same plan (both write `eval-improve/<skill>`).
+- **`needs-trigger-set`** (change type `fixture`) when there is no set: an
+  `agent-ready` issue asking for one, a JSON list of `{query,
+  should_trigger}` objects with at least 8 of each class. A pull request
+  that adds only that file merges itself (`scripts/fixture_pr_gate.py`).
+
+A skill owned by retirement gets neither, and a private skill is never
+judged. The plan's `triggers` map lists every judged skill with its reasons;
+the weekly sweep closes a `needs-trigger-set` issue only for a judged skill.
 
 The plan also lists **hook candidates** (the owner: hooks first): skills whose
 SKILL.md has at least half its non-blank body lines under a heading naming a
 checklist, rules or checks. That heuristic is cheap and misses rules written
 as prose.
 
+### Description trims
+
+acsi-agentskills caps a skill's description at 400 characters, because long
+descriptions push the session's skill listing past its budget and the last
+skills then show no description (skills-evals#668). Ten eval-protected skills
+were over the cap and carry a `length-limit` waiver in acsi-agentskills'
+`scripts/skills_waivers.yml`; their trims go through the improve lane
+(skills-evals#687), as a fixed chore rather than a value bet:
+
+- The planner reads those waivers from its acsi-agentskills checkout. A
+  waived public skill with at least three fixtures, all naming
+  acsi-agentskills, not owned by retirement, still over the cap and not
+  paused by rule C (the ordinary improve pause, so a merged edit waits for a
+  with-arm run of the new text) is an improve-band **fire** sent with
+  `trim_description=true` and no holdout, placed before the value-ranked
+  improve fires. It is charged and capped as an improve fire and held while
+  the routine is down, and its skill gets no other improve fire in that plan.
+- The loop (`propose_skill_edit.py --trim-description`) makes one proposal
+  call for a description of at most 400 characters that keeps every trigger
+  and every "not for" boundary, then measures the current and the trimmed
+  text on every fixture (`with_skill`, three trials, no judge). It accepts
+  only when no fixture errored, the trimmed text passes at least as many
+  objective checks summed over all fixtures, and no fixture loses more than
+  one. A description already within the cap is rejected with no model call.
+- The improve gate re-derives that decision from the record's counts,
+  refuses any body change or a description over the cap, and removes the
+  skill's waiver from `scripts/skills_waivers.yml` in the same pull request
+  (acsi-agentskills fails its build on a waiver that matches nothing).
+- The plan's `trims` map and its `description-trim` work items (never filed
+  as issues) track every waived skill until its waiver is gone. With no
+  readable waiver file the plan plans no trim and says so (`trims_unread`).
+
+### Routine improve mode: what each run costs (#572)
+
+Every improve and guidance-improve run (2026-11-02) records what it
+measurably spent. On EVERY exit (accepted, rejected, refused, error or
+timeout) the routine runs `scripts/improve_cost.py summarize` over the
+loop's results directory and pushes the one file it writes on
+`claude/eval-cost-<run id>`; `routine-eval-cost-pushed.yml` signals
+`routine-eval-ingest.yml`, whose `validate` dispatches on the branch regex,
+accepts exactly `improve-cost/<run id>/cost.json` passing
+`improve_cost.check_record` (and refuses a private skill's name), and lands
+it at `improve-costs/<run id>.json` on `persistent/eval-results`. A rejected
+branch ends the ingest run red, as an eval rejection does; a second,
+differing record for one run id is logged and dropped (the first stands). A
+cost ingest, like an eval one, also wakes `explorer-data.yml` and
+`routine-eval-weekly.yml`'s top-up re-plan.
+
+The record holds numbers, enums and checked ids only: the trials' list-priced
+`agent_usd`, `judge_usd` and `guard_usd` (and `usd_unpriced_trials`), each
+side's trials and dollars, the proposal call's dollars and tokens (the
+proposer writes `$RESULTS/proposal-<ts>.json` from `Runner.last_usage`), the
+trigger loop's call count (its dollars are unknown), the arm and proposal
+models, busy and span seconds, and the weekly meter's first and last
+snapshot across all trials with their `delta` (null across a window reset or
+with fewer than two snapshots). The guard does not charge it yet: that, and
+recomputing the improve fire's reservation from these records, is a
+follow-up once at least six exist.
+
+The routine's saved prompt is not in this repository. Its improve sections,
+and the rule sentence that allows the cost branch, read as follows (a test
+holds the commands in them to the scripts' own flags):
+
+```text
+Never dispatch workflows, open PRs or issues, or edit any file in the repos except the branches your mode allows (improve and guidance-improve modes: their result branch and claude/eval-cost-<run_id>).
+
+IMPROVE MODE (payload "mode": "improve" only). You run the skill improvement loop for ONE skill and, only if it accepts a candidate, push ONE branch claude/eval-improve-<run_id>; on every exit you also push the one cost branch of step 5. You never open, edit or comment on a pull request, never push to main or persistent/*, and never edit acsi-agentskills.
+1. In skills-evals, check out the default branch. Use the acsi-agentskills checkout at its default branch as $REG and record REG_SHA=$(git -C "$REG" rev-parse HEAD). Install the harness pins: python3 -m pip install --user pyyaml==6.0.3 markdown-it-py==4.2.0 tree-sitter==0.26.0 tree-sitter-bash==0.25.1. Fetch skill-creator read-only at exactly commit 2a40fd2e7c52207aa903bd33fc4c65716126966e of https://github.com/anthropics/claude-plugins-official (e.g. git clone --filter=blob:none --no-checkout, then git checkout 2a40fd2e7c52207aa903bd33fc4c65716126966e -- plugins/skill-creator) into a temp dir; SC=<that dir>/plugins/skill-creator/skills/skill-creator. Never use any other commit or plugin.
+2. Re-check the payload: evals/<skill>/ must hold at least three fixture directories and holdout (if not null) must be one of them; else REFUSED. Build the guard's unset list AT RUN TIME (never a fixed list), then run the loop under it with a results directory OUTSIDE the checkout:
+   mapfile -t refused < <(python3 -c 'import os, sys; sys.path.insert(0, "scripts"); import local_eval_guard as g; print("\n".join(g.refused_env_names(os.environ)))' | sed '/^$/d')
+   unset_args=(); for name in "${refused[@]}"; do unset_args+=(-u "$name"); done
+   env "${unset_args[@]}" python3 scripts/propose_skill_edit.py "$SKILL" --registry acsi-agentskills="$REG" --ref "$REG_SHA" --skill-creator "$SC" --trials "$TRIALS" [--holdout "$HOLDOUT" only when not null] [--trigger-eval-set evals/$SKILL/trigger-eval-set.json only when that file exists] --results-dir "$RESULTS"
+   Run that propose_skill_edit.py command in the background with a Bash timeout of 5400000 ms (90 minutes), never less, and wait for its exit code before going on. Do not edit scripts/local_eval_guard.py or bypass it any other way. Exit 0 = accepted, 1 = rejected, 2 = refused. On exit 1 or 2 push no claude/eval-improve branch; go to step 5, then end with the status and the record's reasons (or the refusal line). If the run is refused or fails before the loop starts (the payload re-check, a failed skill-creator fetch, missing node or a failed npm ci), go to step 5 with exit code 2 before ending. On the 90-minute timeout, first stop the background loop process (kill it and wait for it to exit), then go to step 5 with exit code none.
+3. On exit 0 only: create branch claude/eval-improve-<run_id> from the default branch and add exactly three files from $RESULTS/improvements/<skill>/<ts>.*: <ts>.json as eval-improve/<run_id>/summary.json, <ts>.pr-body.md as eval-improve/<run_id>/report.md, <ts>.patch as eval-improve/<run_id>/skill.patch. Commit nothing else. Before pushing, self-check: python3 scripts/improve_gate.py validate --repo . --base origin/<default> --source HEAD --branch claude/eval-improve-<run_id> --out "$(mktemp -d)"; if it prints rejected:, push nothing and report that line.
+4. Push only that branch and verify with git merge-base --is-ancestor <sha> origin/claude/eval-improve-<run_id>. Never open a pull request: routine-improve-gate.yml validates the branch and opens the draft PR.
+5. COST RECORD, on EVERY exit (0, 1, 2, an error, the 90-minute timeout, or a refusal before the loop started), once per run id, after step 4 if it ran: with RUN_ID set to the payload's run_id and COST=$(mktemp -d) (outside the checkout), from the skills-evals checkout run
+   python3 scripts/improve_cost.py summarize --results-dir "$RESULTS" --run-id "$RUN_ID" --mode improve --target "$SKILL" --exit-code <the loop's exit code 0, 1 or 2; 2 for any refusal before the loop started; none on an error or the 90-minute timeout> --out "$COST/improve-cost/$RUN_ID/cost.json"
+   (when the loop never started, pass a fresh empty directory as --results-dir). If any evals/<target>/*/fixture.yaml names acsi-agentskills-private, push no cost branch and report it. If summarize exits 0: W=$(mktemp -d)/w; git worktree add -b claude/eval-cost-$RUN_ID "$W" origin/main; mkdir -p "$W/improve-cost/$RUN_ID"; cp "$COST/improve-cost/$RUN_ID/cost.json" "$W/improve-cost/$RUN_ID/cost.json"; git -C "$W" add -- "improve-cost/$RUN_ID/cost.json". Verify that git -C "$W" diff --cached --name-only prints exactly improve-cost/$RUN_ID/cost.json and nothing else; otherwise push nothing in this step and report it. Never use git add -A or git add . here, and never edit that file or put anything else on that branch. Commit with the message "Improve cost <run_id>", push only that branch with git -C "$W" push origin HEAD:refs/heads/claude/eval-cost-$RUN_ID, and verify with git -C "$W" merge-base --is-ancestor <sha> origin/claude/eval-cost-$RUN_ID. If summarize, the commit or the push fails, report it and go on: it never changes RESULT.
+6. Final message: skill, trials, holdout, loop exit code, wall time, the record's decision and reasons, token/cost figures if reported, branch pushed (or none), cost branch pushed (or why not), and RESULT: ok|error|refused.
+
+GUIDANCE-IMPROVE MODE (payload "mode": "guidance-improve" only). You run the guidance improvement loop for ONE _agent-guidance section and, only if it accepts a candidate, push ONE branch claude/eval-guidance-improve-<run_id>; on every exit you also push the one cost branch of step 5. You never open, edit or comment on a pull request, never push to main or persistent/*, and never edit or push to _agent-guidance.
+1. In skills-evals, check out the default branch. Use the _agent-guidance checkout at its default branch, with its full history, as $AG and record AG_SHA=$(git -C "$AG" rev-parse HEAD). Install the harness pins: python3 -m pip install --user pyyaml==6.0.3 markdown-it-py==4.2.0 tree-sitter==0.26.0 tree-sitter-bash==0.25.1. The proposer validates its patch with _agent-guidance's own checks, which need `node` on PATH and that checkout's packages: run (cd "$AG" && npm ci); if node is missing or npm ci fails, go to step 5 with exit code 2, then end with RESULT: refused and that reason.
+2. Re-check the payload: `section` must match ^[a-z0-9][a-z0-9-]{0,63}$ and `python3 scripts/guidance_improve_gate.py fire-check "$SECTION" --holdout="$HOLDOUT" --guidance "$AG"` (pass --holdout= with an empty value when holdout is null) must exit 0; else REFUSED. Build the guard's unset list AT RUN TIME (never a fixed list), then run the loop under it with a results directory OUTSIDE the checkout:
+   mapfile -t refused < <(python3 -c 'import os, sys; sys.path.insert(0, "scripts"); import local_eval_guard as g; print("\n".join(g.refused_env_names(os.environ)))' | sed '/^$/d')
+   unset_args=(); for name in "${refused[@]}"; do unset_args+=(-u "$name"); done
+   env "${unset_args[@]}" python3 scripts/propose_guidance_edit.py "$SECTION" --guidance "$AG" --ref "$AG_SHA" --trials "$TRIALS" [--holdout "$HOLDOUT" only when not null] --results-dir "$RESULTS"
+   Run that propose_guidance_edit.py command in the background with a Bash timeout of 5400000 ms (90 minutes), never less, and wait for its exit code before going on. In this mode the nested-agent limit is 100 (not the default 60): the loop starts one agent session per fixture, side and trial, up to 6 fixtures x 2 sides x 3 trials x 2 (its one re-run) + 1 proposal call = 73, with margin. Stop at the 90-minute timeout regardless. Do not pass --dry-run, --no-judge or --rotation. Do not edit scripts/local_eval_guard.py or bypass it any other way. Exit 0 = accepted (and the patch passed _agent-guidance's checks), 1 = rejected, 2 = refused. On exit 1 or 2 push no claude/eval-guidance-improve branch; go to step 5, then end with the status and the record's reasons (or the refusal line). If the run is refused or fails before the loop starts (the payload re-check, a failed skill-creator fetch, missing node or a failed npm ci), go to step 5 with exit code 2 before ending. On the 90-minute timeout, first stop the background loop process (kill it and wait for it to exit), then go to step 5 with exit code none.
+3. On exit 0 only: create branch claude/eval-guidance-improve-<run_id> from the default branch and add exactly three files from $RESULTS/guidance-improvements/<section>/<ts>.*: <ts>.json as eval-guidance-improve/<run_id>/summary.json, <ts>.pr-body.md as eval-guidance-improve/<run_id>/report.md, <ts>.patch as eval-guidance-improve/<run_id>/guidance.patch. Commit nothing else. Before pushing, self-check: python3 scripts/guidance_improve_gate.py validate --repo . --base origin/<default> --source HEAD --branch claude/eval-guidance-improve-<run_id> --out "$(mktemp -d)"; if it prints rejected:, push nothing and report that line.
+4. Push only that branch and verify with git merge-base --is-ancestor <sha> origin/claude/eval-guidance-improve-<run_id>. Never open a pull request: routine-guidance-improve-gate.yml validates the branch and opens the pull request in _agent-guidance.
+5. COST RECORD, on EVERY exit (0, 1, 2, an error, the 90-minute timeout, or a refusal before the loop started), once per run id, after step 4 if it ran: with RUN_ID set to the payload's run_id and COST=$(mktemp -d) (outside the checkout), from the skills-evals checkout run
+   python3 scripts/improve_cost.py summarize --results-dir "$RESULTS" --run-id "$RUN_ID" --mode guidance-improve --target "$SECTION" --exit-code <the loop's exit code 0, 1 or 2; 2 for any refusal before the loop started; none on an error or the 90-minute timeout> --out "$COST/improve-cost/$RUN_ID/cost.json"
+   (when the loop never started, pass a fresh empty directory as --results-dir). If any evals/<target>/*/fixture.yaml names acsi-agentskills-private, push no cost branch and report it. If summarize exits 0: W=$(mktemp -d)/w; git worktree add -b claude/eval-cost-$RUN_ID "$W" origin/main; mkdir -p "$W/improve-cost/$RUN_ID"; cp "$COST/improve-cost/$RUN_ID/cost.json" "$W/improve-cost/$RUN_ID/cost.json"; git -C "$W" add -- "improve-cost/$RUN_ID/cost.json". Verify that git -C "$W" diff --cached --name-only prints exactly improve-cost/$RUN_ID/cost.json and nothing else; otherwise push nothing in this step and report it. Never use git add -A or git add . here, and never edit that file or put anything else on that branch. Commit with the message "Improve cost <run_id>", push only that branch with git -C "$W" push origin HEAD:refs/heads/claude/eval-cost-$RUN_ID, and verify with git -C "$W" merge-base --is-ancestor <sha> origin/claude/eval-cost-$RUN_ID. If summarize, the commit or the push fails, report it and go on: it never changes RESULT.
+6. Final message: section, trials, holdout, loop exit code, wall time, the record's decision and reasons, token/cost figures if reported, branch pushed (or none), cost branch pushed (or why not), and RESULT: ok|error|refused.
+```
+
 ### Skill retirement (#70)
 
 Every day, `skill-coverage.yml`'s `retirement` job (schedule only) runs
 `scripts/compute_gates.py` over the results branch and the public registries,
 then `scripts/retire_skill.py` over its verdicts. A skill whose verdict is
-`retire` (no benefit on every fixture and roster model, at two fixed looks)
+`retire` (90% confidence on an anytime-valid bound, on every fixture and roster model, that the skill does not improve results by 0.15 or more: the owner, 2026-11-02)
 gets, in `retirement_mode: auto` (the committed value in
 `evals/gate-policy.yml`), a ready removal pull request in acsi-agentskills,
 labeled `agent-authored`, that auto-merges (merge commit) with no human
 review ([ADR 0014](decisions/0014-removal-pull-requests-merge-without-review.md),
-acsi-agentskills ADR 0021), one loop pull request at a time: nothing is
+acsi-agentskills ADR 0021). Each removal also files an `agent-authored`
+skills-evals issue that mentions the owner, links the removal pull request and
+says how to reverse it (close it, or press Revert once merged), and the
+explorer lists removed skills and sections (#557). One loop pull request
+is open at a time: nothing is
 opened while an `eval-improve/`, `draft-skill/` or `retire-skill/` pull
 request is open there, and a closed `retire-skill/<skill>` one means the
 skill is decided. That branch carries everything the registry's required
@@ -312,7 +620,8 @@ locked, a `skills.lock` re-pin — produced by the registry's own generators
 rather than reimplemented here. The job checks out the registry with full
 history (the lock re-pin reads the commit the lock pins) and writes with the
 improvement gate's GitHub App token. Without that token, or for a skill whose
-plugin runs code (its removal would wait on plugin-runtime-review), it falls
+removal plugin-runtime-review would hold (the skill has its own `hooks/` or
+`bin/`, or a hook of its plugin names a path in it), it falls
 back to `proposal`: one skills-evals issue that is filed or updated and that
 a human acts on; once that issue is closed, the skill is not proposed
 again. Preview either mode with
@@ -328,12 +637,36 @@ fixtures nested on 2026-10-26 (#422, #427).
 
 The session miner writes redacted lesson proposals to
 acsi-agentskills-private's `lessons/proposals/<date>/<subject>__<kind>.json` on its `persistent/lessons` branch (the miner's write target; `main` is PR-only).
-Draft mode is what consumes the `new-skill` kind:
+Beside them it writes `DIGEST.md` for the same day: a human-readable summary of
+the proposals, grouped by kind, that is the first thing to read. It is
+regenerated with the JSON files and is not a proposal, so draft mode ignores it.
+Draft mode is what consumes the `new-skill` kind. The miner gives that kind
+only to a cluster of failures with no suspected subject that spans at least
+three sessions: repeated tool failures grouped as `tool-<tool>[-<command word>]`
+(for example `tool-bash-gh`) and red CI after a push grouped as `red-ci-<repo>`.
+Other unattributed failures stay records with no proposal, and the subject
+`none` is never a `new-skill` ([#581](https://github.com/Adam-S-Daniel/skills-evals/issues/581)):
 
-1. **Pick** (`routine-draft-skill.yml`, daily at 06:30 UTC). One proposal:
+1. **Pick** (`routine-draft-skill.yml`, daily at 06:30 UTC). Proposals come
+   from two sources: the miner's lessons, and skill proposals filed as
+   issues in the public acsi-agentskills. An open issue there counts only
+   when the owner filed it himself, it has the `skill-proposal` label, and its
+   body has a "Skill name: `<subject>`" (or "Working name: `<subject>`")
+   line; `scripts/draft_new_skill.py issue-proposals` turns each one into
+   a proposal of the same schema (evidence count 1, the title and body as
+   its examples), and the job log lists the numbers of the issues skipped
+   for lacking that line. Both sources compete as one list, so a missing
+   `persistent/lessons` branch no longer means there is nothing to draft.
+   One proposal:
    the most evidence, then the newest, then by name; never a subject that
    is already a skill, already has `evals/<subject>/`, or was drafted
-   before (any `claude/draft-skill-*` branch). It dispatches
+   before (any `claude/draft-skill-*` branch). A rejection that measured
+   nothing is the exception: the subject is drafted again, up to three
+   such tries. The miner names subjects by cluster (`tool-<tool>-<word>`,
+   `red-ci-<repo>`), so a signal that keeps producing skills that add
+   nothing would come back under new names. Once two siblings in one
+   family (`tool-<tool>`, or `red-ci`) were measured and rejected, with
+   none accepted, the rest of that family is not drafted. It dispatches
    `routine-eval-fire.yml` in draft mode only when one fire fits the
    weekly allowance guard.
 2. **Triage, hooks first** (the owner, 2026-10-26: "I want the first choice to
@@ -357,7 +690,19 @@ Draft mode is what consumes the `new-skill` kind:
    branch without running it. Accepted: a draft pull request in
    acsi-agentskills with the skill, then a draft pull request here with
    only `evals/<subject>/` and its README layout line (merge the skill
-   first). Rejected: the record stays on its branch and the subject is not
+   first). In `improve_merge_mode: auto` both are ready instead. The
+   fixtures pull request is opened with the roster App token, because
+   GitHub holds every run of a pull request opened by `github-actions[bot]`
+   at `action_required` and `test` would never run (#618). The gate never
+   turns auto-merge on for it: `draft-fixtures-follow.yml` (every 30
+   minutes) does, only after the skill's pull request has merged, and also
+   restarts the checks of one the job-token fallback opened. The skill's branch carries what the registry's checks read (the
+   bundle version, the README table, the layout pin in
+   `scripts/plugin_layout.json`, a `docs/skill-impact.md` entry, a
+   `skills.lock` re-pin), and the gate runs the registry's own
+   `check_skills.py`, README and lock checks and its layout test on that
+   tree before pushing, so a draft they would reject is never opened.
+   Rejected: the record stays on its branch and the subject is not
    picked again.
 
 **The decline path.** When the agent-checks lane finds a hook proposal
@@ -367,16 +712,61 @@ skips triage and drafts a skill. The routine's saved prompt for this mode
 is in [`routine-prompt-draft-mode.md`](routine-prompt-draft-mode.md); the owner
 approves changes to it.
 
+### Fixture requests (2026-11-03)
+
+The weekly sweep files each `needs-fixtures`, `needs-harder-fixtures` and
+`needs-trigger-set` work item as an `agent-ready` issue
+(`scripts/work_item_issues.py`) with one kind label, the kind itself, and
+three lines after its marker: `Kind:`, `Subject:` (the skill, or
+`guidance/<section>`) and `Reason:` (fixed text from the plan's numbers,
+such as `train headroom 0.03, 5 fixture(s)` or `usage weight 0, no trigger
+set`). Missing labels are created, never edited, and an open issue missing
+its kind label gets it on the next run.
+
+A fixture request asks the fleet worker to build from **real fleet work**
+first (the owner, 2026-11-03, skills-evals#656): a merged pull request in a fleet
+repository, under either owner, where the subject's advice applied or an
+agent got it wrong, rebuilt as an ordinary per-skill fixture with invented
+names, data and hosts (`example.com`), never private content copied; an
+invented task when no real case fits. This replaces the scaffold lane below.
+Every fixture the pull request adds carries a top-level `origin:` mapping:
+`kind: real-work` with `source:` the pull request's URL (owner
+`example-adopter` or `example-adopter-two`), or `kind: invented` with `source: null`,
+and `request:` the issue's URL. `scripts/fixture_pr_gate.py` refuses to arm
+auto-merge for a fixture without a valid one; the harness ignores the key.
+A trigger set carries none.
+
+`scripts/fixture_queue.py report` follows the queue end to end and
+explorer-data.yml puts it in `explorer/latest.json` as `fixture_queue`: each
+request with the pull requests naming it, each fixture with an origin (real
+work or invented, when it landed, its ingested runs, its pass rate per arm,
+and its cost in dollars and allowance points from the runs'
+`cost_estimate.json`, null when unknown), totals, and findings. A finding
+becomes a `half-built-or-broken` issue (`fixture_queue.py alerts`, the
+fleet health audit's format, closed once it clears):
+
+- `skills-evals/fixture-queue-stale-request-<issue>` (idle, medium): an
+  open request 7 days old that no open or merged pull request names;
+- `skills-evals/fixture-queue-stuck-pr-<pr>` (broken, high): a fleet worker
+  pull request open 2 days with auto-merge off;
+- `skills-evals/fixture-queue-unused-fixture-<path>` (broken, high): a
+  fixture with an origin committed 3 days ago with no ingested run.
+
 ### Fixture supply (#65)
 
 Fixtures are the improvement queue, so they are made and promoted with no
 person in the loop (the owner, 2026-10-26; ADR
 [0003](decisions/0003-roster-merges-automatically.md)'s 2026-10-26 addendum).
-`.github/workflows/routine-fixture-supply.yml` runs daily at 13:17 UTC:
+`.github/workflows/routine-fixture-supply.yml` runs daily at 13:17 UTC.
+**Its scaffold step is paused** (the owner, 2026-11-03, skills-evals#656): the
+`plan` and `dispatch` jobs are removed, so step 1 no longer runs and
+nothing fires scaffold mode; fixture requests built from real fleet work
+(above) replace it. Steps 2 and 3 are kept for what is already in flight,
+and the same job still contextualizes drafted fixtures.
 
-1. **Scaffold.** It mines the fleet's newest merged pull requests
+1. **Scaffold (paused).** It mined the fleet's newest merged pull requests
    (`scripts/mine_real_work.py`, REST only), and
-   `scripts/scaffold_real_work.py pick` drops every candidate the routine
+   `scripts/scaffold_real_work.py pick` dropped every candidate the routine
    would refuse or already has: a body that quotes the diff, several closing
    issues, an existing `evals/real-work/<id>/` or `claude/scaffold-<id>`
    branch, or a successful scaffold fire in the last 30 days (read from the
@@ -423,21 +813,84 @@ fixture candidate that a fixture writer turns into an eval. The layout and
 schema are in that repo's `lessons/README.md`. Commands: DESIGN.md, "Lessons
 from real sessions".
 
+Who reads each kind (#657), always the newest day's directory and, but for
+`new-skill`, only a per-skill evidence count (`scripts/lesson_evidence.py`),
+so no excerpt reaches this repository:
+
+| Kind | Reader |
+|---|---|
+| `new-skill` | `routine-draft-skill.yml` (draft mode, below) |
+| `fixture-candidate` | `routine-fixture-supply.yml`: `scaffold_real_work.py pick` ranks real-work candidates for a skill with this evidence first |
+| `skill-edit` | `routine-eval-weekly.yml`: `plan_week.py --lessons` multiplies that public skill's improve value by up to 2 |
+| `agent-check` | _agent-guidance's fleet worker (its ADR 0027), not this repository |
+| `memory-note`, `guidance-edit` | _agent-guidance's memory curation; it does not read them yet |
+
 ### Guidance section retirement (#124)
 
 The same job also reads an `_agent-guidance` checkout. Five sections have
 fixtures under `evals/guidance/<section id>/<name>/`, and
 `anything-you-name-gets-its-link` has four. Each fixture runs the section
 inside the whole guidance against the guidance without it, and the section
-alone against no guidance. A section that adds nothing in situ is `retire`.
-If it helps only when alone, it is `shorten-or-merge` instead, because the
-rest of the guidance already covers it. Both verdicts become one
-skills-evals issue in `proposal` mode, which is the committed
-`guidance.retirement_mode`. In `auto` mode a `retire` would open an
-auto-merging removal pull request in `_agent-guidance` that passes that
-repository's own checks. A `shorten-or-merge` verdict never removes the
-section. Preview with
+alone against no guidance. The in-situ runs are pooled by the rest of the
+guidance each ran beside (#557): every version of the rest counts, as a
+stratum, so an edit elsewhere in the guidance no longer starts the evidence
+over. A section is `retire` when the gate is 90% confident that it does not
+improve results by 0.15 or more across those strata (the owner, 2026-11-02:
+the guidance block of `evals/gate-policy.yml`; skills use the same rule).
+There is no separate confirmation step. If a `retire` section helps only
+when alone, it is `shorten-or-merge` instead, because the rest of the
+guidance already covers it. In `auto` mode, the committed
+`guidance.retirement_mode`, a `retire` opens an auto-merging removal pull
+request in `_agent-guidance` that passes that repository's own checks; in
+`proposal` mode it becomes one skills-evals issue. A `shorten-or-merge`
+verdict never removes the section; it files an issue. Preview with
 `python3 scripts/retire_skill.py --gates FILE --target guidance --guidance PATH --dry-run`.
+
+### The eval scope pass
+
+The owner, 2026-11-03: which fixtures and subjects are worth running is decided
+automatically, and often. `scripts/eval_scope.py` holds the rules and
+`.github/workflows/eval-scope.yml` runs them after every ingest of routine
+results, daily and on dispatch. The `plan` job writes the changes with a
+reason each to its job summary; the `propose` job applies them on
+`eval-scope/<run id>` and opens one pull request with auto-merge (merge
+commit; repo-settings ADR 0017), with the roster App token and at most one such pull request open.
+The rules, in order:
+
+- **Ceiling.** A scheduled fixture with at least 4 runs after its directory's
+  last commit whose without arm (guidance: `full_minus_section`) passes 0.85
+  or more of its checks on average, and, when that arm has judge figures,
+  scores 8.5 or more, cannot show a gain. Paused. The rule reads each roster
+  model's cell on its own: every model needs 4 runs of its own that trip it,
+  because the gate decides per model and a pooled mean can hide a model with
+  room to gain.
+- **Floor.** The same runs, both arms (guidance: `full` and
+  `full_minus_section`) at 0.10 or less, on every roster model. Paused.
+- **Keep guard.** Neither rule pauses a subject whose explorer verdict is
+  `keep` or whose confidence that it helps is 0.5 or more. A skill fixture's
+  pause drops its cells from the gate, so it could take a keep with it and
+  leave a removal.
+- **Zero use.** A skill with no use in the last 8 weeks
+  (`skill_usage.zero_use`, local surface only for the two local-only plugins
+  in acsi-agentskills' `plugin_layout.json`, both surfaces otherwise; an
+  unknown answer does nothing) has all its scheduled fixtures paused. A skill
+  listed in `evals/usage-unknown.yml` has unknown use whatever the census says
+  (for example, Claude Code drops its description from the skill listing in
+  some sessions, [#668](https://github.com/Adam-S-Daniel/skills-evals/issues/668)):
+  it is never paused for zero use, and an earlier zero-use pause of it resumes.
+- **Resume.** A ceiling or floor pause ends when the fixture directory's
+  content digest (sha256 over sorted relative paths and bytes) differs from
+  the one recorded at the pause, when the subject is now kept, or when its
+  runs no longer trip the rule per model; a zero-use pause ends when
+  `zero_use` is false.
+
+A pause removes the path from `evals/scheduled.yml`, records it in
+`evals/scope-auto.yml` (rule, date, digest, and the readiness note a resume
+restores) and, for a skill fixture, adds an `evals/unscheduled.yml` row whose
+reason starts `Auto scope (<rule>), <date>:`. A resume reverses all three.
+Never touched: fixtures of `stakes: high` subjects, `draft: true` fixtures,
+and any `unscheduled.yml` row the pass did not write. The unscheduled rule
+(`test_issue_371_scheduled_fixtures.py`) therefore keeps holding.
 
 ## 4. Where to look for current results
 
@@ -452,11 +905,29 @@ branch, which carries generated data only and is treated as untrusted input:
 | `badges/<fixture>.json` | the shields.io badge over the last five runs, rendered at the top of the README |
 | `roster/latest.json` | the computed roster and proposal from the latest run (an exhibit, read by no decision) |
 | `usage/latest.json` | the usage census |
+| `coverage/latest.json`, `coverage/<run id>.json`, `badges/coverage.json` | the redacted skill coverage census and its badge, written only by `skill-coverage.yml` (`scripts/scaffold_skill_gaps.py`); the explorer reads `publication.as_of` from it |
+| `fixture-census/latest.json`, `fixture-census/<timestamp>.json`, `fixture-census/latest.md`, `badges/fixture-census.json` | the fixture census and its badge, written only by `propagation.yml`'s `coverage-publish` job (#660) |
 | `propagation/` | historical: the retired account-store audit's last result (no longer updated) |
 
 The most recent real run at the time of writing is
 [`results/workflow-path-audit/20260922T125552Z/report.md`](https://github.com/example-adopter/skills-evals/blob/persistent/eval-results/results/workflow-path-audit/20260922T125552Z/report.md).
 Raw transcripts are deliberately never published (public repository): each arm's `transcripts/raw.json` stays on the runner, in neither `persistent/eval-results` nor the run's workflow artifact. Each arm's `transcripts/` directory also holds `tool_trace.json`, a bounded, redacted line per tool call and tool result; it stays out of `persistent/eval-results` and reaches only the run's workflow artifact. That artifact (`eval-results-payload-*` on success, `eval-results-diagnostics-*` on failure) carries only `summary.json`, `report.md` and `tool_trace.json` (#289).
+
+### Private-skill results (#81)
+
+A skill in `acsi-agentskills-private` (today only `acsi-writing-style`) is
+scheduled like any other, but its results never land here (the owner,
+2026-10-31: they live in the private skills repo and stay off the public
+explorer). The eval routine checks out the private registry for that
+fixture and pushes its results to `claude/eval-<run id>` in
+`acsi-agentskills-private`, whose own ingest writes that repository's
+`persistent/eval-results`. The weekly plan and the fire workflow's
+allowance guard read that branch with the read-only registry App token
+and add its `routine-results/` to the workspace tree
+(`scripts/overlay_private_results.py`); nothing from it is pushed,
+uploaded or printed. The plan gives a private skill eval cells but no
+improve candidate, ranking row or work item, since each of those would
+publish its pass rate (`plan_week.PRIVATE_REGISTRY_URL`).
 
 ## 5. What is measured today
 
@@ -549,6 +1020,14 @@ Two `evals/` directories aren't covered below because they aren't skill or guida
 - `review-bash-ci-reliability` (registry: `acsi-agentskills`) — [evals/review-bash-ci-reliability/drift-report-capture](https://github.com/example-adopter/skills-evals/tree/main/evals/review-bash-ci-reliability/drift-report-capture)
 - Review a config-drift check whose `diff` and `grep | head | cut` captures abort it under `set -euo pipefail` on a normal result (checklist item 7). Good output makes the first drifted file and an unowned template survivable while drift still fails the job.
 - Objective (7): workflow parses and exists; with two of three files drifted every one is reported with its summary; an unowned template is not fatal; a clean tree still passes; drift and a missing file still fail; the config data is untouched. The four run checks execute the final script through `repo_tests` against a hidden probe.
+- Judge: weighted — `correctness` 0.5, `restraint` 0.2, `explanation` 0.3.
+- No pinned models: the roster picks the agent and the judge. In-place context: `example-adopter/example-site-platform`. Class A. No real run yet.
+
+### review-bash-ci-reliability/nightly-snapshot
+
+- `review-bash-ci-reliability` (registry: `acsi-agentskills`) — [evals/review-bash-ci-reliability/nightly-snapshot](https://github.com/example-adopter/skills-evals/tree/main/evals/review-bash-ci-reliability/nightly-snapshot)
+- Review a nightly job that commits a rebuilt snapshot: it leaves commit signing to the runner's global git config (item 5), hides a missing `dasel` behind `|| echo unknown` (item 6), and captures `grep -c` under `set -euo pipefail`, which aborts on a night with nothing to commit (item 7). Written after adam-agentskills#87 edited those three items, as the fixture that edit never saw.
+- Objective (8): workflow parses and exists; the snapshot is committed and pushed with signing turned on globally; a quiet night stays green and commits nothing; without `dasel` the job never commits `snapshot unknown`; new data is still committed; a failed build still fails; the data is untouched. The five run checks execute the final script in a throwaway git repository through `repo_tests` against a hidden probe.
 - Judge: weighted — `correctness` 0.5, `restraint` 0.2, `explanation` 0.3.
 - No pinned models: the roster picks the agent and the judge. In-place context: `example-adopter/example-site-platform`. Class A. No real run yet.
 

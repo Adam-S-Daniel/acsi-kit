@@ -39,6 +39,13 @@ permissions:
 
 jobs:
   audit:
+    # _agent-guidance's lockfile-safe copy, not example-site-platform's reusable: a
+    # reusable is covered by the lockfile of the repo that defines it, and
+    # example-site-platform has none, so since 2026-10-28 calling it from this
+    # lockfile repo startup-failed every day (_agent-guidance ADR 0024's
+    # 2026-10-31 addendum). A cross-repo reusable takes a full commit sha.
+    # The audit script is copied into _agent-guidance too (the adoption
+    # kit's DECISIONS C4).
     uses: example-adopter/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@0000000000000000000000000000000000000000
     with:
       dry_run: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.dry_run) || false }}

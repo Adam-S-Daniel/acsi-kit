@@ -179,6 +179,25 @@ shows (`skill`, `registry`, `model`, `judge`, `prompt`, `arms`,
   judge and the guidance guard probe never take it. Any other value is a
   configuration error (rc 2) at load.
 
+- **`guard: {proof: probe | receipt}`** (guidance subject, optional;
+  default `probe`) — how a guidance arm proves its delivery (#139). Every
+  guidance arm, in either pairing, persists its session in its scratch
+  profile and is checked against its own **receipt**: the `instructions`
+  entry the CLI writes into a persisted transcript (CLI 2.1.312 or newer;
+  measured on 2.1.316), which lists each loaded memory file's path, type and
+  content with HTML comments removed. The arm is scored only when it loaded
+  the delivered file as the expected type (`User`, or `Project` under the
+  project fallback) carrying the token it was handed, loaded nothing from
+  outside its scratch config dir and workspace (machine `Managed` policy
+  memory excepted and recorded), loaded no other `User` file, and carries no
+  token it was not handed. Otherwise it is INCONCLUSIVE (`delivery_unproven`
+  or `receipt_contaminated`, exit 2, no score). The summary's `receipt`
+  records each file's scratch-relative path, type, byte length and sha256,
+  never an absolute host path or content. `probe` also runs the paid
+  magic-token probe before the agent; `receipt` skips it, so the receipt is
+  the whole proof. Skill arms are unchanged: they keep
+  `--no-session-persistence` and the operator's profile, and carry no receipt.
+
 - **`strip_agent_context:`** (optional, `true` or `false`; default `false`)
   — for a real-work seed copied from a fleet repository. Before `deps:`
   and `setup:` run, and before the seed commit, the harness
@@ -233,7 +252,19 @@ shows (`skill`, `registry`, `model`, `judge`, `prompt`, `arms`,
   200 characters: the identifiers and messages a hidden test checks
   verbatim, which the task text must therefore name. A run inside one
   declared string is not an answer-leak hit (see "The answer-leak lint"
-  below). Validated at load.
+  below). Validated at load. A string that exempts a run the lint would
+  otherwise report must already occur in the seed (as whole words, or as a
+  seed file's path), or be a callable the checker calls or supplies as a
+  function: a name, or a name with a list of bare parameter names, found by
+  parsing the checker (Python's `ast`, Acorn, Ruby's Ripper). A new message,
+  selector or literal exempts nothing, so the task text is rewritten instead
+  (skills-evals#595; the integrator, 2026-11-02). A signature's qualifiers
+  and parameter names must already be identifiers in the seed, and no
+  identifier may be a literal or more than three lint words, so only the
+  callable's own name can be new. Which tests the checker selects or skips
+  is not modeled: a name called anywhere in a checker file counts, so a
+  scaffold can exempt one new identifier of up to three words by calling it
+  in a test nothing runs.
 - **`issue_before_fix:`** (optional) — a fixture-relative path to a regular
   file outside `seed/`, at most 256 KiB, holding the issue's text as it stood
   before the pull request's first commit. A run of that text is not an
@@ -292,7 +323,10 @@ The model-call catalog and marker guard remain part 3 of
 
 A bare skill name must resolve uniquely; `--skill-registry OWNER/REPO` and
 `--skill-bundle BUNDLE` qualify its source and bundle. Keep-or-remove runs
-test the deployed bytes by default. `--subject-candidate PATH` explicitly
+of a skill test main's copy of it, the registry checkout's committed HEAD
+(`subject_source: main`, `subject_revision`), which must match the registry
+the context deploys it from and be clean (ADR 0012, addendum "main's copy",
+2026-11-02); a guidance subject tests the deployed section. `--subject-candidate PATH` explicitly
 supplies a skill directory or a guidance file; only that skill or the pinned
 section's exact extent replaces the subject in `with`. Summaries retain both
 deployed and tested digests. A fixture names its deployed context using `context:`:
@@ -475,6 +509,50 @@ through `fixture_added_lines`. The scaffolder rejects a hit (the owner,
 2026-10-06: "Reject (Recommended)"; `LEAK_POLICY` in
 `scripts/scaffold_real_work.py`, "The scaffolder and its gate" below). The
 miner, earlier in the pipeline, records a hit as a warning (Q3 below).
+
+**Scaffold admission: code-token overlap and local paths.** The common static
+validator in [`scripts/scaffold_real_work.py`](scripts/scaffold_real_work.py)
+runs two further lexical rules in `build`, `check` and the routine scaffold
+gate (`answer_rules`). They are admission checks; the four-word lint still
+applies afterward.
+
+1. The issue portion still carried in the prompt may share at most **two
+   distinct substantive code tokens** with `solution.patch` added lines,
+   including comments. Tokens are case-sensitive identifier/path/file runs
+   with camel case, underscores, dollar signs, dots, slashes or colons;
+   hyphen-only tokens count only when the issue marks them as code, so
+   ordinary prose such as "near-duplicate" does not count. The earlier-issue
+   exemption does not waive this rule: a review follow-up can prescribe the
+   answer before its own fix begins. Tokens in omitted snapshot sections do
+   not count.
+2. The prompt must not carry local filesystem paths starting with `~/`,
+   `/home/` or `/tmp/`; omit local evidence references.
+
+Calibration uses the actual scaffold branches from
+[the rejected CSS draft](https://github.com/Adam-S-Daniel/skills-evals/pull/325)
+and [the rejected review-follow-up draft](https://github.com/Adam-S-Daniel/skills-evals/pull/326),
+plus [the tags-input API control](https://github.com/Adam-S-Daniel/cms-platform/pull/761)
+and [the tag aggregation API control](https://github.com/Adam-S-Daniel/cms-platform/pull/760).
+The distinct-token counts are respectively 3, 3, 2 and 1. The limit of two
+allows the controls' symptom/API overlap while rejecting the follow-up's
+`stopImmediatePropagation`, `live-url-banner.js` and `autosave-on-hide.js`.
+Offline regression inputs preserve the original prompts, snapshots, patches,
+checkers and relevant seed files in
+[`test/fixtures/scaffold-answer-leaks.json`](test/fixtures/scaffold-answer-leaks.json).
+The overlap heuristic misses unmarked plain word or numeric literals, so it
+supplements human review.
+
+Three earlier committed drafts no longer pass admission:
+[`_agent-guidance-196`](evals/real-work/_agent-guidance-196/fixture.yaml)
+(8 shared tokens), [`example-site-platform-221`](evals/real-work/example-site-platform-221/fixture.yaml)
+(11 shared tokens and a local path) and
+[`example-site-platform-761`](evals/real-work/example-site-platform-761/fixture.yaml) (4 shared
+tokens: its committed prompt gained a "Cause:" line naming the fix after the
+calibration snapshot was taken). Their historical evidence stays intact, and
+none is on `evals/scheduled.yml`. Two further rules from the same work
+(interface-string provenance and a behavioral checker for styling-only fixes)
+need a checker AST and are tracked in
+[#595](https://github.com/Adam-S-Daniel/skills-evals/issues/595).
 
 **What "pre-existing" rests on.** A fixture's `issue_before_fix:` names a
 file in the fixture directory (outside `seed/`) holding the issue's title and
@@ -1571,13 +1649,28 @@ redirections, stated rules, interruptions, repeated tool failures, red CI
 after a push and unfinished endings into short redacted **lesson records**,
 and routes them into **proposal files**: `agent-check` first when a git hook
 could enforce the lesson, else `skill-edit`, `new-skill`, `guidance-edit`,
-`memory-note` or `fixture-candidate`. A fixture candidate is a concrete
+`memory-note` or `fixture-candidate`. `new-skill` comes only from a cluster
+of failures with no suspected subject: repeated tool failures grouped by tool
+and command word (`tool-bash-gh`) and red CI grouped by repo (`red-ci-<repo>`),
+each seen in at least three sessions; every other unattributed failure stays
+a record with no proposal, and no proposal is ever subject `none`
+([#581](https://github.com/Adam-S-Daniel/skills-evals/issues/581)). A fixture candidate is a concrete
 failure tied to a skill or guidance section, and the input a fixture writer
 on that machine expands (`mine_sessions.py locate <session hash>` finds the
 transcript). Records and proposals land on acsi-agentskills-private's
 `persistent/lessons` branch; that repo's `lessons/README.md` holds both
 schemas. Tests: `test/issues/test_issue_session_miner.py`, invented
 transcripts only.
+
+`route` also writes `lessons/proposals/<date>/DIGEST.md`, the file the owner reads
+first: the same proposals as plain-English cards, one section per kind
+(agent-check, new-skill, skill-edit, guidance-edit, memory-note,
+fixture-candidate; empty kinds skipped), each card with a readable subject,
+how often and when it was seen, the repos, the file name, the check sketch
+for an agent-check and up to three examples (re-scrubbed, trimmed to 160
+characters, Markdown-escaped). It is deterministic, is deleted and rewritten
+with the day's JSON files, and is not a proposal: `read_proposals` and the
+draft lane (`*__new-skill.json`) never read it.
 
 Daily run, from WSL, after a dry run first (`PRIVACY_DENYLIST_FILE` is a file
 outside every repo; `WIN_HOME` is the Windows profile as a WSL path, which
@@ -1822,6 +1915,8 @@ yet" must stay distinguishable.)
 | `windows-elevation-from-wsl` | Class B, covered | the one machine-bound skill whose surface is cheap to fake: `evals/windows-elevation-from-wsl/seed/bin/powershell.exe` answers reads, denies writes, refuses dodges, and logs; the fixture's `env:` block puts it on the arm's `PATH` |
 | `fastmail` bundle | defer | credentialed live service; a fixture may not carry real accounts, and a faked Fastmail is a harness project of its own |
 | `aws-bootstrap`, `preview-environments` | freshness lint | staleness is the failure mode, not procedure quality |
+| `admin-config-render`, `browser-testing`, `code-quality`, `editorial-label-audit` | freshness lint | reference for one repo's internals; staleness is the failure mode, so a freshness lint replaces the eval (scope decision 2026-11-03) |
+| `finding-unknowns`, `acsi-writing-style` | owner review | process/taste skill; owner review replaces the eval (scope decision 2026-11-03) |
 
 ### Budget
 
@@ -2246,7 +2341,8 @@ the section's own file when it is an opt-in `sections/*.md`), and
 `section`/`none` asks whether the section teaches; the declared
 `ablation: [full, full-minus-section]` pair asks what it is worth in situ,
 including any lost-in-the-middle effect of a 56 KB file. [ADR 0012](docs/decisions/0012-ab-runs-in-the-deployed-context-minus-the-subject.md)
-(not built yet) makes the in-place pair the default. Extents are located
+makes the in-place pair the default; section fixtures declare all four arms,
+so one fire runs both pairs (see "Section fixtures, verdicts and removal"). Extents are located
 with a real markdown parse (`markdown-it-py`, pinned exact) using the same
 arithmetic as `_agent-guidance`'s own `scripts/check-guidance-coverage.js`, so
 the manifest's `bytes` column and the delivered payload can never disagree; a
@@ -2541,22 +2637,38 @@ its path without `evals/`; `make_badge.py` reads only run dirs whose summary
 names that fixture, on the in-situ pair.
 
 **The verdict.** `harness/gates.py` `guidance_verdict` reuses the skill
-machinery (run-level pooling, looks at 5, 10 and 20 runs, the same
-classes) twice per section: the in-situ pair (`full` vs
+machinery (run-level pooling, a confidence sequence checked after every
+run, the same classes) twice per section: the in-situ pair (`full` vs
 `full-minus-section`) and the alone pair (`section` vs `none`), classified by
 each arm's `mode`, never its name. A run pools when its `section` digest is
-the section's extent on main and its fixture digest matches; the `rest`
-digest is the pair key, so runs beside different neighbours never share a
-cell. The in-situ verdict decides. The one change: a section whose in-situ
-verdict is `retire` but which shows `benefit` alone in any cell gets
-**`shorten-or-merge`**, since the rest of the guidance covers what it teaches.
-That verdict never removes anything. The thresholds are `gate-policy.yml`'s
-`guidance:` block, which is separate from `skills:`.
+the section's extent on main and its fixture digest matches. In situ, runs
+beside different versions of the rest of the guidance (the `rest` digest)
+are separate strata of one cell, combined by precision weight
+(`classify_strata`, #546 and #557), so an edit elsewhere in the guidance
+does not start a section's evidence over; each in-situ cell measures its
+own priors (`cell_priors`). The in-situ verdict decides. The one change: a
+section whose in-situ verdict is `retire` but which shows `benefit` alone in
+any cell gets **`shorten-or-merge`**, since the rest of the guidance covers
+what it teaches. That verdict never removes anything.
+
+**The rule** (the owner, 2026-11-02, #557), the same for skills and sections in
+`gate-policy.yml`'s two blocks: remove when the gate is 90% confident
+(`retire_confidence` 0.90) that the subject does not improve results by
+0.15 or more (`objective_margin` 0.15; `judge_margin` 1.5 on the judge's
+0-to-10 scale), with no separate confirmation step. Keep at 85%
+(`benefit_confidence`), applied per SUBJECT (#578): the cells' keep tests,
+one per route, form a family of fixed size m = fixtures on main x roster
+models x 3, and a subject keeps only when a `benefit` cell's test clears
+0.15 / m. The alone pair keeps its per-cell keep for the twist above. An
+agent-errored trial counts 0 and does not block a removal; when every
+missing judge figure in a cell is a with-ahead conditional skip, the
+objective alone can remove. Simulations: `scripts/simulate_stratified_pooling.py`
+and the PR bodies of #565 and #578.
 
 **Removal.** `scripts/retire_skill.py --target guidance --guidance PATH`
 acts on at most one section per evaluation. `shorten-or-merge` always
-becomes a skills-evals issue. `retire` becomes an issue in `proposal` mode
-(the committed `guidance.retirement_mode`), and in `auto` mode a branch
+becomes a skills-evals issue. `retire` becomes an issue in `proposal` mode,
+and in `auto` mode (the committed `guidance.retirement_mode`) a branch
 `retire-guidance/<id>` in the `_agent-guidance` checkout that auto-merges.
 That branch removes the extent from `base.md` (or `git rm`s a `sections/`
 file when this was its only `##`) and re-copies `base.md` to
@@ -2565,8 +2677,41 @@ file when this was its only `##`) and re-copies `base.md` to
 `docs/guidance-impact.md` whose `Eval:` line gives the pooled run count
 (`n=`) and the fixtures, and rebuilds `AGENTS.md`, split on the
 `## Repo-specific additions` heading line. A dry run lists every step.
-Auto mode is not wired: it needs a write credential for `_agent-guidance` and
-the same refusals as the skill path.
+Retirement is automatic, with no human approval (the owner, 2026-10-10, #124):
+`evals/gate-policy.yml` commits `guidance.retirement_mode: auto`, and the
+removal pull request in `_agent-guidance` is written with the eval-improve
+GitHub App's token minted for that repository alone (`skill-coverage.yml`'s
+`retirement` job). With no token it files the issue instead. Every removal
+pull request is followed by a notice issue in skills-evals that mentions
+the owner, links the pull request and says how to reverse it (close it, or press
+Revert once merged), and the explorer lists removed sections and skills
+with the date and that link (#565, #567). The refusals match
+the skill path ([ADR 0014](docs/decisions/0014-removal-pull-requests-merge-without-review.md),
+which covers both subjects). The decision as a fleet record is
+[_agent-guidance ADR 0030](https://github.com/example-adopter/_agent-guidance/blob/main/docs/decisions/0030-a-sections-worth-is-measured-by-ablation-and-weighed-against-its-bytes.md).
+
+**The cost axis is bytes, and nothing divides by it.** A section's cost is the
+size of its extent, recorded as `bytes` in `_agent-guidance`'s manifest and in
+each guidance arm's summary. The retire decision weighs it only through the
+in-situ pair: a section that adds nothing inside the whole guidance is paid
+for in every session and removed. No `delta_per_kb` score (benefit per
+kilobyte) is computed anywhere, and no cap on a section's growth is enforced;
+the proposer is only told that every byte is delivered into every session
+(`scripts/propose_guidance_edit.py`, `PROPOSAL_CONSTRAINTS`).
+
+**Guidance non-coverage lives in `_agent-guidance`, not here.** A section with
+no fixture is a `gap` row, and one deliberately without a fixture is a
+`skipped` row with a `reason` and `since` date, both in
+[`agents-md/eval-coverage.yml`](https://github.com/example-adopter/_agent-guidance/blob/main/agents-md/eval-coverage.yml),
+which that repository's `check-guidance-coverage.js` gate holds to one row per
+heading. This repository's `evals/non-coverage.yml` and the "Deliberate
+non-coverage" table cover skills only.
+
+**Guidance fixtures are unprompted** ([_agent-guidance ADR 0031](https://github.com/example-adopter/_agent-guidance/blob/main/docs/decisions/0031-guidance-eval-fixtures-are-unprompted.md)):
+the prompt never names the rule, because a section exists for the case where
+the agent does not recognize it. The four-word lint (`harness/answer_leak.py`)
+applies to real-work task text against the merged diff; no check compares a
+guidance prompt with its section, so that is a review judgment.
 
 ## Out of scope
 

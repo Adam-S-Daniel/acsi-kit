@@ -579,7 +579,7 @@ regen_and_merge() { # task
 regen_and_merge run-health-sha
 assert_eq "regenerate run-health-sha exits 0" "$RC" 0
 ag=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
-for r in repo-settings skills-evals acsi-agentskills; do
+for r in repo-settings skills-evals acsi-agentskills wsl-automation; do
   assert "$r calls your _agent-guidance's reusable at its commit" bash -c 'git --git-dir="$1" show main:.github/workflows/scheduled-run-health.yml | grep -qF "scheduled-run-health-reusable.yml@$2"' _ "$T/remotes/$O/$r.git" "$ag"
 done
 regen_and_merge hook-pin

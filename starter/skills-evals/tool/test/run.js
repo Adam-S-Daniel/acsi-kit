@@ -1,0 +1,479 @@
+'use strict';
+// Tests for tool/index.html: plain Node, no dependencies, no network.
+// Run: node tool/test/run.js   (exits nonzero on any failure)
+
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const TOOL = path.resolve(__dirname, '..');
+const REPO = path.resolve(TOOL, '..');
+const PAGE = path.join(TOOL, 'index.html');
+const html = fs.readFileSync(PAGE, 'utf8');
+
+function loadPage() {
+  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)].map((m) => m[1]);
+  if (scripts.length !== 1) throw new Error('expected exactly one inline <script>, found ' + scripts.length);
+  const sandbox = { module: { exports: {} }, URL, URLSearchParams, Intl, console, Date, Math, JSON };
+  vm.runInNewContext(scripts[0], sandbox, { filename: 'index.html' });
+  return sandbox.module.exports;
+}
+
+const P = loadPage();
+const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixture.json'), 'utf8'));
+const committedIds = JSON.parse(fs.readFileSync(path.join(__dirname, 'guidance-ids.json'), 'utf8'));
+// Every alert kind scripts/explorer_data.py can emit; the pytest module
+// test_issue_544_545_health_alerts.py checks it against the script's AST.
+const emittedKinds = JSON.parse(fs.readFileSync(path.join(__dirname, 'alert-kinds.json'), 'utf8'));
+
+let passed = 0;
+const failures = [];
+const pending = [];
+function test(name, fn) {
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') {
+      pending.push(r.then(() => { passed += 1; }, (e) => failures.push(name + ': ' + e.message)));
+      return;
+    }
+    passed += 1;
+  } catch (e) {
+    failures.push(name + ': ' + e.message);
+  }
+}
+function eq(actual, expected, what) {
+  if (actual !== expected) throw new Error((what || 'value') + ': expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual));
+}
+function ok(cond, what) { if (!cond) throw new Error(what || 'assertion failed'); }
+
+const REF = '2026-10-31T21:00:00Z';
+const refMs = Date.parse(REF);
+const DAY = 24 * 3600 * 1000;
+const at = (daysAgo) => new Date(refMs - daysAgo * DAY).toISOString().replace(/\.\d{3}Z$/, 'Z');
+const arm = (p, t, trials) => ({ trials: trials || 3, checks_passed: p, checks_total: t, judge_mean: null, cost_usd: 0 });
+const skillRun = (model, daysAgo, wp, op, t) => ({ model, at: at(daysAgo), fixture: null, cli_version: '1.0.0', with: arm(wp, t), without: arm(op, t), report_url: null });
+const secRun = (model, daysAgo, s, n, f, fm, t) => {
+  const modes = {};
+  if (s !== null) modes.section = arm(s, t);
+  if (n !== null) modes.none = arm(n, t);
+  if (f !== null) modes.full = arm(f, t);
+  if (fm !== null) modes.full_minus_section = arm(fm, t);
+  return { model, at: at(daysAgo), fixture: 'f', cli_version: '1.0.0', modes, report_url: null };
+};
+const chipOf = (runs, subject, regression) => P.chipFor(P.poolRuns(runs, subject, refMs, []), { subject, regression });
+
+// --- sentences ---------------------------------------------------------
+test('friendly model names come from ids', () => {
+  eq(P.friendlyModel('claude-sonnet-5-5'), 'Claude Sonnet 5.5');
+  eq(P.friendlyModel('claude-fable-5-1'), 'Claude Fable 5.1');
+  eq(P.friendlyModel('example-large-2-0'), 'Example Large 2.0');
+  eq(P.friendlyModel('claude-haiku-4-5-20251001'), 'Claude Haiku 4.5');
+});
+
+test('skill sentence for a canned run', () => {
+  const runs = [
+    skillRun('example-model-1-0', 0, 8, 5, 9),
+    skillRun('example-model-1-0', 7, 8, 5, 9),
+    skillRun('example-model-1-0', 14, 8, 5, 9)
+  ];
+  const s = P.sentenceFor(P.poolRuns(runs, 'skills', refMs, []), 'skills', refMs);
+  eq(s, 'With this skill, Example Model 1.0 passed 24 of 27 checks; without it, 15 of 27. Tried 9 times, last on Oct 31.');
+});
+
+test('guidance sentence includes the ablation clause', () => {
+  const runs = [secRun('example-model-1-0', 1, 7, 4, 7, 5, 8)];
+  const s = P.sentenceFor(P.poolRuns(runs, 'guidance', refMs, []), 'guidance', refMs);
+  eq(s, 'With this section, Example Model 1.0 passed 7 of 8 checks; without it, 4 of 8. '
+    + 'With all the rules, 7 of 8; with all the other rules but not this one, 5 of 8. Tried 3 times, last on Oct 30.');
+});
+
+test('runs older than the window are left out of the sentence', () => {
+  const s = P.sentenceFor(P.poolRuns([skillRun('m-1', 400, 1, 0, 1)], 'skills', refMs, []), 'skills', refMs);
+  eq(s, P.STRINGS.notTried);
+});
+
+test('data-as-of time is shown in US Eastern', () => {
+  eq(P.fmtDateTime(Date.parse('2026-10-31T21:03:00Z')), 'Oct 31, 2026, 5:03 PM ET');
+});
+
+// --- chips ---------------------------------------------------------------
+test('chip: Not enough data below the paired-run minimum when the early signal is mixed or small', () => {
+  eq(chipOf([skillRun('a', 0, 5, 5, 9), skillRun('a', 1, 5, 5, 9), skillRun('b', 0, 9, 0, 9)], 'skills'), 'insufficient');
+  eq(chipOf([skillRun('a', 0, 9, 0, 9), skillRun('b', 0, 3, 9, 9)], 'skills'), 'insufficient');
+  eq(chipOf([], 'skills'), 'insufficient');
+});
+test('chip: Early sign when every model tried gains >= 5 points below the minimum', () => {
+  eq(chipOf([skillRun('a', 0, 9, 0, 9), skillRun('a', 1, 9, 0, 9), skillRun('b', 0, 9, 0, 9)], 'skills'), 'early');
+  eq(chipOf([skillRun('a', 0, 7, 1, 7)], 'skills', true), 'worse');
+  ok(P.STRINGS.chips.early && P.STRINGS.chipRules.early && P.STRINGS.wholeAnswer.early, 'early strings');
+});
+test('chip: Helps at >= 5 points on one model and not worse beyond 5 on any', () => {
+  const runs = [0, 1, 2, 3, 4].map((d) => skillRun('a', d, 21, 20, 20 * 1)).map((r) => Object.assign(r, { with: arm(11, 20), without: arm(10, 20) }));
+  eq(chipOf(runs, 'skills'), 'helps', 'exactly +0.05');
+  const mixed = runs.concat([0, 1, 2, 3, 4].map((d) => Object.assign(skillRun('b', d, 0, 0, 20), { with: arm(9, 20), without: arm(10, 20) })));
+  eq(chipOf(mixed, 'skills'), 'helps', '+0.05 and -0.05 is still helps');
+});
+test('chip: No measurable difference when the gain is small', () => {
+  const runs = [0, 1, 2, 3, 4].map((d) => Object.assign(skillRun('a', d, 0, 0, 100), { with: arm(54, 100), without: arm(50, 100) }));
+  eq(chipOf(runs, 'skills'), 'none');
+});
+test('chip: a model worse beyond 5 points blocks Helps', () => {
+  const a = [0, 1, 2, 3, 4].map((d) => skillRun('a', d, 9, 3, 9));
+  const b = [0, 1, 2, 3, 4].map((d) => Object.assign(skillRun('b', d, 0, 0, 100), { with: arm(40, 100), without: arm(50, 100) }));
+  eq(chipOf(a.concat(b), 'skills'), 'none');
+});
+test('chip: Getting worse when a regression alert names it', () => {
+  eq(chipOf([skillRun('a', 0, 9, 0, 9)], 'skills', true), 'worse');
+  ok(P.hasRegression(fixture.alerts, 'skill', 'example-skill-delta'), 'fixture regression found');
+  ok(!P.hasRegression(fixture.alerts, 'guidance', 'example-skill-delta'), 'subject must match');
+});
+test('chip: guidance Helps when the section also helps with the other rules present', () => {
+  const runs = [0, 1, 2, 3, 4].map((d) => secRun('a', d, 7, 3, 7, 4, 8));
+  eq(chipOf(runs, 'guidance'), 'helps');
+});
+test('chip: guidance Helps only on its own', () => {
+  const runs = [0, 1, 2, 3, 4].map((d) => secRun('a', d, 7, 3, 7, 7, 8));
+  eq(chipOf(runs, 'guidance'), 'alone');
+  // without enough ablation runs, the second rule cannot fire
+  eq(chipOf([0, 1, 2, 3, 4].map((d) => secRun('a', d, 7, 3, d === 0 ? 7 : null, d === 0 ? 7 : null, 8)), 'guidance'), 'helps');
+});
+test('chip: the guidance subject applies the shared rules too', () => {
+  eq(chipOf([secRun('a', 0, 7, 3, 7, 7, 8)], 'guidance'), 'early');
+  eq(chipOf([0, 1, 2, 3, 4].map((d) => secRun('a', d, 5, 5, 5, 5, 8)), 'guidance'), 'none');
+  eq(chipOf([secRun('a', 0, 5, 5, 5, 5, 8)], 'guidance', true), 'worse');
+});
+test('removed skills are listed with their date and revert link (#557)', () => {
+  const doc = { schema_version: P.SCHEMA_VERSION, generated_at: '2026-11-20T00:00:00Z', skills: [], guidance: { sections: [] },
+    removed_skills: [{ name: 'example-skill', plugin: 'acsi-coding-anywhere', date: '2026-11-20', reverse_url: 'https://github.com/example-adopter/acsi-agentskills/pulls?q=is%3Apr+head%3Aretire-skill%2Fexample-skill' }] };
+  const text = P.textOf(P.buildPage(doc, 'skills', {}));
+  eq(text.includes(P.STRINGS.removedSkillsHeading), true);
+  eq(text.includes('example-skill'), true);
+  const none = P.textOf(P.buildPage({ ...doc, removed_skills: [] }, 'skills', {}));
+  eq(none.includes(P.STRINGS.removedSkillsHeading), false, 'no list without removals');
+});
+test('removed sections are listed with their date and revert link (#557)', () => {
+  const doc = { schema_version: P.SCHEMA_VERSION, generated_at: '2026-11-20T00:00:00Z', skills: [],
+    guidance: { sections: [], removed: [{ id: 'bravo', date: '2026-11-20', reverse_url: 'https://github.com/example-adopter/_agent-guidance/pulls?q=is%3Apr+head%3Aretire-guidance%2Fbravo' }] } };
+  const text = P.textOf(P.buildPage(doc, 'guidance', {}));
+  eq(text.includes(P.STRINGS.removedHeading), true);
+  eq(text.includes('bravo'), true);
+  eq(text.includes('2026-11-20'), true);
+  const none = P.textOf(P.buildPage({ ...doc, guidance: { sections: [] } }, 'guidance', {}));
+  eq(none.includes(P.STRINGS.removedHeading), false, 'no list without removals');
+});
+test('with a loop verdict, the chip follows the loop, not the page rule', () => {
+  const strong = [skillRun('a', 0, 9, 0, 9)];
+  const many = [0, 1, 2, 3, 4].map((d) => skillRun('a', d, 9, 0, 9));
+  const ch = (runs, verdict, reg) => P.chipFor(P.poolRuns(runs, 'skills', refMs, []), { subject: 'skills', verdict, regression: reg });
+  eq(ch(strong, 'keep'), 'helps');
+  eq(ch(many, 'insufficient'), 'early', 'a big gain the loop has not confirmed is only an early sign');
+  eq(ch(many, null), 'early', 'no verdict yet');
+  eq(ch([skillRun('a', 0, 5, 5, 9)], 'insufficient'), 'insufficient');
+  eq(ch(many, 'retire'), 'none');
+  eq(ch(many, 'retire-pending'), 'none');
+  eq(ch(many, 'ceiling'), 'canttell');
+  eq(ch(many, 'cannot-discriminate'), 'canttell');
+  eq(ch(many, 'shorten-or-merge'), 'alone');
+  eq(ch(many, 'keep', true), 'worse', 'a regression alert still wins');
+  eq(ch(many, 'something-new'), 'early', 'an unknown verdict is not final');
+  P.STRINGS.chipOrder.forEach((k) => ok(P.STRINGS.chips[k] && P.STRINGS.chipRules[k], 'strings for ' + k));
+});
+test('fixture cards get the expected chips', () => {
+  const skills = Object.fromEntries(P.skillItems(fixture).map((i) => [i.name, i.chip]));
+  eq(skills['example-skill-alpha'], 'helps');
+  eq(skills['example-skill-beta'], 'none');
+  eq(skills['example-skill-gamma'], 'early');
+  eq(skills['example-skill-delta'], 'worse');
+  ok(!('example-skill-epsilon' in skills), 'skipped skill without runs has no card');
+  const secs = Object.fromEntries(P.sectionItems(fixture).map((i) => [i.id, i.chip]));
+  eq(secs['anything-you-name-gets-its-link'], 'helps');
+  eq(secs['security'], 'alone');
+  eq(secs['git-practices'], 'none');
+  eq(secs['workstation-layout'], 'early');
+});
+test('skills sort by helpfulness: chip group first, then gain, highest first', () => {
+  const items = P.skillItems(fixture);
+  eq(items.map((i) => i.name).join(','),
+    'example-skill-alpha,example-skill-gamma,example-skill-leaky,example-skill-beta,example-skill-delta');
+  const rank = ['helps', 'early', 'canttell', 'insufficient', 'none', 'worse'];
+  items.forEach((it, i) => {
+    if (i === 0) return;
+    const p = items[i - 1];
+    const rp = rank.indexOf(p.chip), rc = rank.indexOf(it.chip);
+    ok(rp < rc || (rp === rc && (p.pooled.all.gain === null ? it.pooled.all.gain === null
+      : it.pooled.all.gain === null || p.pooled.all.gain >= it.pooled.all.gain)), 'order at ' + it.name);
+  });
+});
+test('cards sort by next test first, then by how well they are faring', () => {
+  const doc = JSON.parse(JSON.stringify(fixture));
+  const set = (name, nt) => { doc.skills.find((x) => x.name === name).next_test = nt; };
+  set('example-skill-delta', { position: 1, band: 'missing', due: null, scheduled: true });
+  set('example-skill-beta', { position: 2, band: 'near', due: null, scheduled: true });
+  set('example-skill-gamma', { position: null, band: null, due: '2026-12-20T00:00:00Z', scheduled: true });
+  set('example-skill-leaky', { position: null, band: null, due: '2026-12-01T15:00:00Z', scheduled: true });
+  eq(P.skillItems(doc).map((i) => i.name).join(','),
+    'example-skill-delta,example-skill-beta,example-skill-leaky,example-skill-gamma,example-skill-alpha');
+  const sec = JSON.parse(JSON.stringify(fixture));
+  sec.guidance.sections.find((x) => x.id === 'git-practices').next_test = { position: 1, band: 'missing', due: null, scheduled: true };
+  eq(P.sectionItems(sec, 'next')[0].id, 'git-practices');
+  const text = P.textOf(P.buildPage(doc, 'skills', {}));
+  ok(text.includes('Next test: 1st skill in line for the next round of tests.'), 'queued line');
+  ok(text.includes('Next test: a re-check due Dec 1.'), 're-check line, in Eastern time');
+  ok(text.includes(P.STRINGS.nextUnscheduled), 'unscheduled line');
+});
+test('the start-up code names the one page title, not a property of its state', () => {
+  // Regression: a title rename once left `state.STRINGS.title` in boot(), which
+  // only runs in a browser, so every page load showed "could not be shown".
+  ok(!/\bstate\.STRINGS\b/.test(html), 'no state.STRINGS reference');
+  eq(P.STRINGS.title, 'Evals Explorer');
+});
+test('stakes show on the card for high and no-eval subjects only', () => {
+  const doc = JSON.parse(JSON.stringify(fixture));
+  doc.skills[0].stakes = { level: 'high', reason: 'a wrong pin runs third-party code' };
+  doc.skills[1].stakes = { level: 'none', reason: 'a hook refuses it', covered_by: 'example-adopter/example:hooks/check.sh' };
+  doc.skills[2].stakes = { level: 'normal' };
+  const text = P.textOf(P.buildPage(doc, 'skills', {}));
+  ok(text.includes('High stakes: a wrong pin runs third-party code. It is tested first and re-checked every 4 weeks instead of 8.'), 'high line');
+  ok(text.includes('No eval needed: a hook refuses it. A check enforces it: example-adopter/example:hooks/check.sh.'), 'none line');
+  eq(text.split('High stakes:').length + text.split('No eval needed:').length, 4);
+});
+test('the confidence line shows whole percents and never rounds up to certainty', () => {
+  const doc = JSON.parse(JSON.stringify(fixture));
+  doc.skills[0].confidence = { helps: 0.8571, no_help: 0.9999 };
+  doc.skills[1].confidence = { helps: null, no_help: null };
+  const text = P.textOf(P.buildPage(doc, 'skills', {}));
+  ok(text.includes('How sure the loop is: 85% that it helps, over 99% that any gain is under 5 points. It keeps a skill at 85% and removes one at 90%.'), 'levels');
+  ok(text.includes(P.STRINGS.confidenceNone), 'no-figure line');
+});
+test('the confidence line takes its keep and removal levels from the data policy', () => {
+  // Regression: the page hard-coded "removes one at 95%" after the removal
+  // level became 90% (the owner, 2026-11-02).
+  const doc = JSON.parse(JSON.stringify(fixture));
+  doc.policy = { ...doc.policy, benefit_confidence: 0.8, retire_confidence: 0.97 };
+  doc.skills[0].confidence = { helps: 0.5, no_help: 0.25 };
+  const text = P.textOf(P.buildPage(doc, 'skills', {}));
+  ok(text.includes('It keeps a skill at 80% and removes one at 97%.'), 'policy levels');
+});
+test('real-use counts show on skill cards with the census window', () => {
+  const doc = JSON.parse(JSON.stringify(fixture));
+  doc.usage = { from: '2026-09-07T00:00:00Z', to: '2026-10-31T16:37:13Z', sessions_scanned: 2517, surface: 'local' };
+  doc.skills[0].usage = { invocations: 9 };
+  doc.skills[1].usage = { invocations: 1 };
+  doc.skills[2].usage = { invocations: 0 };
+  const text = P.textOf(P.buildPage(doc, 'skills', {}));
+  ok(text.includes('Used 9 times in my real work from Sep 7 to Oct 31.'), 'plural, UTC window start');
+  ok(text.includes('Used 1 time in my real work from Sep 7 to Oct 31.'), 'singular');
+  ok(text.includes('Not used in my real work from Sep 7 to Oct 31.'), 'zero');
+  ok(text.includes('2,517 of my Claude Code sessions'), 'session count note');
+  ok(!P.textOf(P.buildPage(fixture, 'skills', {})).includes('real work from'), 'no census, no line');
+});
+test('each skill card says what the skill is for', () => {
+  eq(P.purposeOf('Write ADRs under docs/decisions/. Use when asked.'), 'Write ADRs under docs/decisions/.');
+  eq(P.purposeOf('Debug e.g. workflows. Trigger on CI.'), 'Debug e.g. workflows.');
+  eq(P.purposeOf('No final stop'), 'No final stop');
+  eq(P.purposeOf(null), null);
+  const page = P.textOf(P.buildPage(fixture, 'skills', {}));
+  ok(page.includes('Invented description of what example-skill-alpha is for.'), 'purpose on the card');
+  ok(!page.includes('Use when the test says so'), 'trigger text left off');
+  const noDesc = JSON.parse(JSON.stringify(fixture));
+  noDesc.skills.forEach((x) => { delete x.description; });
+  ok(P.textOf(P.buildPage(noDesc, 'skills', {})).includes(P.STRINGS.purposeMissing), 'fallback when absent');
+  eq(P.purposeOf('   '), null);
+});
+test('sections sort by gain per KB, or by size', () => {
+  const byValue = P.sectionItems(fixture, 'value').map((i) => i.id);
+  const withGain = byValue.filter((id) => ['security', 'anything-you-name-gets-its-link', 'git-practices'].includes(id));
+  eq(withGain.join(','), 'security,anything-you-name-gets-its-link,git-practices');
+  const bySize = P.sectionItems(fixture, 'size').map((i) => i.bytes);
+  ok(bySize.every((b, i) => i === 0 || bySize[i - 1] >= b), 'size order descending');
+});
+test('whole-guidance headline pools full vs none', () => {
+  const w = P.wholeGuidance(fixture);
+  eq(w.chip, 'helps');
+  ok(w.sentence.startsWith('With all the rules, Example Large 2.0 passed'), w.sentence);
+});
+
+// --- failure states ---------------------------------------------------------
+const mode = 'skills';
+test('failure state when the fetch fails', async () => {
+  const res = await P.loadData(P.DEFAULT_DATA_URL, () => Promise.reject(new Error('offline')), 1);
+  eq(res.ok, false); eq(res.kind, 'fetch');
+  const t = P.textOf(P.buildFailure(res, mode));
+  ok(t.includes(P.STRINGS.failFetch), 'says it could not load');
+  ok(t.includes('explorer/latest.json'), 'names the file');
+  ok(t.includes('Try reloading'), 'says what to do');
+});
+test('failure state on HTTP 404', async () => {
+  const res = await P.loadData(P.DEFAULT_DATA_URL, () => Promise.resolve({ ok: false, status: 404 }), 1);
+  eq(res.kind, 'fetch');
+});
+test('failure state on a wrong schema_version', async () => {
+  const res = await P.loadData(P.DEFAULT_DATA_URL, () => Promise.resolve({ ok: true, json: () => Promise.resolve({ schema_version: 2 }) }), 1);
+  eq(res.ok, false); eq(res.kind, 'schema');
+  const t = P.textOf(P.buildFailure(res, 'guidance'));
+  ok(t.includes('version 2'), 'names the version it got');
+  ok(t.includes('explorer/latest.json'), 'names the file');
+});
+test('failure state on unreadable JSON', async () => {
+  const res = await P.loadData(P.DEFAULT_DATA_URL, () => Promise.resolve({ ok: true, json: () => Promise.reject(new SyntaxError('x')) }), 1);
+  eq(res.kind, 'parse');
+});
+test('a good file loads and is cache-busted', async () => {
+  let asked = '';
+  const res = await P.loadData(P.DEFAULT_DATA_URL, (u) => { asked = u; return Promise.resolve({ ok: true, json: () => Promise.resolve(fixture) }); }, 42);
+  eq(res.ok, true);
+  eq(asked, P.DEFAULT_DATA_URL + '?v=42');
+});
+
+// --- modes -------------------------------------------------------------------
+test('default mode is skills; ?subject=guidance is guidance', () => {
+  eq(P.modeFromSearch(''), 'skills');
+  eq(P.modeFromSearch('?foo=1'), 'skills');
+  eq(P.modeFromSearch('?subject=guidance'), 'guidance');
+  eq(P.searchForMode('?data=x', 'guidance'), '?data=x&subject=guidance');
+  eq(P.searchForMode('?subject=guidance', 'skills'), '');
+});
+test('each mode renders its own views', () => {
+  const s = P.textOf(P.buildPage(fixture, 'skills', {}));
+  ok(s.includes(P.STRINGS.skillsHeading) && !s.includes(P.STRINGS.wholeHeading), 'skills view');
+  const g = P.textOf(P.buildPage(fixture, 'guidance', {}));
+  ok(g.includes(P.STRINGS.wholeHeading) && g.includes(P.STRINGS.sectionsHeading), 'guidance view');
+  ok(g.includes('About 150 words'), 'section size in words');
+  ok(g.includes(P.GLOSSES['security']), 'gloss on the card');
+});
+
+test('a not-schedulable alert gets its plain label, not the raw kind', () => {
+  eq(P.STRINGS.alertKinds['not-schedulable'], 'Not being tested');
+  const doc = Object.assign({}, fixture, { alerts: [{ kind: 'not-schedulable', subject: 'skill',
+    name: 'example-skill-alpha', model: 'example-large-2-0', fixture: 'evals/example-skill-alpha/x',
+    reason: 'no context', text: 'The task evals/example-skill-alpha/x is not scheduled: no context.', url: null }] });
+  const t = P.textOf(P.buildPage(doc, 'skills', {}));
+  ok(t.includes('Not being tested: example-skill-alpha'), 'label shown');
+  ok(!t.includes('not-schedulable'), 'raw kind not shown');
+});
+
+test('every alert kind explorer_data can emit has a plain label', () => {
+  ok(Array.isArray(emittedKinds) && emittedKinds.length > 0, 'alert-kinds.json is a non-empty list');
+  const missing = emittedKinds.filter((k) => !Object.prototype.hasOwnProperty.call(P.STRINGS.alertKinds, k)
+    || typeof P.STRINGS.alertKinds[k] !== 'string' || !P.STRINGS.alertKinds[k].trim());
+  eq(missing.join(','), '', 'kinds with no label');
+});
+test('a context-drift alert names the repository and the day it drifted (#545)', () => {
+  const doc = Object.assign({}, fixture, { alerts: [{ kind: 'context-drift', subject: 'skill',
+    name: 'example-skill-alpha', fixture: 'evals/example-skill-alpha/x', model: null,
+    repository: 'Example-Owner/example-site', drift_since: '2026-10-12T17:00:22Z' }] });
+  const t = P.textOf(P.buildPage(doc, 'skills', {}));
+  ok(t.includes('Context out of date: example-skill-alpha'), 'label shown');
+  ok(t.includes('in Example-Owner/example-site have changed since Oct 12'), 'repository and day shown');
+  ok(!t.includes('context-drift'), 'raw kind not shown');
+});
+test('a loaded-copy alert gets its plain label and names both prefixes (#562)', () => {
+  const doc = Object.assign({}, fixture, { alerts: [{ kind: 'loaded-copy', subject: 'skill',
+    name: 'example-skill-alpha', surface: 'local', loaded: 'aaaaaaaaaaaa', main: 'bbbbbbbbbbbb' }] });
+  const t = P.textOf(P.buildPage(doc, 'skills', {}));
+  ok(t.includes('Sessions load an old copy: example-skill-alpha'), 'label shown');
+  ok(t.includes('Most local uses in the last 2 weeks loaded copy aaaaaaaaaaaa, which main did not have at any point in that time. Main is bbbbbbbbbbbb.'), 'worded');
+  ok(!t.includes('loaded-copy'), 'raw kind not shown');
+});
+test('the copies line counts uses by how they compare with main, and null copies show nothing (#562)', () => {
+  const doc = JSON.parse(JSON.stringify(fixture));
+  doc.skills[0].copies = { main: 'bbbbbbbbbbbb', window: { from: '2026-10-19', to: '2026-10-31' }, alert: { local: false, cloud: null },
+    loaded: [{ digest: 'bbbbbbbbbbbb', surface: 'local', invocations: 4, vs_main: 'current' },
+      { digest: 'cccccccccccc', surface: 'local', invocations: 2, vs_main: 'in-window' },
+      { digest: 'aaaaaaaaaaaa', surface: 'local', invocations: 3, vs_main: 'older' },
+      { digest: 'unknown:gone', surface: 'local', invocations: 1, vs_main: 'unknown' }] };
+  doc.skills[1].copies = { main: null, window: { from: '2026-10-19', to: '2026-10-31' }, loaded: [], alert: { local: null, cloud: null } };
+  doc.skills[2].copies = null;
+  const t = P.textOf(P.buildPage(doc, 'skills', {}));
+  ok(t.includes('Copies loaded in the last 2 weeks: 6 match main, 3 older, 1 unknown.'), 'counts');
+  ok(t.includes(P.STRINGS.copiesNone), 'no uses in the window');
+  eq(t.split('Copies loaded in the last 2 weeks').length - 1, 2, 'null copies render nothing');
+  ok(!P.textOf(P.buildPage(fixture, 'skills', {})).includes('Copies loaded'), 'no copies anywhere, no line');
+});
+test('the fires-without-results line is worded as past events since the oldest counted fire (#555)', () => {
+  const f = { window_days: 14, since: '2026-10-19T14:00:00Z', without_results: 10, rejected: 2,
+    sweeps: [{ start: '2026-10-31T13:03:00Z', end: '2026-10-31T13:20:00Z', fires: 3 },
+      { start: '2026-11-01T05:43:00Z', end: '2026-11-01T06:06:00Z', fires: 6 },
+      { start: '2026-11-01T15:55:00Z', end: '2026-11-01T15:55:00Z', fires: 1 }] };
+  for (const m of ['skills', 'guidance']) {
+    const t = P.textOf(P.buildPage(Object.assign({}, fixture, { fires_without_results: f }), m, {}));
+    ok(t.includes('10 fires produced no results since Oct 19 (3 sweeps); 2 produced results that did not validate.'), m + ' line shown');
+  }
+  const one = Object.assign({}, f, { without_results: 1, rejected: 0, sweeps: [f.sweeps[2]] });
+  ok(P.textOf(P.buildPage(Object.assign({}, fixture, { fires_without_results: one }), 'skills', {}))
+    .includes('1 fire produced no results since Oct 19 (1 sweep); 0 produced results that did not validate.'), 'singular');
+  for (const quiet of [null, undefined, Object.assign({}, f, { without_results: 0, rejected: 0, sweeps: [] })]) {
+    const t = P.textOf(P.buildPage(Object.assign({}, fixture, { fires_without_results: quiet }), 'skills', {}));
+    ok(!t.includes('produced no results'), 'no line for ' + JSON.stringify(quiet));
+  }
+});
+
+// --- glosses -----------------------------------------------------------------
+function manifestIds() {
+  const file = process.env.AGENT_GUIDANCE_MANIFEST
+    || path.join(REPO, '..', '_agent-guidance', 'agents-md', 'eval-coverage.yml');
+  if (!fs.existsSync(file)) return null;
+  // Lexical token match on top-level list items; the pytest wrapper cross-checks with a YAML parser.
+  return [...fs.readFileSync(file, 'utf8').matchAll(/^- id: *['"]?([a-z0-9-]+)['"]?\s*$/gm)].map((m) => m[1]);
+}
+test('every committed guidance id has a gloss', () => {
+  ok(Array.isArray(committedIds) && committedIds.length > 0, 'guidance-ids.json is a non-empty list');
+  const missing = committedIds.filter((id) => !Object.prototype.hasOwnProperty.call(P.GLOSSES, id) || !P.GLOSSES[id].trim());
+  eq(missing.join(','), '', 'ids with no gloss');
+});
+test('every manifest id has a gloss (when the _agent-guidance checkout is present)', () => {
+  const ids = manifestIds();
+  if (ids === null) { console.log('  note: no _agent-guidance manifest found; checked the committed list only'); return; }
+  ok(ids.length > 0, 'manifest parsed to some ids');
+  const missing = ids.filter((id) => !Object.prototype.hasOwnProperty.call(P.GLOSSES, id));
+  eq(missing.join(','), '', 'manifest ids with no gloss');
+});
+test('a section without a gloss shows a fallback, never a blank card', () => {
+  const doc = JSON.parse(JSON.stringify(fixture));
+  doc.guidance.sections = [{ id: 'no-such-section', heading: 'No such section', bytes: 60, status: 'gap', runs: [] }];
+  const t = P.textOf(P.buildPage(doc, 'guidance', {}));
+  ok(t.includes(P.GLOSS_MISSING), 'fallback gloss shown');
+});
+
+// --- data URL override ---------------------------------------------------------
+test('?data accepts only localhost, 127.0.0.1 and this repo on raw.githubusercontent.com', () => {
+  ok(P.allowedDataUrl('http://localhost:8000/test/fixture.json'), 'localhost');
+  ok(P.allowedDataUrl('http://127.0.0.1:8000/x.json'), '127.0.0.1');
+  ok(P.allowedDataUrl('https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/explorer/latest.json'), 'repo');
+  for (const bad of ['https://evil.example.com/x.json', 'http://localhost.evil.example.com/x', 'http://localhost@evil.example.com/x',
+    'http://127.0.0.1.example.com/x', 'https://localhost/x', 'javascript:alert(1)', 'data:application/json,{}',
+    'https://raw.githubusercontent.com/example-adopter/other/main/x.json', 'https://raw.githubusercontent.com/example-adopter/skills-evals-x/main/x',
+    'https://raw.githubusercontent.com/example-adopter/skills-evals/../other/x', 'http://raw.githubusercontent.com/example-adopter/skills-evals/x']) {
+    eq(P.allowedDataUrl(bad), null, bad);
+  }
+  eq(P.dataUrlFromSearch('').url, P.DEFAULT_DATA_URL);
+  eq(P.dataUrlFromSearch('?data=https://evil.example.com/x').error, 'badurl');
+  eq(P.dataUrlFromSearch('?data=http://localhost:8000/test/fixture.json').url, 'http://localhost:8000/test/fixture.json');
+});
+
+// --- privacy ----------------------------------------------------------------------
+test('no @, /home/ or cse_ string from the data reaches rendered text', () => {
+  for (const m of ['skills', 'guidance']) {
+    const page = P.buildPage(fixture, m, {});
+    const t = P.textOf(page);
+    for (const bad of ['@', '/home/', 'cse_']) ok(!t.includes(bad), m + ' mode text contains ' + bad);
+    const hrefs = P.findAll(page, (n) => n.tag === 'a').map((n) => n.attrs.href);
+    ok(hrefs.length > 0, 'some links rendered');
+    ok(hrefs.every((u) => u.startsWith('https://github.com/')), 'only github.com links: ' + hrefs.filter((u) => !u.startsWith('https://github.com/')).join(' '));
+  }
+});
+test('no markup is built from data strings', () => {
+  ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write/.test(html), 'page must not use HTML-string sinks');
+});
+
+// --- size -----------------------------------------------------------------------------
+test('tool/index.html is under 200 KB', () => {
+  const size = fs.statSync(PAGE).size;
+  ok(size < 200 * 1024, 'size ' + size);
+});
+
+Promise.all(pending).then(() => {
+  for (const f of failures) console.log('FAIL ' + f);
+  console.log(passed + ' passed, ' + failures.length + ' failed');
+  process.exit(failures.length ? 1 : 0);
+});

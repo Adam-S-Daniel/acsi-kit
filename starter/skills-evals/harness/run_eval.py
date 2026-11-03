@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import dataclasses
 import fnmatch
 import functools
 import hashlib
@@ -51,11 +52,13 @@ import math
 import os
 import re
 import shutil
+import signal
 import stat
 import statistics
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
@@ -70,6 +73,7 @@ import run_canary  # noqa: E402
 from harness_repo import _git_out, harness_clone_root, harness_git_common_dir  # noqa: E402
 import context  # noqa: E402
 import delivery  # noqa: E402
+import fleet_hooks  # noqa: E402
 import guidance_violations  # noqa: E402
 import judge_policy  # noqa: E402
 from scorers import judge, objective  # noqa: E402
@@ -353,6 +357,24 @@ def validate_mapping_keys(fixture: dict, fixture_path: Path) -> None:
     for key in MAPPING_FIXTURE_KEYS:
         _require_mapping(fixture, key, fixture_path)
     guidance.check_env_block(fixture.get("env"), f"{fixture_path}: `env:`")
+    proof = (fixture.get("guard") or {}).get("proof", "probe")
+    if proof not in GUARD_PROOFS:
+        raise guidance.GuidanceError(
+            f"{fixture_path}: `guard.proof` is {proof!r}; expected one of "
+            f"{', '.join(GUARD_PROOFS)}")
+
+
+#: How a guidance arm proves its delivery before it is scored (#139). Every
+#: arm's own session receipt is checked either way; `probe` (the default)
+#: also runs the paid magic-token probe first, `receipt` skips it.
+GUARD_PROOFS = ("probe", "receipt")
+#: The error types of an arm whose own session receipt failed (#139).
+RECEIPT_ERRORS = ("delivery_unproven", "receipt_contaminated")
+
+
+def guard_proof(fixture: dict) -> str:
+    """The fixture's `guard.proof`, validated at load."""
+    return (fixture.get("guard") or {}).get("proof", "probe")
 
 
 # The CEILING every knob above is checked against, and the predicate that
@@ -476,7 +498,7 @@ def _layout_parts(layout: str) -> list[str]:
 
 
 def _load_registries_config(path: Path = REGISTRIES_YML) -> list[dict]:
-    """harness/registries.yml: [{name, url, layout}, ...] — this harness's own
+    """harness/registries.yml: [{name, url, layout, private}, ...] — this harness's own
     record of registry name/URL/layout, kept in step by hand with acsi-agentskills'
     scripts/skills_registries.yml (see test/run_tests.py::TestIssue63) rather
     than importing that file at run time: this harness must resolve using
@@ -521,6 +543,12 @@ def _load_registries_config(path: Path = REGISTRIES_YML) -> list[dict]:
                 f"{path} registries[{i}] field(s) must be strings: " +
                 ", ".join(f"{f!r} is {type(entry[f]).__name__}" for f in bad_type))
         name, url, layout = entry["name"], entry["url"], entry["layout"]
+        plugins = entry.get("plugins", [])
+        if not (isinstance(plugins, list)
+                and all(isinstance(p, str) and p for p in plugins)):
+            raise ValueError(
+                f"{path} entry {name!r} has 'plugins' that is not a list of "
+                "non-empty strings")
         if name in seen_names:
             raise ValueError(f"{path} has a duplicate registry name {name!r}")
         seen_names.add(name)
@@ -544,6 +572,13 @@ def _load_registries_config(path: Path = REGISTRIES_YML) -> list[dict]:
             raise ValueError(
                 f"{path} entry {name!r} has layout {layout!r} containing "
                 "'..' — layouts must stay within the registry checkout")
+        # #562: `private` is a bool, never a string, and is never defaulted:
+        # a census publishes a registry's name and digest prefixes only when
+        # it is `private: false`, so an absent or mistyped value must stop the
+        # load rather than read as either answer.
+        if type(entry.get("private")) is not bool:
+            raise ValueError(
+                f"{path} entry {name!r} needs 'private: true' or 'private: false'")
     return entries
 
 
@@ -705,6 +740,36 @@ def registry_for_url(registries: dict[str, dict], url: str) -> dict:
     raise ValueError(
         f"unknown registry {url!r} — not listed in harness/registries.yml "
         f"(known registries: {known})")
+
+
+def main_copy(registries: dict[str, dict], skill: str, url: str | None) -> tuple[str, str, Path]:
+    """The one copy of `skill` on the registry checkouts' main, as the
+    `(identity, bundle, path)` tuple `delivery._registry_matches` yields.
+
+    The selection rule compute_gates' `tested_digest` uses for a skill's main
+    copy (skills-evals#548). With `url` the search is that registry only; with
+    None, every registry. No copy and several copies are distinct
+    DeliveryErrors, never a sorted pick. Messages never include file contents.
+    """
+    if url is not None:
+        try:
+            entry = registry_for_url(registries, url)
+        except ValueError as exc:
+            raise delivery.DeliveryError("registry_unknown", str(exc)) from exc
+        if not Path(entry["path"]).is_dir():
+            raise delivery.DeliveryError(
+                "registry_checkout_missing",
+                f"registry {entry['name']!r} has no checkout at its configured path")
+        registries = {entry["name"]: entry}
+    matches = delivery._registry_matches(registries, None, skill)
+    if not matches:
+        raise delivery.DeliveryError(
+            "main_copy_missing", f"{skill} is not present in a registry checkout")
+    if len(matches) > 1:
+        raise delivery.DeliveryError(
+            "main_copy_ambiguous", f"{skill} matches {len(matches)} registry copies "
+            f"({', '.join(f'{r}:{b}' for r, b, _ in matches)})")
+    return matches[0]
 
 
 def _skill_md_glob(layout: str, skill: str) -> str:
@@ -1819,6 +1884,96 @@ def _agent_config_dirs(workspace: Path, config_dir: Path | None = None) -> list[
     return out
 
 
+def _agent_path_dirs(workspace: Path, path_env: str) -> list[Path]:
+    """The arm's PATH directories that lie in its workspace (#606), each as
+    given and resolved, in PATH order.
+
+    The CLI itself starts programs from PATH OUTSIDE the sandbox: at every
+    launch it ran a planted `git` (`ls-files`, `status`, `log`, ...) and
+    `sh -c uname -s ...` from the first PATH directory (CLI 2.1.316,
+    measured with a dead API URL). A follow-up turn is a new launch
+    (`--resume`), and a fixture that puts `$WORKSPACE/bin` first on PATH
+    gives the agent that directory, so a `bin/git` written in one turn ran
+    unconfined, with network, at the start of the next. These directories
+    are guarded like `_agent_config_dirs`: `Edit(...)` deny rules and
+    `denyWrite` in the arm's settings, and the snapshot that fails the trial
+    after any turn in which one changed (`agent_wrote_agent_config`).
+
+    Only absolute entries: `workspace_path_or_error` has already dropped the
+    relative ones and refused the workspace itself, a `..` component and a
+    directory that does not exist. Entries outside the
+    workspace are not named: the sandbox does not let Bash write them, and
+    the stand-ins fixtures put on PATH all live in the workspace.
+    """
+    root = Path(workspace)
+    real_root = root.resolve()
+    out: list[Path] = []
+    for entry in (path_env or "").split(os.pathsep):
+        if not os.path.isabs(entry):
+            continue
+        given = Path(os.path.normpath(entry))
+        resolved = given.resolve()
+        if not (_within(given, root) or _within(given, real_root)
+                or _within(resolved, real_root)):
+            continue
+        for path in (given, resolved):
+            if path not in out:
+                out.append(path)
+    return out
+
+
+def workspace_path_or_error(path_env: str, workspace: Path) -> str:
+    """The arm's PATH without relative or empty entries, or
+    ArmReadIsolationError (`read_rules_unsafe`) when an entry is the
+    workspace itself (#606).
+
+    The CLI runs PATH programs outside the sandbox and searches a relative or
+    empty entry from its cwd, the workspace, which the agent writes freely; a
+    PATH entry that IS the workspace cannot be write-protected without
+    protecting the whole workspace. No fixture uses either: they put
+    `$WORKSPACE/<dir>` on PATH, which `_agent_path_dirs` guards. An entry in
+    the workspace with a `..` component, or that is not an existing
+    directory, is refused too: the kernel resolves `..` after any symlink
+    the agent plants before it, and a directory created later has no
+    baseline in the snapshot. A dropped
+    relative entry is the operator's (a trailing `:`, a `.`), never a
+    fixture's stand-in."""
+    root = Path(workspace)
+    real_root = root.resolve()
+    kept = []
+    for entry in (path_env or "").split(os.pathsep):
+        if not os.path.isabs(entry):
+            continue
+        given = Path(os.path.normpath(entry))
+        if real_root in (given, given.resolve()) or given == root:
+            raise ArmReadIsolationError(
+                "a PATH entry is the arm's workspace, which the CLI would run "
+                "programs from outside the sandbox; put stand-ins in a "
+                "directory under it", code="read_rules_unsafe")
+        if any(_within(ws, entry_path) for ws in (root, real_root)
+               for entry_path in (given, given.resolve())):
+            # An ancestor holds the workspace: the agent writes inside it,
+            # and Bash may write it too (TMPDIR) - no guard covers it.
+            raise ArmReadIsolationError(
+                "a PATH entry is a directory that holds the arm's workspace",
+                code="read_rules_unsafe")
+        inside = (_within(given, root) or _within(given, real_root)
+                  or _within(given.resolve(), real_root))
+        # `..` is normalized here lexically but resolved by the kernel after
+        # any symlink before it, which the agent could plant; and a
+        # directory that does not exist yet has no baseline to compare.
+        if inside and ".." in Path(entry).parts:
+            raise ArmReadIsolationError(
+                "a PATH entry in the arm's workspace has a `..` component",
+                code="read_rules_unsafe")
+        if inside and not given.is_dir():
+            raise ArmReadIsolationError(
+                "a PATH entry in the arm's workspace is not an existing "
+                "directory", code="read_rules_unsafe")
+        kept.append(entry)
+    return os.pathsep.join(kept)
+
+
 # The prefixes of every named temporary store the harness and scripts make
 # under TMPDIR (including explicit parents that may be TMPDIR): other
 # arms' workspaces and scratch profiles (transcripts), canary and
@@ -1835,7 +1990,8 @@ HARNESS_TEMP_PREFIXES = (
     "scaffold-", "scaffold-context-", "claude-probe-home-", "skill-edit-guard-",
     "propose-skill-edit-", "scoring-guidance-", "scoring-skill-", "mine-real-work-",
     ".scaffold-", ".gh-label-", ".gh-timeline-", "usage-census-",
-    "session-miner-", "lesson-classify-")
+    "session-miner-", "lesson-classify-",
+    "fleet-hooks-modules-")
 
 
 def _harness_temp_rules(tmp_root: Path, workspace: Path | None,
@@ -1894,6 +2050,27 @@ def _harness_temp_rules(tmp_root: Path, workspace: Path | None,
 MAX_SETTINGS_BYTES = 64 * 1024
 
 
+def _launch_read_paths(path_env: str, home: Path, workspace: Path | None) -> list[Path]:
+    """The absolute PATH directories outside the workspace and the HOME's
+    global git configuration (`~/.gitconfig`, `~/.config/git`), each as
+    given and resolved, without duplicates: what the CLI's own startup
+    programs run or read, unsandboxed (#606, #609, #612)."""
+    out: list[Path] = []
+    roots = ([Path(workspace), Path(workspace).resolve()] if workspace is not None else [])
+    for entry in (path_env or "").split(os.pathsep):
+        if not os.path.isabs(entry):
+            continue
+        given = Path(os.path.normpath(entry))
+        for path in (given, given.resolve()):
+            if path not in out and not any(_within(path, root) for root in roots):
+                out.append(path)
+    for given in (Path(home) / ".gitconfig", Path(home) / ".config" / "git"):
+        for path in (given, given.resolve()):
+            if path not in out:
+                out.append(path)
+    return out
+
+
 def arm_sandbox_settings(checkouts=(), *, home: Path | None = None,
                          path_env: str | None = None,
                          harness_root: Path = HARNESS_ROOT,
@@ -1903,7 +2080,8 @@ def arm_sandbox_settings(checkouts=(), *, home: Path | None = None,
                          profiles=None, outputs=(), additional_profiles=(),
                          tmp_root: Path | None = None,
                          mountinfo: str | None = None,
-                         readable_plugins=()) -> dict:
+                         readable_plugins=(), fleet_hooks_dir: Path | None = None,
+                         fleet_hooks_modules: Path | None = None) -> dict:
     """The settings every agent arm runs under, as one JSON object.
 
     `checkouts` are the run's registry and guidance checkouts; `session_dir`
@@ -1914,6 +2092,10 @@ def arm_sandbox_settings(checkouts=(), *, home: Path | None = None,
     `mountinfo` to `host_mountinfo()`. A host-filesystem alias is denied
     whole, and PATH entries under one are dropped (`path_without_aliases`)
     before any carve-out is considered.
+    `fleet_hooks_dir` is a hooked arm's frozen hook set (#535): write-denied
+    like the configuration directories, and its guard is the arm's one
+    PreToolUse hook. `fleet_hooks_modules`, the plan's markdown-it install
+    the set's copy came from, is write-denied too.
     Raises ArmReadIsolationError when the read rules cannot be built safely.
     """
     home = Path(home if home is not None else Path.home()).resolve()
@@ -1953,6 +2135,15 @@ def arm_sandbox_settings(checkouts=(), *, home: Path | None = None,
     keep = Path(session_dir).resolve() if session_dir else None
     config_dirs = (_agent_config_dirs(workspace, config_dir)
                    if workspace is not None else [])
+    # The workspace's PATH directories, which the CLI runs programs from
+    # outside the sandbox, are no more the agent's to write (#606).
+    if workspace is not None:
+        config_dirs += [path for path in _agent_path_dirs(workspace, path_env)
+                        if path not in config_dirs]
+    for frozen_dir in (fleet_hooks_dir, fleet_hooks_modules):
+        if frozen_dir is not None:
+            config_dirs += [path for path in dict.fromkeys(
+                (Path(frozen_dir), Path(frozen_dir).resolve())) if path not in config_dirs]
     protected = [*_SYSTEM_ROOTS,
                  *(Path(e).resolve() for e in path_env.split(os.pathsep)
                    if e and os.path.isabs(e))]
@@ -1977,7 +2168,7 @@ def arm_sandbox_settings(checkouts=(), *, home: Path | None = None,
                      else _read_rules(_glob_escape(str(path)))):
             if rule not in read_rules:
                 read_rules.append(rule)
-    return {
+    settings = {
         "sandbox": {
             "enabled": True,
             # Refuse to start rather than run commands unsandboxed.
@@ -2006,8 +2197,20 @@ def arm_sandbox_settings(checkouts=(), *, home: Path | None = None,
                            f"Edit(/{_glob_escape(str(path))}/**)")),
             *(rule for path in [*compact_profiles, *(Path(p).resolve() for p in checkouts)]
               for rule in (f"Edit(/{_glob_escape(str(path))})",
+                           f"Edit(/{_glob_escape(str(path))}/**)")),
+            # What the CLI runs or reads outside the sandbox at launch, which
+            # the sandbox keeps Bash from writing but not the file tools
+            # (#612): every PATH directory outside the workspace, and the
+            # real HOME's global git configuration.
+            *(rule for path in (_launch_read_paths(path_env, home, workspace)
+                                if workspace is not None else [])
+              if path not in config_dirs
+              for rule in (f"Edit(/{_glob_escape(str(path))})",
                            f"Edit(/{_glob_escape(str(path))}/**)"))]},
     }
+    if fleet_hooks_dir is not None:
+        settings["hooks"] = fleet_hooks.guard_hooks(fleet_hooks_dir)
+    return settings
 
 
 def arm_isolation_flags(checkouts=(), session_dir: Path | None = None,
@@ -2015,7 +2218,9 @@ def arm_isolation_flags(checkouts=(), session_dir: Path | None = None,
                         config_dir: Path | None = None, outputs=(), *,
                         path_env: str | None = None,
                         mountinfo: str | None = None,
-                        additional_profiles=(), readable_plugins=()) -> list[str]:
+                        additional_profiles=(), readable_plugins=(),
+                        fleet_hooks_dir: Path | None = None,
+                        fleet_hooks_modules: Path | None = None) -> list[str]:
     """The CLI flags that put an agent arm behind `arm_sandbox_settings`
     (`path_env`, the arm's own PATH, and `mountinfo` default as there).
     Raises ArmReadIsolationError (`settings_too_large`) past
@@ -2024,7 +2229,9 @@ def arm_isolation_flags(checkouts=(), session_dir: Path | None = None,
         checkouts, session_dir=session_dir, workspace=workspace,
         config_dir=config_dir, outputs=outputs, additional_profiles=additional_profiles,
         readable_plugins=readable_plugins, path_env=path_env,
-        mountinfo=mountinfo), sort_keys=True, separators=(",", ":"))
+        mountinfo=mountinfo, fleet_hooks_dir=fleet_hooks_dir,
+        fleet_hooks_modules=fleet_hooks_modules),
+        sort_keys=True, separators=(",", ":"))
     if len(settings.encode()) > MAX_SETTINGS_BYTES:
         raise ArmReadIsolationError(
             f"the arm's --settings is {len(settings.encode())} bytes, over "
@@ -2251,6 +2458,27 @@ def managed_sandbox_refusal(files=None, dropins=None,
     return None
 
 
+def managed_hooks_refusal(files=None, dropins=None) -> str | None:
+    """Why the managed settings can silently drop the arm's PreToolUse guard
+    (#605), or None: `disableAllHooks` or `allowManagedHooksOnly` set to
+    anything but false. Names the file and key, never a value."""
+    for path in managed_settings_paths(files, dropins):
+        try:
+            settings = json.loads(Path(path).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError) as exc:
+            return (f"managed settings file {path} cannot be read "
+                    f"({type(exc).__name__})")
+        if not isinstance(settings, dict):
+            return f"managed settings file {path} is not a JSON object"
+        for key in ("disableAllHooks", "allowManagedHooksOnly"):
+            if key in settings and settings[key] is not False:
+                return (f"managed settings file {path} sets {key}, which can "
+                        "drop the arm's PreToolUse guard")
+    return None
+
+
 # What the CLI and trusted delivery hook write, during a turn, under the directories
 # `_agent_config_dirs` names, as relative paths (fnmatch, `*` crossing `/`).
 # Measured with CLI 2.1.292 (strace of a two-turn arm with a Bash call, a
@@ -2268,10 +2496,19 @@ _CLI_PROFILE_TREES = (".cc-writes", "backups", "bridge-spawn", "projects",
 # the given size in bytes; anything else at that path is a change. The lock
 # is a directory the CLI creates and removes, exempt only while empty.
 _BUILTIN_PLUGIN_STORE = "plugins/store/cc-plugin-*_builtin-" + "[0-9a-f]" * 12 + ".json"
+# The CLI's account plugin sync stamps each synced set's directory, possibly
+# after the arm's CLI returned (#594): seen locally recreating a cleaned pair
+# profile. Like the skills one below, it is a timestamp and loads nothing.
+_PLUGINS_SYNCED_MARKER = "plugins/synced/*/.last-complete-round"
+# Markers whose `*` must stay within one path segment (fnmatch's crosses `/`):
+# `plugins/` is where plugins load from, so a `.last-complete-round` deeper
+# down, beside a plugin's own files, is not the sync's stamp.
+_ONE_SEGMENT_MARKERS = frozenset({_PLUGINS_SYNCED_MARKER})
 _CLI_PROFILE_MARKERS = {
     ".claude.json": None, ".claude.json.tmp.*": None,
     "plugins/cache/*/.orphaned_at": 4096,
     "skills/synced/*/.last-complete-round": 4096,
+    _PLUGINS_SYNCED_MARKER: 4096,
     # The trusted fleet-memory hook appends this detached delivery receipt,
     # possibly after delivery returned. It loads no CLI configuration. The
     # writer checks 1 MiB before its last append of at most 4096 bytes.
@@ -2349,6 +2586,8 @@ def _exempt(path: Path, rel: str, trees, markers, empty_dirs) -> bool:
         return True
     st = os.lstat(path)
     for pattern, limit in markers.items():
+        if pattern in _ONE_SEGMENT_MARKERS and rel.count("/") != pattern.count("/"):
+            continue
         if fnmatch.fnmatchcase(rel, pattern):
             # The receipt writer also refuses foreign-owned or hard-linked
             # files; such a path is not its trusted bookkeeping.
@@ -2413,13 +2652,214 @@ def _config_snapshot(root: Path, label: str, trees=(), markers=None,
     return out
 
 
+# A watched file larger than this is recorded by size and inode, not read.
+_SNAPSHOT_MAX_FILE_BYTES = 16 * 1024 * 1024
+
+
+def _path_dir_snapshot(path: Path, label: str) -> dict[str, bytes]:
+    """Everything under one of the arm's PATH directories (#606), by
+    `label`-prefixed relative path: each entry's mode with a file's SHA-256 or
+    a symlink's target, so a new program, a changed one, a mode change (an
+    exec bit) or a swapped symlink all differ. The directory's own absence,
+    or a symlink or file in its place, is recorded too: a directory created
+    later is a change. Nothing is exempt."""
+    def entry(item: Path) -> bytes:
+        info = os.lstat(item)
+        mode = f"{stat.S_IMODE(info.st_mode):o}:".encode()
+        if stat.S_ISLNK(info.st_mode):
+            # And what it leads to: a link's target may lie outside the
+            # guarded directory, where a write is not denied.
+            target = Path(os.path.realpath(item))
+            try:
+                body = (hashlib.sha256(target.read_bytes()).digest()
+                        if target.is_file() else b"-")
+                body += f":{stat.S_IMODE(os.stat(target).st_mode):o}".encode()
+            except OSError:
+                body = b"<unresolved>"
+            return b"symlink:" + mode + os.readlink(item).encode() + b"->" + body
+        if stat.S_ISDIR(info.st_mode):
+            return b"dir:" + mode
+        if stat.S_ISREG(info.st_mode):
+            if info.st_size > _SNAPSHOT_MAX_FILE_BYTES:
+                # Never read whole: a sparse file costs nothing to make.
+                return b"file:" + mode + f"<{info.st_size} bytes, inode {info.st_ino}>".encode()
+            try:
+                return b"file:" + mode + hashlib.sha256(item.read_bytes()).digest()
+            except OSError:
+                return b"<unreadable>:" + mode
+        return b"other:" + mode + str(stat.S_IFMT(info.st_mode)).encode()
+
+    try:
+        out = {label: entry(path)}
+    except FileNotFoundError:
+        return {label: b"<absent>"}
+    except OSError:
+        return {label: b"<unreadable>"}
+    if not out[label].startswith(b"dir:"):
+        return out
+    for current, dirs, files in os.walk(path):
+        rel_dir = Path(current).relative_to(path)
+        for name in sorted(dirs + files):
+            try:
+                out[f"{label}/{(rel_dir / name).as_posix()}"] = entry(Path(current) / name)
+            except FileNotFoundError:
+                out[f"{label}/{(rel_dir / name).as_posix()}"] = b"<vanished>"
+            except OSError:
+                out[f"{label}/{(rel_dir / name).as_posix()}"] = b"<unreadable>"
+    return out
+
+
+# Git follows at most this many nested includes (config.c MAX_INCLUDE_DEPTH).
+_GIT_INCLUDE_DEPTH = 10
+# One `git config --file` read of an agent-controlled file: a hang guard.
+GIT_INCLUDE_TIMEOUT_S = 10
+
+
+def _git_include_targets(config: Path, home: str | None) -> list[Path]:
+    """The `include.path` and `includeIf.<cond>.path` values in one git
+    config file, resolved as git resolves them (relative to the file's own
+    directory, `~/` against the arm's HOME), whatever their condition and
+    whether or not the target exists yet: a target created later is how a
+    filter driver would arrive. Read with `git config --file`, which runs
+    nothing from the file, under no system or global configuration."""
+    guidance.check_timeout(GIT_INCLUDE_TIMEOUT_S, "run_eval._git_include_targets(timeout=)",
+                           guidance.SINK_TIMEOUT_REMEDY)
+    try:
+        if not config.is_file():
+            return []
+        # Every include lives in an `[include]` or `[includeIf ...]` section,
+        # and a section name has no escapes, so a file without the word (in
+        # any case) names none, and git is not started for it.
+        if config.stat().st_size > _SNAPSHOT_MAX_FILE_BYTES:
+            return [config.parent / "<unreadable includes>"]
+        if b"include" not in config.read_bytes().lower():
+            return []
+    except OSError:
+        return [config.parent / "<unreadable includes>"]
+    env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "HOME": "/nonexistent",
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+    try:
+        result = subprocess.run(
+            [workspace_git.GIT, "config", "--file", str(config), "--null", "--get-regexp",
+             r"^include(if\..*)?\.path$"],
+            capture_output=True, env=env, stdin=subprocess.DEVNULL,
+            text=True, encoding="utf-8", errors="surrogateescape",
+            timeout=GIT_INCLUDE_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired):
+        return [config.parent / "<unreadable includes>"]
+    if result.returncode not in (0, 1):
+        return [config.parent / "<unreadable includes>"]
+    out = []
+    for record in (result.stdout or "").split("\0"):
+        if "\n" not in record:
+            continue
+        value = record.split("\n", 1)[1]
+        if value.startswith("~/") and home:
+            target = Path(home) / value[2:]
+        else:
+            target = config.parent / value
+        out.append(Path(os.path.normpath(target)))
+    return out
+
+
+def _workspace_git_snapshot(workspace: Path, env: dict) -> dict[str, bytes]:
+    """Every git configuration file the CLI's own startup `git` reads in the
+    workspace, outside the sandbox (#609), by label (see `_path_dir_snapshot`).
+
+    CLI 2.1.316 runs `git status --short`, `git log` and `git config
+    user.name` in its cwd at every launch, unsandboxed. It disables hooks
+    and fsmonitor but not `filter.<driver>.clean`, so a driver an agent adds
+    to the workspace's git configuration runs, with network, at the next
+    launch (measured: a local stand-in API, no model call). The sandbox
+    protects `.git/config` by path, which a renamed and re-created `.git`
+    gets around, so what is watched is `.git` itself (its inode and type,
+    which a rename changes), `config`, `config.worktree`, `commondir` and
+    `info/attributes`, every include those configs name (followed to git's
+    depth limit, missing targets included), and the arm's global config
+    (`GIT_CONFIG_GLOBAL`, else `~/.gitconfig` and the XDG one).
+    """
+    root = Path(workspace)
+    dot = root / ".git"
+    out: dict[str, bytes] = {}
+    try:
+        info = os.lstat(dot)
+        out["git:.git"] = f"{info.st_dev}:{info.st_ino}:{info.st_mode:o}".encode()
+        if not stat.S_ISDIR(info.st_mode):
+            # A gitfile (or a link) names the git directory in its content.
+            out.update(_path_dir_snapshot(dot, "git:.git (content)"))
+    except FileNotFoundError:
+        out["git:.git"] = b"<absent>"
+    except OSError:
+        out["git:.git"] = b"<unreadable>"
+    home = env.get("HOME")
+    configs = [dot / "config", dot / "config.worktree"]
+    # Outside the workspace a path is labeled by its role: the detail is
+    # published, and a real HOME's path is not the reader's business.
+    roles: dict[Path, str] = {}
+    if env.get("GIT_CONFIG_GLOBAL"):
+        roles[Path(env["GIT_CONFIG_GLOBAL"])] = "$GIT_CONFIG_GLOBAL"
+    elif home:
+        xdg = env.get("XDG_CONFIG_HOME")
+        roles[Path(home) / ".gitconfig"] = "~/.gitconfig"
+        roles[Path(xdg or Path(home) / ".config") / "git" / "config"] = (
+            "$XDG_CONFIG_HOME/git/config" if xdg else "~/.config/git/config")
+    configs += list(roles)
+    watched = [*configs, dot / "commondir", dot / "info" / "attributes"]
+    pending = [(path, 0) for path in configs]
+    while pending:
+        config, depth = pending.pop(0)
+        if depth >= _GIT_INCLUDE_DEPTH:
+            continue
+        for target in _git_include_targets(config, home):
+            if target not in watched:
+                watched.append(target)
+                pending.append((target, depth + 1))
+    for number, path in enumerate(watched):
+        label = (f"git:{path.relative_to(root).as_posix()}" if _within(path, root)
+                 else f"git:{roles[path]}" if path in roles
+                 else f"git:include {number} outside the workspace")
+        try:
+            if path.is_dir() and not path.is_symlink():
+                out[label] = b"<directory>"
+                continue
+        except OSError:
+            out[label] = b"<unreadable>"
+            continue
+        if workspace_git._sandbox_placeholder(path):
+            # The empty mount point the sandbox leaves for a protected path
+            # that did not exist (`.git/config.worktree`, measured): it sets
+            # nothing, so it reads as absent. Any content still differs.
+            out[label] = b"<absent>"
+            continue
+        out.update(_path_dir_snapshot(path, label))
+    return out
+
+
+def _snapshot_changes(before: dict, after: dict) -> str | None:
+    """The labels that differ between two snapshots (at most five)."""
+    changed = sorted(name for name in set(before) | set(after)
+                     if before.get(name) != after.get(name))
+    if not changed:
+        return None
+    more = f" and {len(changed) - 5} more" if len(changed) > 5 else ""
+    return ", ".join(changed[:5]) + more
+
+
 def _agent_config_snapshot(workspace: Path, config_dir: Path | None = None,
-                           shared: bool = False) -> dict[str, bytes | None]:
+                           shared: bool = False,
+                           path_dirs=()) -> dict[str, bytes | None]:
     """The workspace's `.claude/` and the arm's profile, by relative path (see
     `_config_snapshot`): a scratch profile whole, a shared one (`shared`)
-    only where the CLI loads configuration from."""
+    only where the CLI loads configuration from. And every one of
+    `path_dirs` (`_agent_path_dirs`), named relative to the workspace when it
+    lies there lexically (`_path_dir_snapshot`)."""
     out = _config_snapshot(Path(workspace) / ".claude", ".claude",
                            trees=_CLI_WORKSPACE_TREES)
+    for path in path_dirs:
+        path = Path(path)
+        label = (f"PATH:{path.relative_to(workspace).as_posix()}"
+                 if _within(path, Path(workspace)) else f"PATH:{path}")
+        out.update(_path_dir_snapshot(path, label))
     if config_dir is not None:
         if shared:
             out.update(_config_snapshot(Path(config_dir), "$CLAUDE_CONFIG_DIR",
@@ -2435,10 +2875,10 @@ def _agent_config_snapshot(workspace: Path, config_dir: Path | None = None,
 
 def _agent_config_written(workspace: Path, before: dict,
                           config_dir: Path | None = None,
-                          shared: bool = False) -> str | None:
+                          shared: bool = False, path_dirs=()) -> str | None:
     """What the agent created, changed or removed in its configuration since
     `before`, named relative to the workspace or profile (at most five)."""
-    after = _agent_config_snapshot(workspace, config_dir, shared)
+    after = _agent_config_snapshot(workspace, config_dir, shared, path_dirs)
     changed = sorted(name for name in set(before) | set(after)
                      if name not in before or name not in after
                      or before[name] != after[name])
@@ -2653,6 +3093,109 @@ def install_skill(workspace: Path, arm: dict) -> dict | None:
     return None
 
 
+# How long the agent CLI's leftover process group gets between SIGTERM and
+# SIGKILL, and how often it is checked meanwhile (#594).
+_GROUP_TERM_GRACE_S = 5.0
+_GROUP_POLL_S = 0.05
+
+
+def _group_states(pgid: int, proc_root: str = "/proc") -> list[str] | None:
+    """The state letter (`R`, `S`, `Z`, ...) of every process in group
+    `pgid`, read from `<proc_root>/<pid>/stat`; None when `proc_root` cannot
+    be listed (no /proc), so the caller cannot tell and keeps waiting."""
+    try:
+        pids = [name for name in os.listdir(proc_root) if name.isdigit()]
+    except OSError:
+        return None
+    states = []
+    for pid in pids:
+        try:
+            with open(os.path.join(proc_root, pid, "stat"), "rb") as stream:
+                stat_line = stream.read().decode("ascii", "replace")
+            # `pid (comm) state ppid pgrp ...`: comm may hold spaces and
+            # parentheses, so the fields start after the LAST ')'.
+            fields = stat_line[stat_line.rindex(")") + 1:].split()
+            if int(fields[2]) == pgid:
+                states.append(fields[0])
+        except (OSError, ValueError, IndexError):
+            continue  # gone since the listing, or not a stat line
+    return states
+
+
+def _kill_process_group(pgid, *, grace: float = _GROUP_TERM_GRACE_S,
+                        poll: float = _GROUP_POLL_S, clock=time.monotonic,
+                        pause=time.sleep, states=_group_states) -> None:
+    """SIGTERM whatever is left of process group `pgid` (an agent CLI started
+    in its own session), then SIGKILL it if anything is still there after
+    `grace` seconds of `clock`, checking every `poll` seconds (`pause`). The
+    wait ends early once every member is a zombie (`states`): a zombie
+    still answers `killpg(pgid, 0)`, and in a PID namespace nobody may reap
+    it.
+
+    Refuses, before any signal, a group that is not an int greater than 1 or
+    is the harness's own (its pid or its group): 0 would be the harness's
+    group, 1 init's, and -1 every process the harness may signal (a mocked
+    pid once became `kill(-1, SIGKILL)` and killed every session). A group
+    that is already gone, or not the harness's to signal, is left alone.
+
+    What it ends is everything the arm's CLI left in its group, including
+    the fleet-memory hook's detached delivery receipt writer when the CLI
+    ran that hook in an arm's profile: intended, since that scratch profile
+    is discarded with the arm. A writer that calls setsid() itself has left
+    the group and is not reached; the profile markers' exemption and
+    `_in_place_scratch`'s removal of a markers-only leftover cover it."""
+    if (type(pgid) is not int or pgid <= 1
+            or pgid in (os.getpid(), os.getpgrp())):
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+        deadline = clock() + grace
+        while clock() < deadline:
+            pause(poll)
+            os.killpg(pgid, 0)
+            members = states(pgid)
+            # Non-empty: a /proc from another PID namespace lists no member,
+            # and all([]) would end the wait before a living writer's SIGKILL.
+            if members and all(state == "Z" for state in members):
+                return
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        # Empty (the usual case) or emptied while waiting; a group the
+        # harness may not signal is not the one it started.
+        return
+
+
+def _run_in_own_session(cmd: list, *, cwd, capture_output: bool, text: bool,
+                        timeout, env) -> subprocess.CompletedProcess:
+    """`subprocess.run` with the same arguments, result and TimeoutExpired,
+    but the child is started in its own session, and its process group,
+    whatever the CLI left running in it, is ended (`_kill_process_group`)
+    however the call ends (#594): a detached child otherwise outlives its arm
+    and writes into the next one's profile."""
+    guidance.check_timeout(timeout, "run_eval._run_in_own_session(timeout=)",
+                           guidance.SINK_TIMEOUT_REMEDY)
+    pipe = subprocess.PIPE if capture_output else None
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=pipe, stderr=pipe,
+                            text=text, start_new_session=True)
+    try:
+        with proc:
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # As subprocess.run: the child is killed and reaped, and the
+                # output read so far stays on the exception.
+                proc.kill()
+                proc.wait()
+                raise
+            except BaseException:
+                proc.kill()
+                raise
+            return subprocess.CompletedProcess(proc.args, proc.poll(), stdout, stderr)
+    finally:
+        # With start_new_session the child's pid is its group's id.
+        _kill_process_group(proc.pid)
+
+
 def run_agent(workspace: Path, prompt: str, arm: dict) -> dict:
     """Run the agent under test (the Claude Code CLI, headless) on the workspace.
 
@@ -2725,6 +3268,12 @@ def run_agent(workspace: Path, prompt: str, arm: dict) -> dict:
                                  or agent_env(workspace, arm.get("env")))
     for name in ARM_DROPPED_ENV:
         env.pop(name, None)
+    # The CLI's own startup `git` must find the workspace's `.git` or none:
+    # a `.git` it could not use there (a broken HEAD) would otherwise send
+    # it up to a parent directory's, which the snapshot does not watch and
+    # Bash may be able to write (#612).
+    env["GIT_CEILING_DIRECTORIES"] = os.pathsep.join(dict.fromkeys(
+        (str(Path(workspace).parent), str(Path(workspace).resolve().parent))))
     # Every host-filesystem alias is denied whole, so a PATH entry under one
     # (WSL appends the Windows PATH under /mnt/c) is dropped from the arm's
     # environment, a skill arm's and a guidance arm's `env_override` alike;
@@ -2732,7 +3281,8 @@ def run_agent(workspace: Path, prompt: str, arm: dict) -> dict:
     aliases = [path for label, path in denied if label == MOUNT_ALIAS_LABEL]
     if "PATH" in env:
         try:
-            env["PATH"] = arm_path_or_error(env["PATH"], aliases)
+            env["PATH"] = workspace_path_or_error(
+                arm_path_or_error(env["PATH"], aliases), workspace)
         except ArmReadIsolationError as exc:
             return {"error": exc.code, "detail": str(exc)}
     # Where this arm's CLI saves its session, which the read rules leave open
@@ -2791,10 +3341,13 @@ def run_agent(workspace: Path, prompt: str, arm: dict) -> dict:
             for skill in (path / "skills").iterdir():
                 delivery._tree_files(skill)
             readable_plugins.append(path)
+        hooks_dir = Path(arm["fleet_hooks_dir"]) if arm.get("fleet_hooks_dir") else None
         isolation = arm_isolation_flags(checkouts, session_dir, workspace, config_dir,
                                         outputs, additional_profiles=scratch_profiles,
                                         readable_plugins=readable_plugins,
-                                        path_env=env.get("PATH", ""), mountinfo=mountinfo)
+                                        path_env=env.get("PATH", ""), mountinfo=mountinfo,
+                                        fleet_hooks_dir=hooks_dir,
+                                        fleet_hooks_modules=arm.get("fleet_hooks_modules"))
     except (ArmReadIsolationError, delivery.DeliveryError, OSError, ValueError) as exc:
         if not isinstance(exc, ArmReadIsolationError):
             return {"error": "read_rules_unsafe", "detail": "plugin read boundary could not be verified"}
@@ -2826,7 +3379,14 @@ def run_agent(workspace: Path, prompt: str, arm: dict) -> dict:
     # `--resume`s the session, and a non-persisted session cannot be resumed
     # ("No conversation found", measured), so a multi-turn arm persists and
     # `_archive_session_dir` moves what it wrote out of the profile.
-    if not arm.get("followups"):
+    #
+    # A receipt arm (#139, a guidance arm) persists too: the instructions
+    # entry its receipt is read from exists only in a persisted transcript
+    # (CLI 2.1.316, measured). Only on a scratch profile, which the arm
+    # removes with the rest of its scratch, so nothing lands under a real
+    # HOME.
+    receipt = bool(arm.get("instructions_receipt")) and not shared_profile
+    if not arm.get("followups") and not receipt:
         cmd.append("--no-session-persistence")
     if arm.get("model"):
         cmd += ["--model", arm["model"]]
@@ -2869,7 +3429,14 @@ def run_agent(workspace: Path, prompt: str, arm: dict) -> dict:
         turns: list[dict] = []
         # What the harness installed (a with_skill arm's skill), before the
         # agent's first turn.
-        config_before = _agent_config_snapshot(workspace, config_dir, shared_profile)
+        path_dirs = _agent_path_dirs(workspace, env.get("PATH", ""))
+        config_before = _agent_config_snapshot(workspace, config_dir, shared_profile,
+                                               path_dirs)
+        # A hooked arm's frozen hook set (#535), write-denied above.
+        hooks_before = fleet_hooks.tree_digest(hooks_dir) if hooks_dir is not None else None
+        # The git configuration the NEXT launch's own `git` will read (#609):
+        # only a multi-turn arm launches again in this workspace.
+        git_before = _workspace_git_snapshot(workspace, env) if len(texts) > 1 else None
         for index, text in enumerate(texts):
             label = f"follow-up {index} of {len(texts) - 1}: " if index else ""
             turn_cmd = cmd
@@ -2883,8 +3450,9 @@ def run_agent(workspace: Path, prompt: str, arm: dict) -> dict:
             calls.append([])
             clocked.append({"started": _now()})
             try:
-                result = subprocess.run(turn_cmd, cwd=workspace, capture_output=True,
-                                        text=True, timeout=timeout, env=env)
+                result = _run_in_own_session(turn_cmd, cwd=workspace,
+                                             capture_output=True, text=True,
+                                             timeout=timeout, env=env)
                 clocked[-1]["ended"] = _now()
             except OSError as exc:
                 # E2BIG and the like: the CLI never started.
@@ -2955,23 +3523,37 @@ def run_agent(workspace: Path, prompt: str, arm: dict) -> dict:
             # (blocked by the settings above) is not the arm the fixture
             # describes, and project settings reload mid-session.
             written = _agent_config_written(workspace, config_before, config_dir,
-                                            shared_profile)
+                                            shared_profile, path_dirs)
+            if not written and hooks_dir is not None \
+                    and fleet_hooks.tree_digest(hooks_dir) != hooks_before:
+                written = f"{fleet_hooks.DIRNAME}/ (the frozen fleet hooks)"
+            if not written and git_before is not None and index < len(texts) - 1:
+                written = _snapshot_changes(git_before,
+                                            _workspace_git_snapshot(workspace, env))
             if written:
                 return traced({"error": "agent_wrote_agent_config",
                                "detail": f"{label}the agent wrote {written}",
                                "raw": data})
 
         if len(turns) > 1:
-            return traced(_combine_turns(turns, texts[1:]))
-        data = turns[0]
-        return traced({
-            "transcript": data.get("result"),
-            "usage": data.get("usage"),
-            "cost_usd": data.get("total_cost_usd"),
-            "num_turns": data.get("num_turns"),
-            "duration_ms": data.get("duration_ms"),
-            "raw": data,
-        })
+            answer = _combine_turns(turns, texts[1:])
+        else:
+            data = turns[0]
+            answer = {
+                "transcript": data.get("result"),
+                "usage": data.get("usage"),
+                "cost_usd": data.get("total_cost_usd"),
+                "num_turns": data.get("num_turns"),
+                "duration_ms": data.get("duration_ms"),
+                "raw": data,
+            }
+        if arm.get("instructions_receipt"):
+            # What the FIRST turn's session loaded; in memory only, never
+            # written to raw.json or a summary (the caller keeps paths and
+            # digests). Read before the finally archives the directory.
+            answer["instructions"] = (guidance.read_instruction_files(
+                projects, turns[0].get("session_id")) if receipt else None)
+        return traced(answer)
     finally:
         if session_dir is not None and not preexisting:
             _archive_session_dir(session_dir, arm.get("session_scratch"))
@@ -3428,6 +4010,72 @@ def claude_version() -> str | None:
     return None
 
 
+#: The fixture key that opts a fixture into the fleet hook runner (ADR 0012,
+#: fleet hooks addendum, #535). Literal `true` or `false` only
+#: (context._check_fleet_hooks); part of `fixture_digest`, which hashes every
+#: tracked file of the fixture directory, fixture.yaml included.
+FLEET_HOOKS_KEY = context.FLEET_HOOKS_KEY
+#: Config-based `hook.<name>.event` and `hook.<name>.command` keys, the way
+#: the fleet installs its hooks (acsi-agentskills ADR 0020), need Git 2.54 or
+#: later. scripts/dev_setup.sh carries the same minimum, and
+#: test/issues/test_issue_dev_setup.py pins the two equal.
+FLEET_HOOKS_MIN_GIT = (2, 54)
+_GIT_VERSION = re.compile(r"git version ([0-9]+)\.([0-9]+)(?![0-9])")
+
+
+def git_version() -> str | None:
+    """The first line of `git --version` for the `git` an arm runs (the first
+    on PATH, which agent_env passes through), reduced and capped like
+    claude_version's, or None with a one-line warning naming only an exit
+    status or an exception class. Recorded as `harness.git_version`."""
+    guidance.check_timeout(VERSION_TIMEOUT_S, "run_eval.git_version(timeout=)",
+                           guidance.SINK_TIMEOUT_REMEDY)
+    why = None
+    try:
+        # No `GIT_*` from the caller and no system or global config: only the
+        # binary's own version is read.
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith("GIT_")}
+        env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null")
+        result = subprocess.run(["git", "--version"], env=env, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=VERSION_TIMEOUT_S)
+        if result.returncode != 0:
+            why = f"exit {result.returncode}"
+        else:
+            lines = (result.stdout or "").splitlines()
+            first = _VERSION_JUNK.sub("", lines[0]) if lines else ""
+            version = first.strip()[:VERSION_MAX_CHARS].strip()
+            if version:
+                return version
+            why = "no version in its output"
+    except Exception as exc:  # noqa: BLE001 — record null, never crash the run
+        why = type(exc).__name__
+    print(f"warning: harness: could not read the Git version ({why}); "
+          "recording null", file=sys.stderr)
+    return None
+
+
+def git_supports_fleet_hooks(version: str | None) -> bool:
+    """Whether `version` (git_version's string) is FLEET_HOOKS_MIN_GIT or
+    later. An unreadable or unparsable version does not."""
+    match = _GIT_VERSION.match(version or "")
+    return match is not None and (int(match[1]), int(match[2])) >= FLEET_HOOKS_MIN_GIT
+
+
+def fleet_hooks_refusal(fixture: dict, version: str | None) -> str | None:
+    """Why a fixture that opts into the fleet hooks cannot run on this host's
+    Git (`git_too_old_for_fleet_hooks`), or None when it can or does not opt
+    in."""
+    if fixture.get(FLEET_HOOKS_KEY) is not True or git_supports_fleet_hooks(version):
+        return None
+    minimum = ".".join(map(str, FLEET_HOOKS_MIN_GIT))
+    return (f"the fixture sets `{FLEET_HOOKS_KEY}: true`, and the fleet hooks are "
+            f"config-based Git hooks, which need Git {minimum} or later "
+            "(acsi-agentskills ADR 0020); this host's `git --version` is "
+            f"{version or 'unreadable'}. Provision Git with "
+            "`bash scripts/dev_setup.sh --build-git PREFIX`")
+
+
 def models_used(*results) -> list[str]:
     """The sorted model ids that served one or more CLI results.
 
@@ -3686,6 +4334,16 @@ _NO_RUN_END = ("no call the harness makes prints a meter event after its last "
                "call (agent, judge or guard) has started (one real call "
                "observed: one event, as the call began); reading the meter at "
                "run end would need an added call")
+#: What `usage.cost_estimate` is (owner decision, 2026-11-01): the meter
+#: reads whole points as each call starts, so a run's last calls are never in
+#: it, and this is the dollar side of every call to set beside it.
+COST_ESTIMATE_BASIS = ("an estimate from the CLI's own per-call dollar figures "
+                       "(total_cost_usd, else modelUsage costUSD), times the "
+                       "measured points-per-dollar rate; not a meter reading")
+#: Why `points_per_usd` and `points` are null in every summary: the harness
+#: has no ingested runs to calibrate on.
+_POINTS_AT_INGEST = ("calibrated at ingest, where the ingested runs are: "
+                     "routine-results/<run id>/cost_estimate.json")
 
 
 def _now() -> datetime:
@@ -3798,6 +4456,61 @@ def _role_usage(role: str, calls: list, results: list) -> dict:
            else f"the {role} call ended without a result")
     return {**block, "reasons": {name: why for name, value in block.items()
                                  if value is None}}
+
+
+def _call_costs(role: str, calls: list, results: list) -> list:
+    """Each of one role's queued calls' own dollar cost, in call order, or
+    None where its results do not say. A single call costs what
+    `_role_usage` reads. Several calls are one resumed session (an agent's
+    follow-ups): one result whose `turns` are the calls' own results, each
+    `total_cost_usd` cumulative for the session (`_combine_turns`), so a
+    call costs its total less the one before it."""
+    if len(calls) == 1:
+        return [_role_usage(role, calls, results)["cost_usd"]]
+    turns = results[0].get("turns") if len(results) == 1 else None
+    if not isinstance(turns, list) or len(turns) != len(calls):
+        return [None] * len(calls)
+    costs, before = [], 0
+    for turn in turns:
+        total = _token_count(turn.get("total_cost_usd")) if isinstance(turn, dict) else None
+        costs.append(None if total is None or before is None or total < before
+                     else total - before)
+        before = total
+    return costs
+
+
+def _cost_estimate(costs: list, span: tuple | None, api_billed: bool) -> dict:
+    """`usage.cost_estimate`: the run's dollars, summed over every call that
+    carries a dollar figure (`costs`, `(role, usd or None)` in call order).
+    `metered_usd` is the dollars of the calls `meter_delta` spans (`span`,
+    the first snapshot's call up to but not including the last one's), which
+    is what a points-per-dollar rate is calibrated on. Nothing is rounded."""
+    known = [(role, usd) for role, usd in costs if usd is not None]
+    agent = [usd for role, usd in costs if role == "agent"]
+    inside = [usd for _, usd in costs[span[0]:span[1]]] if span else []
+    block = {"usd": sum(usd for _, usd in known),
+             **{f"{role}_usd": sum(usd for mine, usd in known if mine == role)
+                for role in USAGE_ROLES},
+             "metered_usd": (sum(inside) if inside and None not in inside
+                             else None),
+             "last_agent_call_usd": agent[-1] if agent else None,
+             "calls_with_cost": len(known),
+             "calls_without_cost": len(costs) - len(known),
+             "points_per_usd": None, "points": None,
+             "basis": COST_ESTIMATE_BASIS}
+    reasons = {"points_per_usd": _POINTS_AT_INGEST, "points": _POINTS_AT_INGEST}
+    if block["metered_usd"] is None:
+        reasons["metered_usd"] = (
+            _API_BILLED if api_billed
+            else "a call inside the measured meter span carried no dollar figure"
+            if None in inside
+            else "no meter delta spans a call: fewer than two meter snapshots "
+                 "from different calls")
+    if block["last_agent_call_usd"] is None:
+        reasons["last_agent_call_usd"] = (
+            "the run's last agent call carried no dollar figure" if agent
+            else "no agent call was made")
+    return {**block, "reasons": reasons}
 
 
 def _sum_measured(trials: list) -> dict:
@@ -3918,9 +4631,18 @@ def _seven_day(info) -> tuple | None:
     return week["utilization"], week.get("resetsAt")
 
 
-def budget_stop_reading(readings: list, limits: dict) -> dict | None:
+def budget_stop_reading(readings: list, limits: dict,
+                        own_usd: float | None = None) -> dict | None:
     """The budget stop (#68) a run's weekly-window readings call for, oldest
     first, or None. `limits` is `budget.load_budget()`'s.
+
+    With `limits["points_per_usd"]` and `own_usd`, the dollars of every call
+    the run has made (None when any call's cost is unknown), `per_run_cap`
+    is charged the run's own spend, `own_usd * points_per_usd`, and that is
+    what `moved` records. The meter reads whole points and moves with the
+    account's other use too, so a tick during a run is not the run's: read
+    that way, one run in six lost its second arm on 2026-11-03. Without
+    either, `moved` is the meter's movement as below.
 
     `moved` is the latest reading less the first, rounded as `_meter_delta`
     rounds a window's delta so the two agree; when the window's reset time
@@ -3932,6 +4654,9 @@ def budget_stop_reading(readings: list, limits: dict) -> dict | None:
         return None
     (start, start_reset), (latest, latest_reset) = readings[0], readings[-1]
     moved = round(latest - start, 6) if latest_reset == start_reset else latest
+    rate = limits.get("points_per_usd")
+    if rate is not None and own_usd is not None:
+        moved = round(own_usd * rate, 6)
     if latest >= limits["stop_when_account_above"]:
         reason, limit = "account_above", limits["stop_when_account_above"]
     elif moved >= limits["per_run_cap"]:
@@ -3994,8 +4719,13 @@ class _RunTelemetry:
         # had started before the call that printed it.
         self.calls_seen = 0
         self.snapshot_calls: list[int] = []
+        # Each of the run's CLI calls' (role, dollar cost or None), in order.
+        self.call_costs: list[tuple] = []
         self.unreadable = 0
         self.written: list[Path] = []
+        # `git --version` (git_version), read once by main(); None for a
+        # caller that never reads it, and recorded as null.
+        self.git_version: str | None = None
 
     def begin_trial(self) -> None:
         """A trial starts. Calls still queued belong to a trial that wrote
@@ -4037,7 +4767,15 @@ class _RunTelemetry:
             event["info"] for group in self.pending for call in group["calls"]
             for event in call.get("events") or ()]
         readings = [r for r in map(_seven_day, infos) if r is not None]
-        self.stop = budget_stop_reading(readings, self.budget)
+        own_usd = None
+        if self.budget.get("points_per_usd") is not None:
+            # Queued calls get their duration when flushed; cost ignores it.
+            costs = [cost for _, cost in self.call_costs] + [
+                cost for group in self.pending for cost in _call_costs(
+                    group["role"], [{**call, "duration_ms": 0}
+                                    for call in group["calls"]], group["results"])]
+            own_usd = None if None in costs else sum(costs)
+        self.stop = budget_stop_reading(readings, self.budget, own_usd)
         return self.stop
 
     def _call_snapshots(self, events: list, role: str, index: int,
@@ -4082,6 +4820,8 @@ class _RunTelemetry:
                 shots += self._call_snapshots(call.get("events") or [],
                                               group["role"], index,
                                               call["started"])
+            self.call_costs += [(group["role"], cost) for cost in _call_costs(
+                group["role"], group["calls"], group["results"])]
         self.snapshots += shots
         kept = _cap_snapshots(shots)
         first = started or min((c["started"] for g in groups for c in g["calls"]),
@@ -4125,9 +4865,10 @@ class _RunTelemetry:
         self.calls_seen += 1
         call = {"started": started, "ended": ended,
                 "duration_ms": int((ended - started).total_seconds() * 1000)}
+        results = [r for r in results if isinstance(r, dict)]
+        self.call_costs += [(role, cost) for cost in _call_costs(role, [call], results)]
         measured["ended_at"] = _stamp(ended)
-        measured[role] = _role_usage(role, [call], [
-            r for r in results if isinstance(r, dict)])
+        measured[role] = _role_usage(role, [call], results)
         new = self._call_snapshots(list(events), role, 0, started)
         self.snapshots += new
         if new and measured["meter"] is not None:
@@ -4192,6 +4933,10 @@ class _RunTelemetry:
                     "id": session if RUN_NAME.fullmatch(session) else None,
                     "usage": None, "note": "not measured"},
                 "limit_promotion": None, "price_table_version": None,
+                "cost_estimate": _cost_estimate(
+                    self.call_costs, None if delta is None else
+                    (self.snapshot_calls[0], self.snapshot_calls[-1]),
+                    self._api_billed()),
                 "reasons": reasons, **stopped}
 
     def usage(self, trials: list | None) -> dict:
@@ -4232,15 +4977,31 @@ class _RunTelemetry:
         delta = level["meter_delta"]
         if delta is None:
             why = level["reasons"]["meter_delta"]
-            return [*lines, f"- Account meter: no change recorded ({why})"]
-        moved = ", ".join(f"{name} {window['from']} to {window['to']}"
-                          for name, window in delta["windows"].items())
-        late = delta["uncovered"]["calls_from_last_snapshot"]
-        return [*lines, "- Account meter (account-wide, so anything else the "
-                        "account ran is in it; read as each agent, judge or guard "
-                        "call starts, "
-                        f"so the {late} call(s) from the last reading on are "
-                        f"not in it): {moved}, from {len(self.snapshots)} snapshots"]
+            lines.append(f"- Account meter: no change recorded ({why})")
+        else:
+            moved = ", ".join(f"{name} {window['from']} to {window['to']}"
+                              for name, window in delta["windows"].items())
+            late = delta["uncovered"]["calls_from_last_snapshot"]
+            lines.append("- Account meter (account-wide, so anything else the "
+                         "account ran is in it; read as each agent, judge or "
+                         "guard call starts, "
+                         f"so the {late} call(s) from the last reading on are "
+                         f"not in it): {moved}, from {len(self.snapshots)} snapshots")
+        return [*lines, _cost_estimate_line(level["cost_estimate"])]
+
+
+def _cost_estimate_line(estimate: dict) -> str:
+    """report.md's line for `usage.cost_estimate`, the one place its
+    dollars are rounded (to cents)."""
+    last = estimate["last_agent_call_usd"]
+    missing = estimate["calls_without_cost"]
+    return ("- Estimated cost (an estimate from the CLI's own per-call dollar "
+            f"figures, not a meter reading): ${estimate['usd']:.2f} over "
+            f"{estimate['calls_with_cost']} call(s); agent "
+            f"${estimate['agent_usd']:.2f}, judge ${estimate['judge_usd']:.2f}, "
+            f"guard ${estimate['guard_usd']:.2f}; last agent call "
+            + ("not known" if last is None else f"${last:.2f}")
+            + (f"; {missing} call(s) without a dollar figure" if missing else ""))
 
 
 _TELEMETRY = _RunTelemetry()
@@ -4266,6 +5027,32 @@ def _harness_line(harness_version: str | None, arm_summaries: list[dict]) -> str
         for s in arm_summaries)
     version = f"`{harness_version}`" if harness_version else "version unknown"
     return f"- Harness: Claude Code {version}; models used: {models}"
+
+
+# The ingest validator's cap on an objective check's or an error's `detail`
+# (scripts/ingest_routine_results.py MAX_STRING). A longer one rejected the
+# whole run on ingest, so the summary carries it cut to the cap with a marker
+# saying how much was dropped; the in-memory result keeps it whole.
+SUMMARY_DETAIL_MAX = 4096
+
+
+def _capped_detail(detail):
+    """`detail` cut to SUMMARY_DETAIL_MAX characters, marker included."""
+    if not isinstance(detail, str) or len(detail) <= SUMMARY_DETAIL_MAX:
+        return detail
+    marker = f" [truncated: {len(detail)} chars]"
+    return detail[:SUMMARY_DETAIL_MAX - len(marker)] + marker
+
+
+def _capped_details(entries):
+    """A copy of a list of check results (or one error object) whose
+    `detail` strings fit the ingest cap; anything else is returned as is."""
+    if isinstance(entries, dict) and "detail" in entries:
+        return {**entries, "detail": _capped_detail(entries["detail"])}
+    if isinstance(entries, list):
+        return [_capped_details(entry) if isinstance(entry, dict) else entry
+                for entry in entries]
+    return entries
 
 
 def _write_summary(results_dir: Path, skill: str | None, arm_name: str,
@@ -4325,12 +5112,13 @@ def _write_summary(results_dir: Path, skill: str | None, arm_name: str,
     summary.update({
         "arm": arm_name,
         "timestamp": timestamp,
-        "error": error,
+        "error": _capped_details(error),
         "agent": agent,
-        "objective_checks": objective_checks,
+        "objective_checks": _capped_details(objective_checks),
         "judge": judge_result,
         "harness": {"name": HARNESS_NAME, "version": harness_version,
-                    "permission_mode": permission_mode, "effort": effort},
+                    "permission_mode": permission_mode, "effort": effort,
+                    "git_version": _TELEMETRY.git_version},
         "models_used": list(models or []),
         "judge_models_used": list(judge_models or []),
         "model_tokens": dict(usage["tokens"]),
@@ -5079,9 +5867,10 @@ class ContextRepositories(dict):
         return paths
 
 
-def _check_with_budget(frozen, subject, budget: dict) -> None:
-    """A subject added to `with` makes that arm the larger one; it must fit
-    the fixture's budget too, which `resolve_context` checked without it."""
+def with_arm_sizes(frozen, subject) -> dict:
+    """The `with` arm's context measurements: the frozen context's, with the
+    skill subject's tested copy in place of any deployed copy, or the section
+    subject's `with` guidance payload."""
     sizes = dict(frozen.manifest["measurements"])
     if isinstance(subject, delivery.SkillSubject):
         deployed = next((tree for tree in frozen.skills if (tree.registry, tree.bundle, tree.skill)
@@ -5095,11 +5884,119 @@ def _check_with_budget(frozen, subject, budget: dict) -> None:
             sizes["skill_payload_bytes"] -= sum(len(raw) for raw in deployed.files.values())
     if isinstance(subject, delivery.SectionSubject):
         sizes["guidance_bytes"] = len(delivery.guidance_payload(frozen, subject, "with"))
+    return sizes
+
+
+def _check_with_budget(frozen, subject, budget: dict) -> None:
+    """A subject added to `with` makes that arm the larger one; it must fit
+    the fixture's budget too, which `resolve_context` checked without it."""
+    sizes = with_arm_sizes(frozen, subject)
+    copy = ""
+    if isinstance(subject, delivery.SkillSubject) and subject.source == "main":
+        # A skill edit on main can grow the with arm with no fixture change;
+        # say which copy did, so the refusal is traceable to a commit.
+        copy = f" with main's copy of {subject.skill} at {subject.revision}"
     for key, measured in sizes.items():
         if measured > budget[key]:
             raise context.ContextError(
                 "budget_exceeded", f"the with arm's {key} measured {measured} "
-                f"bytes exceeds limit {budget[key]}")
+                f"bytes{copy} exceeds limit {budget[key]}")
+
+
+def _registry_head(identity: str, checkout: Path, path: Path,
+                   files: dict, modes: dict) -> str:
+    """The registry checkout's HEAD commit, once the skill directory `path`
+    read as `files`/`modes` is proven to be exactly HEAD's tree there.
+
+    `subject_revision` names a commit, so the bytes tested must be that
+    commit's: an uncommitted edit, a plain directory or a directory nested
+    in some other repository would record a revision that never held them.
+    Only the audited object reader is used (never `git status`, whose
+    filters and config the checkout controls), and paths and modes are
+    compared before any blob is read."""
+    try:
+        git = context._Git(identity, {identity: checkout})
+        # Git prints the directory relative to the checkout at its top level
+        # and absolute elsewhere; either way it must be the checkout's own.
+        reported = (checkout / git.run("rev-parse", "--git-dir").strip().decode("utf-8")).resolve()
+        dotgit = checkout / ".git"
+        if dotgit.is_file():
+            # A linked worktree or submodule: `.git` names its gitdir.
+            line = dotgit.read_text(encoding="utf-8").strip()
+            own = (checkout / line.removeprefix("gitdir:").strip()).resolve() \
+                if line.startswith("gitdir:") else None
+        else:
+            own = dotgit.resolve()
+        if reported != own:
+            raise delivery.DeliveryError(
+                "registry_checkout_unversioned",
+                f"the registry checkout for {identity} is not the top level of its own "
+                "Git repository, so no commit names the skill's bytes")
+        rev = git.revision("HEAD")
+    except (context.ContextError, OSError, UnicodeError) as exc:
+        raise delivery.DeliveryError(
+            "registry_checkout_unversioned",
+            f"the registry checkout for {identity} has no readable Git HEAD") from exc
+    prefix = path.relative_to(checkout).as_posix() + "/"
+    head = {name[len(prefix):]: entry for name, entry in git.tree(rev).items()
+            if name.startswith(prefix)}
+    dirty = delivery.DeliveryError(
+        "registry_checkout_dirty",
+        f"the registry checkout's copy of {path.name} differs from its HEAD {rev}; "
+        "main's copy is tested only as committed")
+    if set(head) != set(files) or any(
+            entry[:2] not in (("100644", "blob"), ("100755", "blob"))
+            or entry[0] != modes[name] for name, entry in head.items()):
+        raise dirty
+    if any(git.read(head, name) != raw for name, raw in files.items()):
+        raise dirty
+    try:
+        main = git.revision("refs/remotes/origin/main")
+    except context.ContextError:
+        # No origin/main (a local clone with no remote): HEAD is all there is,
+        # and `subject_source: main` then means the checkout's HEAD.
+        main = None
+    if main is not None and main != rev:
+        raise delivery.DeliveryError(
+            "registry_checkout_not_main",
+            f"the registry checkout for {identity} is at {rev}, not its origin/main {main}")
+    return rev
+
+
+def _main_copy_subject(subject, url, registries: dict):
+    """`subject` with main's copy of its skill as the bytes the with arm
+    tests (ADR 0012, addendum "main's copy", 2026-11-02): the copy
+    compute_gates' `tested_digest` names, so a run pools exactly when the
+    gate's digest matches. The without arm is unchanged; an adopted subject
+    keeps its deployed digest."""
+    if subject.action == "removed":
+        # Main's copy must come from the registry the context deploys the
+        # skill from: a same-named skill elsewhere is a different skill.
+        if url is not None:
+            named = delivery._identity({"url": _normalize_registry_url(url)})
+            if named.lower() != subject.registry.lower():
+                raise delivery.DeliveryError(
+                    "registry_mismatch", f"the fixture's registry is not {subject.registry}, "
+                    f"which the context deploys {subject.skill} from")
+        else:
+            url = "https://github.com/" + subject.registry
+    identity, bundle, path = main_copy(registries, subject.skill, url)
+    if subject.action == "removed" and bundle != subject.bundle:
+        raise delivery.DeliveryError(
+            "main_bundle_mismatch", f"main's copy of {subject.skill} is in bundle {bundle}, "
+            f"not the deployed {subject.bundle}")
+    files, modes = delivery._tree_files(path)
+    if subject.action == "added" and (
+            identity.lower() != subject.registry.lower() or bundle != subject.bundle
+            or context._file_digest(files) != subject.tested_digest):
+        raise delivery.DeliveryError(
+            "main_copy_mismatch", f"main's copy of {subject.skill} is not the registry copy "
+            "the subject resolved to")
+    checkout = Path(registry_for_url(registries, "https://github.com/" + identity)["path"])
+    rev = _registry_head(identity, checkout, path, files, modes)
+    subject = delivery._skill_candidate(subject, None, files=files, modes=modes,
+                                        label="main's copy")
+    return dataclasses.replace(subject, source="main", revision=rev)
 
 
 def _in_place_plan(fixture: dict, args: argparse.Namespace,
@@ -5120,17 +6017,26 @@ def _in_place_plan(fixture: dict, args: argparse.Namespace,
             "hook, and in-place guidance is delivered only through the real hook")
     candidate = getattr(args, "subject_candidate", None)
     if kind == "skill":
+        url = fixture.get("registry")
+        if url is not None and (not isinstance(url, str) or not url):
+            raise delivery.DeliveryError(
+                "invalid_registry_field", "a fixture's `registry:` is a registry URL string")
         bundle = getattr(args, "skill_bundle", None)
         registry = getattr(args, "skill_registry", None)
-        # A fixture registry qualifies absent subjects; adopted defaults remain
-        # the immutable deployed version unless the run explicitly qualifies it.
-        if registry is None and fixture.get("registry") and not any(
+        # A fixture registry qualifies absent subjects. An adopted subject is
+        # found in the context whatever registry the fixture names; that the
+        # two agree is checked against main's copy below.
+        if registry is None and url and not any(
                 tree.skill == fixture["skill"] and (bundle is None or tree.bundle == bundle)
                 for tree in frozen.skills):
-            registry = delivery._identity({"url": fixture["registry"]})
+            registry = delivery._identity({"url": url})
         subject = delivery.resolve_skill_subject(
             frozen, f"{bundle}:{fixture['skill']}" if bundle else fixture["skill"],
             registries, registry=registry, candidate=candidate)
+        if candidate is not None:
+            subject = dataclasses.replace(subject, source="candidate", revision=None)
+        else:
+            subject = _main_copy_subject(subject, url, registries)
     else:
         subject = delivery.resolve_section_subject(
             frozen, fixture["section"], repositories, candidate=candidate)
@@ -5138,12 +6044,29 @@ def _in_place_plan(fixture: dict, args: argparse.Namespace,
     plan = {"frozen": frozen, "subject": subject, "repositories": repositories,
             "candidate_paths": ([Path(candidate).resolve() if kind == "skill" else
                                  Path(candidate).resolve().parent] if candidate else [])}
+    if fixture.get(FLEET_HOOKS_KEY) is True:
+        # The hooks the context deployed, proven against it (#535); both arms
+        # of every trial get this one set. Host conditions first (#605), so a
+        # host that cannot run them refuses before any arm is paid for.
+        reason = managed_hooks_refusal()
+        if reason:
+            raise delivery.DeliveryError("fleet_hooks_managed_hooks_off", reason)
+        if not fleet_hooks.guard_python_present():
+            raise delivery.DeliveryError(
+                "fleet_hooks_no_python", "the guard hook runs under PATH=/usr/bin:/bin "
+                "and neither /usr/bin/python3 nor /bin/python3 is executable there")
+        fleet_hooks.harness_netns()
+        plan["fleet_hooks"] = fleet_hooks.freeze(frozen, repositories,
+                                                 guidance_subject=kind == "guidance")
     _check_context_summary(plan)
     # Prove every context metadata fence before any CLI/version call.
     try:
         repositories.used_paths()
     except ArmReadIsolationError as exc:
         raise delivery.DeliveryError("context_git_metadata_unknown", str(exc)) from exc
+    if "fleet_hooks" in plan:
+        # Last, as the one step that needs the network, and once per plan.
+        plan["fleet_hooks_modules"] = fleet_hooks.install_modules(plan["fleet_hooks"])
     return plan
 
 
@@ -5189,7 +6112,7 @@ def _in_place_record(plan: dict, role: str) -> dict:
     proof = manifest["guidance"]
     expected = delivery.expected_skills(frozen, skill_subject, role)
     payload = delivery.guidance_payload(frozen, section_subject, role)
-    return {
+    record = {
         "pairing": "in_place",
         "role": role,
         "context": {
@@ -5217,6 +6140,11 @@ def _in_place_record(plan: dict, role: str) -> dict:
                         "guidance_digest": hashlib.sha256(payload).hexdigest(),
                         "subject_present": role == "with"},
     }
+    if "fleet_hooks" in plan:
+        # The hook set both arms received (#535), which compute_gates pools
+        # by; absent for an unhooked run, so its record is as before.
+        record["context"]["fleet_hooks_digest"] = plan["fleet_hooks"].digest
+    return record
 
 
 @contextmanager
@@ -5241,12 +6169,56 @@ def _in_place_pair(plan: dict | None):
         shutil.rmtree(parent, ignore_errors=True)
 
 
+# What a late CLI writer may leave in a cleaned pair profile (#594): the
+# profile markers that carry a size cap. `.claude.json` (uncapped) is the
+# previous arm's CLI state, not a late stamp, and still refuses.
+_LATE_MARKERS = {pattern: limit for pattern, limit in _CLI_PROFILE_MARKERS.items()
+                 if limit is not None}
+
+
+def _only_late_markers(config: Path) -> bool:
+    """Whether a leftover pair profile holds at least one `_LATE_MARKERS`
+    file, each exempt as `_exempt` judges it, and nothing else but the
+    directories leading to them. Anything unreadable is not."""
+    def refuse(error: OSError) -> None:
+        raise error
+
+    found = False
+    try:
+        if os.path.islink(config) or not os.path.isdir(config):
+            return False
+        for current, dirs, files in os.walk(config, onerror=refuse):
+            for name in dirs:
+                if os.path.islink(os.path.join(current, name)):
+                    return False
+            for name in files:
+                path = Path(current) / name
+                if not _exempt(path, path.relative_to(config).as_posix(), (),
+                               _LATE_MARKERS, ()):
+                    return False
+                found = True
+    except OSError:
+        return False
+    return found
+
+
 def _in_place_scratch(plan: dict) -> Path:
     # The reserved profile parent is write-denied; keep writable workspaces
     # and tool temporary files outside it.
-    if os.path.lexists(plan["_pair_config"]):
+    config = plan["_pair_config"]
+    if os.path.lexists(config) and _only_late_markers(Path(config)):
+        # A late writer's stamps only (#594): nothing of the previous arm.
+        shutil.rmtree(config, ignore_errors=True)
+    if os.path.lexists(config):
         raise delivery.DeliveryError("install_collision", "a previous arm's profile was not cleaned")
     return Path(tempfile.mkdtemp(prefix=f"{ARM_WORKSPACE_PREFIX}arm-"))
+
+
+def _fleet_hooks_arm(plan: dict, scratch: Path) -> dict:
+    """The arm key `run_agent` protects and guards a hooked arm by."""
+    return ({"fleet_hooks_dir": str(scratch / fleet_hooks.DIRNAME),
+             "fleet_hooks_modules": str(plan["fleet_hooks_modules"])}
+            if "fleet_hooks" in plan else {})
 
 
 def _clean_in_place_config(plan: dict | None) -> None:
@@ -5298,7 +6270,33 @@ def _prepare_in_place(role: str, fixture: dict, seed: Path, plan: dict,
     env = guidance.agent_env(workspace=workspace, home=home, tmpdir=tmpdir,
                              config_dir=config, env_spec=fixture.get("env"))
     assert_stand_ins_on_path(workspace, env, fixture.get("env"))
+    if "fleet_hooks" in plan:
+        # The arm's own read-only copy, outside `ws/` and `tmp/`, reached
+        # from the agent's environment only and only from a fleet remote, as
+        # ADR 0020's installer reaches it (#535). Harness Git never sees it:
+        # it strips `GIT_*` and reads no global or system config.
+        directory = scratch / fleet_hooks.DIRNAME
+        fleet_hooks.materialize(plan["fleet_hooks"], directory, plan["fleet_hooks_modules"])
+        _add_fleet_origin(workspace, frozen.manifest["repository"])
+        env.update(fleet_hooks.agent_env(directory))
     return workspace, env, delivered
+
+
+def _add_fleet_origin(workspace: Path, repository: str) -> None:
+    """Give a hooked arm's workspace the `origin` a clone of its context
+    repository has, so the fleet include matches as on a real machine. The
+    sandbox has no network, so it is never reached. A workspace that already
+    has an `origin` (a seed's own) is refused rather than left unhooked."""
+    config = workspace / ".git" / "config"
+    text = config.read_text(encoding="utf-8")
+    if re.search(r'^\s*\[\s*remote\s+"origin"\s*\]', text, re.MULTILINE | re.IGNORECASE):
+        raise delivery.DeliveryError(
+            "fleet_hooks_origin_exists", "the workspace already has an `origin` remote, "
+            "so the fleet hooks' remote-scoped include cannot be proven to match")
+    config.write_text(text + f'[remote "origin"]\n\turl = https://github.com/{repository}.git\n'
+                      "\tfetch = +refs/heads/*:refs/remotes/origin/*\n", encoding="utf-8")
+    # The baseline covers `.git/config`: record it again with the remote.
+    workspace_git.seal(workspace)
 
 
 # ---------------------------------------------------------------------------
@@ -5577,6 +6575,7 @@ def _run_arm(arm_name: str, fixture: dict, seed: Path, registries: dict[str, dic
         else:
             if scratch is not None:
                 workspace_git.release(scratch / "ws")
+                fleet_hooks.unlock(scratch / fleet_hooks.DIRNAME)
                 shutil.rmtree(scratch, ignore_errors=True)
                 _clean_in_place_config(plan)
             raise
@@ -5587,6 +6586,7 @@ def _run_arm(arm_name: str, fixture: dict, seed: Path, registries: dict[str, dic
                        effort=effort, agent_model=agent_model)
         if scratch is not None:
             workspace_git.release(scratch / "ws")
+            fleet_hooks.unlock(scratch / fleet_hooks.DIRNAME)
             shutil.rmtree(scratch, ignore_errors=True)
         elif isinstance(exc, SetupFailedError):
             shutil.rmtree(exc.workspace, ignore_errors=True)
@@ -5621,6 +6621,7 @@ def _run_arm(arm_name: str, fixture: dict, seed: Path, registries: dict[str, dic
                 "setting_sources": IN_PLACE_SETTING_SOURCES,
                 "env_override": env_override,
                 "session_scratch": str(scratch),
+                **_fleet_hooks_arm(plan, scratch),
                 "read_denied": [*arm_config["read_denied"],
                                 *plan["repositories"].used_paths(),
                                 *plan.get("candidate_paths", [])]})
@@ -5787,6 +6788,8 @@ def _run_arm(arm_name: str, fixture: dict, seed: Path, registries: dict[str, dic
                 "models_used": agent_models, **extra}
     finally:
         workspace_git.release(workspace)
+        if scratch is not None:
+            fleet_hooks.unlock(scratch / fleet_hooks.DIRNAME)
         shutil.rmtree(scratch if scratch is not None else workspace, ignore_errors=True)
         _clean_in_place_config(plan)
 
@@ -5851,6 +6854,53 @@ def _aggregate_arm(arm_name: str, item: dict, args: argparse.Namespace,
     return written, stats
 
 
+# ---------------------------------------------------------------------------
+# Errored arms in the log. "Runner-level error in arm(s): X" named the arm
+# and nothing else, and a cloud reader cannot download the diagnostics
+# artifact, so each errored trial also prints its CLASS: the summary's error
+# type and the API's HTTP status when the detail carries one. Never the
+# detail itself: it can hold API or stderr text.
+ERROR_TYPE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+_API_STATUS_RE = re.compile(r"\bAPI Error: ([1-5][0-9]{2})\b")
+#: HTTP statuses an immediate retry can clear: timeout, rate limit, server
+#: errors and the API's "overloaded".
+TRANSIENT_STATUSES = frozenset({408, 429, 500, 502, 503, 504, 529})
+#: Error types whose run may be API-side: the CLI reported an error result,
+#: or exited non-zero.
+API_ERROR_TYPES = ("agent_error", "nonzero_exit")
+
+
+def error_class(error: dict | None) -> dict | None:
+    """`{"type", "status"}` of one trial's error, content-free;
+    None for no error. An unexpected type string reads as `unknown`."""
+    if not error:
+        return None
+    raw_type = error.get("type")
+    kind = (raw_type if isinstance(raw_type, str) and ERROR_TYPE_RE.fullmatch(raw_type)
+            else "unknown")
+    detail = error.get("detail")
+    match = _API_STATUS_RE.search(detail) if isinstance(detail, str) else None
+    return {"type": kind, "status": int(match.group(1)) if match else None}
+
+
+def describe_error_class(cls: dict) -> str:
+    text = cls["type"]
+    if cls["status"] is not None:
+        text += f", HTTP {cls['status']}"
+    return text
+
+
+def is_transient(error: dict | None) -> bool:
+    """A timeout, or an API-side error with a retryable HTTP status."""
+    cls = error_class(error)
+    if cls is None:
+        return False
+    if cls["type"] == "timeout":
+        return True
+    return cls["type"] in API_ERROR_TYPES and cls["status"] in TRANSIENT_STATUSES
+
+
+
 def _run_arm_trials(arm_name: str, item: dict, registries: dict[str, dict],
                     args: argparse.Namespace, timestamp: str,
                     selection: tuple | None, *,
@@ -5877,16 +6927,27 @@ def _run_arm_trials(arm_name: str, item: dict, registries: dict[str, dict],
     arm_dir = _unit_dir(args.results_dir, fixture["skill"], timestamp,
                         item["name"]) / arm_name
     label = {"fixture": item["name"]} if item["name"] else {}
+
+    def trial(out_dir: Path, extra: dict) -> dict:
+        result = _run_arm(arm_name, fixture, item["seed"], registries, args,
+                          timestamp, selection, out_dir=out_dir, extra=extra,
+                          plan=plan, hold=hold)
+        # --retry-transient (eval.yml): one more attempt for a timeout or a
+        # retryable API status, in a clean trial directory, so the summary
+        # on disk is the retry's alone. An errored trial queued no judge call.
+        if getattr(args, "retry_transient", False) and is_transient(result.get("error")):
+            print(f"retrying {item['name'] + '/' if item['name'] else ''}{arm_name} "
+                  f"once after {describe_error_class(error_class(result['error']))}")
+            shutil.rmtree(out_dir, ignore_errors=True)
+            result = _run_arm(arm_name, fixture, item["seed"], registries, args,
+                              timestamp, selection, out_dir=out_dir, extra=extra,
+                              plan=plan, hold=hold)
+        return result
+
     if args.trials == 1:
-        results = [_run_arm(arm_name, fixture, item["seed"], registries,
-                            args, timestamp, selection, out_dir=arm_dir,
-                            extra={**label, "n": 1}, plan=plan, hold=hold)]
+        results = [trial(arm_dir, {**label, "n": 1})]
     else:
-        results = [_run_arm(arm_name, fixture, item["seed"], registries,
-                            args, timestamp, selection,
-                            out_dir=arm_dir / f"{TRIAL_DIR_PREFIX}{index}",
-                            extra={**label, "trial": index}, plan=plan,
-                            hold=hold)
+        results = [trial(arm_dir / f"{TRIAL_DIR_PREFIX}{index}", {**label, "trial": index})
                    for index in range(1, args.trials + 1)]
     written, stats = _aggregate_arm(arm_name, item, args, timestamp)
     return {"arm": arm_name, "models_used": _union(written, "models_used"),
@@ -6284,6 +7345,10 @@ def _run_guidance_arm(arm: dict, fixture: dict, seed: Path, ctx: dict,
             extra.update({"bytes": delivered["bytes"], "installed": True,
                           "hook_verdict": delivered["hook_verdict"],
                           "hook_returncode": 0})
+            receipt_expect = {
+                "roots": {"config": Path(env["CLAUDE_CONFIG_DIR"]), "ws": workspace},
+                "delivered": Path(env["CLAUDE_CONFIG_DIR"]) / "CLAUDE.md",
+                "memory_type": "User", "token": None, "forbidden": ()}
         else:
             workspace, home = scratch / "ws", scratch / "home"
             config, tmpdir = scratch / "config", scratch / "tmp"
@@ -6360,27 +7425,39 @@ def _run_guidance_arm(arm: dict, fixture: dict, seed: Path, ctx: dict,
                            if "guidance_violations" in extra else {})}
 
             setting_sources = guidance.SETTING_SOURCES[channel]
+            receipt_expect = {
+                "roots": {"config": config, "ws": workspace},
+                # Where `guidance.deliver` wrote it (its own `dest`).
+                "delivered": (config if channel == "user" else workspace) / "CLAUDE.md",
+                "memory_type": "User" if channel == "user" else "Project",
+                "token": arm_token, "forbidden": forbidden}
             # The guard's preflight model: the fixture's own `model:` pin when it
             # has one, else the CLI's default. When the model roster (#67) lands,
             # its `preflight` entry — the cheapest model that can answer a
             # tool-free probe — is what this line consults instead.
             preflight_model = args.model or fixture.get("model")
-            guard_started = _now()
-            with run_canary.collecting_results() as guard_results:
-                guard = guidance.run_guard(
-                    workspace=workspace, token=arm_token,
-                    expected=guidance.guard_expectation(arm["mode"]), env=env,
-                    # The other side, for EVERY arm: it must not report a token
-                    # it was not delivered.
-                    forbidden_tokens=forbidden,
-                    setting_sources=setting_sources, model=preflight_model,
-                    timeout=(fixture.get("guard") or {}).get("timeout_s", 300))
+            # `guard: {proof: receipt}` (#139): the agent session's own
+            # receipt, checked after it runs, is the whole proof and the
+            # paid probe is skipped. The default, `probe`, runs both.
+            if guard_proof(fixture) == "receipt":
+                guard = {"ok": True, "skipped": "receipt"}
+            else:
+                guard_started = _now()
+                with run_canary.collecting_results() as guard_results:
+                    guard = guidance.run_guard(
+                        workspace=workspace, token=arm_token,
+                        expected=guidance.guard_expectation(arm["mode"]), env=env,
+                        # The other side, for EVERY arm: it must not report a
+                        # token it was not delivered.
+                        forbidden_tokens=forbidden,
+                        setting_sources=setting_sources, model=preflight_model,
+                        timeout=(fixture.get("guard") or {}).get("timeout_s", 300))
+                guard_results, guard_events = _split_events(guard_results)
+                _TELEMETRY.timed("guard", guard_started, guard_results, outcome=(
+                    guard.get("error") or {}).get("type") or "ok",
+                    events=guard_events)
 
             extra["guard"] = guard
-            guard_results, guard_events = _split_events(guard_results)
-            _TELEMETRY.timed("guard", guard_started, guard_results, outcome=(
-                guard.get("error") or {}).get("type") or "ok",
-                events=guard_events)
 
             if not guard["ok"]:
                 error = _guard_error(guard)
@@ -6408,13 +7485,17 @@ def _run_guidance_arm(arm: dict, fixture: dict, seed: Path, ctx: dict,
             # A multi-turn arm's transcript lands under `config`, inside this
             # scratch, and goes when the scratch does: never archived.
             "session_scratch": str(scratch),
+            # The receipt (#139): persist the session in the scratch profile
+            # and hand back the instructions entry it wrote.
+            "instructions_receipt": True,
             "read_denied": run_checkouts(args, guidance_dir=ctx["guidance_dir"]),
             "read_denied_outputs": run_outputs(args),
         }
         if plan is not None:
             arm_config.update({"pairing": "in_place", "pair_parent": str(plan["_pair_parent"]),
                                "verified_plugin_roots": [str(p) for p in delivery.plugins_root(
-                                   Path(env["CLAUDE_CONFIG_DIR"])).iterdir() if p.is_dir()]})
+                                   Path(env["CLAUDE_CONFIG_DIR"])).iterdir() if p.is_dir()],
+                               **_fleet_hooks_arm(plan, scratch)})
             arm_config["read_denied"] = [*arm_config["read_denied"],
                                          *plan["repositories"].used_paths(),
                                 *plan.get("candidate_paths", [])]
@@ -6434,6 +7515,7 @@ def _run_guidance_arm(arm: dict, fixture: dict, seed: Path, ctx: dict,
         agent_usage = None if "error" in result else model_usage(raw)
         judge_models: list = []
 
+        receipt = None
         if "error" in result:
             error = {"type": result["error"], "detail": result.get("detail", "")}
         else:
@@ -6443,6 +7525,29 @@ def _run_guidance_arm(arm: dict, fixture: dict, seed: Path, ctx: dict,
                 "duration_ms": result.get("duration_ms"),
                 "usage": result.get("usage"),
             }
+            receipt = guidance.receipt_verdict(result.get("instructions"),
+                                               **receipt_expect)
+            extra["receipt"] = receipt
+        if receipt is not None and not receipt["ok"]:
+            # INCONCLUSIVE, exactly as a failed guard: what the arm's own
+            # session loaded does not match what was delivered to it, so
+            # nothing it did is scored or judged.
+            error = {"type": receipt["reason"],
+                     "detail": receipt["detail"] + "; no score is written for it"}
+            _write_summary(args.results_dir, None, arm["name"], timestamp, error,
+                           agent_summary, None, None, raw, key=ctx["key"],
+                           extra=extra, harness_version=harness_version,
+                           permission_mode=permission_mode, models=agent_models,
+                           tool_trace=tool_trace, effort=effort,
+                           agent_usage=agent_usage, agent_model=agent_model)
+            return {"arm": arm["name"], "mode": arm["mode"], "error": error,
+                    "agent": agent_summary, "objective_checks": None,
+                    "judge": None, "guard": guard, "inconclusive": True,
+                    "models_used": agent_models, "receipt": receipt,
+                    **({"pairing": "in_place"} if plan is not None else {}),
+                    **({"guidance_violations": extra["guidance_violations"]}
+                       if "guidance_violations" in extra else {})}
+        if "error" not in result:
             checks = arm["objective_checks"] or fixture.get("objective_checks", [])
             scored = dict(fixture)
             scored["objective_checks"] = substitute_token(
@@ -6489,7 +7594,7 @@ def _run_guidance_arm(arm: dict, fixture: dict, seed: Path, ctx: dict,
         done = {"arm": arm["name"], "mode": arm["mode"], "error": error,
                 "agent": agent_summary, "objective_checks": objective_checks,
                 "judge": judge_result, "guard": guard, "inconclusive": False,
-                "models_used": agent_models,
+                "models_used": agent_models, "receipt": extra.get("receipt"),
                 **({"pairing": "in_place"} if plan is not None else {}),
                 **({"guidance_violations": extra["guidance_violations"]}
                    if "guidance_violations" in extra else {})}
@@ -6531,6 +7636,7 @@ def _run_guidance_arm(arm: dict, fixture: dict, seed: Path, ctx: dict,
                 "guidance_violations": counts}
     finally:
         workspace_git.release(scratch / "ws")
+        fleet_hooks.unlock(scratch / fleet_hooks.DIRNAME)
         shutil.rmtree(scratch, ignore_errors=True)
         _clean_in_place_config(plan)
 
@@ -6568,6 +7674,8 @@ def _render_guidance_report(section: str, prompt: str, timestamp: str,
         guard = s.get("guard") or {}
         if s.get("pairing") == "in_place":
             guard_str = "offline proof only (in place)"
+        elif guard.get("skipped") == "receipt":
+            guard_str = "receipt only"
         elif guard.get("ok"):
             guard_str = "ok (saw it)" if guard.get("expected") else "ok (clean)"
         elif guard.get("observed") is None:
@@ -6575,6 +7683,10 @@ def _render_guidance_report(section: str, prompt: str, timestamp: str,
         else:
             guard_str = (f"INCONCLUSIVE (expected {guard.get('expected')}, "
                          f"observed {guard.get('observed')})")
+        receipt = s.get("receipt")
+        if receipt is not None:
+            guard_str += ("; receipt ok" if receipt.get("ok")
+                          else f"; receipt {receipt.get('reason')}")
         err = s.get("error")
         err_str = (" ".join(f"{err['type']}: {err['detail']}".split())
                    .replace("|", "\\|")[:200] if err else "")
@@ -6763,8 +7875,15 @@ def _run_guidance(args: argparse.Namespace, fixture: dict,
         guard = arm_summary["guard"]
         # A `delivery_failed` arm never reached the guard, so there is no
         # expected/observed pair to report — only the delivery's own detail.
-        preamble = (f"guard expected {guard['expected']}, observed "
-                    f"{guard['observed']} — ") if guard else "delivery — "
+        # A receipt failure (#139) comes after a passing (or skipped) guard,
+        # so its own detail is the whole story.
+        if (arm_summary["error"] or {}).get("type") in RECEIPT_ERRORS:
+            preamble = "receipt — "
+        elif guard and "expected" in guard:
+            preamble = (f"guard expected {guard['expected']}, observed "
+                        f"{guard['observed']} — ")
+        else:
+            preamble = "delivery — "
         print(f"INCONCLUSIVE {arm_summary['arm']} (mode "
               f"{arm_summary['mode']}): {preamble}"
               f"{arm_summary['error']['detail']}")
@@ -6777,6 +7896,10 @@ def _run_guidance(args: argparse.Namespace, fixture: dict,
     errored_arms = [s["arm"] for s in arm_summaries if s["error"]]
     if errored_arms:
         print(f"Runner-level error in arm(s): {', '.join(errored_arms)}")
+        for arm_summary in arm_summaries:
+            cls = error_class(arm_summary["error"])
+            if cls is not None:
+                print(f"  {arm_summary['arm']}: {describe_error_class(cls)}")
         return 2
     return 0
 
@@ -7012,6 +8135,51 @@ def _valid_timestamp(value: str) -> bool:
     return True
 
 
+def _exit_on_signal(signum, _frame):
+    """Turn SIGTERM or SIGHUP into SystemExit(128 + signum), so the `finally`
+    blocks run: above all `_run_in_own_session`'s, which kills the agent CLI
+    and ends its group. Started in its own session (#594), the CLI no longer
+    gets a signal aimed at the harness's group (a runner's cancel, GNU
+    timeout, a hangup), and without this it would outlive the harness and
+    keep spending until its own timeout.
+
+    Both signals are ignored from here on, so a repeated SIGTERM cannot cut
+    short the cleanup this one started (the group's SIGKILL, the usage
+    record's write)."""
+    for each in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(each, signal.SIG_IGN)
+        except (ValueError, OSError):
+            pass
+    raise SystemExit(128 + signum)
+
+
+def _exiting_on_signals(run):
+    """Decorate main(): install `_exit_on_signal` for SIGTERM and SIGHUP for
+    the call, and put the previous handlers back after it, so a test that
+    calls main() in-process keeps its own. Only main() installs them, never
+    an import; off the main thread (where signal.signal refuses) they are
+    left as they are."""
+    @functools.wraps(run)
+    def wrapped(*args, **kwargs):
+        previous = {}
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            try:
+                previous[signum] = signal.signal(signum, _exit_on_signal)
+            except ValueError:
+                break
+        try:
+            return run(*args, **kwargs)
+        finally:
+            for signum, handler in previous.items():
+                # None: a handler set outside Python, which cannot be put back.
+                if handler is not None:
+                    signal.signal(signum, handler)
+    return wrapped
+
+
+# Outermost, so the usage record is finished on a signal too.
+@_exiting_on_signals
 @_ending_the_run
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -7093,6 +8261,10 @@ def main() -> int:
                              "`harness` block; the judge does not take it")
     parser.add_argument("--no-judge", action="store_true",
                         help="skip judge scoring (wins over --judge)")
+    parser.add_argument("--retry-transient", action="store_true",
+                        help="run an arm's trial once more when it errored "
+                             "with a timeout or a retryable API status (408, "
+                             "429, 5xx, 529); eval.yml passes it")
     parser.add_argument("--judge", default="auto", choices=("auto", "always"),
                         help="auto (default): a with/without pair is judged "
                              "only when the objective result does not already "
@@ -7149,9 +8321,11 @@ def main() -> int:
     parser.add_argument("--budget", type=Path, default=budget.DEFAULT_BUDGET,
                         metavar="PATH",
                         help="the weekly allowance budget (#68): a run stops "
-                             "starting trials and judge calls once the weekly "
-                             "meter has moved per_run_cap since its first "
-                             "reading, or reads stop_when_account_above "
+                             "starting trials and judge calls once its own "
+                             "calls have cost per_run_cap (at points_per_usd; "
+                             "without it, once the weekly meter has moved "
+                             "that much since its first reading), or the "
+                             "meter reads stop_when_account_above "
                              "(default: evals/budget.yml)")
     parser.add_argument("--asserted-quiet", default=None, type=_run_name,
                         metavar="WHO",
@@ -7253,6 +8427,11 @@ def main() -> int:
     # than named by it.
     discovered = eval_dirs != [args.eval_dir]
 
+    # Read once per run (#535): recorded in every summary as
+    # `harness.git_version`, and what a `fleet_hooks: true` fixture is
+    # refused on below.
+    _TELEMETRY.git_version = git_version()
+
     # EVERY selected fixture is loaded and checked before ANY arm of any of
     # them starts: the first refusal ends the invocation with nothing spent.
     prepared = []
@@ -7271,6 +8450,12 @@ def main() -> int:
             validate_followups(fixture, eval_dir / FIXTURE_FILE)
             validate_effort(fixture, eval_dir / FIXTURE_FILE)
             seed_prep.validate_fixture(fixture, eval_dir)
+            refusal = fleet_hooks_refusal(fixture, _TELEMETRY.git_version)
+            if refusal is not None and args.arm != "objective-only":
+                # Before any paid call: an arm that stands for the real setup
+                # would run without the hooks it is meant to carry.
+                print(f"git_too_old_for_fleet_hooks: {eval_dir / FIXTURE_FILE}: {refusal}")
+                return 2
         except MappingFixtureKeyError as exc:
             # A malformed `judge:` is #81's `invalid_judge_block` — named in
             # stdout AND recorded as report.md plus one summary.json per arm, so
@@ -7640,6 +8825,7 @@ def main() -> int:
     # always was: an arm whose mean is over the survivors is not the
     # measurement that was asked for.
     errored_arms = []
+    error_lines = []
     for item, arms in outcomes:
         for arm in arms:
             stats = arm["stats"]
@@ -7647,6 +8833,11 @@ def main() -> int:
                 continue
             label = (f"{item['name']}/{arm['arm']}" if item["name"]
                      else arm["arm"])
+            for index, result in enumerate(arm["results"], start=1):
+                cls = error_class(result.get("error"))
+                if cls is not None:
+                    where = f"{label} trial {index}" if args.trials > 1 else label
+                    error_lines.append(f"  {where}: {describe_error_class(cls)}")
             if args.trials > 1:
                 label += f" ({stats['errors']} of {stats['n']} trials)"
             errored_arms.append(label)
@@ -7655,6 +8846,8 @@ def main() -> int:
               "calls after it were not started (see usage.budget_stop)")
     if errored_arms:
         print(f"Runner-level error in arm(s): {', '.join(errored_arms)}")
+        for line in error_lines:
+            print(line)
         return 2
     return 0
 

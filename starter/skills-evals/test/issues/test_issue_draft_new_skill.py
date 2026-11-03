@@ -6,6 +6,12 @@ routine's `draft` mode. What is pinned here:
 
   * the proposal schema (one table), the selector's order and exclusions,
     and the hook-first decline path (`--hook-declined`, `hook_declined=1`);
+  * `issue-proposals`: only open, owner-filed `skill-proposal` issues (no
+    pull requests) with a name line become proposals of the same schema,
+    deterministically, the lower number winning a shared subject, the
+    skipped ones counted by number and their text never printed; `select
+    --issue-proposals` ranks them with the lessons, and `payload` reads an
+    issue-proposals/ path under that directory;
   * `drafted-subjects` reads remote branches through git plumbing only and
     prints `<subject> <decision>`;
   * the fire payload: exact keys, `id` kept, dates dropped, the 60000-byte
@@ -86,6 +92,19 @@ def proposal(**changes) -> dict:
            "examples": ["An agent pushed a branch that failed lint at "
                         "ci.example.com, twice in one session."],
            "repos": ["example-org/example-repo"]}
+    doc.update(changes)
+    return doc
+
+
+def issue(number: int = 18, **changes) -> dict:
+    doc = {"number": number, "title": "Skill: fan out a triage",
+           "state": "open", "author_association": "OWNER",
+           "user": {"login": "example-adopter"},
+           "labels": [{"name": "bug"}, {"name": "skill-proposal"}],
+           "created_at": "2026-10-20T08:00:00Z",
+           "updated_at": "2026-10-26T09:30:00Z",
+           "body": "Working name: `fan-out-triage`, in `acsi-coding-anywhere`.\n\n"
+                   "Fan a triage out over the example.com repositories."}
     doc.update(changes)
     return doc
 
@@ -220,6 +239,19 @@ class ProposalSchema(unittest.TestCase):
             with self.subTest(label), self.assertRaises(dns.Rejected):
                 dns.check_proposal(doc)
 
+    def test_miner_shaped_repos_pass_and_path_shapes_are_refused(self):
+        miner = ["~", "example-site-a", "_agent-guidance", "GHA-bench",
+                 "scratch-2026-10-05-abc123", "example-owner/example-repo"]
+        miner += [f"example-repo-{i}" for i in range(30)]
+        dns.check_proposal(proposal(repos=miner), "2026-10-26", SUBJECT)
+        dns.check_proposal(proposal(repos=[f"r{i}" for i in range(100)]))
+        for bad in ("../x", "a/b/c", ".", "..", "/abs", ".hidden", "a/", "",
+                    "x" * 101):
+            with self.subTest(bad), self.assertRaises(dns.Rejected):
+                dns.check_proposal(proposal(repos=[bad]))
+        with self.assertRaises(dns.Rejected):
+            dns.check_proposal(proposal(repos=[f"r{i}" for i in range(101)]))
+
     def test_the_path_must_agree_with_the_content(self):
         with self.assertRaises(dns.Rejected):
             dns.check_proposal(proposal(), "2026-10-23", SUBJECT)
@@ -275,6 +307,20 @@ class Select(Case):
                    MARKER + "{not json")
         self.assertEqual(self.select()["count"], "0")
 
+    def test_a_miner_shaped_proposal_is_picked(self):
+        repos = ["~", "example-site-a", "_agent-guidance"]
+        repos += [f"example-repo-{i}" for i in range(27)]
+        rel = self.put("2026-10-26", proposal(repos=repos))
+        self.assertEqual(self.select()["proposal"], rel)
+
+    def test_the_unattributed_pool_is_skipped_and_a_real_subject_picked(self):
+        self.put("2026-10-26", proposal(subject="none", evidence_count=403))
+        real = self.put("2026-10-26", proposal(subject="aaa", evidence_count=2))
+        self.assertEqual(self.select(), {"proposal": real, "count": "1",
+                                         "hook_declined": "0"})
+        with self.assertRaisesRegex(dns.Rejected, "unattributed pool"):
+            dns.check_proposal(proposal(subject="none"))
+
     def test_a_proposal_too_big_to_fire_is_never_picked(self):
         self.put("2026-10-26", proposal(examples=["é" * 2000] * 20))
         self.assertEqual(self.select()["count"], "0")
@@ -319,6 +365,253 @@ class Select(Case):
         self.assertEqual(dns.eligibility("a", {"a": {"hook-first"}}, set()), (False, False))
         self.assertEqual(dns.eligibility("a", {"a": {"hook-first"}}, {"a"}), (True, True))
         self.assertEqual(dns.eligibility("a", {"a": {"accepted"}}, {"a"}), (False, False))
+        two = {f"unmeasured@{RUN_ID[:-1]}{k}" for k in "01"}
+        self.assertEqual(dns.eligibility("a", {"a": two}, set()), (True, False))
+        three = two | {f"unmeasured@{RUN_ID[:-1]}2"}
+        self.assertEqual(dns.eligibility("a", {"a": three}, set()), (False, False))
+        self.assertEqual(dns.eligibility("a", {"a": two | {"rejected"}}, set()),
+                         (False, False))
+
+    def test_family_names_the_miners_cluster(self):
+        self.assertEqual(dns.family("tool-bash-gh"), "tool-bash")
+        self.assertEqual(dns.family("tool-bash-sleep"), "tool-bash")
+        self.assertEqual(dns.family("tool-edit"), "tool-edit")
+        self.assertEqual(dns.family("red-ci-example-site-a-ai"), "red-ci")
+        self.assertEqual(dns.family("github-batch-writes"), "github-batch-writes")
+
+    def test_two_measured_sibling_rejections_close_the_family(self):
+        one = {"tool-bash-gh": {"rejected"}}
+        self.assertEqual(dns.eligibility("tool-bash-cd", one, set()), (True, False))
+        two = {**one, "tool-bash-sleep": {"rejected"}}
+        self.assertEqual(dns.eligibility("tool-bash-cd", two, set()), (False, False))
+        # Another family, or a subject that is its own family, is untouched.
+        self.assertEqual(dns.eligibility("tool-edit", two, set()), (True, False))
+        self.assertEqual(dns.eligibility("red-ci-x", two, set()), (True, False))
+        # An accepted sibling keeps the family open.
+        opened = {**two, "tool-bash-git": {"accepted"}}
+        self.assertEqual(dns.eligibility("tool-bash-cd", opened, set()), (True, False))
+        # Rejections that measured nothing say nothing about the family.
+        unmeasured = {"tool-bash-gh": {f"unmeasured@{RUN_ID}"},
+                      "tool-bash-sleep": {f"unmeasured@{RUN_ID}"}}
+        self.assertEqual(dns.eligibility("tool-bash-cd", unmeasured, set()), (True, False))
+
+    def test_select_skips_a_subject_in_a_closed_family(self):
+        self.put("2026-10-26", proposal(subject="tool-bash-cd"))
+        self.write(self.drafted, "tool-bash-gh rejected\ntool-bash-sleep rejected\n")
+        self.assertEqual(self.select()["count"], "0")
+        self.write(self.drafted, "tool-bash-gh rejected\n")
+        self.assertEqual(self.select()["count"], "1")
+
+    def test_an_unmeasured_rejection_leaves_the_subject_eligible(self):
+        self.put("2026-10-26", proposal())
+        self.write(self.drafted, f"{SUBJECT} unmeasured@{RUN_ID}\n")
+        self.assertEqual(self.select()["count"], "1")
+        self.write(self.drafted, "".join(f"{SUBJECT} unmeasured@{RUN_ID[:-1]}{k}\n"
+                                         for k in "012"))
+        self.assertEqual(self.select()["count"], "0")
+        # A malformed tag is skipped, not counted.
+        self.write(self.drafted, f"{SUBJECT} unmeasured@nope\n")
+        self.assertEqual(self.select()["count"], "1")
+
+    def test_measured_reads_whether_any_fixture_ran_both_arms(self):
+        ok = {"n": 1, "errors": 0, "passed": 4, "total": 4}
+        bad = {"n": 1, "errors": 1, "passed": 0, "total": 0}
+        self.assertFalse(dns.measured({"fixtures": {}}))
+        self.assertFalse(dns.measured({}))
+        self.assertFalse(dns.measured({"fixtures": {"x": {"with_skill": bad,
+                                                          "without_skill": bad}}}))
+        self.assertFalse(dns.measured({"fixtures": {"x": {"with_skill": ok,
+                                                          "without_skill": None}}}))
+        self.assertTrue(dns.measured({"fixtures": {"x": {"with_skill": bad,
+                                                         "without_skill": bad},
+                                                   "y": {"with_skill": ok,
+                                                         "without_skill": ok}}}))
+
+
+class IssueProposals(Case):
+    def convert(self, issues, out=None) -> tuple[int, str, str, Path]:
+        out = out or self.tmp / "out"
+        path = self.write(self.tmp / "issues.json", issues)
+        code, stdout, stderr = run_main("issue-proposals", "--issues", str(path),
+                                        "--out", str(out))
+        return code, stdout, stderr, out
+
+    def files(self, out: Path) -> dict[str, dict]:
+        return {p.relative_to(out).as_posix(): json.loads(p.read_text(encoding="utf-8"))
+                for p in sorted(out.rglob("*.json"))}
+
+    def test_an_owner_issue_becomes_a_schema_proposal(self):
+        code, stdout, stderr, out = self.convert([issue()])
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(outputs(stdout), {"written": "1"})
+        rel = "issue-proposals/2026-10-26/fan-out-triage__new-skill.json"
+        doc = self.files(out)[rel]
+        self.assertEqual(doc, {
+            "schema_version": 1, "id": "issue-acsi-agentskills-18",
+            "subject": "fan-out-triage", "kind": "new-skill", "evidence_count": 1,
+            "first_seen": "2026-10-20", "last_seen": "2026-10-26",
+            "examples": ["2026-10-20 acsi-agentskills [issue] #18 Skill: fan out a triage",
+                         "Working name: `fan-out-triage`, in `acsi-coding-anywhere`.\n\n"
+                         "Fan a triage out over the example.com repositories."],
+            "repos": ["example-adopter/acsi-agentskills"]})
+        self.assertRegex(doc["id"], rf"^{dns.PROPOSAL_ID}$")
+        dns.check_proposal(doc, "2026-10-26", "fan-out-triage")
+        self.assertEqual(dns.PROPOSAL_PATH_RE.fullmatch(rel).group("root"), "issue-proposals")
+
+    def test_only_open_owner_labeled_issues_count(self):
+        pr = issue(pull_request={"url": "https://example.com/pr"})
+        cases = {
+            "member": issue(author_association="MEMBER"),
+            "contributor": issue(author_association="CONTRIBUTOR"),
+            "other login": issue(user={"login": "someone-else"}),
+            "no label": issue(labels=[{"name": "bug"}]),
+            "label as text": issue(labels=["skill-proposal"]),
+            "pull request": pr,
+            "closed": issue(state="closed"),
+            "bool number": issue(number=True),
+            "bad date": issue(created_at="yesterday"),
+            "not an object": "skill-proposal",
+        }
+        for label, item in cases.items():
+            with self.subTest(label):
+                code, stdout, stderr, out = self.convert(
+                    [item], self.tmp / label.replace(" ", "-"))
+                self.assertEqual(code, 0, stderr)
+                self.assertEqual(outputs(stdout), {"written": "0"})
+                self.assertEqual(self.files(out), {})
+
+    def test_the_subject_comes_from_the_first_name_line(self):
+        cases = {
+            "working name": ("Working name: `fan-out-triage`, in x.", "fan-out-triage"),
+            "skill name": ("Intro.\nSkill name:`a-b-c`\nmore", "a-b-c"),
+            "first wins": ("Skill name: `first-one`\nWorking name: `second`", "first-one"),
+            "crlf": ("Intro.\r\nSkill name: `crlf-name`\r\n", "crlf-name"),
+            "not at line start": ("See Skill name: `nope-name`", None),
+            "bad subject": ("Skill name: `Bad_Name`", None),
+            "unquoted": ("Skill name: plain-name", None),
+            "first is bad": ("Skill name: `Bad`\nSkill name: `good-one`", None),
+        }
+        for label, (body, want) in cases.items():
+            with self.subTest(label):
+                self.assertEqual(dns.issue_subject(dns.clean_text(body)), want)
+
+    def test_unnamed_issues_are_counted_by_number_and_never_quoted(self):
+        issues = [issue(5, body=MARKER), issue(7, body=None, title=MARKER),
+                  issue(9, title=MARKER, body=f"Skill name: `good-one`\n\n{MARKER}"),
+                  issue(11, author_association="NONE", body=MARKER)]
+        code, stdout, stderr, out = self.convert(issues)
+        self.assertEqual(code, 0, stderr)
+        self.assertNotIn(MARKER, stdout + stderr)
+        self.assertIn("issues without a name line: 2 #5 #7", stderr)
+        self.assertNotIn("#11", stderr)
+        self.assertEqual(list(self.files(out)),
+                         ["issue-proposals/2026-10-26/good-one__new-skill.json"])
+
+    def test_a_shared_subject_keeps_the_lower_number(self):
+        issues = [issue(30, updated_at="2026-10-28T00:00:00Z"), issue(12)]
+        code, _, stderr, out = self.convert(issues)
+        self.assertEqual(code, 0, stderr)
+        [(rel, doc)] = self.files(out).items()
+        self.assertEqual(doc["id"], "issue-acsi-agentskills-12")
+        self.assertEqual(rel, "issue-proposals/2026-10-26/fan-out-triage__new-skill.json")
+        self.assertIn("issues skipped for a subject a lower number has: 1 #30", stderr)
+
+    def test_the_body_is_chunked_on_paragraphs_within_the_limits(self):
+        limit = dns.PROPOSAL_SCHEMA["examples"]["item"]["max"]
+        self.assertEqual(dns.body_chunks("one\n\ntwo\n  \nthree", limit),
+                         ["one\n\ntwo\n\nthree"])
+        self.assertEqual(dns.body_chunks("a" * 10 + "\n\n" + "b" * 10, 15),
+                         ["a" * 10, "b" * 10])
+        self.assertEqual(dns.body_chunks("c" * 35, 15), ["c" * 15, "c" * 15, "c" * 5])
+        self.assertEqual(dns.clean_text("a\x1b[0mb\r\nc\x7f\td"), "a[0mb\nc\td")
+        paragraphs = "\n\n".join(f"{i:03d} " + "w" * 1500 for i in range(40))
+        body = "Skill name: `long-one`\n\n" + paragraphs + "\x00\x1b"
+        code, _, stderr, out = self.convert([issue(body=body, title="t\x1b\nx")])
+        self.assertEqual(code, 0, stderr)
+        [doc] = self.files(out).values()
+        self.assertEqual(len(doc["examples"]), 20)
+        self.assertEqual(doc["examples"][0], "2026-10-20 acsi-agentskills [issue] #18 t x")
+        for example in doc["examples"]:
+            self.assertTrue(dns.text_ok(example, limit))
+        self.assertTrue(doc["examples"][1].startswith("Skill name: `long-one`\n\n000 "))
+
+    def test_an_issue_too_big_to_fire_is_skipped_and_counted(self):
+        body = "Skill name: `big-one`\n\n" + "\n\n".join(["é" * 1990] * 25)
+        code, _, stderr, out = self.convert([issue(body=body), issue(4)])
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual([d["id"] for d in self.files(out).values()],
+                         ["issue-acsi-agentskills-4"])
+        self.assertIn("issues skipped as unusable: 1 #18", stderr)
+
+    def test_the_output_is_deterministic(self):
+        issues = [issue(3, body="Skill name: `zeta-one`"), issue(), issue(2, state="closed")]
+        _, _, _, first = self.convert(issues, self.tmp / "first")
+        _, _, _, second = self.convert(list(reversed(issues)), self.tmp / "second")
+        read = lambda root: {p.relative_to(root).as_posix(): p.read_bytes()
+                             for p in sorted(root.rglob("*.json"))}
+        self.assertEqual(len(read(first)), 2)
+        self.assertEqual(read(first), read(second))
+
+    def test_bad_input_is_refused(self):
+        code, stdout, _, _ = self.convert({"message": MARKER})
+        self.assertEqual((code, stdout), (1, ""))
+        bad = self.write(self.tmp / "bad.json", MARKER + "[")
+        code, stdout, stderr = run_main("issue-proposals", "--issues", str(bad),
+                                        "--out", str(self.tmp / "x"))
+        self.assertEqual((code, stdout), (1, ""))
+        self.assertNotIn(MARKER, stderr)
+        _, _, _, out = self.convert([issue()])
+        code, stdout, _, _ = self.convert([issue()], out)
+        self.assertEqual((code, stdout), (2, ""))
+
+
+class SelectAcrossSources(Case):
+    def setUp(self):
+        super().setUp()
+        self.lessons = self.tmp / "lessons"
+        self.issues = self.tmp / "issue-lessons"
+        self.registry = self.tmp / "registry"
+        self.registry.mkdir()
+        self.evals = self.tmp / "evals"
+        self.evals.mkdir()
+        self.drafted = self.write(self.tmp / "drafted.txt", "")
+
+    def put(self, root: Path, source: str, day: str, doc: dict) -> str:
+        rel = f"{source}/{day}/{doc['subject']}__new-skill.json"
+        self.write(root / rel, doc)
+        return rel
+
+    def select(self) -> dict:
+        code, out, err = run_main(
+            "select", "--lessons", str(self.lessons), "--issue-proposals",
+            str(self.issues), "--registry", f"acsi-agentskills={self.registry}",
+            "--evals", str(self.evals), "--drafted", str(self.drafted))
+        self.assertEqual(code, 0, err)
+        return outputs(out)
+
+    def test_both_sources_compete_in_one_order(self):
+        from_issue = self.put(self.issues, "issue-proposals", "2026-10-26",
+                              proposal(subject="from-issue", evidence_count=1,
+                                       last_seen="2026-10-26"))
+        lesson = self.put(self.lessons, "proposals", "2026-10-26",
+                          proposal(subject="from-lesson", evidence_count=1))
+        self.assertEqual(self.select(), {"proposal": from_issue, "count": "1",
+                                         "hook_declined": "0"})
+        self.put(self.lessons, "proposals", "2026-10-26",
+                 proposal(subject="from-lesson", evidence_count=2))
+        self.assertEqual(self.select()["proposal"], lesson)
+
+    def test_issues_alone_can_be_picked(self):
+        rel = self.put(self.issues, "issue-proposals", "2026-10-26", proposal())
+        self.assertFalse(self.lessons.exists())
+        self.assertEqual(self.select()["proposal"], rel)
+        self.write(self.drafted, f"{SUBJECT} rejected\n")
+        self.assertEqual(self.select()["count"], "0")
+
+    def test_each_root_is_read_for_its_own_source_only(self):
+        self.put(self.lessons, "issue-proposals", "2026-10-26", proposal(subject="aaa"))
+        self.put(self.issues, "proposals", "2026-10-26", proposal(subject="bbb"))
+        self.assertEqual(self.select()["count"], "0")
 
 
 class DraftedSubjects(Case):
@@ -335,6 +628,11 @@ class DraftedSubjects(Case):
             "20261026T000000Z-bbbbbb": hook_record(subject="two-thing"),
             "20261026T000000Z-cccccc": {"subject": "Bad Subject", "decision": "accepted"},
             "20261026T000000Z-dddddd": MARKER,
+            "20261026T000000Z-eeeeee": skill_record(
+                run_id="x", subject="three-thing", decision="rejected", plugin=None,
+                fixtures={}),
+            "20261026T000000Z-ffffff": skill_record(
+                run_id="x", subject="four-thing", decision="rejected"),
         }
         for run_id, doc in branches.items():
             git(repo, "checkout", "-q", "-b", f"b-{run_id}", base)
@@ -348,7 +646,9 @@ class DraftedSubjects(Case):
         git(repo, "checkout", "-q", "main")
         code, out, err = run_main("drafted-subjects", "--repo", str(repo))
         self.assertEqual(code, 0, err)
-        self.assertEqual(out.splitlines(), ["one-thing accepted", "two-thing hook-first"])
+        self.assertEqual(out.splitlines(), [
+            "four-thing rejected", "one-thing accepted",
+            "three-thing unmeasured@20261026T000000Z-eeeeee", "two-thing hook-first"])
         self.assertNotIn(MARKER, out + err)
 
 
@@ -375,6 +675,22 @@ class Payload(Case):
                                 "--proposal", self.rel, "--run-id", RUN_ID,
                                 "--hook-declined")
         self.assertIs(json.loads(out)["hook_declined"], True)
+
+    def test_an_issue_proposal_path_reads_under_issue_proposals(self):
+        issues = self.tmp / "issue-lessons"
+        rel = f"issue-proposals/2026-10-26/{SUBJECT}__new-skill.json"
+        self.write(issues / rel, proposal(id="issue-acsi-agentskills-18"))
+        code, out, err = run_main("payload", "--lessons", str(issues),
+                                  "--proposal", rel, "--run-id", RUN_ID)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["proposal"]["id"], "issue-acsi-agentskills-18")
+        # Each prefix resolves under its own directory only.
+        for lessons, path in ((self.lessons, rel),
+                              (issues, self.rel)):
+            with self.subTest(path=path):
+                code, out, _ = run_main("payload", "--lessons", str(lessons),
+                                        "--proposal", path, "--run-id", RUN_ID)
+                self.assertEqual((code, out), (1, ""))
 
     def test_bad_paths_and_run_ids_are_refused(self):
         outside = self.write(self.tmp / "outside.json", proposal())
@@ -580,7 +896,10 @@ class Measure(Case):
                 self.assertEqual(record["decision"], "rejected")
                 dns.check_record(record, RUN_ID)
 
-    def test_bad_staging_is_a_rejected_record_before_any_run(self):
+    def test_bad_staging_is_refused_once_then_a_rejected_record(self):
+        # A shape mistake is the drafter's, so the first try is a refusal
+        # that writes no record (the subject stays eligible) and the retry
+        # records it as rejected; neither runs an arm.
         breaks = {
             "context block": lambda: self.write(
                 self.staging / "fixtures/alpha/fixture.yaml",
@@ -593,9 +912,8 @@ class Measure(Case):
                                                 SKILL_MD.replace(SUBJECT, "other")),
             "stray file": lambda: self.write(self.staging / "skill/notes.txt", "x\n"),
             "bad plugin": lambda: self.write(self.staging / "plugin", "example-site-platform\n"),
-            "verbatim example": lambda: self.write(
-                self.staging / "skill/references/checklist.md",
-                proposal()["examples"][0] + "\n"),
+            "stray fixture file": lambda: self.write(
+                self.staging / "fixtures/alpha/notes.md", "x\n"),
         }
         for label, make in breaks.items():
             with self.subTest(label):
@@ -605,9 +923,37 @@ class Measure(Case):
                 make()
                 runner = FakeRunner(table())
                 code, _, err = self.measure(runner)
+                self.assertEqual(code, 2, err)
+                self.assertIn("staging shape", err)
+                self.assertEqual(runner.calls, [])
+                self.assertFalse(self.results.exists() and self.files(), self.results)
+                self.assertTrue((self.staging / dns.SHAPE_RETRY_MARKER).is_file())
+                code, _, err = self.measure(runner)
                 self.assertEqual(code, 1, err)
                 self.assertEqual(runner.calls, [])
                 self.assertEqual(self.record()["decision"], "rejected")
+
+    def test_a_fixed_shape_after_a_refusal_is_measured(self):
+        stray = self.write(self.staging / "fixtures/alpha/notes.md", "x\n")
+        runner = FakeRunner(table())
+        code, _, err = self.measure(runner)
+        self.assertEqual(code, 2, err)
+        stray.unlink()
+        code, _, err = self.measure(runner)
+        self.assertEqual(code, 0, err)
+        self.assertNotEqual(runner.calls, [])
+        self.assertEqual(self.record()["decision"], "accepted")
+        self.assertNotIn(dns.SHAPE_RETRY_MARKER, " ".join(self.files()))
+
+    def test_a_verbatim_example_is_a_rejected_record_at_once(self):
+        # Content, not shape: quoting a lesson example stays final at once.
+        self.write(self.staging / "skill/references/checklist.md",
+                   proposal()["examples"][0] + "\n")
+        runner = FakeRunner(table())
+        code, _, err = self.measure(runner)
+        self.assertEqual(code, 1, err)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.record()["decision"], "rejected")
 
     def setUp_staging(self):
         for rel, data in skill_files().items():
@@ -930,6 +1276,12 @@ class Apply(Staged):
         readme = load_module(self.tree / "scripts/generate_readme_table.py", "t_readme")
         self.assertEqual(readme.render(True), 0)
         self.assertIn(f"/{PLUGIN}:{SUBJECT}", (self.tree / "README.md").read_text())
+        # The ADR 0013 layout pin lists the new skill, sorted, in canonical form.
+        layout_text = (self.tree / dns.LAYOUT_FILE).read_text()
+        layout = json.loads(layout_text)["plugins"][PLUGIN]["skills"]
+        self.assertIn(SUBJECT, layout)
+        self.assertEqual(layout, sorted(layout))
+        self.assertEqual(layout_text, json.dumps(json.loads(layout_text), indent=2) + "\n")
         # check_plugin_versions.py imports jsonschema at load time, which
         # acsi-agentskills' CI installs and this repo's does not; the bump
         # itself is asserted above either way.
@@ -955,10 +1307,20 @@ class FixturesApply(Staged):
     def test_fixtures_land_with_their_readme_layout_entry(self):
         tree = self.tmp / "skills-evals"
         self.write(tree / "README.md", (REPO_ROOT / "README.md").read_text())
+        before = (REPO_ROOT / "evals/unscheduled.yml").read_text()
+        self.write(tree / "evals/unscheduled.yml", before)
         code, out, err = run_main("fixtures-apply", "--staged", str(self.stage()),
                                   "--tree", str(tree))
         self.assertEqual(code, 0, err)
         self.assertEqual(outputs(out)["subject"], SUBJECT)
+        # The owner's 2026-11-02 rule (test_issue_371_scheduled_fixtures.py): each
+        # drafted fixture is listed as unscheduled, with a reason, and the
+        # rows already there are kept byte for byte.
+        after = (tree / "evals/unscheduled.yml").read_text()
+        self.assertTrue(after.startswith(before))
+        rows = {r["path"]: r["reason"] for r in yaml.safe_load(after)["fixtures"]}
+        for name in FIXTURE_NAMES:
+            self.assertEqual(rows[f"evals/{SUBJECT}/{name}"], dns.ISOLATION_REASON)
         for name in FIXTURE_NAMES:
             self.assertTrue((tree / f"evals/{SUBJECT}/{name}/fixture.yaml").is_file())
         # The suite's own rule (test_every_eval_directory_is_named_in_the_readmes_layout).
@@ -969,6 +1331,25 @@ class FixturesApply(Staged):
         code, _, _ = run_main("fixtures-apply", "--staged", str(self.tmp / "staged"),
                               "--tree", str(tree))
         self.assertEqual(code, 1, "a second apply must refuse the existing directory")
+
+    def test_a_fixture_with_a_context_gets_the_context_reason(self):
+        doc = {"skill": SUBJECT, "context": {"repo": "example"}}
+        rows = dns.unscheduled_entries(
+            {"b": {"fixture.yaml": yaml.safe_dump(doc).encode()},
+             "a": {"fixture.yaml": yaml.safe_dump({"skill": SUBJECT}).encode()}}, SUBJECT)
+        parsed = yaml.safe_load("fixtures:\n" + rows)["fixtures"]
+        self.assertEqual([r["path"] for r in parsed],
+                         [f"evals/{SUBJECT}/a", f"evals/{SUBJECT}/b"])
+        self.assertEqual([r["reason"] for r in parsed],
+                         [dns.ISOLATION_REASON, dns.CONTEXT_REASON])
+
+    def test_fixtures_apply_refuses_a_missing_unscheduled_file(self):
+        tree = self.tmp / "skills-evals"
+        self.write(tree / "README.md", (REPO_ROOT / "README.md").read_text())
+        code, _, _ = run_main("fixtures-apply", "--staged", str(self.stage()),
+                              "--tree", str(tree))
+        self.assertEqual(code, 1)
+        self.assertFalse((tree / "evals" / SUBJECT).exists())
 
 
 class Bodies(Staged):
@@ -1010,7 +1391,9 @@ class Bodies(Staged):
         self.assertIn("merges itself (merge commit)", skill)
         self.assertIn(dns.improve_gate.REGISTRY_ADR, skill)
         _, fixtures = self.body("pr-body", "--repo", "skills-evals", "--mode", "auto")
-        self.assertIn("Auto-merge (merge commit) is enabled", fixtures)
+        self.assertIn("Follow drafted-skill fixtures", fixtures)
+        self.assertIn("Once the skill's pull request has merged", fixtures)
+        self.assertNotIn("job token", fixtures)
         _, draft = self.body("pr-body", "--repo", "acsi-agentskills")
         self.assertIn("nothing merges itself", draft)
         with self.assertRaises(SystemExit):

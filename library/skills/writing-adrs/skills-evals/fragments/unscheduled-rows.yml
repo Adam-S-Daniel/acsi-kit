@@ -1,0 +1,4 @@
+  - path: evals/writing-adrs/supersede
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+  - path: evals/writing-adrs/why-no-comment-trail
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."

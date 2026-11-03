@@ -60,7 +60,8 @@ name: Gate routine improvement candidate
 #   request from it: ready, labeled `agent-authored` and `eval-improve`, with
 #   auto-merge (merge commit) enabled when the mode is `auto`; a draft
 #   otherwise. The mode is evals/improve-policy.yml's, lowered to `draft`
-#   when the skill's plugin runs code (hooks, bin/, settings), so an
+#   when plugin-runtime-review would hold the change (the skill has its own
+#   hooks/ or bin/, or a hook of its plugin names a path in it), so an
 #   auto-merged pull request never needs plugin-runtime-review. If that
 #   branch already exists, or any loop pull request (`eval-improve/*`,
 #   `draft-skill/*` or `retire-skill/*`) is open, it does nothing: they
@@ -120,7 +121,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -206,7 +207,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
 
@@ -282,7 +283,7 @@ jobs:
       # write only.
       - name: Mint the GitHub App token for acsi-agentskills
         id: app-token
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ secrets.EVAL_IMPROVE_APP_CLIENT_ID }}
           private-key: ${{ secrets.EVAL_IMPROVE_APP_PEM }}

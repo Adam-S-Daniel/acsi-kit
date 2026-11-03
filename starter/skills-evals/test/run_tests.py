@@ -2640,13 +2640,17 @@ class EvalWorkflowSecurityHeaderTests(unittest.TestCase):
         # emits reviewed selections without receiving evaluation credentials.
         self.assertEqual(
             sorted(doc["jobs"]),
-            ["disarm", "eval", "plan", "publish", "roster", "roster-pr", "roster-wait"],
-            "eval.yml must have exactly these seven jobs — a new job needs "
+            ["disarm", "eval", "failure-watch", "plan", "publish", "roster", "roster-pr",
+             "roster-wait"],
+            "eval.yml must have exactly these eight jobs — a new job needs "
             "its own exact-permissions row here and in "
             "test_eval_workflow_keeps_its_security_posture")
         self.assertEqual(
             doc["jobs"]["plan"].get("permissions"), {"contents": "read"},
             "the planner reads committed fixtures and never exchanges a credential")
+        self.assertEqual(
+            doc["jobs"]["failure-watch"].get("permissions"), {"issues": "write"},
+            "the failure watch (skills-evals#664) holds only issues: write")
         self.assertEqual(
             doc.get("permissions"), {},
             "eval.yml's workflow-level permissions must be {} — every scope "
@@ -2767,7 +2771,8 @@ class EvalWorkflowSecurityHeaderTests(unittest.TestCase):
                    for k, v in (j.get("permissions") or {}).items()))
         # ADR 0004: `roster-wait` (pull-requests: write, for its disarm)
         # is the fifth, and runs no agent either.
-        self.assertEqual(writers, ["disarm", "publish", "roster", "roster-pr", "roster-wait"])
+        # `failure-watch` (issues: write, skills-evals#664) is the sixth.
+        self.assertEqual(writers, ["disarm", "failure-watch", "publish", "roster", "roster-pr", "roster-wait"])
         for name in writers:
             for step in doc["jobs"][name]["steps"]:
                 self.assertNotIn("run_eval.py", step.get("run") or "")
@@ -2882,7 +2887,8 @@ class EvalWorkflowSecurityHeaderTests(unittest.TestCase):
         repo_keys = {(step.get("with") or {}).get("repository") or "self"
                     for step in checkout_steps}
         count = len(repo_keys)
-        number_words = {2: "two", 3: "three", 4: "four", 5: "five"}
+        number_words = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
+                        7: "seven"}
         self.assertIn(count, number_words,
                       f"unexpected number of distinct checked-out repositories: {count}")
         self.assertIn(
@@ -3038,10 +3044,13 @@ class CiDispatchTests(unittest.TestCase):
                ".github/workflows/routine-scaffold-gate.yml",
                ".github/workflows/routine-scaffold-pushed.yml",
                ".github/workflows/skill-coverage.yml",
+               ".github/workflows/explorer-data.yml",
+               ".github/workflows/site-sync.yml",
+               ".github/workflows/site-preview.yml",
                ".github/workflows/actions.lock", ".github/workflows/**",
                ".github/actions/**",
                ".github/dependabot.yml", "evals/**", "dashboard/**",
-               "harness/**", "scripts/**", "test/**", "README.md",
+               "harness/**", "scripts/**", "test/**", "tool/**", "README.md",
                "DESIGN.md",
                "docs/decisions/0008-run-ready-fixtures-on-the-weekly-schedule.md",
                "docs/decisions/0010-run-ai-eval-steps-in-a-routine-fired-by-actions.md"]
@@ -4888,6 +4897,74 @@ class TestIssue67(unittest.TestCase):
             # Keys are exactly the published contract — nothing else rides along.
             self.assertEqual(sorted(document), ["counts", "generated_at", "weeks"])
 
+            # A hook log's `runner` is as untrusted: only 12 lowercase hex
+            # survive into the public weekly rows, anything else is null.
+            hostile_runners = ["/home/example/repos/runner", "a runner that wrote prose",
+                               "a" * 64, 7,
+                               ["abcdef012345"], {"r": "abcdef012345"}, "ABCDEF012345"]
+            log = Path(tmp) / "runs.jsonl"
+            log.write_text("\n".join(json.dumps(
+                {"v": 1, "ts": "2026-09-03T10:00:00Z", "event": "pre-commit",
+                 "repo": None, "checks": ["lint-a"], "failed": [], "runner": value})
+                for value in hostile_runners) + "\n", encoding="utf-8")
+            hooks = model_usage_census.hook_tally(
+                [str(log)], self.NOW, 8, frozenset(), None, "example-host")
+            weekly = model_usage_census.build_weekly_document(
+                {"invocations": {}, "sessions": {}, "sessions_scanned": 0},
+                self.NOW, 8, hooks)
+            hook_rows = [r for r in weekly["rows"] if r["kind"] == "hook"]
+            self.assertEqual([r["runner"] for r in hook_rows], [None] * len(hook_rows))
+            self.assertEqual(sum(r["invocations"] for r in hook_rows if r["name"] == "all"),
+                             len(hostile_runners))
+            blob = json.dumps(weekly)
+            for leaked in ("/home/example/repos/runner", "a runner that wrote prose",
+                           "a" * 64, "abcdef012345", "ABCDEF012345"):
+                self.assertNotIn(leaked, blob)
+
+            # Cloud guidance records are as untrusted: `state` and
+            # `check_reported` cross from the private branch to the public
+            # file through fixed enums, and the session, CLI version, repo
+            # count and guidance version never cross at all. Invented values.
+            cloud_dir = Path(tmp) / "events-branch" / "events" / "2026-09"
+            cloud_dir.mkdir(parents=True)
+            fake_session = "fake-session-0123"
+            fake_cli, fake_version = "9.9.9-fake", "fakeversion-1"
+            fake_prose = "fake prose about the merger"
+            fake_path = "/home/example/fake-private-path"
+            lines = []
+            for index, value in enumerate((fake_path, fake_prose, "f" * 64, 7,
+                                           ["full"], {"s": "full"}, None)):
+                lines.append(json.dumps(
+                    {"v": 1, "ts": "2026-09-03T10:00:00Z", "kind": "guidance-load",
+                     "session": f"{fake_session}-{index}", "cli": fake_cli,
+                     "repos": 3, "guidance_version": fake_version,
+                     "state": value, "check_reported": value}))
+            (cloud_dir / "cloud-guidance.jsonl").write_text(
+                "\n".join(lines) + "\n", encoding="utf-8")
+            before = sorted(p.name for p in (cloud_dir.parent.parent).rglob("*"))
+            cloud = model_usage_census.cloud_guidance_tally(
+                Path(tmp) / "events-branch", self.NOW, 8)
+            self.assertEqual(sorted(p.name for p in (cloud_dir.parent.parent).rglob("*")),
+                             before, "the reader must not write into the branch")
+            weekly = model_usage_census.build_weekly_document(
+                {"invocations": {}, "sessions": {}, "sessions_scanned": 0},
+                self.NOW, 8, None, cloud)
+            cloud_rows = [r for r in weekly["rows"] if r["surface"] == "cloud"]
+            self.assertEqual({(r["kind"], r["name"]) for r in cloud_rows},
+                             {("guidance", "invalid"), ("guidance-check", "unknown")})
+            self.assertEqual([r["sessions"] for r in cloud_rows], [7, 7])
+            source = [s for s in weekly["sources"] if s["surface"] == "cloud"][0]
+            self.assertEqual(source["scope"], "guidance-records")
+            self.assertEqual(source["records_scanned"], 7)
+            self.assertEqual(
+                datetime.strptime(source["from"], "%Y-%m-%dT%H:%M:%SZ").isoweekday(), 1,
+                "the cloud source starts on a week boundary")
+            self.assertTrue(source["from"].endswith("T00:00:00Z"))
+            blob = json.dumps(weekly)
+            for leaked in (fake_session, fake_cli, fake_version, fake_prose,
+                           fake_path, "f" * 64):
+                self.assertNotIn(leaked, blob)
+
     def test_census_ignores_entries_outside_the_window_and_without_a_model(self):
         with tempfile.TemporaryDirectory() as tmp:
             projects = Path(tmp) / "projects" / "-tmp-x"
@@ -5182,11 +5259,13 @@ class TestIssue67(unittest.TestCase):
         # `actions` or `contents: write` any more; the roster App's token
         # opens and arms the PR.
         self.assertEqual(doc["permissions"], {})
-        # Exactly seven jobs (ADR 0008 adds the read-only planner), so an
+        # Exactly eight jobs (ADR 0008 adds the read-only planner; #664 the failure watch), so an
         # additional job cannot go unguarded.
         self.assertEqual(sorted(doc["jobs"]),
-                         ["disarm", "eval", "plan", "publish", "roster", "roster-pr",
-                          "roster-wait"])
+                         ["disarm", "eval", "failure-watch", "plan", "publish", "roster",
+                          "roster-pr", "roster-wait"])
+        # skills-evals#664: the failure watch holds only `issues: write`.
+        self.assertEqual(doc["jobs"]["failure-watch"]["permissions"], {"issues": "write"})
         self.assertEqual(doc["jobs"]["plan"]["permissions"], {"contents": "read"})
         # Round 7 (ADR 0003): `roster` no longer pushes, so contents: read.
         self.assertEqual(doc["jobs"]["roster"]["permissions"],
@@ -8871,7 +8950,7 @@ class TestIssue63(unittest.TestCase):
             bad.write_text(
                 "registries:\n  - name: agentskills\n"
                 "    url: https://example.com/a\n"
-                "    layout: '**/*/SKILL.md'\n",
+                "    layout: '**/*/SKILL.md'\n    private: false\n",
                 encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 run_eval._load_registries_config(bad)
@@ -9230,9 +9309,9 @@ class TestIssue63Review(unittest.TestCase):
             bad.write_text(
                 "registries:\n"
                 "  - name: agentskills\n    url: https://example.com/a\n"
-                "    layout: 'plugins/*/skills/*/SKILL.md'\n"
+                "    layout: 'plugins/*/skills/*/SKILL.md'\n    private: false\n"
                 "  - name: agentskills\n    url: https://example.com/b\n"
-                "    layout: 'skills/*/SKILL.md'\n",
+                "    layout: 'skills/*/SKILL.md'\n    private: false\n",
                 encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 run_eval._load_registries_config(bad)
@@ -9245,7 +9324,7 @@ class TestIssue63Review(unittest.TestCase):
             bad.write_text(
                 "registries:\n"
                 "  - name: agentskills\n    url: https://example.com/a\n"
-                "    layout: 'plugins/*/skills/*'\n",
+                "    layout: 'plugins/*/skills/*'\n    private: false\n",
                 encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 run_eval._load_registries_config(bad)
@@ -9257,7 +9336,7 @@ class TestIssue63Review(unittest.TestCase):
             bad.write_text(
                 "registries:\n"
                 "  - name: agentskills\n    url: https://example.com/a\n"
-                "    layout: '/plugins/*/SKILL.md'\n",
+                "    layout: '/plugins/*/SKILL.md'\n    private: false\n",
                 encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 run_eval._load_registries_config(bad)
@@ -9267,6 +9346,24 @@ class TestIssue63Review(unittest.TestCase):
         entries = run_eval._load_registries_config()
         names = {e["name"] for e in entries}
         self.assertEqual(names, {"acsi-agentskills", "acsi-agentskills-private"})
+
+    def test_registries_yml_plugins_only_on_the_private_registry_and_validated(self):
+        entries = {e["name"]: e for e in run_eval._load_registries_config()}
+        self.assertEqual(entries["acsi-agentskills-private"]["plugins"],
+                         ["acsi-private-anything-anywhere"])
+        self.assertEqual([n for n, e in entries.items() if "plugins" in e],
+                         ["acsi-agentskills-private"])
+        for value in ("acsi-x", "[a, 7]", "[a, '']", "{a: b}"):
+            with self.subTest(plugins=value), tempfile.TemporaryDirectory() as tmp:
+                bad = Path(tmp) / "registries.yml"
+                bad.write_text(
+                    "registries:\n  - name: agentskills\n"
+                    "    url: https://example.com/a\n"
+                    "    layout: 'plugins/*/skills/*/SKILL.md'\n    private: false\n"
+                    f"    plugins: {value}\n", encoding="utf-8")
+                with self.assertRaises(ValueError) as ctx:
+                    run_eval._load_registries_config(bad)
+                self.assertIn("plugins", str(ctx.exception))
 
 
 class TestIssue63Round2(unittest.TestCase):
@@ -9281,12 +9378,12 @@ class TestIssue63Round2(unittest.TestCase):
     def test_registries_yml_field_wrong_type_has_a_clear_message(self):
         cases = {
             "url": ("registries:\n  - name: agentskills\n    url: 12345\n"
-                    "    layout: 'plugins/*/skills/*/SKILL.md'\n"),
+                    "    layout: 'plugins/*/skills/*/SKILL.md'\n    private: false\n"),
             "layout": ("registries:\n  - name: agentskills\n"
-                       "    url: https://example.com/a\n    layout: 99\n"),
+                       "    url: https://example.com/a\n    layout: 99\n    private: false\n"),
             "name": ("registries:\n  - name: [a]\n"
                      "    url: https://example.com/a\n"
-                     "    layout: 'plugins/*/skills/*/SKILL.md'\n"),
+                     "    layout: 'plugins/*/skills/*/SKILL.md'\n    private: false\n"),
         }
         for field, text in cases.items():
             with self.subTest(field=field):
@@ -9305,7 +9402,7 @@ class TestIssue63Round2(unittest.TestCase):
             bad = Path(tmp) / "registries.yml"
             bad.write_text(
                 "registries:\n  - name: no\n    url: https://example.com/a\n"
-                "    layout: 'plugins/*/skills/*/SKILL.md'\n",
+                "    layout: 'plugins/*/skills/*/SKILL.md'\n    private: false\n",
                 encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 run_eval._load_registries_config(bad)
@@ -9320,7 +9417,7 @@ class TestIssue63Round2(unittest.TestCase):
             # a bare `yaml.safe_load(f)` call should let escape as-is.
             bad.write_text(
                 "registries:\n  - name: agentskills\n      url: https://example.com/a\n"
-                "    layout: 'plugins/*/skills/*/SKILL.md'\n",
+                "    layout: 'plugins/*/skills/*/SKILL.md'\n    private: false\n",
                 encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 run_eval._load_registries_config(bad)
@@ -9337,7 +9434,7 @@ class TestIssue63Round2(unittest.TestCase):
             bad.write_text(
                 "registries:\n  - name: agentskills\n"
                 "    url: https://example.com/a\n"
-                "    layout: 'skills/bundle*/SKILL.md'\n",
+                "    layout: 'skills/bundle*/SKILL.md'\n    private: false\n",
                 encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 run_eval._load_registries_config(bad)
@@ -9349,7 +9446,7 @@ class TestIssue63Round2(unittest.TestCase):
             bad.write_text(
                 "registries:\n  - name: agentskills\n"
                 "    url: https://example.com/a\n"
-                "    layout: '../*/SKILL.md'\n",
+                "    layout: '../*/SKILL.md'\n    private: false\n",
                 encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 run_eval._load_registries_config(bad)
@@ -9364,9 +9461,9 @@ class TestIssue63Round2(unittest.TestCase):
             bad.write_text(
                 "registries:\n"
                 "  - name: a\n    url: https://github.com/Org/repo\n"
-                "    layout: 'plugins/*/skills/*/SKILL.md'\n"
+                "    layout: 'plugins/*/skills/*/SKILL.md'\n    private: false\n"
                 "  - name: b\n    url: https://GITHUB.com/org/REPO.git/\n"
-                "    layout: 'skills/*/SKILL.md'\n",
+                "    layout: 'skills/*/SKILL.md'\n    private: false\n",
                 encoding="utf-8")
             with self.assertRaises(ValueError) as ctx:
                 run_eval._load_registries_config(bad)
@@ -9508,7 +9605,7 @@ class TestIssue63Round2(unittest.TestCase):
                 "registries:\n"
                 "  - name: scratch-registry\n"
                 "    url: https://example.com/scratch-registry\n"
-                "    layout: 'skills/*/SKILL.md'\n",
+                "    layout: 'skills/*/SKILL.md'\n    private: false\n",
                 encoding="utf-8")
 
             eval_dir = tmp_root / "evals" / "scratch-eval"
@@ -13897,6 +13994,9 @@ class TestIssue81(unittest.TestCase):
         "github_pat_11ABCDEFG0abcdefghij_0123456789abcdefghijklmnop",
         "xoxp" + "-0123456789-0123456789012-abcdefghijklmnopqrstuvwx",
         "sk-proj-0123456789abcdefghijklmnopqrstuvwxyz",
+        # Split for the same reason as the Slack token: GitHub secret
+        # scanning reads a whole one as a live Google API key. The
+        # characters are a counting run, not a key.
         "AI" + "zaSy0123456789abcdefghijklmnopqrstuvw",
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.c2lnbmF0dXJl",
         # A private key pasted without its BEGIN header is still one.
@@ -19943,8 +20043,11 @@ class TestIssue84Round5(Issue84Fixture, unittest.TestCase):
                         | {"HOME", "TMPDIR", "XDG_CONFIG_HOME", "CLAUDE_BIN"})}
         fixture_env = set(run_eval.load_fixture(self.STUCK_DIR)["env"])
         # CLI_FORCED_ENV is SET at the spawn (auto-memory off), not inherited.
+        # GIT_CEILING_DIRECTORIES is SET at the spawn too (#612): git must not
+        # search the workspace's parents for a repository.
         expected = (allowlisted | fixture_env | set(run_eval.guidance.CLI_FORCED_ENV)
-                    | {"WORKSPACE", "GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN"})
+                    | {"WORKSPACE", "GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN",
+                       "GIT_CEILING_DIRECTORIES"})
         self.assertEqual(set(seen), expected,
                          f"unexpected: {sorted(set(seen) - expected)}; "
                          f"missing: {sorted(expected - set(seen))}")
@@ -24775,6 +24878,8 @@ class TestIssue147(unittest.TestCase):
             workspace.joinpath("evals").mkdir()
             for relative in ("scripts/render_roster_yaml.py",
                              "scripts/make_badge.py",
+                             "scripts/push_with_rebase_retry.sh",
+                             "scripts/relocate_colliding_runs.py",
                              "harness/roster.py",
                              "harness/timeweeks.py",
                              "evals/roster.yml"):
@@ -25132,6 +25237,8 @@ elif 'worktree' in args and 'remove' in args:
             for relative in (".github/workflows/eval.yml",
                              "scripts/render_roster_yaml.py",
                              "scripts/make_badge.py",
+                             "scripts/push_with_rebase_retry.sh",
+                             "scripts/relocate_colliding_runs.py",
                              "harness/roster.py",
                              "harness/timeweeks.py",
                              "evals/roster.yml"):
@@ -31513,6 +31620,9 @@ class TestPublishUsageCensus(unittest.TestCase):
             self.assertNotIn(leaked, blob)
 
     def test_an_unchanged_census_makes_no_commit(self):
+        self.assertEqual(self.run_script().returncode, 0)
+        # The first run created the private branch, so the second is the first
+        # that reads it and adds the cloud source; the third changes nothing.
         self.assertEqual(self.run_script().returncode, 0)
         first = self.head()
         proc = self.run_script()

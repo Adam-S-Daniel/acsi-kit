@@ -16,7 +16,7 @@
 # prints a pattern.
 #
 # The bearer and the trigger id come from the eval runner routine's API
-# trigger at claude.ai/code/routines (skills-evals docs/routine-prompt.md);
+# trigger at claude.ai/code/routines (skills-evals docs/routine/eval-runner-prompt.md);
 # the bearer is shown once. routine-eval-fire.yml reads both from the
 # routine-fire environment and refuses a trigger id that is not trig_...
 #
