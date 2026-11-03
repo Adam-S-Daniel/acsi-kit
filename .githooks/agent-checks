@@ -2,10 +2,10 @@
 # agent-checks: the fleet's commit-time rules, run by local git hooks and by CI.
 #
 # Locally it runs from config-based git hooks (Git 2.54+) that
-# adam-agentskills' scripts/install-agent-hooks.sh installs once per machine.
+# acsi-agentskills' scripts/install-agent-hooks.sh installs once per machine.
 # CI runs the same file over a pull request's commits, and CI is the
 # enforcement: a hook can be skipped with --no-verify, a required check
-# cannot. See adam-agentskills ADR 0020 and _agent-guidance ADR 0021.
+# cannot. See acsi-agentskills ADR 0020 and _agent-guidance ADR 0021.
 #
 # Managed by _agent-guidance (templates/agent-checks/). The sync overwrites
 # this file in every fleet repo, so change it there, not here.
@@ -15,12 +15,6 @@
 #   agent-checks pre-push <remote> <url>     (git's ref lines on stdin)
 #   agent-checks ci <base> <head>
 #   agent-checks tree [<rev>]                (every path in <rev>, default HEAD)
-#
-# `ci` also runs pr-tldr when GitHub Actions starts it for a pull request
-# (GITHUB_EVENT_NAME pull_request or pull_request_target, with
-# GITHUB_EVENT_PATH set): the pull request's description must begin with a
-# TLDR heading and text under it. It reads only the event payload, never the
-# API or the network; see "PR description: pr-tldr" below.
 #
 # `tree` is for measuring a check against a repo's whole current tree, so a new
 # check can be shown to refuse nothing already on a fleet repo's main.
@@ -47,13 +41,10 @@
 # ${XDG_STATE_HOME:-$HOME/.local/state}/agent-checks/runs.jsonl, so a dashboard
 # can show how often each check runs and refuses, per repo, over time:
 #   {"v":1,"ts":"2026-10-26T12:00:00Z","event":"pre-commit","repo":"owner/name",
-#    "checks":["rules-dir","secret-file","skill-shell"],"failed":["secret-file"],
-#    "runner":"0123456789ab"}
+#    "checks":["secret-file","skill-shell"],"failed":["secret-file"]}
 # `repo` is origin's GitHub owner/name, or null for any other remote. `checks`
 # are the ids of the checks that ran (dated-phrasing only when it read a file),
-# `failed` the ones that refused; a warning is never in `failed`. `runner` is
-# the first 12 hex digits of this file's own sha256, so a count can tell which
-# version of the runner a repo had, or null when no hash tool is found. The line
+# `failed` the ones that refused; a warning is never in `failed`. The line
 # holds no paths, messages, branch names or user names. AGENT_CHECKS_LOG=off
 # turns it off. Logging is best effort: a failure is silent and never changes
 # the exit code or the output.
@@ -119,15 +110,13 @@ check_lessons() {
 }
 
 # Reads NUL-separated paths on stdin and refuses the ones that must never be
-# committed.
+# committed: the fleet checks below, then each lesson (a `case` arm in
+# check_lessons). A check of your own goes beside the fleet checks (the
+# commented example below).
 check_paths() {
   local path
   while IFS= read -r -d '' path; do
     [ -n "$path" ] || continue
-    case "$path" in
-      .claude/rules/*)
-        problem rules-dir "$path: path-scoped rules (.claude/rules/) are not used in this fleet. Only Claude Code reads them. Put the rule in AGENTS.md or a skill, or make it a check in .githooks/agent-checks." ;;
-    esac
     case "${path##*/}" in
       .env.example|.env.sample|.env.template) ;;
       .env|.env.*|*.pem|*.key|*.p12|*.pfx|id_rsa|id_ecdsa|id_ed25519)
@@ -145,6 +134,15 @@ check_paths() {
         && grep -Eq '(^|[[:space:]])!`|^[[:space:]]*```!' <<<"$(file_content "$path")"; then
       problem skill-shell "$path: a line starts a shell command that Claude Code runs when the skill loads (an exclamation mark then a backtick, at line start or after a space, or a code fence opened with a backtick fence and an exclamation mark). It runs before the model reads the skill, so no review and no prompt-injection defense sees it. Have the skill tell the agent to run the command, or move the command into a script the skill calls."
     fi
+    # TEMPLATE, commented out: a check of your own. Uncomment it, give it a
+    # kebab-case id, add `note_ran <id>` in run_checks so the run log counts
+    # it, and make the message say what is wrong, why, and how to fix it.
+    # Name the path; never print file content.
+    #
+    #   case "${path##*/}" in
+    #     *.orig|*.rej)
+    #       problem leftover-patch "$path: a .orig or .rej file is what a failed merge or patch leaves behind, and it does not belong in the repo. Delete it (git rm --cached -- '$path') and add its pattern to .gitignore." ;;
+    #   esac
     check_lessons "$path" < /dev/null
   done
 }
@@ -308,142 +306,10 @@ run_dated_phrasing() {
   return 0
 }
 
-# ── PR description: pr-tldr ──────────────────────────────────────────────────
-# Every pull request description begins with a plain-English TLDR, so a reader
-# learns what changes and why before the detail. In the ci event of a
-# pull_request or pull_request_target run, with GITHUB_EVENT_PATH set, the
-# check reads the event payload GitHub wrote there (the pull request's body,
-# its author's type and its creation time) with node, and nothing else: no
-# API call, no network. A missing node or a payload it cannot read or parse
-# refuses (fail closed). Any other event, or no GITHUB_EVENT_PATH, skips it.
-#
-# The rule is lexical, so it gives the same answer every time:
-#   1. CRLF becomes LF; every HTML comment (<!-- ... -->, across lines too) is
-#      removed, and an unclosed <!-- hides everything after it, as GitHub
-#      renders it.
-#   2. Leading lines that are blank, or a "_Requested by ..._" attribution
-#      line, are skipped.
-#   3. The first line left must be an ATX heading whose text is TLDR or TL;DR
-#      (any case, an optional colon): "## TLDR", "# tl;dr:".
-#   4. Some line between it and the next heading (or the end) has text.
-#
-# Closing keywords. The same read also warns, never refuses, about every issue
-# or pull request the description would close: GitHub closes the target of
-# close, closes, closed, fix, fixes, fixed, resolve, resolves or resolved
-# (any case, an optional colon) followed by #N, owner/repo#N or an issue or
-# pull request URL, from any repo, and "For #N" does not. The match is
-# lexical, on the description after the comment removal above, and it prints
-# only the references, never the description. It applies to a pull request
-# opened before pr_tldr_cutoff too, and to a bot's.
-#
-# The payload is the description as it was when the run started: re-running
-# an old run reads the old text. The workflow's `edited` pull_request trigger
-# is what re-runs the check after the description changes.
-#
-# Pull requests opened before the rule shipped are exempt, so an open one is
-# not retro-failed: pr_tldr_cutoff is that moment.
-pr_tldr_cutoff=2026-11-03T00:00:00Z
-
-# pr_tldr_warn <message> — a warning line on stderr, never a refusal.
-pr_tldr_warn() {
-  if [ "${GITHUB_ACTIONS:-}" = true ]; then
-    printf '::warning::agent-checks (warning): %s\n' "$1" >&2
-  else
-    printf 'agent-checks (warning): %s\n' "$1" >&2
-  fi
-}
-
-run_pr_tldr() {
-  local verdict why msg js closes
-  case "${GITHUB_EVENT_NAME:-}" in
-    pull_request|pull_request_target) ;;
-    *) return 0 ;;
-  esac
-  [ -n "${GITHUB_EVENT_PATH:-}" ] || return 0
-  note_ran pr-tldr
-  if ! command -v node > /dev/null 2>&1; then
-    problem pr-tldr "pull request description: node is not on PATH, so the TLDR rule could not read the event payload and nothing was checked. Run this check where Node.js is installed (every GitHub-hosted runner has it)."
-    return 0
-  fi
-  # The script prints "<verdict> <author>": verdict ok, exempt, missing or
-  # empty; author bot or user. It exits nonzero when the payload cannot be
-  # read. It is held in a variable and fed on stdin, not written as a here-doc
-  # inside $( ), which older bash (macOS's 3.2) can misparse.
-  IFS= read -r -d '' js <<'JS' || true
-const fs = require("fs");
-const [file, cutoff] = process.argv.slice(2);
-let pr;
-try {
-  pr = JSON.parse(fs.readFileSync(file, "utf8")).pull_request;
-} catch (err) {
-  process.exit(3);
-}
-if (!pr || typeof pr !== "object") process.exit(3);
-const author = pr.user && pr.user.type === "Bot" ? "bot" : "user";
-const created = typeof pr.created_at === "string" ? Date.parse(pr.created_at) : NaN;
-let body = typeof pr.body === "string" ? pr.body : "";
-body = body.replace(/\r\n?/g, "\n").replace(/<!--[\s\S]*?-->/g, "");
-const open = body.indexOf("<!--");
-if (open >= 0) body = body.slice(0, open);
-// Closing keywords (see "Closing keywords" below): a second output line, the
-// issues and pull requests the description would close, each once.
-const closing = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?[ \t]+((?:[\w.-]+\/[\w.-]+)?#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)/gi;
-const closes = [...new Set([...body.matchAll(closing)].map((m) => m[1]))];
-const closesLine = closes.length ? "\ncloses " + closes.join(" ") : "";
-if (!Number.isNaN(created) && created < Date.parse(cutoff)) {
-  console.log("exempt " + author + closesLine);
-  process.exit(0);
-}
-const lines = body.split("\n");
-let i = 0;
-while (i < lines.length && (/^\s*$/.test(lines[i]) || /^_Requested by .+_\s*$/.test(lines[i]))) i++;
-const tldr = /^ {0,3}#{1,6}[ \t]+TL;?DR[ \t]*:?[ \t]*#*[ \t]*$/i;
-const heading = /^ {0,3}#{1,6}([ \t]|$)/;
-let verdict = "missing";
-if (i < lines.length && tldr.test(lines[i])) {
-  verdict = "empty";
-  for (let j = i + 1; j < lines.length && !heading.test(lines[j]); j++) {
-    if (/\S/.test(lines[j])) {
-      verdict = "ok";
-      break;
-    }
-  }
-}
-console.log(verdict + " " + author + closesLine);
-JS
-  verdict=$(node - "$GITHUB_EVENT_PATH" "$pr_tldr_cutoff" <<< "$js" 2> /dev/null) || verdict=""
-  # An optional second line, "closes <ref> <ref> ...", names what the
-  # description would close; split it off so the verdict is the first line.
-  closes=""
-  case "$verdict" in
-    *$'\n'closes\ *) closes=${verdict#*$'\n'closes }; verdict=${verdict%%$'\n'*} ;;
-  esac
-  if [ -n "$closes" ]; then
-    pr_tldr_warn "pull request description: it uses a closing keyword, so merging this pull request closes these: $closes. If you meant only to reference one, drop the keyword (write \"For #N\", not \"Closes #N\")."
-  fi
-  case "$verdict" in
-    "ok "*|"exempt "*) return 0 ;;
-    "missing "*) why="it does not begin with a TLDR heading" ;;
-    "empty "*) why="its TLDR heading has no text under it" ;;
-    *)
-      problem pr-tldr "pull request description: the event payload at GITHUB_EVENT_PATH could not be read as a pull request event (unreadable, not JSON, or no pull_request object), so the TLDR rule was not checked. Re-run the check; if it fails again, the runner's event file is broken."
-      return 0 ;;
-  esac
-  msg="pull request description: $why. The pull request description must begin with a \"## TLDR\" heading followed by one to three plain-English sentences on what changes and why. Only HTML comments and a \"_Requested by ..._\" attribution line may come before it. Edit the description: editing it re-runs this check (re-running an old run does not, because it reads the description as it was when that run started)."
-  # A bot's pull request (Dependabot, a GitHub App, github-actions) is warned,
-  # not refused: this is the one place that decides it.
-  if [ "${verdict#* }" = bot ]; then
-    pr_tldr_warn "$msg The author is a bot, so this is a warning, not a refusal."
-    return 0
-  fi
-  problem pr-tldr "$msg"
-}
-
 # run_checks — the fleet checks, then the repo's own, over the same
 # NUL-separated path list on stdin, then the warning pass.
 run_checks() {
   local list id
-  note_ran rules-dir
   note_ran secret-file
   note_ran skill-shell
   for id in $lesson_checks; do note_ran "$id"; done
@@ -459,16 +325,6 @@ run_checks() {
 # deleted inside the range is still caught: it stays in the history.
 paths_in_range() {
   git log --format= --name-only -z --diff-filter=ACMR "$@"
-}
-
-default_branch() {
-  local remote=$1 head
-  head=$(git symbolic-ref --quiet --short "refs/remotes/$remote/HEAD" 2>/dev/null) || head=""
-  if [ -n "$head" ]; then
-    printf '%s\n' "${head#"$remote"/}"
-  else
-    printf '%s\n' main master
-  fi
 }
 
 # git writes an all-zero object id for "no commit" (a new branch, a delete),
@@ -493,27 +349,10 @@ case "$event" in
 
   pre-push)
     remote=${2:-origin}
-    note_ran staged-index
-    note_ran push-to-default
-    note_ran persistent-delete
-    if ! git diff --cached --quiet; then
-      problem staged-index "the index has staged changes that are in no commit. If your last 'git commit' was refused by a hook, this push would publish the commit before it and report success. Commit or unstage them first (git status), then push."
-    fi
-    defaults=$(default_branch "$remote")
     while read -r _ local_oid remote_ref remote_oid; do
       [ -n "${remote_ref:-}" ] || continue
-      for branch in $defaults; do
-        if [ "$remote_ref" = "refs/heads/$branch" ]; then
-          problem push-to-default "refusing to push to $branch: fleet default branches take changes only through pull requests, and GitHub would reject it (GH013). Push a feature branch and open a PR."
-        fi
-      done
-      if is_zero "$local_oid"; then
-        case "$remote_ref" in
-          refs/heads/persistent/*)
-            problem persistent-delete "refusing to delete ${remote_ref#refs/heads/}: persistent/* branches outlive their PRs and hold data (results, usage records), and deleting one loses it. Private repos without rulesets have nothing else to stop this. If it really must go, ask Adam." ;;
-        esac
-        continue
-      fi
+      # A delete pushes no content to check.
+      is_zero "$local_oid" && continue
       content_rev=$local_oid
       if known_commit "$remote_oid"; then
         run_checks < <(paths_in_range "$remote_oid..$local_oid")
@@ -532,7 +371,6 @@ case "$event" in
     else
       run_checks < <(paths_in_range -1 "$head")
     fi
-    run_pr_tldr
     ;;
 
   tree)
@@ -576,19 +414,6 @@ origin_repo() {
   printf '"%s/%s"' "$owner" "$name"
 }
 
-# runner_digest — this file's sha256, first 12 hex digits, as a JSON string,
-# or null when no hash tool answers.
-runner_digest() {
-  local self=${BASH_SOURCE[0]} sum
-  sum=$( { sha256sum -- "$self" || shasum -a 256 -- "$self"; } 2>/dev/null) || sum=""
-  sum=${sum%% *}
-  sum=${sum:0:12}
-  case "$sum" in
-    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) printf '"%s"' "$sum" ;;
-    *) printf null ;;
-  esac
-}
-
 log_run() {
   local log=${AGENT_CHECKS_LOG:-} base ts line
   [ "$log" = off ] && return 0
@@ -598,8 +423,8 @@ log_run() {
     log=$base/agent-checks/runs.jsonl
   fi
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || return 0
-  line=$(printf '{"v":1,"ts":"%s","event":"%s","repo":%s,"checks":%s,"failed":%s,"runner":%s}' \
-    "$ts" "$event" "$(origin_repo)" "$(json_ids "$ran_ids")" "$(json_ids "$failed_ids")" "$(runner_digest)")
+  line=$(printf '{"v":1,"ts":"%s","event":"%s","repo":%s,"checks":%s,"failed":%s}' \
+    "$ts" "$event" "$(origin_repo)" "$(json_ids "$ran_ids")" "$(json_ids "$failed_ids")")
   (
     mkdir -p -- "$(dirname -- "$log")" || exit 0
     { [ ! -e "$log" ] || [ -f "$log" ]; } || exit 0
@@ -612,7 +437,7 @@ case "$event" in
 esac
 
 if [ "$failed" -ne 0 ]; then
-  printf '%s\n' "agent-checks: fix the cause rather than skipping the hook (--no-verify); CI runs the same checks. If a check is wrong, say so to Adam." >&2
+  printf '%s\n' "agent-checks: fix the cause rather than skipping the hook (--no-verify); CI runs the same checks. If a check is wrong, say so to the owner." >&2
   exit 1
 fi
 exit 0

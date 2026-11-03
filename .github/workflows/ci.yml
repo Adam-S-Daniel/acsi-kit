@@ -1,0 +1,86 @@
+# The kit's own checks: its tests (the leak scan over every kit file, public
+# names and the owner's private denylist; every kit file tracked by git; the
+# suite runner), the bootstrap tests, and `export.py --check` (each starter
+# tree equals a fresh export of its pinned source, as git tracks it).
+#
+# `test` is the required check, so there is no `on.paths` (a skipped required
+# check blocks the merge). Every file in this repo is kit content, so there is
+# no salient-path gate either: every pull request and push runs it all.
+name: CI
+run-name: "${{ github.event_name == 'pull_request' && format('PR #{0} — {1}', github.event.pull_request.number, github.event.pull_request.title) || github.event_name == 'push' && format('push — {0}', github.ref_name) || format('dispatch — {0}', github.ref_name) }}"
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+
+      # The denylist arrives through `env:` from the repository secret and is
+      # read by the test from the environment; it is never interpolated into
+      # the script, and the test prints a hit as `path:line: pattern #N`,
+      # never the text. A missing or empty secret FAILS this step: a leak scan
+      # that checked nothing must not read as green. The one exception is a
+      # pull request from `dependabot[bot]` (read from $GITHUB_EVENT_PATH),
+      # which GitHub runs without secrets and which cannot add personal data:
+      # it warns, and the public scan and `--check` still run (CI=false makes
+      # the private half skip, as it does locally). A fork's pull request also
+      # gets no secret, so it fails here by design; the owner brings its change
+      # in on a branch of this repo instead.
+      #
+      # The sources are fetched at the manifests' pinned commits with no
+      # credential, so the private registry's tree (its source is private) is
+      # left out of `--check` (`--skip`); its files are still scanned, and
+      # checked as tracked, by the tests. The full check runs in
+      # run-all-tests.sh on a machine with every source checked out.
+      - name: Kit tests and export check
+        env:
+          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
+          SOURCE_OWNER: ${{ github.repository_owner }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          if [ -z "${PRIVACY_DENYLIST//[[:space:]]/}" ]; then
+            author=$(jq -r '.pull_request.user.login // empty' "${GITHUB_EVENT_PATH:-/dev/null}" 2>/dev/null) || author=""
+            if [ "$author" = "dependabot[bot]" ]; then
+              echo "::warning::the PRIVACY_DENYLIST secret is not available to a Dependabot run, so the kit's private leak scan was skipped; the public scan and the export check still ran"
+            else
+              echo "::error::the PRIVACY_DENYLIST repository secret is unset or empty (a fork's pull request never gets it), so the kit's leak scan cannot run: set the secret (one regular expression per line), then re-run"
+              exit 1
+            fi
+            export CI=false
+          fi
+          python3 -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
+          python3 -m pytest export/tests -q -p no:cacheprovider
+          python3 export/fetch_sources.py --owner "$SOURCE_OWNER" --dest "$RUNNER_TEMP/kit-sources" --skip agentskills-private
+          # The _agent-guidance export runs that repo's own Node scripts with
+          # NODE_PATH at its node_modules (its manifest's `run:` steps), and a
+          # fetched source has no work tree. Install its pinned dev
+          # dependencies from its own lockfile at the pinned commit.
+          ag="$RUNNER_TEMP/kit-sources/_agent-guidance"
+          ag_sha=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["source_sha"])' export/manifests/_agent-guidance.yml)
+          [[ "$ag_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::_agent-guidance manifest has no full source_sha"; exit 1; }
+          npm_dir="$RUNNER_TEMP/agent-guidance-npm"
+          mkdir -p "$npm_dir"
+          git -C "$ag" show "$ag_sha:package.json" > "$npm_dir/package.json"
+          git -C "$ag" show "$ag_sha:package-lock.json" > "$npm_dir/package-lock.json"
+          npm ci --prefix "$npm_dir" --ignore-scripts --no-audit --no-fund --silent
+          mv "$npm_dir/node_modules" "$ag/node_modules"
+          python3 export/export.py --check --sources "$RUNNER_TEMP/kit-sources" --skip agentskills-private
+
+      - name: Bootstrap tests
+        run: bash bootstrap/tests/test-bootstrap.sh

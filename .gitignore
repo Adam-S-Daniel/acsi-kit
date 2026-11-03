@@ -1,0 +1,7 @@
+# Test-run junk only. Every other file in the kit is content, and
+# export/tests/test_kit_tracked.py fails if a rule here drops one.
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+.DS_Store
