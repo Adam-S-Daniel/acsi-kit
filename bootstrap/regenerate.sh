@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# regenerate.sh [--config fleet.env] [--dry-run] [--check] <task>
+# regenerate.sh [--config fleet.env] [--dry-run] [--check] [--track base|evals|all] <task>
 #
 # Rebuilds, after adoption, the generated files the export could not build
 # offline (export/REGENERATE.md), with each repo's own tooling, and proposes
@@ -36,6 +36,12 @@
 #                  --check runs `gh actions-lock --verify`. Needs the gh
 #                  extension: gh extension install github/gh-actions-lock.
 #
+# skills-evals is the evals track's: the tasks leave it alone while it does
+# not exist (a base-only setup), and include it once it does. --track base
+# or --track evals limits a task to that track's repos (status.sh passes
+# each step's track to --check, so the base steps never look at
+# skills-evals); --track evals fails while skills-evals does not exist.
+#
 # Each task needs the starter pull requests of the repos it reads merged.
 # Idempotent: a repo already current gets no commit and no pull request.
 # Pushes only to regenerate/<task>, never with force, and checks the commit
@@ -48,15 +54,20 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib/pr.sh
 . "$HERE/lib/pr.sh"
 
-CHECK=0 TASK=""
+CHECK=0 TASK="" TRACK=all
 parse_common_args "$@"
-for a in "${REST_ARGS[@]}"; do
-  case $a in
+set -- "${REST_ARGS[@]}"
+while [ $# -gt 0 ]; do
+  case $1 in
     --check) CHECK=1 ;;
-    -*) die "unknown option: $a" ;;
-    *) [ -z "$TASK" ] || die "give one task"; TASK=$a ;;
+    --track) [ $# -ge 2 ] || die "--track needs base, evals or all"; TRACK=$2; shift ;;
+    --track=*) TRACK=${1#--track=} ;;
+    -*) die "unknown option: $1" ;;
+    *) [ -z "$TASK" ] || die "give one task"; TASK=$1 ;;
   esac
+  shift
 done
+check_track "$TRACK"
 [ -n "$TASK" ] || { usage; die "give a task: ${REGEN_TASKS[*]}"; }
 known=0; for t in "${REGEN_TASKS[@]}"; do [ "$t" = "$TASK" ] && known=1; done
 [ "$known" = 1 ] || die "unknown task: $TASK (expected one of: ${REGEN_TASKS[*]})"
@@ -65,6 +76,10 @@ load_config "$CONFIG"
 O=$CFG_OWNER
 ZERO40=0000000000000000000000000000000000000000
 NOT_DONE=0
+# all: skills-evals counts once it exists (a base-only setup has none).
+if [ "$TRACK" = all ] && ! evals_repo_exists; then TRACK=base; log "skip: $O/$EVALS_REPO does not exist yet (the evals track creates it)"; fi
+# in_task <repo>: whether this run covers that repo.
+in_task() { on_track "$TRACK" "$(repo_track "$1")"; }
 
 # clone <repo>: a full clone of OWNER/<repo> at $BOOT_WORK/<repo> (once).
 clone() {
@@ -201,7 +216,8 @@ task_run_health_sha() {
   local r pinned
   need _agent-guidance .github/workflows/scheduled-run-health-reusable.yml
   AG_SHA=$(git -C "$CLONE" rev-parse HEAD); local ag=$CLONE
-  for r in repo-settings skills-evals acsi-agentskills wsl-automation; do
+  for r in $(regen_repos run-health-sha); do
+    in_task "$r" || continue
     need "$r" "$RH"
     pinned=$(grep -oE 'scheduled-run-health-reusable\.yml@[0-9a-f]{40}' "$CLONE/$RH" | head -n1 | cut -d@ -f2 || true)
     if [ -n "$pinned" ] && [ "$pinned" != "$ZERO40" ] && git -C "$ag" cat-file -e "$pinned^{commit}" 2>/dev/null; then
@@ -252,6 +268,7 @@ task_actions_lock() {
   local r
   "$GH" actions-lock --help >/dev/null 2>&1 || die "gh actions-lock is not installed: gh extension install github/gh-actions-lock"
   for r in "${FLEET_REPOS[@]}"; do
+    in_task "$r" || continue
     clone "$r"
     [ -f "$CLONE/$LOCK" ] || { log "skip: $O/$r has no $LOCK"; continue; }
     if [ "$CHECK" = 1 ]; then
@@ -266,7 +283,10 @@ task_actions_lock() {
 }
 
 [ "$CHECK" = 0 ] || [ "$DRY_RUN" = 0 ] || die "--check is read-only already; drop --dry-run"
-log "Owner $O, task $TASK$([ "$CHECK" = 1 ] && echo ', CHECK')$([ "$DRY_RUN" = 1 ] && echo ', DRY RUN')"
+log "Owner $O, task $TASK$([ "$CHECK" = 1 ] && echo ', CHECK')$([ "$DRY_RUN" = 1 ] && echo ', DRY RUN')$([ "$TRACK" = all ] || echo ", $TRACK track")"
+covered=0
+while IFS= read -r r; do in_task "$r" && covered=1; done < <(regen_repos "$TASK")
+[ "$covered" = 1 ] || die "$TASK edits no repo of the $TRACK track"
 case $TASK in
   skills-locks) task_skills_locks ;;
   hook-pin) task_hook_pin ;;

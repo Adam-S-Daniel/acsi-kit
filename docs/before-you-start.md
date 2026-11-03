@@ -19,9 +19,10 @@
 The kit sets up two tracks. The **base** (`/adopt`) is the fleet guidance
 and its sync, the skills registries, repo settings as code, the git-hook
 checks, each machine's install and the routines that keep the guidance and
-memory current. **Evals** (`/adopt-evals`, now or later) add the eval
-runner routine, its secrets and two more Apps, and the weekly loop in
-`skills-evals` that spends part of your plan's allowance on evals.
+memory current, in five repos. **Evals** (`/adopt-evals`, now or later)
+add the sixth repo, `skills-evals`, the eval runner routine, its secrets and
+three more Apps, and the weekly loop in `skills-evals` that spends part of
+your plan's allowance on evals.
 
 Without evals you give up the measuring: your skills and guidance are never
 measured, improved or retired automatically. A change to a skill or a rule

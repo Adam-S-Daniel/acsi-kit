@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# verify.sh [--config fleet.env] [--only <group>[,<group>...]]
+# verify.sh [--config fleet.env] [--track base|evals|all] [--only <group>[,<group>...]]
 #
 # Read-only. Reports PASS, FAIL or SKIP for each thing the other scripts set
 # up, grouped so status.sh can tell the quick start's steps apart:
 #
-#   repos           the six repos exist, with the visibility the kit wants
+#   repos           the repos exist, with the visibility the kit wants
 #   labels          agent-ready and on-hold (LABELS in lib/common.sh)
 #   branches        skills-evals has its persistent/eval-results branch
 #                   (EVAL_RESULTS_BRANCH in lib/common.sh), which the eval
 #                   loop's workflows fetch and nothing but create-repos.sh creates
 #   environments    fleet-apply, plugin-runtime-review, routine-fire exist,
 #                   with their reviewer and branch policy (ENVIRONMENTS)
-#   variables       repo-settings' GUIDANCE_SYNC_APP_ID and
+#   variables       repo-settings' GUIDANCE_SYNC_APP_ID and (evals)
 #                   ROSTER_WRITER_APP_ID match fleet.env (REPO_VARIABLES)
 #   federation      skills-evals' four ANTHROPIC_* federation ids match
 #                   fleet.env (REPO_VARIABLES; optional, so only when named)
@@ -31,6 +31,15 @@
 #                   (lib/content.py probes: a file it adds, or a line it
 #                   adds to one)
 #
+# --track scopes every group to one track of steps.json (lib/common.sh's
+# repo_track, app_track, variable_track): base checks the five base repos and
+# what lives in them, never skills-evals or the Apps, environment, variables
+# and branch that serve only it; evals checks only those (and the base Apps'
+# installations on skills-evals), and fails while skills-evals does not
+# exist. The default, all, checks both, except that while skills-evals does
+# not exist (a base-only setup) it checks the base and says so. status.sh
+# passes each step's own track.
+#
 # Without --only: repos, labels, branches, environments, variables, every App, its
 # installation and every values group (the fast ones; settings and regen:* clone repos, so
 # name them, and federation is optional, so name it too), and content once
@@ -44,17 +53,20 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib/common.sh
 . "$HERE/lib/common.sh"
 
-ONLY=""
+ONLY="" TRACK=all
 parse_common_args "$@"
 set -- "${REST_ARGS[@]}"
 while [ $# -gt 0 ]; do
   case $1 in
+    --track) [ $# -ge 2 ] || die "--track needs base, evals or all"; TRACK=$2; shift ;;
+    --track=*) TRACK=${1#--track=} ;;
     --only) [ $# -ge 2 ] || die "--only needs a group list"; ONLY=$2; shift ;;
     --only=*) ONLY=${1#--only=} ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
 done
+check_track "$TRACK"
 app_known() { local e; for e in "${APPS[@]}"; do [ "${e%%|*}" = "$1" ] && return 0; done; return 1; }
 group_known() { local e n; for e in "${OTHER_VALUES[@]}"; do IFS='|' read -r _ _ _ n _ <<<"$e"; [ "$(value_group "$n")" = "$1" ] && return 0; done; return 1; }
 task_known() { local t; for t in "${REGEN_TASKS[@]}"; do [ "$t" = "$1" ] && return 0; done; return 1; }
@@ -82,6 +94,7 @@ require_tools jq "$GH"
 load_config "$CONFIG"
 O=$CFG_OWNER
 [ -z "$ONLY" ] || log "checking only: $ONLY"
+[ "$TRACK" = all ] || log "checking only the $TRACK track"
 PASS=0 FAIL=0 SKIPPED=0
 pass() { PASS=$((PASS + 1)); printf 'PASS: %s\n' "$*"; }
 fail() { FAIL=$((FAIL + 1)); printf 'FAIL: %s\n' "$*"; }
@@ -98,12 +111,27 @@ if (choices_file) >/dev/null 2>&1; then choices_file; fi
 ONLY_CONTENT=0
 [ "$ONLY" != content ] || ONLY_CONTENT=1
 
+# A base-only setup has no skills-evals: the whole setup is then the base.
+if [ "$TRACK" = all ] && [ "$ONLY_CONTENT" = 0 ] && ! evals_repo_exists; then
+  TRACK=base
+  skp "$O/$EVALS_REPO and the evals track's checks ($EVALS_REPO is not created yet; the evals track creates it: /adopt-evals)"
+fi
+tracked() { on_track "$TRACK" "$1"; }
+
 declare -A EXISTS DEFAULT_BRANCH
 for r in "${FLEET_REPOS[@]}"; do
   [ "$ONLY_CONTENT" = 0 ] || break
+  if ! tracked "$(repo_track "$r")"; then
+    # Not this track's to check, but an evals check may read a base repo
+    # (ROSTER_WRITER_APP_ID is a repo-settings variable).
+    EXISTS[$r]=0; [ "$r" = "$EVALS_REPO" ] || ! gh_read "repos/$O/$r" || EXISTS[$r]=1
+    continue
+  fi
   if ! gh_read "repos/$O/$r"; then
     EXISTS[$r]=0
-    fail "$O/$r exists (HTTP $GH_HTTP)"; continue
+    if [ "$r" = "$EVALS_REPO" ]; then fail "$O/$r exists (HTTP $GH_HTTP; the evals track creates it: create-repos.sh $r)"
+    else fail "$O/$r exists (HTTP $GH_HTTP)"; fi
+    continue
   fi
   EXISTS[$r]=1
   DEFAULT_BRANCH[$r]=$(printf '%s' "$GH_OUT" | jq -r '.default_branch // "main"')
@@ -129,6 +157,7 @@ done
 for entry in "${ENVIRONMENTS[@]}"; do
   sel environments || break
   IFS='|' read -r r e rev br <<<"$entry"
+  tracked "$(repo_track "$r")" || continue
   if ! env_available "$r"; then skp "$O/$r environment $e (private repo on PLAN=free)"; continue; fi
   [ "${EXISTS[$r]:-0}" = 1 ] || { fail "$O/$r environment $e (repo missing)"; continue; }
   if ! gh_read "repos/$O/$r/environments/$e"; then fail "$O/$r environment $e exists (HTTP $GH_HTTP)"; continue; fi
@@ -156,6 +185,7 @@ declare -A REPO_VARS
 for entry in "${REPO_VARIABLES[@]}"; do
   IFS='|' read -r r name src group <<<"$entry"
   if [ "$group" = federation ]; then sel federation off || continue; else sel "$group" || continue; fi
+  tracked "$(variable_track "$r" "$src")" || continue
   want=$(repo_variable_value "$src")
   if [ -z "$want" ]; then
     if [ "$group" = federation ]; then fail "$O/$r variable $name: ${src#cfg:} is empty in fleet.env (docs/evals-and-loop.md#workload-identity-federation)"
@@ -188,10 +218,15 @@ installs() { # sets INSTALLS to "app_id<TAB>installation id" lines, once
 for entry in "${APPS[@]}"; do
   IFS='|' read -r app _perms installed r idspec env sec key _optional <<<"$entry"
   sel "apps:$app" || sel "installs:$app" || continue
+  # An evals App is checked on the evals track only. A fleet-wide base App's
+  # installation is checked on the selected track's repos, so the evals
+  # track checks it on skills-evals alone.
+  app_here=1; tracked "$(app_track "$app")" || app_here=0
+  if [ "$app_here" = 0 ]; then { [ "$installed" = fleet ] && sel "installs:$app"; } || continue; fi
   if [ "$env" != - ] && ! env_available "$r"; then skp "$app App (its key would be in a private repo's environment on PLAN=free)"; continue; fi
   cfg=CFG_$key
   if [ -z "${!cfg}" ]; then fail "$app App: $key is in fleet.env (run create-apps.sh $app)"; continue; fi
-  if sel "apps:$app"; then
+  if sel "apps:$app" && [ "$app_here" = 1 ]; then
     pass "$app App: $key is in fleet.env"
     if [ "${EXISTS[$r]:-0}" = 1 ]; then
       has_name "${idspec%%:*}" "$r" - "${idspec#*:}"
@@ -203,7 +238,7 @@ for entry in "${APPS[@]}"; do
   iid=$(awk -F'\t' -v a="${!cfg}" -v o="${O,,}" '$1 == a && tolower($3) == o {print $2; exit}' <<<"$INSTALLS")
   if [ -z "$iid" ]; then fail "$app App is installed on $O (create-apps.sh printed the link)"; continue; fi
   if ! gh_read "user/installations/$iid/repositories?per_page=100"; then fail "$app App: its repositories readable (HTTP $GH_HTTP)"; continue; fi
-  if [ "$installed" = fleet ]; then need=("${FLEET_REPOS[@]}"); else read -r -a need <<<"$installed"; fi
+  if [ "$installed" = fleet ]; then mapfile -t need < <(track_repos "$TRACK"); else read -r -a need <<<"$installed"; fi
   for n in "${need[@]}"; do
     check "$app App is installed on $O/$n" "any(.repositories[]?; (.full_name | ascii_downcase) == (\"$O/$n\" | ascii_downcase))"
   done
@@ -212,6 +247,7 @@ done
 for entry in "${OTHER_VALUES[@]}"; do
   IFS='|' read -r r e kind name _src <<<"$entry"
   sel "values:$(value_group "$name")" || continue
+  tracked "$(repo_track "$r")" || continue
   if [ "$e" != - ] && ! env_available "$r"; then skp "$O/$r$(where "$e") $kind $name (private repo on PLAN=free)"; continue; fi
   [ "${EXISTS[$r]:-0}" = 1 ] || continue
   has_name "$kind" "$r" "$e" "$name"
@@ -225,7 +261,7 @@ sub_check() { # description cmd...
 if sel settings off; then
   while IFS= read -r o; do
     if [ "${o,,}" = "${O,,}" ]; then
-      sub_check "$o's repos match fleet.yml (repo-settings engine diff)" bash "$HERE/apply-settings.sh" --config "$CONFIG" --check
+      sub_check "$o's repos match fleet.yml (repo-settings engine diff$([ "$TRACK" = all ] || echo ", $TRACK track"))" bash "$HERE/apply-settings.sh" --config "$CONFIG" --check --track "$TRACK"
     else
       skp "$o's repos (sign gh in as $o, then: apply-settings.sh --check --owner $o)"
     fi
@@ -233,7 +269,7 @@ if sel settings off; then
 fi
 for t in "${REGEN_TASKS[@]}"; do
   sel "regen:$t" off || continue
-  sub_check "regenerate.sh $t is done" bash "$HERE/regenerate.sh" --config "$CONFIG" --check "$t"
+  sub_check "regenerate.sh $t is done$([ "$TRACK" = all ] || echo " on the $TRACK track")" bash "$HERE/regenerate.sh" --config "$CONFIG" --check --track "$TRACK" "$t"
 done
 
 if sel content off || { [ -z "$ONLY" ] && [ -n "$CHOICES" ] && [ -f "$CHOICES" ]; }; then
@@ -246,6 +282,7 @@ if sel content off || { [ -z "$ONLY" ] && [ -n "$CHOICES" ] && [ -f "$CHOICES" ]
     while IFS=$'\t' read -r id tree path needle; do
       repo=""
       for r in "${FLEET_REPOS[@]}"; do [ "$(kit_tree "$r")" != "$tree" ] || repo=$r; done
+      tracked "$(repo_track "$repo")" || continue
       if ! gh_read "repos/$O/$repo"; then skp "$id: $O/$repo is not created yet"; continue; fi
       if ! gh_read "repos/$O/$repo/contents/$path"; then
         fail "$id is on $O/$repo's default branch ($path: HTTP $GH_HTTP; merge its starter pull request)"; continue

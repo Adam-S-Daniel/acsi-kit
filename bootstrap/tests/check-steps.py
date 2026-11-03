@@ -18,13 +18,18 @@
 4. Every link is docs/<page>.md#<anchor> for a real heading of that page
    (GitHub's anchor rules, duplicates numbered), or an https URL.
 5. Every step has exactly one track, base or evals, and the base steps run
-   on their own: step 0 and the content step are base; no verify group or
-   files entry is checked by both a base and an evals step; and every
-   prerequisite of a check (installs:<app> needs apps:<app>; a repository
-   variable group needs the Apps whose ids it holds; a values group kept in
-   an environment needs environments; settings needs variables) is checked
-   by a base step earlier in the order, or, for an evals step, by any base
-   step or an earlier evals step (/adopt-evals runs every base step first).
+   on their own. A verify check runs with its step's track (verify.sh
+   --track), so a check is a (track, group) pair: step 0 and the content
+   step are base; every group a step checks has something on that step's
+   track (lib/common.sh's group_tracks: a base step never checks what lives
+   only in skills-evals or serves only it, and an evals step never checks a
+   base-only group); no files entry is checked by both tracks; and every
+   prerequisite of a check (installs:<app> needs apps:<app> on the App's
+   own track; a repository variable group needs the Apps whose ids it holds
+   on that track; a values group kept in an environment needs environments;
+   settings needs variables) is checked by an earlier step of the same
+   track, or, for an evals step's need on the base track, by any base step
+   (/adopt-evals runs every base step first).
 
 Prints "N assertions passed" and exits 1 on any failure. Standard library only.
 """
@@ -65,8 +70,13 @@ APPS = bash('for e in "${APPS[@]}"; do printf "%s\\n" "${e%%|*}"; done').split()
 VALUE_GROUPS = set(bash('for e in "${OTHER_VALUES[@]}"; do IFS="|" read -r _ _ _ n _ <<<"$e"; value_group "$n"; done').split())
 TASKS = bash('printf "%s\\n" "${REGEN_TASKS[@]}"').split()
 APP_KEYS = dict(l.split("|") for l in bash('for e in "${APPS[@]}"; do IFS="|" read -r a _ _ _ _ _ _ k _ <<<"$e"; printf "%s|%s\\n" "$k" "$a"; done').split())
-VAR_GROUPS = [l.split("|") for l in bash('for e in "${REPO_VARIABLES[@]}"; do IFS="|" read -r _ _ s g <<<"$e"; printf "%s|%s\\n" "$g" "${s#cfg:}"; done').split()]
+VAR_GROUPS = [l.split("|") for l in bash('for e in "${REPO_VARIABLES[@]}"; do IFS="|" read -r r _ s g <<<"$e"; printf "%s|%s|%s\\n" "$g" "${s#cfg:}" "$(variable_track "$r" "$s")"; done').split()]
 ENV_VALUE_GROUPS = set(bash('for e in "${OTHER_VALUES[@]}"; do IFS="|" read -r _ env _ n _ <<<"$e"; [ "$env" = - ] || value_group "$n"; done').split())
+APP_TRACK = dict(l.split("|") for l in bash('for e in "${APPS[@]}"; do printf "%s|%s\\n" "${e%%|*}" "$(app_track "${e%%|*}")"; done').split())
+
+
+def group_tracks(g):
+    return set(bash(f"group_tracks {g}").split())
 check(f"the registries were read: {FLEET}", len(FLEET) == 6 and all(TREE.values()) and APPS and VALUE_GROUPS and TASKS)
 
 
@@ -140,47 +150,53 @@ for s in STEPS:
 
 # 5. tracks: the base steps form a setup of their own
 def targets(s):
+    """The step's checks, as (track, check) pairs."""
     c = s.get("check") or {}
+    tr = s.get("track")
     if c.get("type") == "verify":
-        return {g for g in c.get("groups") or [] if isinstance(g, str)}
+        return {(tr, g) for g in c.get("groups") or [] if isinstance(g, str)}
     if c.get("type") == "files":
-        return {f"files:{f.get('repo')}:{f.get('path')}" for f in c.get("files") or [] if isinstance(f, dict)}
+        return {(tr, f"files:{f.get('repo')}:{f.get('path')}") for f in c.get("files") or [] if isinstance(f, dict)}
     return set()
 
 
-def needs(g):
+def needs(tr, g):
     kind, _, arg = g.partition(":")
     if kind == "installs":
-        return {f"apps:{arg}"}
-    if g in {grp for grp, _ in VAR_GROUPS}:
-        return {f"apps:{APP_KEYS[k]}" for grp, k in VAR_GROUPS if grp == g and k in APP_KEYS}
+        return {(APP_TRACK.get(arg), f"apps:{arg}")}
+    if g in {grp for grp, _, _ in VAR_GROUPS}:
+        return {(tr, f"apps:{APP_KEYS[k]}") for grp, k, vt in VAR_GROUPS if grp == g and vt == tr and k in APP_KEYS}
     if kind == "values" and arg in ENV_VALUE_GROUPS:
-        return {"environments"}
+        return {(tr, "environments")}
     if g == "settings":   # the engine refuses to plan while a bypass App id is unset
-        return {"variables"}
+        return {(tr, "variables")}
     return set()
 
 
 check(f"the prerequisite registries were read: {sorted(APP_KEYS.values())}, {VAR_GROUPS}",
-      len(APP_KEYS) == len(APPS) and VAR_GROUPS and ENV_VALUE_GROUPS)
+      len(APP_KEYS) == len(APPS) and VAR_GROUPS and ENV_VALUE_GROUPS and set(APP_TRACK.values()) == TRACKS)
 check("step 0 is a base step", any(s.get("id") == "0" and s.get("track") == "base" for s in STEPS))
 check("the content step is a base step",
       all(s.get("track") == "base" for s in STEPS if (s.get("check") or {}).get("record") == "content"))
-by_track = {tr: set().union(*[targets(s) for s in STEPS if s.get("track") == tr]) for tr in TRACKS}
-check(f"no check is shared by a base and an evals step: {sorted(by_track['base'] & by_track['evals'])}",
-      not by_track["base"] & by_track["evals"])
-all_base = by_track["base"]
-seen = {tr: set() for tr in TRACKS}
+for s in STEPS:
+    tr = s.get("track")
+    for _, g in sorted(targets(s)):
+        if not g.startswith("files:") and group_known(g):
+            check(f"step {s.get('id')} ({tr}): {g} checks something on the {tr} track", tr in group_tracks(g))
+files_by_track = {tr: {g for s in STEPS if s.get("track") == tr for t, g in targets(s) if g.startswith("files:")} for tr in TRACKS}
+check(f"no files entry is checked by a base and an evals step: {sorted(files_by_track['base'] & files_by_track['evals'])}",
+      not files_by_track["base"] & files_by_track["evals"])
+all_base = set().union(*[targets(s) for s in STEPS if s.get("track") == "base"])
+seen = set()
 for s in STEPS:
     tr = s.get("track")
     if tr not in TRACKS:
         continue
-    before = seen["base"] if tr == "base" else all_base | seen["evals"]
-    for g in sorted(targets(s)):
-        missing = sorted(needs(g) - before)
-        check(f"step {s.get('id')} ({tr}): {g} needs {missing}, which no {'earlier base' if tr == 'base' else 'base or earlier evals'} step checks",
+    for _, g in sorted(targets(s)):
+        missing = sorted(f"{t}:{n}" for t, n in needs(tr, g) - seen - (all_base if tr == "evals" else set()))
+        check(f"step {s.get('id')} ({tr}): {g} needs {missing}, which no earlier step of that track checks",
               not missing)
-    seen[tr] |= targets(s)
+    seen |= targets(s)
 
 print(f"{passed} assertions passed, {failed} failed")
 sys.exit(1 if failed else 0)

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # create-repos.sh [--config fleet.env] [--dry-run] [--with-optional] [<repo>...]
 #
-# Creates the six repos the kit exports, under OWNER, with the names the
-# owner's own repos have (export/DECISIONS.md C1): _agent-guidance,
-# repo-settings, acsi-agentskills, acsi-agentskills-private, skills-evals and
-# wsl-automation. Default: all six. --with-optional (or naming it) also
-# creates waiting-feed, the private repo the waiting-on-you feed publishes
-# to (export/REGENERATE.md, wsl-automation), which no starter tree fills.
+# Creates the repos the kit exports, under OWNER, with the names the owner's
+# own repos have (export/DECISIONS.md C1): _agent-guidance, repo-settings,
+# acsi-agentskills, acsi-agentskills-private, wsl-automation and, for the
+# evals track only, skills-evals. Default: the five base repos, and
+# skills-evals too once it exists (so a rerun keeps checking it); name
+# skills-evals to create it (/adopt-evals' first step). --with-optional (or
+# naming it) also creates waiting-feed, the private repo the waiting-on-you
+# feed publishes to (export/REGENERATE.md, wsl-automation), which no starter
+# tree fills.
 #
 #   * Visibility: acsi-agentskills-private, repo-settings and waiting-feed are
 #     always private, acsi-agentskills always public. On PLAN=free every other repo
@@ -53,7 +56,13 @@ require_tools jq "$GH"
 load_config "$CONFIG"
 O=$CFG_OWNER
 if [ ${#REPOS[@]} = 0 ]; then
-  REPOS=("${FLEET_REPOS[@]}")
+  for r in "${FLEET_REPOS[@]}"; do
+    if [ "$r" = "$EVALS_REPO" ] && ! evals_repo_exists; then
+      log "skip: $O/$r: the evals track creates it (create-repos.sh $r, /adopt-evals); a base-only setup has none"
+      continue
+    fi
+    REPOS+=("$r")
+  done
   [ "$WITH_OPTIONAL" = 0 ] || REPOS+=("${OPTIONAL_REPOS[@]}")
 fi
 

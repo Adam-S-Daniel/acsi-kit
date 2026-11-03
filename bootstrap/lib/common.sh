@@ -3,6 +3,12 @@
 # Provides:
 #   load_config <path>     parse fleet.env strictly (no `source`), set CFG_* vars
 #   FLEET_REPOS            the six repos the kit exports (DECISIONS C1 names)
+#   EVALS_REPO             skills-evals, the one repo only the evals track needs
+#   repo_track, app_track, variable_track, group_tracks, on_track, track_repos
+#                          which track (base or evals) a repo, App, variable or
+#                          verify group belongs to, and the repos of a track
+#   check_track <track>    refuse a --track value other than base, evals or all
+#   evals_repo_exists      whether OWNER/skills-evals exists (a base-only setup has none)
 #   kit_tree <repo>        the kit's starter/<tree> folder name for a repo
 #   EVAL_RESULTS_BRANCH    skills-evals' persistent/eval-results, which create-repos.sh creates
 #   repo_visibility <name> public|private, from the plan and fleet.env
@@ -57,6 +63,12 @@ ALWAYS_PUBLIC=(acsi-agentskills)
 # persistent/* branches are created by the script or routine that writes them.
 EVAL_RESULTS_REPO=skills-evals
 EVAL_RESULTS_BRANCH=persistent/eval-results
+# The one repo only the evals track needs (steps.json's track; /adopt-evals).
+# A base-only setup never creates it: create-repos.sh makes it only when
+# named, and every script treats it, and the Apps, environment, variables and
+# branch that live in it or serve only it, as part of the fleet once it
+# exists, never as missing before then.
+EVALS_REPO=skills-evals
 
 log()  { printf '%s\n' "$*"; }
 warn() { printf 'WARNING: %s\n' "$*" >&2; }
@@ -254,6 +266,92 @@ eval_results_readme() {
 
 is_known_repo() { local r; for r in "${FLEET_REPOS[@]}" "${OPTIONAL_REPOS[@]}"; do [ "$r" = "$1" ] && return 0; done; return 1; }
 is_fleet_repo() { local r; for r in "${FLEET_REPOS[@]}"; do [ "$r" = "$1" ] && return 0; done; return 1; }
+
+# ------------------------------------------------------------------ tracks
+# Each step in steps.json is on the base or the evals track. A check is
+# scoped to its step's track (verify.sh --track): the base never looks at
+# EVALS_REPO or what serves only it, and the evals track looks at nothing
+# else, so adding evals never turns a base step back to not done.
+check_track() { case $1 in base|evals|all) ;; *) die "--track wants base, evals or all, not: $1" ;; esac; }
+# on_track <selected track> <item track>: whether the selection covers the item.
+on_track() { [ "$1" = all ] || [ "$1" = "$2" ]; }
+repo_track() { if [ "$1" = "$EVALS_REPO" ]; then echo evals; else echo base; fi; }
+# track_repos <track>: the fleet repos of a track, in FLEET_REPOS order.
+track_repos() { local r; for r in "${FLEET_REPOS[@]}"; do on_track "$1" "$(repo_track "$r")" && printf '%s\n' "$r"; done; return 0; }
+# app_track <app>: an App is the evals track's when its credentials live in
+# EVALS_REPO (eval-improve, roster, registry-read).
+app_track() {
+  local e app r
+  for e in "${APPS[@]}"; do
+    IFS='|' read -r app _ _ r _ <<<"$e"
+    [ "$app" = "$1" ] && { repo_track "$r"; return 0; }
+  done
+  return 1
+}
+# variable_track <repo> <source>: a REPO_VARIABLES entry is the evals track's
+# when it lives in EVALS_REPO or holds an evals App's id (ROSTER_WRITER_APP_ID:
+# fleet.yml names it only in skills-evals' roster/proposal ruleset).
+variable_track() {
+  local e app key
+  [ "$(repo_track "$1")" = base ] || { echo evals; return 0; }
+  for e in "${APPS[@]}"; do
+    IFS='|' read -r app _ _ _ _ _ _ key _ <<<"$e"
+    [ "cfg:$key" = "$2" ] && { app_track "$app"; return 0; }
+  done
+  echo base
+}
+# The repos each regenerate.sh task edits (export/REGENERATE.md).
+regen_repos() {
+  case $1 in
+    skills-locks) printf '%s\n' acsi-agentskills acsi-agentskills-private _agent-guidance repo-settings wsl-automation ;;
+    hook-pin) echo _agent-guidance ;;
+    run-health-sha) printf '%s\n' repo-settings skills-evals acsi-agentskills wsl-automation ;;
+    codex-pin) echo wsl-automation ;;
+    actions-lock) printf '%s\n' "${FLEET_REPOS[@]}" ;;
+    *) return 1 ;;
+  esac
+}
+# group_tracks <verify group>: the tracks on which that group checks
+# anything, one per line (tests/check-steps.py holds each step's checks to
+# its own track with it).
+group_tracks() {
+  local g=$1 e r n src grp app installed out=""
+  case $g in
+    repos|labels|settings) out="base evals" ;;
+    branches) out=$(repo_track "$EVAL_RESULTS_REPO") ;;
+    environments) for e in "${ENVIRONMENTS[@]}"; do out+=" $(repo_track "${e%%|*}")"; done ;;
+    variables|federation)
+      for e in "${REPO_VARIABLES[@]}"; do
+        IFS='|' read -r r _ src grp <<<"$e"
+        [ "$grp" = "$g" ] && out+=" $(variable_track "$r" "$src")"
+      done ;;
+    apps:*) out=$(app_track "${g#apps:}") ;;
+    installs:*)
+      for e in "${APPS[@]}"; do
+        IFS='|' read -r app _ installed _ <<<"$e"
+        [ "$app" = "${g#installs:}" ] || continue
+        if [ "$(app_track "$app")" = evals ]; then out=evals
+        elif [ "$installed" = fleet ]; then out="base evals"
+        else for r in $installed; do out+=" $(repo_track "$r")"; done; fi
+      done ;;
+    values:*)
+      for e in "${OTHER_VALUES[@]}"; do
+        IFS='|' read -r r _ _ n _ <<<"$e"
+        [ "$(value_group "$n")" = "${g#values:}" ] && out+=" $(repo_track "$r")"
+      done ;;
+    regen:*) while IFS= read -r r; do out+=" $(repo_track "$r")"; done < <(regen_repos "${g#regen:}") ;;
+    content) out=base ;;
+  esac
+  tr ' ' '\n' <<<"$out" | grep -v '^$' | sort -u || true
+}
+# evals_repo_exists: 0 when OWNER/EVALS_REPO exists, 1 when GitHub answers
+# 404 (a base-only setup); dies on any other answer. Call it directly, not
+# in $( ), so GH_HTTP survives.
+evals_repo_exists() {
+  gh_read "repos/$CFG_OWNER/$EVALS_REPO" && return 0
+  [ "$GH_HTTP" = 404 ] || die "could not read $CFG_OWNER/$EVALS_REPO (HTTP $GH_HTTP)"
+  return 1
+}
 
 # ------------------------------------------------------------------ gh calls
 _status_from() { grep -oE 'HTTP [0-9]{3}' "$1" 2>/dev/null | tail -n1 | cut -d' ' -f2 || true; }
