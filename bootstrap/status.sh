@@ -6,7 +6,9 @@
 # state where it can:
 #
 #   config  fleet.env exists, parses, and sets OWNER and PLAN (step 0);
-#   verify  verify.sh --only <groups> reports no FAIL and at least one PASS;
+#   verify  verify.sh --track <the step's track> --only <groups> reports no
+#           FAIL and at least one PASS (so a base step never looks at
+#           skills-evals, and adding evals never undoes a base step);
 #   files   each named starter file is on the repo's default branch (a
 #           contents read), so the starter's pull request has been merged;
 #   ask     what nothing here can see (an App installation, a routine saved
@@ -51,7 +53,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-case $TRACK in base|evals|all) ;; *) die "--track wants base, evals or all, not: $TRACK" ;; esac
+check_track "$TRACK"
 require_tools jq
 
 # ------------------------------------------------------------------ steps
@@ -111,10 +113,10 @@ fi
 # ------------------------------------------------------------------ checks
 declare -A STEP_DONE DETAIL VERIFY_RC VERIFY_OUT
 [ "$CONFIG_OK" = 0 ] || require_tools "$GH"
-check_verify() { # id groups
-  local g=$2 out="$BOOT_WORK/verify.out" rc=0 summary
+check_verify() { # id groups track
+  local g=$3:$2 out="$BOOT_WORK/verify.out" rc=0 summary
   if [ -z "${VERIFY_RC[$g]+set}" ]; then
-    bash "$HERE/verify.sh" --config "$CONFIG" --only "$g" >"$out" 2>&1 || rc=$?
+    bash "$HERE/verify.sh" --config "$CONFIG" --track "$3" --only "$2" >"$out" 2>&1 || rc=$?
     summary=$(grep -E '^[0-9]+ passed, [0-9]+ failed, [0-9]+ skipped$' "$out" | tail -n 1 || true)
     if [ "$rc" = 0 ] && [[ $summary =~ ^([0-9]+)\ passed ]] && [ "${BASH_REMATCH[1]}" -gt 0 ]; then
       VERIFY_RC[$g]=0
@@ -136,7 +138,7 @@ check_files() { # id "repo:path ..."
 for id in "${IDS[@]}"; do
   case ${CTYPE[$id]} in
     config) if [ "$CONFIG_OK" = 1 ]; then STEP_DONE[$id]=1; else DETAIL[$id]=$CONFIG_ERR; fi ;;
-    verify) [ "$CONFIG_OK" = 0 ] || check_verify "$id" "${CARG[$id]}" ;;
+    verify) [ "$CONFIG_OK" = 0 ] || check_verify "$id" "${CARG[$id]}" "${TRK[$id]}" ;;
     files)  [ "$CONFIG_OK" = 0 ] || check_files "$id" "${CARG[$id]}" ;;
     ask)    if [ -n "${ASKED[$id]:-}" ]; then STEP_DONE[$id]=1
             elif [ "${CTAG[$id]}" = content ] && [ "$CONFIG_OK" = 1 ] && [ -f "$CHOICES" ]; then STEP_DONE[$id]=1; fi ;;

@@ -6,8 +6,10 @@ description: Guide the user step by step through setting up, or resuming the set
 # Adopt the base system, one step at a time
 
 You are helping the user build, on their own account, the base of the
-system that the six exported repos under `starter/` run: the fleet guidance,
-the skills registries, repo settings, git hooks and machines.
+system that the exported repos under `starter/` run: the fleet guidance,
+the skills registries, repo settings, git hooks and machines. The base uses
+five of the six; the sixth, `skills-evals`, is created only by the evals
+track.
 `bootstrap/steps.json` is the list of steps, each on the `base` or the
 `evals` track; this skill runs the base track only.
 `bootstrap/status.sh --track base` reads the real state of the account and
@@ -111,11 +113,19 @@ in `docs/`; the steps table is `docs/quick-start.md`.
   prompt from `docs/routines.md`. On Linux or WSL, give the cron,
   systemd or launchd line instead: the desktop app there would curate the
   wrong `~/.claude`.
-- **Steps 2, 5, 6, 13 and 22** each carry a part only evals use (their
-  `Run:` line says which). Run them whole: steps 2 and 13 still create and
-  copy `skills-evals`, and step 6 still creates `roster`, because the base
-  needs them. The one part to leave out is step 22's usage census, which
-  only evals read: on Linux or macOS pass `--jobs session-miner`.
+- **The base never creates `skills-evals`.** Step 2 creates the other
+  five repos, step 6 the three fleet-wide Apps, and steps 5, 16, 18 and 20
+  leave `skills-evals` out while it does not exist; every check runs on the
+  base track (`status.sh --track base` passes it to `verify.sh`), so none
+  of them asks for that repo. Do not create it here, even when a script
+  mentions it: `/adopt-evals` does. The one part of a base step to leave
+  out is step 22's usage census, which only evals read: on Linux or macOS
+  pass `--jobs session-miner`.
+- **Step 20 on a base-only setup**: `repo-settings`' own
+  `repo-settings.yml` reads the committed `fleet.yml`, which still declares
+  `skills-evals`, so its `plan` job fails until `/adopt-evals` adds that
+  repo. Say so, and apply from the user's machine with `apply-settings.sh`
+  meanwhile (`docs/settings-and-apps.md`, "The first apply").
 
 ## The content step
 

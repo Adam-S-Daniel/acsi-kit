@@ -2,9 +2,11 @@
 
 ## The six repos
 
-`bootstrap/create-repos.sh` creates `_agent-guidance`, `repo-settings`,
-`acsi-agentskills`, `acsi-agentskills-private`, `skills-evals` and `wsl-automation`
-under `OWNER` ([free or paid](before-you-start.md#free-or-paid-github-plan)
+The kit exports six repos. `bootstrap/create-repos.sh` creates the five the
+base needs, `_agent-guidance`, `repo-settings`, `acsi-agentskills`,
+`acsi-agentskills-private` and `wsl-automation`, and the sixth, `skills-evals`,
+only when you name it (`create-repos.sh skills-evals`, the first evals step,
+which `/adopt-evals` runs), under `OWNER` ([free or paid](before-you-start.md#free-or-paid-github-plan)
 decides which are private), gives each a first commit (a generated README
 that `copy-starter.sh` later replaces), and creates the two labels no
 settings file declares: `agent-ready` (the fleet worker's queue) and
@@ -14,6 +16,7 @@ README: the weekly plan, the ingest, the fixture supply, the coverage census and
 the usage census all fetch it, none of them creates it, and they fail on a brand-new
 account without it (`verify.sh --only branches` checks it; the other
 `persistent/*` branches are created by the script or routine that writes them).
+Once `skills-evals` exists, a plain `create-repos.sh` checks it too.
 `--with-optional` also
 creates `waiting-feed`, the private repo the waiting-on-you feed publishes
 to ([machines](machine.md#scheduled-jobs-wsl-automation)).
@@ -63,7 +66,10 @@ rest. A trigger added to that workflow must be added to the policy first.
 `fleet.yml` names the two bypass Apps by id as `"${GUIDANCE_SYNC_APP_ID}"`
 and `"${ROSTER_WRITER_APP_ID}"`, read from `repo-settings`' repository
 variables, and the engine refuses to plan while either is unset. That is
-why the Apps come before the first apply.
+why the Apps come before the first apply. `"${ROSTER_WRITER_APP_ID}"`
+appears only in `skills-evals`' entry, so a base-only setup needs only
+`guidance-sync`'s id: `apply-settings.sh` leaves `skills-evals` out until it
+exists ([the first apply](#the-first-apply)).
 
 After the first apply, `repo-settings`' `repo-settings.yml` reconciles on
 every merge and on a schedule: a read-only `diff` job with the
@@ -82,7 +88,9 @@ environment's approval with the `settings-admin` App.
 
 It also sets `repo-settings`' variables `GUIDANCE_SYNC_APP_ID` and
 `ROSTER_WRITER_APP_ID` from `fleet.env`, once `create-apps.sh` has filled
-them, so run it again after the Apps. On `PLAN=free` the private
+them, so run it again after the Apps. Until the evals track creates
+`skills-evals`, it skips `routine-fire`, and `ROSTER_WRITER_APP_ID` waits
+for the `roster` App; the evals track runs it again (step 37). On `PLAN=free` the private
 `repo-settings` has no environments: `fleet-apply` is skipped and you apply
 from your machine.
 
@@ -116,11 +124,11 @@ drift report, the skills-lock bumper and the Dependabot sweep all use it.
 secret because its gates check that both values exist before minting.
 App names are `<APP_NAME_PREFIX>-<app>`.
 
-The base needs four of them, created in step 6: the three fleet-wide Apps
-and `roster`. `roster` acts only for evals, but `fleet.yml` names its id as
-a bypass actor, so the first apply cannot run without it. `eval-improve`
-and `registry-read` serve only `skills-evals`; `/adopt-evals` creates and
-installs them in steps 33 and 34.
+The base needs three of them, created in step 6: the three fleet-wide
+Apps. `eval-improve`, `roster` and `registry-read` keep their credentials in
+`skills-evals` and serve only evals; `/adopt-evals` creates and installs
+them in steps 33 and 34, once it has created `skills-evals`, and
+`create-apps.sh` skips them while that repo does not exist.
 
 A lost private key cannot be recovered: generate a new one on the App's
 settings page and store it with the `gh secret set` command
@@ -131,8 +139,10 @@ settings page and store it with the `gh secret set` command
 Installing is a browser step: open each
 `https://github.com/apps/<slug>/installations/new` link `create-apps.sh`
 printed, choose "Only select repositories", and pick the repos the table
-names. For the three fleet-wide Apps, that is the six repos and every
-consumer you list in `_agent-guidance`'s `repos.yml`. With a second owner,
+names. For the three fleet-wide Apps, that is the kit's repos you created
+and every consumer you list in `_agent-guidance`'s `repos.yml`; once the
+evals track creates `skills-evals`, add it to their installations
+(step 34). With a second owner,
 the three are public Apps; sign in as that owner and install them there too.
 `bash bootstrap/verify.sh --only installs:<app>` checks an installation.
 
@@ -147,6 +157,18 @@ engine's `apply` with your gh login, and reads back with the engine's
 preview; `--check` is the read-back alone (`verify.sh --only settings`).
 With a second owner, sign gh in as that account (`gh auth switch`) and run
 it again with `--owner <OWNER_TWO>`.
+
+`skills-evals` is the evals track's. While it does not exist, the script
+leaves its entry out of a copy of `fleet.yml` and applies the rest, so the
+base needs neither that repo nor the `roster` App's id; once it exists, the
+same command applies it too and needs `ROSTER_WRITER_APP_ID` (step 39).
+`--track base` or `--track evals` limits a run, or a `--check`, to one
+track's repos; `status.sh` checks each step on its own track. The committed
+`fleet.yml` keeps declaring `skills-evals`, because `repo-settings`' tests
+hold it to that entry: on a base-only setup, `repo-settings.yml`'s own
+`plan` job, which reads the committed file, fails until `/adopt-evals` adds
+the repo and the `ROSTER_WRITER_APP_ID` variable, so apply from your
+machine with `apply-settings.sh` meanwhile.
 
 From then on, a pull request is the only way to change a default branch.
 Check it: `git push origin main` from a clone is rejected with `GH013`, and

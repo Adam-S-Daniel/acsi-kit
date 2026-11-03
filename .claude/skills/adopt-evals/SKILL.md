@@ -1,13 +1,14 @@
 ---
 name: adopt-evals
-description: Guide the user step by step through adding evals to this kit's system on their own GitHub account (the skills-evals loop's eval runner routine, its secrets and Apps, the eval fixture default, the optional federation and dashboard), driven by bootstrap/status.sh --track evals, after checking the base is in place. From a fresh start it runs the base steps first, so it also sets up the whole system in one go. Use when the user types /adopt-evals, asks to add or continue setting up evals or the improvement loop, or wants the whole system including evals. For guidance and skills alone, use /adopt.
+description: Guide the user step by step through adding evals to this kit's system on their own GitHub account (the skills-evals repo, its loop's eval runner routine, its secrets and Apps, the eval fixture default, the optional federation and dashboard), driven by bootstrap/status.sh --track evals, after checking the base is in place. From a fresh start it runs the base steps first, so it also sets up the whole system in one go. Use when the user types /adopt-evals, asks to add or continue setting up evals or the improvement loop, or wants the whole system including evals. For guidance and skills alone, use /adopt.
 ---
 
 # Add evals, one step at a time
 
-You are helping the user add evals to the system from this kit: the eval
-runner routine in `skills-evals`, the secrets and Apps it needs, and the
-loop that measures skills and guidance and improves or retires them.
+You are helping the user add evals to the system from this kit: the
+`skills-evals` repo (the base never creates it), the eval runner routine in
+it, the secrets and Apps it needs, and the loop that measures skills and
+guidance and improves or retires them.
 `bootstrap/steps.json` puts each step on the `base` or the `evals` track;
 the evals steps are this skill's. The base track is `/adopt`'s, in
 `.claude/skills/adopt/SKILL.md`. Work from the kit's folder (the one holding
@@ -42,13 +43,22 @@ step is marked by hand: run `bash bootstrap/status.sh --mark <id>` once the
 user says it is done. A `verify` step is never marked: status.sh refuses
 `--mark` for it, so run `bash bootstrap/status.sh --track evals` again
 until it reads done. The browser steps that create or install the eval
-Apps (33, 34) and the federation step (26) are `verify` steps.
+Apps (33, 34) and the federation step (26) are `verify` steps. Every evals
+check reads only the evals track's part (`verify.sh --track evals`), so
+the base stays done while you add `skills-evals`.
 
 When status.sh reads `Next: nothing; every required evals step is done`,
 run `bash bootstrap/verify.sh` for the whole setup and show its result.
 
 ## Steps with a catch
 
+- **Steps 35 to 39** add `skills-evals` with the base's own scripts, which
+  include it once it exists (`docs/evals-and-loop.md`, "Adding
+  skills-evals"): `create-repos.sh skills-evals`, its starter pull request,
+  `create-environments.sh`, `regenerate.sh run-health-sha` and
+  `actions-lock`, and `apply-settings.sh`. They come first: every other
+  evals step needs that repo. Step 39's apply also ends the base-only
+  failure of `repo-settings.yml`'s `plan` job.
 - **Step 19** (eval.yml's default fixture): the shipped default runs as it
   is; a change is a pull request on the user's `skills-evals`.
 - **The eval runner** (steps 24 and 25): the bearer is shown once. The
@@ -56,9 +66,10 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
   `set-secrets.sh --only routine-fire` themselves.
 - **Steps 26 and 32** are optional: offer them, and move on when the user
   declines.
-- **Steps 33 and 34** (`create-apps.sh eval-improve registry-read`, then
-  the installations): `create-apps.sh` wants the URL GitHub redirects to,
-  so it runs in the user's own terminal.
+- **Steps 33 and 34** (`create-apps.sh eval-improve roster registry-read`,
+  then the installations): `create-apps.sh` wants the URL GitHub redirects
+  to, so it runs in the user's own terminal. Step 34 also adds
+  `skills-evals` to the three base Apps' installations.
 
 ## Never
 

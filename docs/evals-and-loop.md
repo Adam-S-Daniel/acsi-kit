@@ -23,6 +23,31 @@ The deepest account is its
 [`docs/how-it-works.md`](../starter/skills-evals/docs/how-it-works.md);
 [`DESIGN.md`](../starter/skills-evals/DESIGN.md) has the method.
 
+## Adding skills-evals
+
+The base never creates `skills-evals`: only the evals track needs it, and
+on a base-only account its scheduled workflows would run with no routine to
+fire. `/adopt-evals` adds it before any other evals step, with the same
+scripts the base used, which include it once it exists:
+
+1. `bootstrap/create-repos.sh skills-evals`: the repo, its labels and its
+   `persistent/eval-results` branch (step 35).
+2. `bootstrap/copy-starter.sh starter/skills-evals <you>/skills-evals`, then
+   review and merge (step 36).
+3. The three eval Apps, `eval-improve`, `roster` and `registry-read`
+   (`create-apps.sh`, step 33), and their installations, with `skills-evals`
+   added to the three base Apps' installations (step 34).
+4. `bootstrap/create-environments.sh` again: the `routine-fire` environment
+   and `repo-settings`' `ROSTER_WRITER_APP_ID` (step 37).
+5. `bootstrap/regenerate.sh run-health-sha` and
+   `bootstrap/regenerate.sh actions-lock` again, for `skills-evals`' copies
+   (step 38).
+6. `bootstrap/apply-settings.sh` again, which now protects `skills-evals`
+   too (step 39).
+
+Each of those checks reads only the evals track's part
+(`verify.sh --track evals`), so the base steps stay done throughout.
+
 ## Fixtures
 
 A fixture is a directory with a `fixture.yaml` (the prompt, the arms, the

@@ -14,32 +14,32 @@ Every item `REGENERATE.md` lists, and the quick start step that handles it:
 
 | Repo | Item | Step |
 |---|---|---|
-| `_agent-guidance` | `skills.lock` | 13 |
-| `_agent-guidance` | `repos.yml` `skills_bootstrap.ref` | 14 |
-| `_agent-guidance` | `.github/workflows/actions.lock` | 17 |
-| `repo-settings` | `.github/workflows/scheduled-run-health.yml` | 15 |
-| `repo-settings` | `skills.lock` | 13 |
-| `repo-settings` | `.github/workflows/actions.lock` | 17 |
-| `repo-settings` | GitHub App ids | 7 |
-| `repo-settings` | `repo-settings/fleet.yml`'s repo list | 8 |
-| `wsl-automation` | `.github/workflows/scheduled-run-health.yml` | 15 |
-| `wsl-automation` | `skills.lock` | 13 |
-| `wsl-automation` | `.github/workflows/actions.lock` | 17 |
-| `wsl-automation` | The Codex Cloud bootstrap pin | 16 |
-| `wsl-automation` | The waiting feed's commit identity | 12 |
-| `wsl-automation` | The waiting feed's repository | 1, 21 |
-| `skills-evals` | `.github/workflows/scheduled-run-health.yml` | 15 |
-| `skills-evals` | `.github/workflows/actions.lock` | 17 |
-| `skills-evals` | The routine trigger id | 23, 24 |
-| `skills-evals` | `.github/workflows/eval.yml` | 18 |
-| `acsi-agentskills` | `skills.lock` | 13 |
-| `acsi-agentskills-private` | `skills.lock` | 13 |
-| `acsi-agentskills` | `.github/workflows/scheduled-run-health.yml` | 15 |
-| `acsi-agentskills-private` | `.github/workflows/scheduled-run-health.yml` | 15 |
-| `acsi-agentskills` | `.github/workflows/actions.lock` | 17 |
-| `acsi-agentskills-private` | `.github/workflows/actions.lock` | 17 |
-| `acsi-agentskills` | `<your name>` | 11 |
-| `acsi-agentskills-private` | `<your name>` | 11 |
+| `_agent-guidance` | `skills.lock` | 14 |
+| `_agent-guidance` | `repos.yml` `skills_bootstrap.ref` | 15 |
+| `_agent-guidance` | `.github/workflows/actions.lock` | 18 |
+| `repo-settings` | `.github/workflows/scheduled-run-health.yml` | 16 |
+| `repo-settings` | `skills.lock` | 14 |
+| `repo-settings` | `.github/workflows/actions.lock` | 18 |
+| `repo-settings` | GitHub App ids | 8, 37 |
+| `repo-settings` | `repo-settings/fleet.yml`'s repo list | 9 |
+| `wsl-automation` | `.github/workflows/scheduled-run-health.yml` | 16 |
+| `wsl-automation` | `skills.lock` | 14 |
+| `wsl-automation` | `.github/workflows/actions.lock` | 18 |
+| `wsl-automation` | The Codex Cloud bootstrap pin | 17 |
+| `wsl-automation` | The waiting feed's commit identity | 13 |
+| `wsl-automation` | The waiting feed's repository | 2, 22 |
+| `skills-evals` | `.github/workflows/scheduled-run-health.yml` | 38 |
+| `skills-evals` | `.github/workflows/actions.lock` | 38 |
+| `skills-evals` | The routine trigger id | 24, 25 |
+| `skills-evals` | `.github/workflows/eval.yml` | 19 |
+| `acsi-agentskills` | `skills.lock` | 14 |
+| `acsi-agentskills-private` | `skills.lock` | 14 |
+| `acsi-agentskills` | `.github/workflows/scheduled-run-health.yml` | 16 |
+| `acsi-agentskills-private` | `.github/workflows/scheduled-run-health.yml` | 16 |
+| `acsi-agentskills` | `.github/workflows/actions.lock` | 18 |
+| `acsi-agentskills-private` | `.github/workflows/actions.lock` | 18 |
+| `acsi-agentskills` | `<your name>` | 12 |
+| `acsi-agentskills-private` | `<your name>` | 12 |
 
 (`acsi-agentskills-private` has no `scheduled-run-health.yml`; `REGENERATE.md`
 lists the two registries under one heading.)
@@ -80,7 +80,9 @@ opens its own pull request; the nightly bumper runs it from then on).
 `acsi-agentskills` and `wsl-automation` calls `_agent-guidance`'s reusable
 workflow, and a cross-repo reusable takes a full sha; the export ships forty
 zeros. `bash bootstrap/regenerate.sh run-health-sha` writes your
-`_agent-guidance` default branch's commit into all four.
+`_agent-guidance` default branch's commit into each of them that exists:
+the three base repos in step 16, and `skills-evals` once the evals track
+has created it (step 38).
 
 ## The Codex Cloud pin
 
@@ -102,7 +104,8 @@ gh extension install github/gh-actions-lock
 bash bootstrap/regenerate.sh actions-lock
 ```
 
-It runs `gh actions-lock --no-narrow` in each repo and proposes any change;
+It runs `gh actions-lock --no-narrow` in each repo (`skills-evals` once it
+exists: step 38 runs it again) and proposes any change;
 `--check` runs `gh actions-lock --verify`. Review an `actions.lock` diff as
 you would a sha pin.
 

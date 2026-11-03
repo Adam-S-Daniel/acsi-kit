@@ -25,6 +25,11 @@
 # PLAN=free: environments exist only in public repos, so fleet-apply (in the
 # private repo-settings) is skipped, and the script says what to do instead.
 #
+# skills-evals is the evals track's (steps.json): while it does not exist (a
+# base-only setup), its routine-fire environment and its variables are
+# skipped, and ROSTER_WRITER_APP_ID waits for the roster App, which only
+# /adopt-evals creates. Run this again once the evals track has created it.
+#
 # Idempotent: reads each environment and its branch policies first and writes
 # only what differs; a second run says "Nothing to change". Extra branch
 # policies someone added are reported, never deleted. Run create-repos.sh first.
@@ -124,14 +129,24 @@ ensure_env() { # repo env reviewer branches
 }
 
 log "Owner $O, plan $CFG_PLAN$([ "$DRY_RUN" = 1 ] && echo ', DRY RUN')"
+EVALS_HERE=1
+evals_repo_exists || EVALS_HERE=0
+# absent_evals_repo <repo> <what>: skip what lives in a skills-evals not created yet.
+absent_evals_repo() {
+  [ "$1" = "$EVALS_REPO" ] && [ "$EVALS_HERE" = 0 ] || return 1
+  log "skip: $O/$1 $2: $1 does not exist yet; the evals track creates it (create-repos.sh $1, /adopt-evals)"
+}
 for entry in "${ENVIRONMENTS[@]}"; do
   IFS='|' read -r repo env rev br <<<"$entry"
+  absent_evals_repo "$repo" "environment $env" && continue
   ensure_env "$repo" "$env" "$rev" "$br"
 done
 declare -A HAVE_VARS
 ensure_repo_variable() { # repo name source group
   local r=$1 name=$2 src=$3 group=$4 want hint="run create-apps.sh, then this again"
   [ "$group" = federation ] && hint="optional; docs/evals-and-loop.md#workload-identity-federation"
+  [ "$group" = federation ] || [ "$(variable_track "$r" "$src")" = base ] || hint="the evals track's App; /adopt-evals creates it"
+  absent_evals_repo "$r" "variable $name" && return 0
   want=$(repo_variable_value "$src")
   if [ -z "$want" ]; then
     log "skip: $O/$r variable $name: ${src#cfg:} is empty in fleet.env ($hint)"; return 0

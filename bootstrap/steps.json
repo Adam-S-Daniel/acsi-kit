@@ -1,5 +1,5 @@
 {
-  "about": "The quick start's steps, in order: the one source for docs/quick-start.md's table (render-quickstart.py) and for status.sh. Each step is at most one command or one visit to a page, plus the check that says it is done. check.type is config (fleet.env exists with OWNER and PLAN), verify (verify.sh --only <groups> passes), files (each file is on that repo's default branch, so its starter pull request is merged) or ask (status.sh --mark <id> once you say it is done; an ask check with \"record\": \"content\" is also done once add-content.sh has recorded your choices). link is a kit-relative path to the docs section that explains the step. An optional step is listed but never blocks the next. track is base (guidance, skills, settings, hooks, machines: what /adopt sets up) or evals (what exists only for the eval loop: what /adopt-evals adds); status.sh --track limits its report to one. A step that serves both is base, and its run text says which part only evals use.",
+  "about": "The quick start's steps, in order: the one source for docs/quick-start.md's table (render-quickstart.py) and for status.sh. Each step is at most one command or one visit to a page, plus the check that says it is done. check.type is config (fleet.env exists with OWNER and PLAN), verify (verify.sh --only <groups> passes), files (each file is on that repo's default branch, so its starter pull request is merged) or ask (status.sh --mark <id> once you say it is done; an ask check with \"record\": \"content\" is also done once add-content.sh has recorded your choices). link is a kit-relative path to the docs section that explains the step. An optional step is listed but never blocks the next. track is base (guidance, skills, settings, hooks, machines: what /adopt sets up) or evals (what exists only for the eval loop: what /adopt-evals adds); status.sh --track limits its report to one. A step that serves both is base, and its run text says which part only evals use. A verify check runs with its step's track (verify.sh --track): a base step never looks at skills-evals or what serves only it, and an evals step looks only at those, so the base needs no skills-evals and adding evals never undoes a base step.",
   "steps": [
     {
       "id": "0",
@@ -30,8 +30,8 @@
     },
     {
       "id": "2",
-      "title": "Create the six repos",
-      "run": "`bootstrap/create-repos.sh` (`skills-evals` and its `persistent/eval-results` branch serve only evals, but `fleet.yml`, the `roster` App and step 16 name it, so the base creates it too)",
+      "title": "Create the five base repos",
+      "run": "`bootstrap/create-repos.sh` (all but `skills-evals`, which only evals use: the evals track creates it)",
       "kind": "script",
       "part": "settings",
       "track": "base",
@@ -40,8 +40,7 @@
         "type": "verify",
         "groups": [
           "repos",
-          "labels",
-          "branches"
+          "labels"
         ]
       },
       "minutes": 5
@@ -88,7 +87,7 @@
     {
       "id": "5",
       "title": "Create the environments",
-      "run": "`bootstrap/create-environments.sh` (its `routine-fire` environment in `skills-evals` serves only evals)",
+      "run": "`bootstrap/create-environments.sh` (its `routine-fire` environment waits for the evals track's `skills-evals`)",
       "kind": "script",
       "part": "settings",
       "track": "base",
@@ -103,8 +102,8 @@
     },
     {
       "id": "6",
-      "title": "Create the four base GitHub Apps",
-      "run": "`bootstrap/create-apps.sh guidance-sync settings-admin settings-read roster` (GitHub's App manifest flow, once per App, in the browser; `roster` serves only evals, but `fleet.yml` names its id as a bypass actor, so the first apply needs it)",
+      "title": "Create the three base GitHub Apps",
+      "run": "`bootstrap/create-apps.sh guidance-sync settings-admin settings-read` (GitHub's App manifest flow, once per App, in the browser)",
       "kind": "browser",
       "part": "settings",
       "track": "base",
@@ -114,8 +113,7 @@
         "groups": [
           "apps:guidance-sync",
           "apps:settings-admin",
-          "apps:settings-read",
-          "apps:roster"
+          "apps:settings-read"
         ]
       },
       "minutes": 20
@@ -133,15 +131,14 @@
         "groups": [
           "installs:guidance-sync",
           "installs:settings-admin",
-          "installs:settings-read",
-          "installs:roster"
+          "installs:settings-read"
         ]
       },
       "minutes": 10
     },
     {
       "id": "8",
-      "title": "Copy the App ids into repo-settings",
+      "title": "Copy the App id into repo-settings",
       "run": "`bootstrap/create-environments.sh` again",
       "kind": "script",
       "part": "settings",
@@ -229,26 +226,22 @@
     },
     {
       "id": "13",
-      "title": "Copy skills-evals and wsl-automation and merge them",
-      "run": "`bootstrap/copy-starter.sh starter/skills-evals <you>/skills-evals` and `bootstrap/copy-starter.sh starter/wsl-automation <you>/wsl-automation`, then review and merge (`skills-evals` serves only evals, but step 16 pins a file in it)",
+      "title": "Copy wsl-automation and merge it",
+      "run": "`bootstrap/copy-starter.sh starter/wsl-automation <you>/wsl-automation`, then review and merge",
       "kind": "script",
-      "part": "evals",
+      "part": "machine",
       "track": "base",
-      "link": "docs/evals-and-loop.md#what-skills-evals-holds",
+      "link": "docs/machine.md#scheduled-jobs-wsl-automation",
       "check": {
         "type": "files",
         "files": [
-          {
-            "repo": "skills-evals",
-            "path": "scripts/plan_week.py"
-          },
           {
             "repo": "wsl-automation",
             "path": "scripts/unix/install-schedule.sh"
           }
         ]
       },
-      "minutes": 30
+      "minutes": 20
     },
     {
       "id": "14",
@@ -285,7 +278,7 @@
     {
       "id": "16",
       "title": "Pin the scheduled-run-health reusable",
-      "run": "`bootstrap/regenerate.sh run-health-sha`, then merge the four pull requests",
+      "run": "`bootstrap/regenerate.sh run-health-sha`, then merge the three pull requests",
       "kind": "script",
       "part": "generated files",
       "track": "base",
@@ -331,22 +324,9 @@
       "minutes": 10
     },
     {
-      "id": "19",
-      "title": "Decide eval.yml's default fixture",
-      "run": "`.github/workflows/eval.yml`'s `fixture` default, `evals/workflow-path-audit/required-check-routing`, ships with the kit and runs as it is: keep it, or change it to a fixture of your own in a pull request on `<you>/skills-evals`",
-      "kind": "manual",
-      "part": "generated files",
-      "track": "evals",
-      "link": "docs/generated-files.md#the-evalyml-fixture-default",
-      "check": {
-        "type": "ask"
-      },
-      "minutes": 10
-    },
-    {
       "id": "20",
       "title": "Apply fleet.yml: protect every repo",
-      "run": "`bootstrap/apply-settings.sh` (and `--owner <OWNER_TWO>` signed in as that account)",
+      "run": "`bootstrap/apply-settings.sh` (and `--owner <OWNER_TWO>` signed in as that account; it leaves out `skills-evals` until the evals track creates it)",
       "kind": "script",
       "part": "settings",
       "track": "base",
@@ -397,52 +377,6 @@
         "type": "ask"
       },
       "minutes": 20
-    },
-    {
-      "id": "24",
-      "title": "Create the eval runner routine",
-      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id",
-      "kind": "browser",
-      "part": "routines",
-      "track": "evals",
-      "link": "docs/routines.md#the-eval-runner",
-      "check": {
-        "type": "ask"
-      },
-      "minutes": 20
-    },
-    {
-      "id": "25",
-      "title": "Store the eval runner's bearer and trigger id",
-      "run": "`bootstrap/set-secrets.sh --only routine-fire`",
-      "kind": "script",
-      "part": "routines",
-      "track": "evals",
-      "link": "docs/routines.md#the-eval-runner",
-      "check": {
-        "type": "verify",
-        "groups": [
-          "values:routine-fire"
-        ]
-      },
-      "minutes": 5
-    },
-    {
-      "id": "26",
-      "title": "Optional: let eval.yml trade OIDC for an Anthropic token",
-      "run": "In the Anthropic Console, set up workload identity federation for `skills-evals`, put its four ids in fleet.env, then `bootstrap/create-environments.sh`",
-      "kind": "browser",
-      "part": "routines",
-      "track": "evals",
-      "link": "docs/evals-and-loop.md#workload-identity-federation",
-      "check": {
-        "type": "verify",
-        "groups": [
-          "federation"
-        ]
-      },
-      "minutes": 20,
-      "optional": true
     },
     {
       "id": "27",
@@ -510,6 +444,191 @@
       "minutes": 20
     },
     {
+      "id": "35",
+      "title": "Create skills-evals",
+      "run": "`bootstrap/create-repos.sh skills-evals` (with its labels and its `persistent/eval-results` branch)",
+      "kind": "script",
+      "part": "evals",
+      "track": "evals",
+      "link": "docs/evals-and-loop.md#adding-skills-evals",
+      "check": {
+        "type": "verify",
+        "groups": [
+          "repos",
+          "labels",
+          "branches"
+        ]
+      },
+      "minutes": 5
+    },
+    {
+      "id": "36",
+      "title": "Copy skills-evals and merge it",
+      "run": "`bootstrap/copy-starter.sh starter/skills-evals <you>/skills-evals`, then review and merge",
+      "kind": "script",
+      "part": "evals",
+      "track": "evals",
+      "link": "docs/evals-and-loop.md#what-skills-evals-holds",
+      "check": {
+        "type": "files",
+        "files": [
+          {
+            "repo": "skills-evals",
+            "path": "scripts/plan_week.py"
+          }
+        ]
+      },
+      "minutes": 20
+    },
+    {
+      "id": "33",
+      "title": "Create the three eval GitHub Apps",
+      "run": "`bootstrap/create-apps.sh eval-improve roster registry-read` (GitHub's App manifest flow, once per App, in the browser)",
+      "kind": "browser",
+      "part": "settings",
+      "track": "evals",
+      "link": "docs/settings-and-apps.md#github-apps",
+      "check": {
+        "type": "verify",
+        "groups": [
+          "apps:eval-improve",
+          "apps:roster",
+          "apps:registry-read"
+        ]
+      },
+      "minutes": 10
+    },
+    {
+      "id": "34",
+      "title": "Install the eval Apps",
+      "run": "Open the `https://github.com/apps/<slug>/installations/new` link `create-apps.sh` printed for each and pick the repos it names; then add `skills-evals` to the installations of `guidance-sync`, `settings-admin` and `settings-read`",
+      "kind": "browser",
+      "part": "settings",
+      "track": "evals",
+      "link": "docs/settings-and-apps.md#installing-the-apps",
+      "check": {
+        "type": "verify",
+        "groups": [
+          "installs:eval-improve",
+          "installs:roster",
+          "installs:registry-read",
+          "installs:guidance-sync",
+          "installs:settings-admin",
+          "installs:settings-read"
+        ]
+      },
+      "minutes": 10
+    },
+    {
+      "id": "37",
+      "title": "Create its environment and copy the roster App's id",
+      "run": "`bootstrap/create-environments.sh` again (the `routine-fire` environment in `skills-evals`, and `ROSTER_WRITER_APP_ID` in `repo-settings`)",
+      "kind": "script",
+      "part": "evals",
+      "track": "evals",
+      "link": "docs/settings-and-apps.md#environments",
+      "check": {
+        "type": "verify",
+        "groups": [
+          "environments",
+          "variables"
+        ]
+      },
+      "minutes": 3
+    },
+    {
+      "id": "38",
+      "title": "Pin skills-evals' generated files",
+      "run": "`bootstrap/regenerate.sh run-health-sha` and `bootstrap/regenerate.sh actions-lock` again, then merge what they open in `skills-evals`",
+      "kind": "script",
+      "part": "evals",
+      "track": "evals",
+      "link": "docs/evals-and-loop.md#adding-skills-evals",
+      "check": {
+        "type": "verify",
+        "groups": [
+          "regen:run-health-sha",
+          "regen:actions-lock"
+        ]
+      },
+      "minutes": 10
+    },
+    {
+      "id": "39",
+      "title": "Apply fleet.yml to skills-evals",
+      "run": "`bootstrap/apply-settings.sh` again: it now includes `skills-evals`",
+      "kind": "script",
+      "part": "evals",
+      "track": "evals",
+      "link": "docs/settings-and-apps.md#the-first-apply",
+      "check": {
+        "type": "verify",
+        "groups": [
+          "settings"
+        ]
+      },
+      "minutes": 5
+    },
+    {
+      "id": "19",
+      "title": "Decide eval.yml's default fixture",
+      "run": "`.github/workflows/eval.yml`'s `fixture` default, `evals/workflow-path-audit/required-check-routing`, ships with the kit and runs as it is: keep it, or change it to a fixture of your own in a pull request on `<you>/skills-evals`",
+      "kind": "manual",
+      "part": "generated files",
+      "track": "evals",
+      "link": "docs/generated-files.md#the-evalyml-fixture-default",
+      "check": {
+        "type": "ask"
+      },
+      "minutes": 10
+    },
+    {
+      "id": "24",
+      "title": "Create the eval runner routine",
+      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id",
+      "kind": "browser",
+      "part": "routines",
+      "track": "evals",
+      "link": "docs/routines.md#the-eval-runner",
+      "check": {
+        "type": "ask"
+      },
+      "minutes": 20
+    },
+    {
+      "id": "25",
+      "title": "Store the eval runner's bearer and trigger id",
+      "run": "`bootstrap/set-secrets.sh --only routine-fire`",
+      "kind": "script",
+      "part": "routines",
+      "track": "evals",
+      "link": "docs/routines.md#the-eval-runner",
+      "check": {
+        "type": "verify",
+        "groups": [
+          "values:routine-fire"
+        ]
+      },
+      "minutes": 5
+    },
+    {
+      "id": "26",
+      "title": "Optional: let eval.yml trade OIDC for an Anthropic token",
+      "run": "In the Anthropic Console, set up workload identity federation for `skills-evals`, put its four ids in fleet.env, then `bootstrap/create-environments.sh`",
+      "kind": "browser",
+      "part": "routines",
+      "track": "evals",
+      "link": "docs/evals-and-loop.md#workload-identity-federation",
+      "check": {
+        "type": "verify",
+        "groups": [
+          "federation"
+        ]
+      },
+      "minutes": 20,
+      "optional": true
+    },
+    {
       "id": "32",
       "title": "Optional: the project dashboard",
       "run": "Follow skills-evals' `dashboard/README.md` (Adopting it), then schedule its refresh every 2 hours",
@@ -522,40 +641,6 @@
       },
       "minutes": 30,
       "optional": true
-    },
-    {
-      "id": "33",
-      "title": "Create the two eval GitHub Apps",
-      "run": "`bootstrap/create-apps.sh eval-improve registry-read` (GitHub's App manifest flow, once per App, in the browser)",
-      "kind": "browser",
-      "part": "settings",
-      "track": "evals",
-      "link": "docs/settings-and-apps.md#github-apps",
-      "check": {
-        "type": "verify",
-        "groups": [
-          "apps:eval-improve",
-          "apps:registry-read"
-        ]
-      },
-      "minutes": 10
-    },
-    {
-      "id": "34",
-      "title": "Install the eval Apps",
-      "run": "Open the `https://github.com/apps/<slug>/installations/new` link `create-apps.sh` printed for each and pick the repos it names",
-      "kind": "browser",
-      "part": "settings",
-      "track": "evals",
-      "link": "docs/settings-and-apps.md#installing-the-apps",
-      "check": {
-        "type": "verify",
-        "groups": [
-          "installs:eval-improve",
-          "installs:registry-read"
-        ]
-      },
-      "minutes": 5
     }
   ]
 }

@@ -138,19 +138,63 @@ assert_not "a missing config is refused" bash "$B/create-repos.sh" --config "$T/
 assert_not "an unknown repo name is refused" bash "$B/create-repos.sh" --config "$CFG" --dry-run agent-skills
 
 # ======================================================== create-repos.sh
+# The default is the five base repos: skills-evals is the evals track's.
 run bash "$B/create-repos.sh" --config "$CFG" --dry-run; rc=$?
 assert_eq "create-repos dry run exits 0" "$rc" 0
 assert_eq "create-repos dry run makes no write calls" "$(writes "$GH_LOG")" 0
+assert "create-repos dry run prints the private repo create call" has "$OUT" "DRY-RUN: gh repo create acme-example/acsi-agentskills-private --private"
+assert "create-repos dry run says nothing was written" has "$OUT" "nothing was written"
+assert_not "the default dry run leaves skills-evals to the evals track" has "$OUT" "gh repo create acme-example/skills-evals"
+assert "it says why skills-evals is left out" has "$OUT" "skip: acme-example/skills-evals: the evals track creates it"
+run bash "$B/create-repos.sh" --config "$CFG" --dry-run skills-evals; rc=$?
+assert_eq "a dry run naming skills-evals exits 0" "$rc" 0
 assert "dry run prints the results branch's tree, commit and ref" bash -c 'for u in git/trees git/commits git/refs; do grep -qF "DRY-RUN: gh api -X POST repos/acme-example/skills-evals/$u" "$1" || exit 1; done' _ "$OUT"
 assert "dry run says it would create the orphan results branch" has "$OUT" "would have: created the orphan branch persistent/eval-results in acme-example/skills-evals"
 assert_eq "dry run creates no branch" "$(jqs '[.repos[]? | .branches // {} | keys[]] | length')" 0
-assert "create-repos dry run prints the private repo create call" has "$OUT" "DRY-RUN: gh repo create acme-example/acsi-agentskills-private --private"
-assert "create-repos dry run says nothing was written" has "$OUT" "nothing was written"
 
 run bash "$B/create-repos.sh" --config "$CFG"; rc=$?
 assert_eq "create-repos exits 0" "$rc" 0
-assert_eq "it creates exactly the six repos" "$(jqs '[.repos | keys[]] | sort | join(" ")')" \
+assert_eq "it creates exactly the five base repos" "$(jqs '[.repos | keys[]] | sort | join(" ")')" \
+  "acme-example/_agent-guidance acme-example/acsi-agentskills acme-example/acsi-agentskills-private acme-example/repo-settings acme-example/wsl-automation"
+assert_eq "no results branch without skills-evals" "$(jqs '[.repos[] | .branches // {} | keys[] | select(. == "persistent/eval-results")] | length')" 0
+# A base-only setup: the base track's checks pass without skills-evals, the
+# whole-setup check checks the base and says so, and the evals track fails.
+run bash "$B/verify.sh" --config "$CFG" --track base --only repos,labels; rc=$?
+assert_eq "verify --track base passes without skills-evals" "$rc" 0
+assert "the base track checks the five repos" grep -qE '^20 passed, 0 failed, 0 skipped$' "$OUT"
+assert_not "the base track never names skills-evals" has "$OUT" skills-evals
+run bash "$B/verify.sh" --config "$CFG" --only repos,labels; rc=$?
+assert_eq "verify of the whole setup passes a base-only setup" "$rc" 0
+assert "it says it left the evals track out" has "$OUT" "SKIP: acme-example/skills-evals and the evals track's checks"
+run bash "$B/verify.sh" --config "$CFG" --track evals --only repos,labels,branches; rc=$?
+assert_eq "verify --track evals fails without skills-evals" "$rc" 1
+assert "it names the repo and the command that creates it" has "$OUT" "FAIL: acme-example/skills-evals exists (HTTP 404; the evals track creates it: create-repos.sh skills-evals)"
+assert_not "the evals track checks no base repo" grep -qE '^PASS: .*acme-example/(_agent-guidance|repo-settings|acsi-agentskills|wsl-automation)' "$OUT"
+run bash "$B/create-environments.sh" --config "$CFG"; rc=$?
+assert_eq "create-environments exits 0 without skills-evals" "$rc" 0
+assert "it skips routine-fire, which lives in skills-evals" has "$OUT" "skip: acme-example/skills-evals environment routine-fire: skills-evals does not exist yet"
+assert_eq "no environment is made in skills-evals" "$(jqs '.envs["acme-example/skills-evals"] // {} | length')" 0
+assert "ROSTER_WRITER_APP_ID waits for the evals track" has "$OUT" "ROSTER_WRITER_APP_ID is empty in fleet.env (the evals track's App; /adopt-evals creates it)"
+run bash "$B/create-apps.sh" --config "$CFG" --dry-run --out "$T/manifests-base"; rc=$?
+assert_eq "create-apps dry run exits 0 without skills-evals" "$rc" 0
+for a in eval-improve roster registry-read; do
+  assert "the evals App $a waits for skills-evals" has "$OUT" "skip: $a: the evals track's App"
+  assert_not "no $a manifest would be written" has "$OUT" "$a.manifest.json"
+done
+assert "the base Apps would still be made" has "$OUT" "DRY-RUN: write $T/manifests-base/guidance-sync.manifest.json"
+run bash "$B/create-apps.sh" --config "$CFG" --dry-run --out "$T/manifests-base" roster; rc=$?
+assert_eq "naming an evals App without skills-evals is refused" "$rc" 1
+assert "the refusal says to create skills-evals first" has "$ERR" "the evals track creates it first (create-repos.sh skills-evals)"
+# The evals track's first step creates it by name.
+n=$(log_lines "$GH_LOG")
+run bash "$B/create-repos.sh" --config "$CFG" skills-evals; rc=$?
+assert_eq "create-repos skills-evals exits 0" "$rc" 0
+assert_eq "it makes the repo, its README, two labels and the branch's tree, commit and ref" "$(since "$n")" 7
+assert_eq "now there are six repos" "$(jqs '[.repos | keys[]] | sort | join(" ")')" \
   "acme-example/_agent-guidance acme-example/acsi-agentskills acme-example/acsi-agentskills-private acme-example/repo-settings acme-example/skills-evals acme-example/wsl-automation"
+run bash "$B/verify.sh" --config "$CFG" --track evals --only repos,labels,branches; rc=$?
+assert_eq "verify --track evals passes once it exists" "$rc" 0
+assert "the evals track checks skills-evals alone" grep -qE '^5 passed, 0 failed, 0 skipped$' "$OUT"
 for r in _agent-guidance acsi-agentskills skills-evals wsl-automation; do
   assert_eq "free: $r is public" "$(jqs ".repos[\"$O/$r\"].visibility")" public
 done
@@ -528,8 +572,10 @@ jqset 'del(.repos["acme-example/skills-evals"].branches["persistent/eval-results
 run bash "$B/verify.sh" --config "$CFGP" --only branches; rc=$?
 assert_eq "verify --only branches fails without it" "$rc" 1
 assert "verify points at create-repos.sh" has "$OUT" "FAIL: acme-example/skills-evals has the persistent/eval-results branch (HTTP 404; run create-repos.sh)"
-run bash "$B/status.sh" --config "$CFGP"
-assert "status leaves step 2 (create the repos) next while the results branch is missing" grep -q '^Next: 2 ' "$OUT"
+run bash "$B/status.sh" --config "$CFGP" --track evals
+assert "status leaves step 35 (create skills-evals) next while the results branch is missing" grep -q '^Next: 35 ' "$OUT"
+run bash "$B/status.sh" --config "$CFGP" --track base
+assert "a missing results branch leaves the base's step 2 done" grep -qE '^done +2 ' "$OUT"
 run bash "$B/create-repos.sh" --config "$CFGP" skills-evals
 run bash "$B/verify.sh" --config "$CFGP" --only branches; rc=$?
 assert_eq "create-repos puts the results branch back and verify passes" "$rc" 0
@@ -631,14 +677,15 @@ for i in 9 11; do bash "$B/status.sh" --config "$CFGP" --mark "$i" >/dev/null 2>
 assert_eq "the marks are kept in the state file" "$(jq -c .done "$ADOPT_STATE_FILE")" '["9","11"]'
 run bash "$B/status.sh" --config "$CFGP"; rc=$?
 assert "the regenerate steps read as done after their merges" bash -c 'for i in 14 15 16 17 18; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
-assert "step 19, an ask step, is next" grep -q '^Next: 19 ' "$OUT"
-grep -q '^Next: 19 ' "$OUT" || sed 's/^/    status: /' "$OUT"
-assert "status says how to mark an ask step" has "$OUT" "bootstrap/status.sh --mark 19"
+assert "step 20, the settings apply, is next" grep -q '^Next: 20 ' "$OUT"
+grep -q '^Next: 20 ' "$OUT" || sed 's/^/    status: /' "$OUT"
+assert "the evals steps that add skills-evals read as done" bash -c 'for i in 35 36 33 34 37 38; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
 assert "the optional dashboard step is labeled optional" grep -qE '^optional +32 ' "$OUT"
 assert "the optional federation step reads as done once its ids are set" grep -qE '^done +26 ' "$OUT"
 bash "$B/status.sh" --config "$CFGP" --unmark 9 >/dev/null 2>&1
 run bash "$B/status.sh" --config "$CFGP"
 assert "--unmark makes a step next again" grep -q '^Next: 9 ' "$OUT"
+assert "status says how to mark an ask step" has "$OUT" "bootstrap/status.sh --mark 9"
 # --track: one track's steps, its own next step, and both tracks' counts.
 track_ids() { jq -r --arg t "$1" '[.steps[] | select(.track == $t) | .id] | join(" ")' "$B/steps.json"; }
 listed() { sed -nE 's/^(done|asked: done|next|todo|optional) +([0-9]+) .*/\2/p' "$1" | paste -sd' ' -; }
@@ -655,7 +702,7 @@ done
 run bash "$B/status.sh" --config "$CFGP" --track base
 assert "status --track base picks the next base step" grep -q '^Next: 9 ' "$OUT"
 run bash "$B/status.sh" --config "$CFGP" --track evals
-assert "status --track evals picks the next evals step" grep -q '^Next: 19 ' "$OUT"
+assert "status --track evals picks the next evals step" grep -q '^Next: 39 ' "$OUT"
 assert "status --track evals says the base is not done" has "$OUT" "The base track is not done yet"
 run bash "$B/status.sh" --config "$CFGP" --track some; rc=$?
 assert_eq "status refuses an unknown track" "$rc" 1
@@ -673,9 +720,13 @@ cat > "$w/scripts/repo_settings.py" <<'PY'
 import os, sys
 with open(os.environ["FAKE_ENGINE_LOG"], "a", encoding="utf-8") as f:
     f.write(" ".join(sys.argv[1:]) + " | " + os.environ.get("GUIDANCE_SYNC_APP_ID", "") + " " + os.environ.get("ROSTER_WRITER_APP_ID", "") + "\n")
+cfg = sys.argv[sys.argv.index("--config") + 1]
+with open(os.environ["FAKE_ENGINE_LOG"] + ".repos", "w", encoding="utf-8") as f:
+    f.write(" ".join(l.split("name: ", 1)[1].strip() for l in open(cfg, encoding="utf-8") if "name: " in l) + "\n")
 sys.exit(int(os.environ.get("FAKE_DIFF_RC", "0")) if sys.argv[1] == "diff" else int(os.environ.get("FAKE_APPLY_RC", "0")))
 PY
-printf 'repos:\n  - name: acme-fake/one\n  - name: acme-fake/two\n  - name: acme-fake-two/three\n' > "$w/repo-settings/fleet.yml"
+# acme-fake/skills-evals is declared and, until the evals track creates it, absent.
+printf 'repos:\n  - name: acme-fake/one\n  - name: acme-fake/skills-evals\n  - name: acme-fake/two\n  - name: acme-fake-two/three\n' > "$w/repo-settings/fleet.yml"
 git init -q "$w" && git -C "$w" add -A && git -C "$w" commit -qm fake
 git init -q --bare "$T/remotes/$F/repo-settings.git" && git -C "$w" push -q "$T/remotes/$F/repo-settings.git" HEAD:main; rm -rf "$w"
 export FAKE_ENGINE_LOG="$T/engine.log"
@@ -683,9 +734,11 @@ export FAKE_ENGINE_LOG="$T/engine.log"
 run bash "$B/apply-settings.sh" --config "$CFGF" --dry-run; rc=$?
 assert_eq "apply-settings dry run exits 0" "$rc" 0
 assert "the dry run is the engine's own preview, with both App ids" \
-  grep -qxE 'apply --config /.*/repo-settings/repo-settings/fleet\.yml --owner acme-fake --dry-run --cms-label-only skip \| 111 222' "$FAKE_ENGINE_LOG"
+  grep -qxE 'apply --config /.*/fleet\.yml --owner acme-fake --dry-run --cms-label-only skip \| 111 222' "$FAKE_ENGINE_LOG"
 assert_eq "the dry run runs the engine once" "$(log_lines "$FAKE_ENGINE_LOG")" 1
 assert "only this owner's repos are checked for existence" has "$OUT" "declares 2 repo(s) of acme-fake"
+assert "a declared skills-evals that does not exist is left out, not refused" has "$OUT" "skip: fleet.yml declares acme-fake/skills-evals, which does not exist yet"
+assert_eq "the engine reads fleet.yml without skills-evals" "$(cat "$FAKE_ENGINE_LOG.repos")" "acme-fake/one acme-fake/two acme-fake-two/three"
 : > "$FAKE_ENGINE_LOG"
 run bash "$B/apply-settings.sh" --config "$CFGF"; rc=$?
 assert_eq "apply-settings exits 0 when the read-back shows no drift" "$rc" 0
@@ -713,8 +766,31 @@ assert_eq "the engine never ran" "$(log_lines "$FAKE_ENGINE_LOG")" 0
 gh repo create "$F/two" --private >/dev/null
 sed '/_APP_ID=/d' "$CFGF" > "$T/fleet-noids.env"
 run bash "$B/apply-settings.sh" --config "$T/fleet-noids.env"; rc=$?
-assert_eq "apply-settings refuses without the bypass App ids" "$rc" 1
-assert "the missing ids are named" has "$ERR" "GUIDANCE_SYNC_APP_ID ROSTER_WRITER_APP_ID empty in fleet.env"
+assert_eq "apply-settings refuses without guidance-sync's App id" "$rc" 1
+assert "the missing id is named" has "$ERR" "GUIDANCE_SYNC_APP_ID empty in fleet.env"
+sed '/^ROSTER_WRITER_APP_ID=/d' "$CFGF" > "$T/fleet-noroster.env"
+run bash "$B/apply-settings.sh" --config "$T/fleet-noroster.env" --dry-run; rc=$?
+assert_eq "a base-only apply needs no roster App id" "$rc" 0
+run bash "$B/apply-settings.sh" --config "$CFGF" --check --track evals; rc=$?
+assert_eq "--track evals fails while skills-evals does not exist" "$rc" 1
+assert "it says the evals track creates it" has "$ERR" "acme-fake/skills-evals does not exist (HTTP 404): the evals track creates it first"
+# Once the evals track has created it, the same command applies it too.
+gh repo create "$F/skills-evals" --private >/dev/null
+: > "$FAKE_ENGINE_LOG"
+run bash "$B/apply-settings.sh" --config "$CFGF" --dry-run; rc=$?
+assert_eq "apply-settings with skills-evals there exits 0" "$rc" 0
+assert "skills-evals is now applied with the rest" has "$OUT" "declares 3 repo(s) of acme-fake"
+assert "the engine reads the committed fleet.yml" grep -qE '^apply --config /.*/repo-settings/repo-settings/fleet\.yml ' "$FAKE_ENGINE_LOG"
+run bash "$B/apply-settings.sh" --config "$T/fleet-noroster.env" --dry-run; rc=$?
+assert_eq "with skills-evals there, the roster App id is needed" "$rc" 1
+assert "the missing roster id is named" has "$ERR" "ROSTER_WRITER_APP_ID empty in fleet.env"
+run bash "$B/apply-settings.sh" --config "$T/fleet-noroster.env" --check --track base; rc=$?
+assert_eq "--track base leaves skills-evals out and needs no roster id" "$rc" 0
+assert_eq "--track base reads fleet.yml without skills-evals" "$(cat "$FAKE_ENGINE_LOG.repos")" "acme-fake/one acme-fake/two acme-fake-two/three"
+run bash "$B/apply-settings.sh" --config "$CFGF" --check --track evals; rc=$?
+assert_eq "--track evals checks skills-evals" "$rc" 0
+assert "--track evals checks skills-evals alone" has "$OUT" "declares 1 repo(s) of acme-fake"
+assert_eq "--track evals reads fleet.yml with only skills-evals" "$(cat "$FAKE_ENGINE_LOG.repos")" "acme-fake/skills-evals"
 run bash "$B/apply-settings.sh" --config "$CFGF" --owner someone-else; rc=$?
 assert_eq "--owner must be one of fleet.env's owners" "$rc" 1
 run bash "$B/apply-settings.sh" --config "$CFGF" --owner acme-fake-two --dry-run; rc=$?
@@ -780,6 +856,70 @@ run bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
 assert_eq "a clone of another owner's repo is refused" "$rc" 1
 assert "the wrong origin is named" has "$ERR" "not acme-fake/acsi-agentskills"
 
+# ======================================================== a base-only setup reaches done
+# The same account with skills-evals gone (from the stub and the git remotes)
+# and no evals App ids: every base step reads done, the whole-setup checks
+# pass, and the evals track still starts by asking for skills-evals.
+CFGB="$T/fleet-base.env"; grep -vE '^((EVAL_IMPROVE|ROSTER_WRITER|REGISTRY_READ)_APP_ID|ANTHROPIC_[A-Z_]+)=' "$CFGP" > "$CFGB"
+assert_not "the base-only config has no roster App id" grep -q '^ROSTER_WRITER_APP_ID=' "$CFGB"
+jqset 'del(.repos["acme-example/skills-evals"])'
+mv "$T/remotes/$O/skills-evals.git" "$T/gone-skills-evals.git"
+# Step 9 as a pull request would do it (the example repos dropped from
+# fleet.yml), and an engine stand-in that logs the fleet.yml it is given and
+# has the real engine resolve it, with no ROSTER_WRITER_APP_ID.
+w="$T/tmp/base-rs"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/repo-settings.git" "$w"
+python3 -I - "$w/repo-settings/fleet.yml" <<'PY'
+import sys, yaml
+doc = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+doc["repos"] = [r for r in doc["repos"] if "example-site" not in r["name"]]
+yaml.safe_dump(doc, open(sys.argv[1], "w", encoding="utf-8"), sort_keys=False)
+PY
+cat > "$w/scripts/repo_settings.py" <<'PY'
+import os, subprocess, sys
+import yaml
+args = sys.argv[1:]
+cfg, owner = args[args.index("--config") + 1], args[args.index("--owner") + 1]
+names = [r["name"] for r in yaml.safe_load(open(cfg, encoding="utf-8"))["repos"]]
+with open(os.environ["BASE_ENGINE_LOG"], "a", encoding="utf-8") as f:
+    f.write(args[0] + " " + os.environ.get("ROSTER_WRITER_APP_ID", "") + "|" + " ".join(names) + "\n")
+sys.exit(subprocess.run([sys.executable, "-I", os.environ["REAL_ENGINE"], "cms-label-repos", "--config", cfg, "--owner", owner],
+                        stdout=subprocess.DEVNULL).returncode)
+PY
+git -C "$w" commit -qam "fleet.yml without the example repos" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
+export BASE_ENGINE_LOG="$T/base-engine.log" REAL_ENGINE="$K/starter/repo-settings/scripts/repo_settings.py"; : > "$BASE_ENGINE_LOG"
+SB="$T/state-base/adopt.json"; mkdir -p "$T/state-base"; printf '{"installed": []}\n' > "$T/state-base/adopt.content-choices.json"
+read -r -a asks <<<"$(jq -r '[.steps[] | select(.track == "base" and .check.type == "ask" and .check.record == null) | "--mark", .id] | join(" ")' "$B/steps.json")"
+run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" "${asks[@]}"; rc=$?
+assert_eq "the base ask steps are marked" "$rc" 0
+run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" --track base; rc=$?
+assert_eq "status --track base on a base-only setup exits 0" "$rc" 0
+assert "a base-only setup reaches done" has "$OUT" "Next: nothing; every required base step is done"
+grep -qF 'Next: nothing' "$OUT" || sed 's/^/    status: /' "$OUT"
+assert "every base step is done" grep -qE "^base: $nbase of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
+assert "the settings check ran the engine" grep -q '^diff |' "$BASE_ENGINE_LOG"
+assert_not "the engine was never given skills-evals" grep -qF skills-evals "$BASE_ENGINE_LOG"
+run env ADOPT_STATE_FILE="$SB" bash "$B/verify.sh" --config "$CFGB"; rc=$?
+assert_eq "verify of the whole setup passes a base-only setup" "$rc" 0
+[ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'
+assert "it says the evals track was left out" has "$OUT" "SKIP: acme-example/skills-evals and the evals track's checks"
+run bash "$B/regenerate.sh" --config "$CFGB" --check run-health-sha; rc=$?
+assert_eq "regenerate --check run-health-sha passes without skills-evals" "$rc" 0
+assert "it says skills-evals is left out" has "$OUT" "skip: acme-example/skills-evals does not exist yet"
+run bash "$B/create-repos.sh" --config "$CFGB" --dry-run; rc=$?
+assert_eq "create-repos on a base-only setup exits 0" "$rc" 0
+assert "a base-only setup has nothing to create" has "$OUT" "Nothing to change"
+# The evals track still requires skills-evals, and names how to create it.
+run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" --track evals; rc=$?
+assert "the evals track starts by creating skills-evals" grep -q '^Next: 35 ' "$OUT"
+assert "it names the missing repo" has "$OUT" "FAIL: acme-example/skills-evals exists (HTTP 404; the evals track creates it: create-repos.sh skills-evals)"
+run bash "$B/verify.sh" --config "$CFGB" --track evals --only variables; rc=$?
+assert_eq "the evals track's variables check fails without the roster App id" "$rc" 1
+assert "it names ROSTER_WRITER_APP_ID" has "$OUT" "variable ROSTER_WRITER_APP_ID: ROSTER_WRITER_APP_ID is empty in fleet.env"
+run bash "$B/regenerate.sh" --config "$CFGB" --check --track evals run-health-sha; rc=$?
+assert_eq "regenerate --check --track evals fails without skills-evals" "$rc" 1
+run bash "$B/apply-settings.sh" --config "$CFGB" --check --track evals; rc=$?
+assert_eq "apply-settings --check --track evals fails without skills-evals" "$rc" 1
+
 # ======================================================== the checkers, and that each can fail
 for c in check-refs.py check-branch-prefixes.py check-one-owner.py; do
   run python3 -I "$B/tests/$c"; rc=$?
@@ -821,15 +961,21 @@ assert "check-steps names the old guide's field" has "$OUT" "step 4: no fields f
 assert "check-steps names the unknown verify group" has "$OUT" "verify group 'rulesets'"
 mk_kit
 jq '(.steps[] | select(.id == "3") | .track) = "both" | (.steps[] | select(.id == "4")) |= del(.track)
-    | (.steps[] | select(.id == "6") | .check.groups) -= ["apps:roster"]
-    | (.steps[] | select(.id == "33") | .check.groups) += ["apps:roster", "installs:roster"]' \
+    | (.steps[] | select(.id == "6") | .check.groups) += ["apps:roster"]
+    | (.steps[] | select(.id == "33") | .check.groups) -= ["apps:roster"]
+    | (.steps[] | select(.id == "35") | .check.groups) += ["regen:skills-locks"]
+    | (.steps[] | select(.id == "37") | .check.groups) -= ["environments"]
+    | (.steps[] | select(.id == "36") | .check.files) += [{"repo": "wsl-automation", "path": "scripts/unix/install-schedule.sh"}]' \
   "$K/bootstrap/steps.json" > "$T/kit/bootstrap/steps.json"
 kb tests/check-steps.py "$T/kit"; rc=$?
 assert_eq "check-steps fails on bad tracks" "$rc" 1
 assert "check-steps names a track that is not base or evals" has "$OUT" "step 3: track is one of ['base', 'evals']: 'both'"
 assert "check-steps names a step with no track" has "$OUT" "step 4: track is one of ['base', 'evals']: None"
-assert "check-steps names a check both tracks share" has "$OUT" "no check is shared by a base and an evals step: ['installs:roster']"
-assert "check-steps names a base step that needs an evals step" has "$OUT" "step 8 (base): variables needs ['apps:roster']"
+assert "check-steps names a base step checking what only evals has" has "$OUT" "step 6 (base): apps:roster checks something on the base track"
+assert "check-steps names an evals step checking what only the base has" has "$OUT" "step 35 (evals): regen:skills-locks checks something on the evals track"
+assert "check-steps names an evals need no earlier evals step checks" has "$OUT" "step 34 (evals): installs:roster needs ['evals:apps:roster']"
+assert "check-steps names an evals environment no earlier evals step creates" has "$OUT" "step 25 (evals): values:routine-fire needs ['evals:environments']"
+assert "check-steps names a files entry both tracks check" has "$OUT" "no files entry is checked by a base and an evals step: ['files:wsl-automation:scripts/unix/install-schedule.sh']"
 bash "$T/kit/bootstrap/status.sh" --config "$CFGP" >"$OUT" 2>"$ERR"; rc=$?
 assert_eq "status refuses a step with an unknown track" "$rc" 1
 assert "status names the step and its track" has "$ERR" "step 3 has an unknown track: both"

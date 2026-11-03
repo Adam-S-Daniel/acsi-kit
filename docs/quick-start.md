@@ -16,8 +16,10 @@ and guidance. Run it later, or from the start for the whole system in one
 command: it runs the base steps first. Without evals, nothing measures your
 skills and guidance, and nothing improves or retires them automatically
 ([with or without evals](before-you-start.md#with-or-without-evals)). The
-base still creates and copies `skills-evals`, because `fleet.yml`, the
-`roster` App and the scheduled-run-health pin name it.
+base never creates `skills-evals`: its first evals steps do
+([adding skills-evals](evals-and-loop.md#adding-skills-evals)), and every
+check runs on its own step's track, so the base reaches done without that
+repo and adding evals later undoes no base step.
 
 Every command runs from the kit's folder, with your config at `./fleet.env`.
 `<you>` is your `OWNER`. Each script takes `--dry-run`; run it first every
@@ -37,39 +39,44 @@ lists the failures to expect. Do not add collaborators before step 20.
 |---|---|---|---|---|---|
 | 0 | Write fleet.env | `cp bootstrap/fleet.env.example fleet.env`, fill in `OWNER`, `OWNER_TWO` and `PLAN` | 5 min | base | [before you start](before-you-start.md#the-config-file) |
 | 1 | Choose optional skills, guidance and git hooks | `bootstrap/add-content.sh --items recommended --dry-run`, then the same without `--dry-run` (or name the items you want, or `--items none`) | 10 min | base | [skills](skills.md#choosing-optional-content) |
-| 2 | Create the six repos | `bootstrap/create-repos.sh` (`skills-evals` and its `persistent/eval-results` branch serve only evals, but `fleet.yml`, the `roster` App and step 16 name it, so the base creates it too) | 5 min | base | [settings](settings-and-apps.md#the-six-repos) |
+| 2 | Create the five base repos | `bootstrap/create-repos.sh` (all but `skills-evals`, which only evals use: the evals track creates it) | 5 min | base | [settings](settings-and-apps.md#the-six-repos) |
 | 3 | Store the privacy denylist | `bootstrap/set-secrets.sh --only privacy --denylist <file outside every repo>` | 10 min | base | [skills](skills.md#the-privacy-check) |
 | 4 | Copy repo-settings and merge it | `bootstrap/copy-starter.sh starter/repo-settings <you>/repo-settings`, then review and merge the pull request | 20 min | base | [settings](settings-and-apps.md#merging-the-starter-pull-requests) |
-| 5 | Create the environments | `bootstrap/create-environments.sh` (its `routine-fire` environment in `skills-evals` serves only evals) | 3 min | base | [settings](settings-and-apps.md#environments) |
-| 6 | Create the four base GitHub Apps | `bootstrap/create-apps.sh guidance-sync settings-admin settings-read roster` (GitHub's App manifest flow, once per App, in the browser; `roster` serves only evals, but `fleet.yml` names its id as a bypass actor, so the first apply needs it) | 20 min | base | [settings](settings-and-apps.md#github-apps) |
+| 5 | Create the environments | `bootstrap/create-environments.sh` (its `routine-fire` environment waits for the evals track's `skills-evals`) | 3 min | base | [settings](settings-and-apps.md#environments) |
+| 6 | Create the three base GitHub Apps | `bootstrap/create-apps.sh guidance-sync settings-admin settings-read` (GitHub's App manifest flow, once per App, in the browser) | 20 min | base | [settings](settings-and-apps.md#github-apps) |
 | 7 | Install the base Apps | Open each `https://github.com/apps/<slug>/installations/new` link `create-apps.sh` printed and pick the repos it names | 10 min | base | [settings](settings-and-apps.md#installing-the-apps) |
-| 8 | Copy the App ids into repo-settings | `bootstrap/create-environments.sh` again | 2 min | base | [settings](settings-and-apps.md#github-apps) |
+| 8 | Copy the App id into repo-settings | `bootstrap/create-environments.sh` again | 2 min | base | [settings](settings-and-apps.md#github-apps) |
 | 9 | Drop the example repos from fleet.yml | In a pull request on `<you>/repo-settings`, remove the `example-site-*` entries from `repo-settings/fleet.yml` and their rows in `tests/test_repo_settings.py` (unless you have those repos) | 15 min | base | [settings](generated-files.md#example-repos-in-fleetyml) |
 | 10 | Copy _agent-guidance and merge it | `bootstrap/copy-starter.sh starter/agent-guidance <you>/_agent-guidance`, then review and merge | 30 min | base | [guidance](guidance.md#what-_agent-guidance-holds) |
 | 11 | Drop the example repos from repos.yml | In a pull request on `<you>/_agent-guidance`, remove the `example-site-*` names from `repos.yml` `cron_coverage.fleet` (unless you have those repos) | 10 min | base | [guidance](generated-files.md#example-repos-in-fleetyml) |
 | 12 | Copy the two registries and merge them | `bootstrap/copy-starter.sh starter/agent-skills <you>/acsi-agentskills` and `bootstrap/copy-starter.sh starter/agent-skills-private <you>/acsi-agentskills-private`, then review and merge | 30 min | base | [skills](skills.md#the-registry) |
-| 13 | Copy skills-evals and wsl-automation and merge them | `bootstrap/copy-starter.sh starter/skills-evals <you>/skills-evals` and `bootstrap/copy-starter.sh starter/wsl-automation <you>/wsl-automation`, then review and merge (`skills-evals` serves only evals, but step 16 pins a file in it) | 30 min | base | [evals](evals-and-loop.md#what-skills-evals-holds) |
+| 13 | Copy wsl-automation and merge it | `bootstrap/copy-starter.sh starter/wsl-automation <you>/wsl-automation`, then review and merge | 20 min | base | [machine](machine.md#scheduled-jobs-wsl-automation) |
 | 14 | Pin every skills.lock to your registry | `bootstrap/regenerate.sh skills-locks`, merge, then run it again for the other four repos | 15 min | base | [generated files](generated-files.md#the-skills-locks) |
 | 15 | Pin the skills-bootstrap hook | `bootstrap/regenerate.sh hook-pin`, then merge | 5 min | base | [generated files](generated-files.md#the-skills-bootstrap-hook-pin) |
-| 16 | Pin the scheduled-run-health reusable | `bootstrap/regenerate.sh run-health-sha`, then merge the four pull requests | 5 min | base | [generated files](generated-files.md#the-scheduled-run-health-pin) |
+| 16 | Pin the scheduled-run-health reusable | `bootstrap/regenerate.sh run-health-sha`, then merge the three pull requests | 5 min | base | [generated files](generated-files.md#the-scheduled-run-health-pin) |
 | 17 | Pin the Codex Cloud bootstrap | `bootstrap/regenerate.sh codex-pin`, then merge | 5 min | base | [generated files](generated-files.md#the-codex-cloud-pin) |
 | 18 | Regenerate the action lockfiles | `gh extension install github/gh-actions-lock`, then `bootstrap/regenerate.sh actions-lock` and merge what it opens | 10 min | base | [generated files](generated-files.md#the-action-lockfiles) |
-| 19 | Decide eval.yml's default fixture | `.github/workflows/eval.yml`'s `fixture` default, `evals/workflow-path-audit/required-check-routing`, ships with the kit and runs as it is: keep it, or change it to a fixture of your own in a pull request on `<you>/skills-evals` | 10 min | evals | [generated files](generated-files.md#the-evalyml-fixture-default) |
-| 20 | Apply fleet.yml: protect every repo | `bootstrap/apply-settings.sh` (and `--owner <OWNER_TWO>` signed in as that account) | 5 min | base | [settings](settings-and-apps.md#the-first-apply) |
+| 20 | Apply fleet.yml: protect every repo | `bootstrap/apply-settings.sh` (and `--owner <OWNER_TWO>` signed in as that account; it leaves out `skills-evals` until the evals track creates it) | 5 min | base | [settings](settings-and-apps.md#the-first-apply) |
 | 21 | Set up each durable machine | On each one: `bootstrap/install-machine.sh` (add `--with-codex` if you use Codex) | 15 min | base | [machine](machine.md#install-on-each-durable-machine) |
 | 22 | Schedule the machine jobs | Windows: `./scripts/register-tasks.ps1` in an elevated PowerShell 7, in your wsl-automation clone; Linux or macOS: `bash scripts/unix/install-schedule.sh <systemd\|launchd\|cron>` (its usage census, the Linux and macOS default, feeds only evals: without evals pass `--jobs session-miner`) | 30 min | base | [machine](machine.md#scheduled-jobs-wsl-automation) |
 | 23 | Set up your cloud environments | At https://claude.ai/code, give each cloud environment the setup script from acsi-agentskills' `docs/multi-repo-delivery.md` and the network allowlist from _agent-guidance's `docs/reference/network-allowlist-claude-environments.txt` | 20 min | base | [machine](machine.md#cloud-environments) |
-| 24 | Create the eval runner routine | At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id | 20 min | evals | [routines](routines.md#the-eval-runner) |
-| 25 | Store the eval runner's bearer and trigger id | `bootstrap/set-secrets.sh --only routine-fire` | 5 min | evals | [routines](routines.md#the-eval-runner) |
-| 26 | Optional: let eval.yml trade OIDC for an Anthropic token | In the Anthropic Console, set up workload identity federation for `skills-evals`, put its four ids in fleet.env, then `bootstrap/create-environments.sh` | 20 min | evals | [routines (optional)](evals-and-loop.md#workload-identity-federation) |
 | 27 | Create the fleet worker routine | At https://claude.ai/code/routines: hourly at :20, the GitHub connector, the prompt in docs/routines.md | 15 min | base | [routines](routines.md#fleet-worker) |
 | 28 | Create the prompt-audit sweep routine | At https://claude.ai/code/routines: API trigger only; keep its fire URL and bearer for the next step | 15 min | base | [routines](routines.md#prompt-audit-sweep) |
 | 29 | Create the agent changelog watcher routine | At https://claude.ai/code/routines: daily at 01:03 UTC, in an environment that holds the sweep's fire URL and bearer | 20 min | base | [routines](routines.md#agent-changelog-watcher) |
 | 30 | Schedule memory curation | A weekly task from a claude.ai project thread, and the same on each durable machine (docs/routines.md has both prompts) | 15 min | base | [routines](routines.md#memory-curation) |
 | 31 | Create the guidance centralization audit routine | At https://claude.ai/code/routines: daily at 08:00 UTC, the GitHub connector, the prompt in _agent-guidance's `docs/routines/guidance-centralization.routine.md` | 20 min | base | [routines](routines.md#guidance-centralization-audit) |
+| 35 | Create skills-evals | `bootstrap/create-repos.sh skills-evals` (with its labels and its `persistent/eval-results` branch) | 5 min | evals | [evals](evals-and-loop.md#adding-skills-evals) |
+| 36 | Copy skills-evals and merge it | `bootstrap/copy-starter.sh starter/skills-evals <you>/skills-evals`, then review and merge | 20 min | evals | [evals](evals-and-loop.md#what-skills-evals-holds) |
+| 33 | Create the three eval GitHub Apps | `bootstrap/create-apps.sh eval-improve roster registry-read` (GitHub's App manifest flow, once per App, in the browser) | 10 min | evals | [settings](settings-and-apps.md#github-apps) |
+| 34 | Install the eval Apps | Open the `https://github.com/apps/<slug>/installations/new` link `create-apps.sh` printed for each and pick the repos it names; then add `skills-evals` to the installations of `guidance-sync`, `settings-admin` and `settings-read` | 10 min | evals | [settings](settings-and-apps.md#installing-the-apps) |
+| 37 | Create its environment and copy the roster App's id | `bootstrap/create-environments.sh` again (the `routine-fire` environment in `skills-evals`, and `ROSTER_WRITER_APP_ID` in `repo-settings`) | 3 min | evals | [evals](settings-and-apps.md#environments) |
+| 38 | Pin skills-evals' generated files | `bootstrap/regenerate.sh run-health-sha` and `bootstrap/regenerate.sh actions-lock` again, then merge what they open in `skills-evals` | 10 min | evals | [evals](evals-and-loop.md#adding-skills-evals) |
+| 39 | Apply fleet.yml to skills-evals | `bootstrap/apply-settings.sh` again: it now includes `skills-evals` | 5 min | evals | [evals](settings-and-apps.md#the-first-apply) |
+| 19 | Decide eval.yml's default fixture | `.github/workflows/eval.yml`'s `fixture` default, `evals/workflow-path-audit/required-check-routing`, ships with the kit and runs as it is: keep it, or change it to a fixture of your own in a pull request on `<you>/skills-evals` | 10 min | evals | [generated files](generated-files.md#the-evalyml-fixture-default) |
+| 24 | Create the eval runner routine | At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id | 20 min | evals | [routines](routines.md#the-eval-runner) |
+| 25 | Store the eval runner's bearer and trigger id | `bootstrap/set-secrets.sh --only routine-fire` | 5 min | evals | [routines](routines.md#the-eval-runner) |
+| 26 | Optional: let eval.yml trade OIDC for an Anthropic token | In the Anthropic Console, set up workload identity federation for `skills-evals`, put its four ids in fleet.env, then `bootstrap/create-environments.sh` | 20 min | evals | [routines (optional)](evals-and-loop.md#workload-identity-federation) |
 | 32 | Optional: the project dashboard | Follow skills-evals' `dashboard/README.md` (Adopting it), then schedule its refresh every 2 hours | 30 min | evals | [routines (optional)](routines.md#dashboard-refresh) |
-| 33 | Create the two eval GitHub Apps | `bootstrap/create-apps.sh eval-improve registry-read` (GitHub's App manifest flow, once per App, in the browser) | 10 min | evals | [settings](settings-and-apps.md#github-apps) |
-| 34 | Install the eval Apps | Open the `https://github.com/apps/<slug>/installations/new` link `create-apps.sh` printed for each and pick the repos it names | 5 min | evals | [settings](settings-and-apps.md#installing-the-apps) |
 | any | Check | `bootstrap/status.sh` for where you are; `bootstrap/verify.sh` for the fast checks, `--only settings` or `--only regen:<task>` for the slow ones | | | [quick start](#where-you-are) |
 <!-- quickstart:end -->
 

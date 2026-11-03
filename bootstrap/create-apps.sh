@@ -26,7 +26,11 @@
 #   registry-read   contents: read, on acsi-agentskills-private. Variable
 #                   REGISTRY_READ_APP_CLIENT_ID, secret REGISTRY_READ_APP_PEM.
 #
-# Default: all six; name some to create only those.
+# Default: all six; name some to create only those. eval-improve, roster and
+# registry-read are the evals track's (their credentials live in
+# skills-evals): while skills-evals does not exist (a base-only setup), the
+# default skips them, and naming one is refused until the evals track has
+# created it (create-repos.sh skills-evals).
 #
 # For each App it writes DIR/<app>.manifest.json and DIR/<app>.html (default
 # DIR: ./app-manifests). Open the HTML file in a browser signed in as the
@@ -150,7 +154,7 @@ install_hint() { # slug installed
   log "Install it: https://github.com/apps/$1/installations/new"
   if [ "$2" = fleet ]; then
     log "  Pick: Only select repositories: every repo fleet.yml in repo-settings lists for $O"
-    log "  (the six kit repos, plus each consumer in _agent-guidance's repos.yml)."
+    log "  (the kit repos you created, plus each consumer in _agent-guidance's repos.yml)."
     [ "$TWO_OWNERS" = 0 ] || log "  Then sign in as $CFG_OWNER_TWO and install it there too, on that owner's fleet repos."
   else
     log "  Pick: Only select repositories: $2"
@@ -226,10 +230,17 @@ create_one() { # app perms installed repo id-kind:id-name key-env key-secret cfg
 }
 
 log "Owner $O, plan $CFG_PLAN$([ "$DRY_RUN" = 1 ] && echo ', DRY RUN')"
+EVALS_HERE=1
+evals_repo_exists || EVALS_HERE=0
 for entry in "${APPS[@]}"; do
   IFS='|' read -r app perms installed r idspec env sec key _optional <<<"$entry"
   wanted "$app" || continue
+  if [ "$r" = "$EVALS_REPO" ] && [ "$EVALS_HERE" = 0 ]; then
+    [ ${#WANT[@]} = 0 ] || die "$app keeps its credentials in $O/$r, which does not exist yet: the evals track creates it first (create-repos.sh $r)"
+    log "skip: $app: the evals track's App (its credentials live in $O/$r, which does not exist yet; /adopt-evals creates both)"
+    continue
+  fi
   create_one "$app" "$perms" "$installed" "$r" "$idspec" "$env" "$sec" "$key"
 done
-log "Then run create-environments.sh again: it copies GUIDANCE_SYNC_APP_ID and ROSTER_WRITER_APP_ID into repo-settings' variables."
+log "Then run create-environments.sh again: it copies GUIDANCE_SYNC_APP_ID (and, once the roster App exists, ROSTER_WRITER_APP_ID) into repo-settings' variables."
 finish
