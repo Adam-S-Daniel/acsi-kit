@@ -500,6 +500,38 @@ SKILL.md has at least half its non-blank body lines under a heading naming a
 checklist, rules or checks. That heuristic is cheap and misses rules written
 as prose.
 
+### Description trims
+
+acsi-agentskills caps a skill's description at 400 characters, because long
+descriptions push the session's skill listing past its budget and the last
+skills then show no description (skills-evals#668). Ten eval-protected skills
+were over the cap and carry a `length-limit` waiver in acsi-agentskills'
+`scripts/skills_waivers.yml`; their trims go through the improve lane
+(skills-evals#687), as a fixed chore rather than a value bet:
+
+- The planner reads those waivers from its acsi-agentskills checkout. A
+  waived public skill with at least three fixtures, all naming
+  acsi-agentskills, not owned by retirement, still over the cap and not
+  paused by rule C (the ordinary improve pause, so a merged edit waits for a
+  with-arm run of the new text) is an improve-band **fire** sent with
+  `trim_description=true` and no holdout, placed before the value-ranked
+  improve fires. It is charged and capped as an improve fire and held while
+  the routine is down, and its skill gets no other improve fire in that plan.
+- The loop (`propose_skill_edit.py --trim-description`) makes one proposal
+  call for a description of at most 400 characters that keeps every trigger
+  and every "not for" boundary, then measures the current and the trimmed
+  text on every fixture (`with_skill`, three trials, no judge). It accepts
+  only when no fixture errored, the trimmed text passes at least as many
+  objective checks summed over all fixtures, and no fixture loses more than
+  one. A description already within the cap is rejected with no model call.
+- The improve gate re-derives that decision from the record's counts,
+  refuses any body change or a description over the cap, and removes the
+  skill's waiver from `scripts/skills_waivers.yml` in the same pull request
+  (acsi-agentskills fails its build on a waiver that matches nothing).
+- The plan's `trims` map and its `description-trim` work items (never filed
+  as issues) track every waived skill until its waiver is gone. With no
+  readable waiver file the plan plans no trim and says so (`trims_unread`).
+
 ### Routine improve mode: what each run costs (#572)
 
 Every improve and guidance-improve run (2026-11-02) records what it
@@ -873,6 +905,8 @@ branch, which carries generated data only and is treated as untrusted input:
 | `badges/<fixture>.json` | the shields.io badge over the last five runs, rendered at the top of the README |
 | `roster/latest.json` | the computed roster and proposal from the latest run (an exhibit, read by no decision) |
 | `usage/latest.json` | the usage census |
+| `coverage/latest.json`, `coverage/<run id>.json`, `badges/coverage.json` | the redacted skill coverage census and its badge, written only by `skill-coverage.yml` (`scripts/scaffold_skill_gaps.py`); the explorer reads `publication.as_of` from it |
+| `fixture-census/latest.json`, `fixture-census/<timestamp>.json`, `fixture-census/latest.md`, `badges/fixture-census.json` | the fixture census and its badge, written only by `propagation.yml`'s `coverage-publish` job (#660) |
 | `propagation/` | historical: the retired account-store audit's last result (no longer updated) |
 
 The most recent real run at the time of writing is

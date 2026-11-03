@@ -1720,3 +1720,5 @@ hook its siblings now carry. Its NOTICE and pin are unchanged until it is
 re-exported. Every overlay `NOTICE` also still cites the export as
 `docs/reference/adopt-the-whole-system/export/export.py in _agent-guidance`,
 a path from before the move.
+
+The same day, skills-evals moved again to 341f4bd (skills-evals#720: only `skill-coverage.yml` writes `coverage/latest.json` and `badges/coverage.json`; `propagation.yml`'s census writes `fixture-census/`, guarded by `test_issue_660_single_writer.py`). The manifest needed no other change.
