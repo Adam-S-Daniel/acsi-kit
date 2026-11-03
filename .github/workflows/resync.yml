@@ -13,6 +13,12 @@
 # write on this repo; without one the job reports what it would change and
 # succeeds. The App's token, unlike GITHUB_TOKEN, lets the pull request's own
 # checks run.
+#
+# A scheduled failure is otherwise silent, so a failed run opens or updates ONE
+# open issue, "Re-sync from sources is failing", with the run's link and the
+# failed step's name (never its log), and the next successful run closes it.
+# Those two steps use GITHUB_TOKEN, which is why the job alone holds
+# issues: write.
 name: Re-sync from sources
 
 on:
@@ -26,6 +32,11 @@ permissions:
 jobs:
   resync:
     runs-on: ubuntu-latest
+    # A job-level block replaces the workflow's, so contents: read is repeated;
+    # issues: write is for the last two steps alone.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -56,6 +67,7 @@ jobs:
       # export runs that repo's Node scripts, and a fetched source has no work
       # tree. No `--check` here: this rewrites starter/ from the new pins.
       - name: Regenerate starter/
+        id: regenerate
         if: steps.resync.outputs.changed == 'true'
         env:
           SOURCE_OWNER: ${{ github.repository_owner }}
@@ -83,6 +95,7 @@ jobs:
       # or empty denylist fails here, as in ci.yml (this job never runs for
       # Dependabot, so ci.yml's exception does not apply).
       - name: Export tests
+        id: tests
         if: steps.resync.outputs.changed == 'true'
         env:
           PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
@@ -123,6 +136,7 @@ jobs:
           permission-pull-requests: write
 
       - name: Push resync/auto and open or update the pull request
+        id: push
         if: steps.app.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -172,3 +186,69 @@ jobs:
             echo "opened pull request #$number"
           fi
           gh pr edit "$number" --add-label agent-authored > /dev/null || echo "::warning::could not add the agent-authored label"
+
+      # Everything arrives through env:, and the only expressions are the
+      # run's own coordinates and step outcomes, so nothing a source or a step
+      # printed is evaluated as shell. The body names the failed step and links
+      # the run; it never copies a log, which could hold a source's text.
+      - name: Open or update the failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: Re-sync from sources is failing
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OUTCOME_RESYNC: ${{ steps.resync.outcome }}
+          OUTCOME_REGENERATE: ${{ steps.regenerate.outcome }}
+          OUTCOME_TESTS: ${{ steps.tests.outcome }}
+          OUTCOME_PUSH: ${{ steps.push.outcome }}
+        run: |
+          set -euo pipefail
+          failed=""
+          [ "$OUTCOME_RESYNC" = failure ] && failed="${failed}${failed:+, }Move the pins to each source's head"
+          [ "$OUTCOME_REGENERATE" = failure ] && failed="${failed}${failed:+, }Regenerate starter/"
+          [ "$OUTCOME_TESTS" = failure ] && failed="${failed}${failed:+, }Export tests"
+          [ "$OUTCOME_PUSH" = failure ] && failed="${failed}${failed:+, }Push resync/auto and open or update the pull request"
+          [ -n "$failed" ] || failed="another step (see the run)"
+          body="$RUNNER_TEMP/resync-issue.md"
+          {
+            printf '## TLDR\n\n'
+            printf 'The daily re-sync of the kit from its source repos failed, so `starter/` is not following its sources. Failed step: %s.\n\n' "$failed"
+            printf 'Run: %s\n\n' "$RUN_URL"
+            printf 'Read the failed step in the run log. A source change usually means an `edits` entry or a patch in `export/manifests/` needs to follow it; record the change in `export/DECISIONS.md` (MAINTAINING.md, Re-pin). The next successful run closes this issue.\n'
+          } > "$body"
+          # A failed list must not open a duplicate, so it stops here.
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --json number,title --jq 'map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty') \
+            || { echo "::error::could not list open issues; no issue opened or updated"; exit 1; }
+          if [[ "$number" =~ ^[0-9]+$ ]]; then
+            gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$body" > /dev/null
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" \
+              --body "Failed again: $RUN_URL (step: $failed)." > /dev/null
+            echo "updated issue #$number"
+          else
+            url=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file "$body")
+            number="${url##*/}"
+            echo "opened issue #$number"
+          fi
+          gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label agent-authored > /dev/null \
+            || echo "::warning::could not add the agent-authored label"
+
+      # A green run closes the failure issue, if one is open. It never fails
+      # the job: the re-sync itself succeeded.
+      - name: Close the failure issue
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: Re-sync from sources is failing
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --json number,title --jq 'map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty') \
+            || { echo "::warning::could not list open issues; the failure issue, if any, stays open"; exit 0; }
+          if [[ "$number" =~ ^[0-9]+$ ]]; then
+            gh issue close "$number" --repo "$GITHUB_REPOSITORY" \
+              --comment "The re-sync succeeded again: $RUN_URL" > /dev/null \
+              || { echo "::warning::could not close issue #$number"; exit 0; }
+            echo "closed issue #$number"
+          fi

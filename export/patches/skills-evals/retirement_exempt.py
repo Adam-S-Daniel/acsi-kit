@@ -94,15 +94,13 @@ RETIRE_EDITS = [
 '''),
     ('''    else:
         kind = "retire"
-        if mode == "auto" and "auto" not in allowed and fallback:
-            mode_reason = GUIDANCE_NO_CREDENTIAL''',
+        if mode == "auto" and proposal_only(guidance_block(gates)[section]):''',
      '''    elif section in compute_gates.load_exempt(REPO_ROOT / "evals")["guidance"]:
         return {"action": "none", "mode": mode, "section": section,
                 "reason": f"{section} is a core item (evals/retirement-exempt.yml), never retired automatically"}
     else:
         kind = "retire"
-        if mode == "auto" and "auto" not in allowed and fallback:
-            mode_reason = GUIDANCE_NO_CREDENTIAL'''),
+        if mode == "auto" and proposal_only(guidance_block(gates)[section]):'''),
 ]
 
 

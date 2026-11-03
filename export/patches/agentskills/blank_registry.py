@@ -46,10 +46,12 @@ PLUGINS = {
     "acsi-anything-anywhere": (
         "the owner's skills for any Claude surface, coding or not: the claude.ai web and iOS apps, "
         "Claude in Chrome, the Claude Desktop app, and Claude Code. Writing ADRs and resolving task ambiguity. "
-        "It also installs the fleet guidance into Claude Code's user memory at session start.",
+        "It also installs the fleet guidance into Claude Code's user memory at session start, "
+        "and in Claude Code blocks a GitHub write that lacks the agent marker.",
         "Skills for any Claude surface, coding or not: the claude.ai web and iOS apps, "
         "Claude in Chrome, the Claude Desktop app, and Claude Code. It also installs the fleet guidance "
-        "into Claude Code's user memory at session start.",
+        "into Claude Code's user memory at session start, and in Claude Code blocks a GitHub write that "
+        "lacks the agent marker.",
         ["adr", "documentation", "requirements", "ambiguity", "planning"],
         ["skills", "writing", "planning"],
     ),
