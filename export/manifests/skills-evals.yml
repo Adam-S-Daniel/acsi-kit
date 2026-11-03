@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: 73d9c4c5ad5d81c1e612756af8fc0c489e208ccc
+source_sha: c6b38e18c441888d8458979f75d020bce2253655
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -468,8 +468,8 @@ edits:
       absent file builds as no gaps, like the other optional dumps.
   - path: dashboard/page/index.html
     stage: output
-    old: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', half_built_issues: 'key', fixture_requests: 'key', cost_benefit_weeks: 'week', cost_benefit_summary: 'key' };\n"
-    new: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', half_built_issues: 'key', fixture_requests: 'key', cost_benefit_weeks: 'week', cost_benefit_summary: 'key', threads: 'id', loop_gaps: 'gap' };\n"
+    old: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', half_built_issues: 'key', fixture_requests: 'key', cost_benefit_weeks: 'week', cost_benefit_summary: 'key', ci_red_runs: 'key' };\n"
+    new: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', half_built_issues: 'key', fixture_requests: 'key', cost_benefit_weeks: 'week', cost_benefit_summary: 'key', ci_red_runs: 'key', threads: 'id', loop_gaps: 'gap' };\n"
     why: >-
       Cold start. The two new placeholder rows are hidden the way the other
       key-field placeholders are, so the loop gap counts stay 0 of 0 and the
