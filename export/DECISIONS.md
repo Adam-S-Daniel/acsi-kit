@@ -1940,3 +1940,53 @@ routine's instructions to name it, and `docs/evals-and-loop.md` lists it.
 
 Reverse: pin the old commit and drop the edits and the `regenerate` step
 named above.
+
+### Third pin: site variables have no fallback (2026-11-04)
+
+The manifest moves on to the source's `main`,
+`cdedb7e1e1523647a11cac30f560e17a6b733e0a`. Its #771 removes every
+`vars.X || '<literal>'` fallback from `site-sync.yml`, `site-preview.yml` and
+`site-freshness.yml`, and the `DEFAULT_*` constants from
+`scripts/site_freshness.py`: `SITE_REPO`, `SITE_PAGE_URL`, `SITE_ASSET_URL`
+and `SITE_FRESHNESS_ROUTINE_ID` are required repository variables, `none`
+skips, and unset fails naming the variable. That is the owner's rule for
+values that name an owner's resources (`_agent-guidance`
+`docs/reference/settings-schema-design.md`, rule 4): no in-code fallback,
+set in one place, fail descriptively, and an opt-out set explicitly.
+
+- **The `SITE_REPO` edits are gone.** The seven edits above that turned the
+  fallback into `none` (two workflows, their comments, three tests) no longer
+  had a target, and the kit adds no fallback of its own, `none` included.
+- **The one place is `fleet.env`.** `SITE_REPO` is a `fleet.env` key
+  (`none` or `owner/name`, validated as `site-sync.yml` validates it), and
+  `create-environments.sh` makes it a `skills-evals` repository variable
+  (`REPO_VARIABLES`, verify group `variables`). `fleet.env.example` ships
+  `SITE_REPO=none`, so a default setup says "no website" explicitly rather
+  than by omission; an empty key is skipped with a message naming it, and
+  `verify.sh` fails on it. The other three, and the fixer routine's bearer,
+  are needed only with a site and stay on the README's by-hand list.
+
+Reverse: pin `50daafc`, restore the seven edits, and drop the `SITE_REPO`
+key, its `REPO_VARIABLES` row and the doc changes.
+
+### Fourth pin, and the session miner's repository settings (2026-11-04)
+
+The manifest moves on to the source's `main`,
+`af2163e9302b2f0e7954c52cddef2c3352f54432` (the site freshness check's
+iframe fix and a glossary entry). No edit, patch or retarget needed changing.
+
+The kit's own session miner wrapper
+(`overlay/wsl-automation/scripts/run-session-miner.sh`) fell back to
+`~/repos/acsi-agentskills-private` for `LESSONS_CLONE` and to the adopter's
+`skills-evals` URL for `SKILLS_EVALS_URL`. Both name the adopter's own
+repositories, so under settings-schema-design rule 4 neither has a default
+now: each comes from the environment or `session-miner.env`, and unset the
+wrapper exits 2 naming the key and where to set it. A new
+`config/session-miner.env.example` carries both keys, and the README's
+"Session miner task" and `docs/machine.md` say to copy it.
+`PRIVACY_DENYLIST_FILE` keeps its `~/.config` default: it names a path on
+the machine, not a repository. `tests/run-session-miner.test.sh` covers both
+missing keys.
+
+Reverse: pin `cdedb7e1`, restore the two fallbacks, and drop the example and
+its tests.

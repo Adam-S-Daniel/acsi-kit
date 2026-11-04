@@ -203,12 +203,18 @@ The public document leaves your spend out: the kit ships
 `evals/public-export.yml` with `include_spend: false`. Set it to `true` in a
 pull request on `<you>/skills-evals` to publish your weekly totals.
 
-A website is optional too. `site-sync.yml` (vendors `tool/index.html` into a
-site repo) and `site-freshness.yml` (checks that site hourly) read the
-repository variable `SITE_REPO`; unset or `none` (the kit's default) skips
-both cleanly, every step after the first. To publish to a site of your own,
-set `SITE_REPO` to `<owner>/<site repo>` and install the `eval-improve` App
-on that repo; a site sync without that App fails red, by design.
+A website is optional too, but saying whether you have one is not.
+`site-sync.yml` (vendors `tool/index.html` into a site repo) and
+`site-freshness.yml` (checks that site hourly) read the repository variable
+`SITE_REPO`, which is required and has no default: `none` means no website
+and skips both, every step after the first; unset fails them with an error
+naming the variable. `create-environments.sh` sets it from `fleet.env`'s
+`SITE_REPO`, which `fleet.env.example` ships as `none`. To publish to a site
+of your own, set it to `<owner>/<site repo>`, install the `eval-improve` App
+on that repo (a site sync without it fails red, by design), and set the three
+variables only a site needs, `SITE_PAGE_URL`, `SITE_ASSET_URL` and
+`SITE_FRESHNESS_ROUTINE_ID`, plus the fixer routine's bearer
+([by hand](../bootstrap/README.md#variables-and-secrets-set-by-hand)).
 
 ## Optional routines the kit does not ship
 

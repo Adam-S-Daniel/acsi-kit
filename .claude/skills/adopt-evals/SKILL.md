@@ -97,9 +97,13 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
      turn it on from the artifact's Share menu. Refreshing it means
      republishing `latest.json`.
   4. Say what stays off: `evals/public-export.yml` ships
-     `include_spend: false`, and `SITE_REPO` unset (or `none`) makes
-     `site-sync.yml` and `site-freshness.yml` skip. Changing either is the
-     user's pull request or repository variable.
+     `include_spend: false`, and `SITE_REPO` is required with no default:
+     `create-environments.sh` set it from `fleet.env`, where `none` means no
+     website and makes `site-sync.yml` and `site-freshness.yml` skip.
+     `SITE_PAGE_URL`, `SITE_ASSET_URL` and `SITE_FRESHNESS_ROUTINE_ID` are
+     needed only with a site (bootstrap/README.md, "Variables and secrets set
+     by hand"). Changing either is the user's pull request, or `fleet.env`
+     and `create-environments.sh` again.
 - **Steps 33 and 34** (`create-apps.sh eval-improve roster registry-read`,
   then the installations): `create-apps.sh` wants the URL GitHub redirects
   to, so it runs in the user's own terminal. Step 34 also adds

@@ -181,12 +181,16 @@ README_MINER = """### Session miner task (default name: `Session Miner`)
      repository**: `~/.config/privacy-denylist.txt` (`PRIVACY_DENYLIST_FILE`).
      Without a readable one the wrapper exits 2 and nothing is mined.
   2. A clone of your private skills registry whose `origin` receives
-     `persistent/lessons`: `~/repos/acsi-agentskills-private` (`LESSONS_CLONE`).
+     `persistent/lessons`, for example `~/repos/acsi-agentskills-private`.
      Its git credential must work with no desktop session: `gh auth setup-git`
      with a file-stored token, as for the census.
   3. python3 with PyYAML (`sudo apt install python3-yaml`).
-  4. Optionally, settings in `~/.config/wsl-automation/session-miner.env`
-     (`SESSION_MINER_CONFIG`), one `KEY=value` per line. A scheduled action has
+  4. Settings in `~/.config/wsl-automation/session-miner.env`
+     (`SESSION_MINER_CONFIG`), one `KEY=value` per line: copy
+     `config/session-miner.env.example` there and edit it. `LESSONS_CLONE`
+     (that clone) and `SKILLS_EVALS_URL` (your skills-evals) are required and
+     have no default, because they name your own repositories; unset, the
+     wrapper exits 2 naming the key. A scheduled action has
      no environment of its own, so this is where settings go. The file is read
      as data, never sourced; only `PRIVACY_DENYLIST_FILE`, `LESSONS_CLONE`,
      `GUIDANCE_MANIFEST`, `MINER_REGISTRIES`, `WIN_HOME`, `MINER_STATE`,
@@ -209,7 +213,8 @@ README_MINER = """### Session miner task (default name: `Session Miner`)
   (a Python traceback, for example) could carry a path or an excerpt, so it is
   counted, not copied. Exit codes: 0 success; 1 a missing prerequisite (the
   registry clone, PyYAML) or a failed clone of skills-evals; 2 a refusal (CI or
-  cloud, no denylist, a bad settings line, `--file-issues` while off); 3 not
+  cloud, no denylist, a bad settings line, an unset `LESSONS_CLONE` or
+  `SKILLS_EVALS_URL`, `--file-issues` while off); 3 not
   set up yet; anything else is the miner's own exit code.
 - Run it now: `Start-ScheduledTask -TaskName 'Session Miner'`; check
   `(Get-ScheduledTaskInfo -TaskName 'Session Miner').LastTaskResult` is `0`

@@ -34,7 +34,7 @@ session.
 | `add-content.sh` | Adds the recommended and opinionated items you name (`--items <ids\|recommended\|none>`, from `content-catalog.json`) to the kit copy's `../starter/` from `../library/`, rebuilds the generated files they feed (through `lib/content.py`), and records your choices beside `status.sh`'s state file. Idempotent; `--dry-run` lists the files it would add or change. | Write to GitHub: once the repos exist it lists the repos that need a pull request. Run inside a git work tree. |
 | `create-repos.sh` | The five base repos, and `skills-evals` only when named (the evals track's first step) or once it exists (`FLEET_REPOS` and `EVALS_REPO` in `lib/common.sh`), with the owner's visibility, a generated README as the first commit, the labels `agent-ready` and `on-hold`, and, in `skills-evals`, the orphan branch `persistent/eval-results` (a README only) that the eval loop's workflows fetch and nothing else creates. `--with-optional` adds the private `waiting-feed`. | Change an existing repo's visibility (it reports the mismatch and exits 1). Every other setting is `fleet.yml`'s, applied by `apply-settings.sh`. |
 | `copy-starter.sh` | Clones one of your repos, copies an export from `../starter/` into it with your names (every form of the invented owners, and `<your name>`, through `lib/substitute.py`), commits on `starter/<folder>`, pushes, checks the commit is on the remote branch, and opens a pull request. Refuses to overwrite a file that differs unless `--force`, except the README `create-repos.sh` generated. | Merge it: review it yourself, above all `.github/workflows/`. |
-| `create-environments.sh` | The three environments (`ENVIRONMENTS`): `fleet-apply` in `repo-settings` and `routine-fire` in `skills-evals`, limited to the default branch, and `plugin-runtime-review` in `acsi-agentskills` with you as reviewer. Then the repository variables in `REPO_VARIABLES` (`repo-settings`' `GUIDANCE_SYNC_APP_ID` and `ROSTER_WRITER_APP_ID`, and, when you fill them in, `skills-evals`' four optional `ANTHROPIC_*` federation ids, all from `fleet.env`). While `skills-evals` does not exist, what lives in it is skipped. | Create an environment in a private repo on GitHub Free (it says so and skips it). Delete an extra branch policy (it reports it). |
+| `create-environments.sh` | The three environments (`ENVIRONMENTS`): `fleet-apply` in `repo-settings` and `routine-fire` in `skills-evals`, limited to the default branch, and `plugin-runtime-review` in `acsi-agentskills` with you as reviewer. Then the repository variables in `REPO_VARIABLES` (`repo-settings`' `GUIDANCE_SYNC_APP_ID` and `ROSTER_WRITER_APP_ID`, `skills-evals`' required `SITE_REPO` (`none`: no website), and, when you fill them in, `skills-evals`' four optional `ANTHROPIC_*` federation ids, all from `fleet.env`). While `skills-evals` does not exist, what lives in it is skipped. | Create an environment in a private repo on GitHub Free (it says so and skips it). Delete an extra branch policy (it reports it). |
 | `create-apps.sh` | The six Apps (`APPS`) through GitHub's App manifest flow: writes `app-manifests/<app>.html`, exchanges the code from the URL you paste, records the App id in `fleet.env`, stores the client id and private key under the names the workflows read, on stdin, and prints the install link and the repos to pick. The three evals Apps keep their credentials in `skills-evals`, so they wait for it. | Click Create or install an App for you. Recover a lost key. |
 | `set-secrets.sh` | `PRIVACY_DENYLIST` in `acsi-agentskills` (`--only privacy`: the file must be outside every git work tree and every line must compile), and `EVAL_ROUTINE_FIRE_BEARER` and `ROUTINE_TRIGGER_ID` in `skills-evals`' `routine-fire` environment (`--only routine-fire`), from a hidden prompt or the file, on stdin. `--rotate` replaces values already set. | Read the bearer from claude.ai: you copy it from the routine's API trigger. Compare a stored secret (GitHub never shows one). |
 | `regenerate.sh <task>` | Rebuilds a generated file the export could not (`skills-locks`, `hook-pin`, `run-health-sha`, `codex-pin`, `actions-lock`) with the repo's own tooling, on a clone, and proposes it as a pull request on `regenerate/<task>`. `evals-fleet` (the evals track's) merges `repo-settings`' `repo-settings/fleet.evals.yml`, the `skills-evals` element, into `repo-settings/fleet.yml` with `lib/fleet_fragment.py` and deletes the fragment. `--check` reads the default branches and exits 1 while it is not done. `skills-evals` counts once it exists; `--track base\|evals` limits a task to one track's repos. | Merge what it opens. |
@@ -56,8 +56,8 @@ installer `add-content.sh` runs).
 Every `vars.NAME` and `secrets.NAME` an exported workflow reads is set by a
 script: App client ids and keys by `create-apps.sh`, `PRIVACY_DENYLIST`,
 `EVAL_ROUTINE_FIRE_BEARER` and `ROUTINE_TRIGGER_ID` by `set-secrets.sh`,
-and the repository variables by `create-environments.sh`, except the
-optional site ones below. If you add a workflow that reads a value no script
+and the repository variables by `create-environments.sh` (`SITE_REPO`
+included, from `fleet.env`), except the site ones below. If you add a workflow that reads a value no script
 sets, list it here as a list item, "- `NAME`: where it lives and how to set
 it"; `tests/check-refs.py` fails on any name that is neither set by a script
 nor listed here, and on a name listed here that a script already sets or
@@ -65,14 +65,17 @@ nothing reads.
 
 The site ones are for publishing the Evals Explorer to a website of your own
 (`skills-evals`' `site-sync.yml` and `site-freshness.yml`,
-[routines](../docs/routines.md#dashboard-refresh)). Leave them all unset to
-have no site: both workflows then skip cleanly.
+[routines](../docs/routines.md#dashboard-refresh)). Neither workflow has a
+default for any of them. Which site, if any, is `SITE_REPO` in `fleet.env`,
+and it is required: `none` (what `fleet.env.example` ships) means no
+website, and both workflows skip; `owner/name` names your site repo; left
+empty, `create-environments.sh` skips it and says so, and the workflows then
+fail naming it. The four below are needed only with a site; with
+`SITE_REPO=none`, leave them unset.
 
-- `SITE_REPO`: a repository variable on `<you>/skills-evals`, the site repo
-  as `owner/name`. Unset or `none`: no site. Set it with
-  `gh variable set SITE_REPO --repo <you>/skills-evals --body <owner>/<site>`.
 - `SITE_PAGE_URL`: a repository variable on `<you>/skills-evals`, the live
-  page's URL that `site-freshness.yml` loads. Set it the same way.
+  page's URL that `site-freshness.yml` loads. Set it with
+  `gh variable set SITE_PAGE_URL --repo <you>/skills-evals --body <url>`.
 - `SITE_ASSET_URL`: a repository variable on `<you>/skills-evals`, the URL of
   the vendored page file on the site. Set it the same way.
 - `SITE_FRESHNESS_ROUTINE_ID`: a repository variable on `<you>/skills-evals`,

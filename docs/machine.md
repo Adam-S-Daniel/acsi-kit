@@ -65,10 +65,13 @@ nothing). macOS needs `brew install flock coreutils`; systemd needs
 **The session miner refuses to run** until you set it up and run it by hand
 once, in the distro: a privacy denylist outside every repo
 (`~/.config/privacy-denylist.txt`, the same patterns as the `PRIVACY_DENYLIST`
-secret), a clone of `acsi-agentskills-private` at `~/repos/acsi-agentskills-private`
-with a git credential that works without a desktop session
-(`gh auth setup-git` with a file-stored token), `python3-yaml`, and then
-`bash scripts/run-session-miner.sh --dry-run`. Filing issues stays off until
+secret), a clone of `acsi-agentskills-private` (for example at
+`~/repos/acsi-agentskills-private`) with a git credential that works without a
+desktop session (`gh auth setup-git` with a file-stored token), `python3-yaml`,
+`~/.config/wsl-automation/session-miner.env` copied from the repo's
+`config/session-miner.env.example` with `LESSONS_CLONE` and `SKILLS_EVALS_URL`
+set (both required, no default: unset, the wrapper exits 2 naming the key),
+and then `bash scripts/run-session-miner.sh --dry-run`. Filing issues stays off until
 you set `FILE_ISSUES=on`, after you have read a sample of its records. The
 README's "Session miner task" has every setting.
 

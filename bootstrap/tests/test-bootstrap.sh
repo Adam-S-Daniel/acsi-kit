@@ -134,6 +134,9 @@ printf 'OWNER=acme-example\nPLAN=free\nGUIDANCE_SYNC_APP_ID=12x\n' > "$T/bad4.en
 assert_not "a non-numeric App id is refused" bash "$B/create-repos.sh" --config "$T/bad4.env" --dry-run
 printf 'OWNER=acme-example\nPLAN=free\nANTHROPIC_WORKSPACE_ID=svac_EXAMPLE0000000001\n' > "$T/bad5.env"
 assert_not "a federation id of the wrong shape is refused" bash "$B/create-repos.sh" --config "$T/bad5.env" --dry-run
+printf 'OWNER=acme-example\nPLAN=free\nSITE_REPO=example.net\n' > "$T/bad6.env"
+assert_not "a SITE_REPO that is neither none nor owner/name is refused" bash "$B/create-repos.sh" --config "$T/bad6.env" --dry-run
+assert_eq "fleet.env.example says no website explicitly" "$(grep -c '^SITE_REPO=none$' "$B/fleet.env.example")" 1
 assert_not "a missing config is refused" bash "$B/create-repos.sh" --config "$T/none.env" --dry-run
 assert_not "an unknown repo name is refused" bash "$B/create-repos.sh" --config "$CFG" --dry-run agent-skills
 
@@ -251,6 +254,7 @@ assert_eq "routine-fire has no reviewer" "$(jqs '.envs["acme-example/skills-eval
 assert_eq "routine-fire deploys only from main" "$(jqs '[.envs["acme-example/skills-evals"]["routine-fire"].policies[].name] | join(",")')" main
 assert "the variables wait for the App ids" has "$OUT" "GUIDANCE_SYNC_APP_ID is empty in fleet.env"
 assert "the federation ids are skipped as optional" has "$OUT" "ANTHROPIC_WORKSPACE_ID is empty in fleet.env (optional; docs/evals-and-loop.md#workload-identity-federation)"
+assert "an empty SITE_REPO is skipped and named as required" has "$OUT" "variable SITE_REPO: SITE_REPO is empty in fleet.env (required: none for no website"
 
 CFGP="$T/fleet-paid.env"; new_config "$CFGP" paid
 export GH_STUB_PLAN=paid
@@ -348,6 +352,16 @@ assert_eq "the workspace id is the fleet.env value" "$(jqs '.values["acme-exampl
 run bash "$B/verify.sh" --config "$CFGP" --only federation; rc=$?
 assert_eq "verify --only federation passes once they are set" "$rc" 0
 assert "verify checks all four" grep -qE '^4 passed, 0 failed' "$OUT"
+# SITE_REPO: required, no default; none is the explicit "no website".
+run bash "$B/verify.sh" --config "$CFGP" --only variables; rc=$?
+assert_eq "verify --only variables fails while SITE_REPO is empty" "$rc" 1
+assert "verify names the empty SITE_REPO as required" has "$OUT" "SITE_REPO is empty in fleet.env (required: none for no website"
+printf 'SITE_REPO=none\n' >> "$CFGP"
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "create-environments with SITE_REPO=none exits 0" "$rc" 0
+assert_eq "skills-evals' SITE_REPO is the fleet.env value" "$(jqs '.values["acme-example/skills-evals||variable"].SITE_REPO')" none
+run bash "$B/verify.sh" --config "$CFGP" --only variables; rc=$?
+assert_eq "verify --only variables passes once SITE_REPO is set" "$rc" 0
 
 # ======================================================== set-secrets.sh
 mkdir -p "$T/private"
