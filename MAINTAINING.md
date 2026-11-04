@@ -21,7 +21,7 @@ For the kit's owner and the agents working on it; adopters can skip this.
   out beside this clone, move the shas, run `npm ci` in the
   `_agent-guidance` checkout and in the `skills-evals` checkout's
   `explorer/` (two exports run that Node code: `_agent-guidance`'s scripts,
-  and the esbuild build of `skills-evals`' two explorer pages), run
+  and the esbuild build of `skills-evals`' three explorer pages), run
   `python3 export/export.py` to rewrite `starter/`, then
   `bash run-all-tests.sh` (as root: `unshare --pid --fork --mount-proc --
   bash run-all-tests.sh`), and record every departure in

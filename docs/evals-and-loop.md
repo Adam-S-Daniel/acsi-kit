@@ -17,11 +17,13 @@ guidance sections and acts on the numbers:
   gates, ingest, and the improve, draft, scaffold and retire lanes.
 - `.github/workflows/` holds the workflows that fire the eval runner routine
   and turn what it pushes into pull requests.
-- `explorer/` is the source of the two explorer pages, built with esbuild
-  (`npm run build`): the public Evals Explorer, `tool/index.html`, and
-  the optional private project dashboard, `dashboard/page/index.html`
-  (`dashboard/` holds its datasets, build and refresh tasks;
-  [routines](routines.md#dashboard-refresh) says how to publish both).
+- `explorer/` is the source of the three explorer pages, built with esbuild
+  (`npm run build`): the public Evals Explorer for a website,
+  `tool/index.html`; the same Explorer as a claude.ai artifact,
+  `explorer/dist/artifact/index.html`; and the optional private project
+  dashboard, `dashboard/page/index.html` (`dashboard/` holds its datasets,
+  build and refresh tasks; [routines](routines.md#dashboard-refresh) says
+  how to publish them).
 
 The deepest account is its
 [`docs/how-it-works.md`](../starter/skills-evals/docs/how-it-works.md);

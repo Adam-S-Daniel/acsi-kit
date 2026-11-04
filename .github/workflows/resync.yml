@@ -79,7 +79,7 @@ jobs:
           # Two exports run a source's own Node code (their manifests'
           # regenerate steps), and a fetched source has no work tree: the
           # _agent-guidance export runs that repo's scripts with NODE_PATH at
-          # its node_modules, and the skills-evals export builds its two
+          # its node_modules, and the skills-evals export builds its three
           # explorer pages with esbuild from explorer/node_modules. Install
           # each from its own lockfile at the manifest's pinned commit.
           npm_at_pin() {  # npm_at_pin <manifest> <source checkout> <folder in it, or "" for its root>

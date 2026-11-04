@@ -159,22 +159,27 @@ snapshot with `scripts/capture-routine.py`.
 ## Dashboard refresh
 
 Optional; the loop runs without it. One source tree in `skills-evals`,
-[`explorer/src`](../starter/skills-evals/explorer/src), builds two pages
-(`npm run build` in `explorer/`; `npm run check` fails when either committed
+[`explorer/src`](../starter/skills-evals/explorer/src), builds three pages
+(`npm run build` in `explorer/`; `npm run check` fails when any committed
 page differs from a fresh build):
 
 - [`tool/index.html`](../starter/skills-evals/tool/index.html), the public
-  Evals Explorer. It reads `explorer/latest.json`, the public document
-  `explorer-data.yml` writes to `persistent/eval-results`. The repository it
-  reads is one value, `DATA_REPO` in `explorer/src/config.js`, which
-  `copy-starter.sh` sets to `<you>/skills-evals`.
+  Evals Explorer for a website. It reads `explorer/latest.json`, the public
+  document `explorer-data.yml` writes to `persistent/eval-results`, from
+  GitHub. The repository it reads is one value, `DATA_REPO` in
+  `explorer/src/config.js`, which `copy-starter.sh` sets to
+  `<you>/skills-evals`.
+- [`explorer/dist/artifact/index.html`](../starter/skills-evals/explorer/dist/artifact/index.html),
+  the same public Explorer as a claude.ai artifact. It reads a file named
+  `latest.json` beside the page instead of GitHub.
 - [`dashboard/page/index.html`](../starter/skills-evals/dashboard/page/index.html),
   the private build: the same views plus "Needs you", the loop, operations
   and your own datasets, read from a claude.ai Dashboard artifact.
 
-Both are claude.ai artifacts, and both start private. An artifact's content
-security policy allows only `'self'`, so neither page can fetch GitHub: its
-data travels with the artifact, and a refresh republishes it.
+The private dashboard and the artifact build are claude.ai artifacts, and
+both start private. An artifact's content security policy allows only
+`'self'`, so neither page can fetch GitHub: its data travels with the
+artifact, and a refresh republishes it.
 
 1. **The private dashboard.** Follow `skills-evals`'
    [`dashboard/README.md`](../starter/skills-evals/dashboard/README.md),
@@ -184,22 +189,15 @@ data travels with the artifact, and a refresh republishes it.
    owner and repo names in the live queries. A routine refreshes it every
    2 hours from `dashboard/tasks/refresh.md`, and one merge relay per loop
    repo from `dashboard/tasks/merge-relay.md`.
-2. **The public explorer page.** Publish `tool/index.html` as a plain page
-   artifact with the results branch's `explorer/latest.json` beside it as a
-   file at that same path (in Claude Code: the Artifact tool's `publish`,
-   `files: {"explorer/latest.json": "<your local copy>"}`). It starts
-   private, visible only to you. A public link is your choice, made in
-   claude.ai's share settings; nothing in the kit turns it on. Republish
-   with a fresh copy of `latest.json` when you want the page current (the
-   refresh routine can do it: add the step to your copy of
-   `dashboard/tasks/refresh.md`).
-   **Not working yet:** the public build's web adapter
-   (`explorer/src/adapters/web.js`) still reads only
-   `https://raw.githubusercontent.com/<you>/skills-evals/...`, which the
-   artifact's policy blocks, so this page shows its load error until
-   `skills-evals` teaches the adapter to read the `explorer/latest.json`
-   beside it. Until then, publish the private dashboard only, or the page
-   on a site of your own (below).
+2. **The public explorer page.** Publish
+   `explorer/dist/artifact/index.html` as a claude.ai artifact, with your
+   `persistent/eval-results` branch's `explorer/latest.json` published as a
+   file named `latest.json` beside it (in Claude Code: the Artifact tool's
+   `publish` with `files: {"latest.json": "<your local copy>"}`). Both start
+   private, visible only to you. If you want a public link, turn it on from
+   the artifact's Share menu; nothing in the kit turns it on. Refreshing the
+   page means republishing `latest.json` (the refresh routine can do it: add
+   the step to your copy of `dashboard/tasks/refresh.md`).
 
 The public document leaves your spend out: the kit ships
 `evals/public-export.yml` with `include_spend: false`. Set it to `true` in a

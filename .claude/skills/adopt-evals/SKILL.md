@@ -77,7 +77,7 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
   artifact can load only its own files (its content security policy allows
   only `'self'`), so the data travels with it:
   1. In a clone of `<you>/skills-evals`, run `npm ci` and `npm run check` in
-     `explorer/` (both pages match their source), and fetch the results
+     `explorer/` (all three pages match their source), and fetch the results
      branch: `git fetch origin persistent/eval-results` and
      `git show origin/persistent/eval-results:explorer/latest.json > <work>/latest.json`.
      No `latest.json` yet means `explorer-data.yml` has not run: wait for its
@@ -89,13 +89,13 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
      it), with the user's owner and repo names in the live queries. Then
      run one refresh by hand and schedule `dashboard/tasks/refresh.md`
      every 2 hours.
-  3. The public build: publish `tool/index.html` as a plain page, with
-     `<work>/latest.json` beside it as a file at `explorer/latest.json`
-     (the Artifact tool's `publish` with
-     `files: {"explorer/latest.json": "<work>/latest.json"}`). Read
-     `docs/routines.md` first: until `skills-evals`' web adapter reads that
-     sibling file, the page shows its load error, and the user may prefer
-     to skip this artifact.
+  3. The public build: publish `explorer/dist/artifact/index.html` as an
+     artifact, with `<work>/latest.json` published as a file named
+     `latest.json` beside it (the Artifact tool's `publish` with
+     `files: {"latest.json": "<work>/latest.json"}`). It reads that file,
+     never GitHub. Both start private; if the user wants a public link, they
+     turn it on from the artifact's Share menu. Refreshing it means
+     republishing `latest.json`.
   4. Say what stays off: `evals/public-export.yml` ships
      `include_spend: false`, and `SITE_REPO` unset (or `none`) makes
      `site-sync.yml` and `site-freshness.yml` skip. Changing either is the

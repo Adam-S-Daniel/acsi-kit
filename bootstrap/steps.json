@@ -647,7 +647,7 @@
     {
       "id": "32",
       "title": "Optional: the dashboard and the explorer page",
-      "run": "Create two claude.ai artifacts: the private build as a Dashboard artifact (skills-evals' `dashboard/README.md`, Adopting it), refreshed every 2 hours, and the public build `tool/index.html` as a page with `explorer/latest.json` beside it; both start private",
+      "run": "Create two claude.ai artifacts: the private build as a Dashboard artifact (skills-evals' `dashboard/README.md`, Adopting it), refreshed every 2 hours, and the public build `explorer/dist/artifact/index.html` as an artifact with your `latest.json` beside it; both start private",
       "kind": "browser",
       "part": "routines",
       "track": "evals",

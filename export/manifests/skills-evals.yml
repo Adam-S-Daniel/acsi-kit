@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: 22f9adafc05a6d3b18e0660a5d17d7b40e3fd628
+source_sha: 50daafcaf5535612491dd758b3f0c05012f31e4b
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -761,9 +761,10 @@ regenerate:
       (cd explorer && node build.js >/dev/null); rc=$?;
       rm explorer/node_modules; exit $rc
     why: >-
-      Both pages are the build output of explorer/src (tool/index.html, the
-      public Evals Explorer, and dashboard/page/index.html, the private
-      dashboard). They are rebuilt from the substituted source, so the
+      The three pages are the build output of explorer/src (tool/index.html,
+      the public Evals Explorer; explorer/dist/artifact/index.html, the same
+      page as a claude.ai artifact; and dashboard/page/index.html, the
+      private dashboard). They are rebuilt from the substituted source, so the
       exported pages equal a fresh `npm run build` of the exported tree and
       the tree's own `npm run check` passes. The pinned esbuild comes from
       the source checkout's explorer/node_modules, installed from the

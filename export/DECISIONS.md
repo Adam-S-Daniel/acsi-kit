@@ -1833,7 +1833,7 @@ starter `repo-settings/fleet.yml` no longer declares `skills-evals` (C13).
 with esbuild from one source tree, `explorer/` (`src/`, `build.js`,
 `package.json`, `package-lock.json`, `template/`, `test/`, `schema.json`).
 The manifest moves `skills-evals` from `c6b38e18c441888d8458979f75d020bce2253655`
-to `22f9adafc05a6d3b18e0660a5d17d7b40e3fd628`, the head of the source's open
+to `22f9adafc05a6d3b18e0660a5d17d7b40e3fd628`, the head of the source's then open
 pull request skills-evals#754 (the private build of the same app). That
 commit contains the source's `main` at the time. Re-run the export once that
 pull request merges, and pin the merge commit. The other manifests keep their
@@ -1915,12 +1915,24 @@ names the folder.
 - **Docs:** `docs/routines.md` ("Dashboard refresh"), step 32 and
   `/adopt-evals` describe the two claude.ai artifacts: the private build as
   the Dashboard artifact, with its datasets including `explorer`, and the
-  public build as a plain page with `explorer/latest.json` beside it. Both
-  start private. An artifact's content security policy allows only
-  `'self'`, so the data travels with the artifact. The source's public web
-  adapter still reads only `raw.githubusercontent.com`, so the docs say the
-  public artifact shows its load error until the source reads the file
-  beside it.
+  public build as an artifact with the data beside it. Both start private.
+  An artifact's content security policy allows only `'self'`, so the data
+  travels with the artifact.
+
+### Second pin (2026-11-04)
+
+skills-evals#754, #755 and #757 merged, and the manifest moves on to the
+source's `main`, `50daafcaf5535612491dd758b3f0c05012f31e4b`. Its #755 adds a
+third build, `explorer/dist/artifact/index.html` (entry
+`src/entries/artifact.js`; `build.js` swaps `adapters/web.js` for
+`adapters/artifact.js`, which reads a `latest.json` beside the page). The
+same `regenerate` step builds it, and the exported tree's `npm run check`
+covers all three pages. The docs, step 32 and `/adopt-evals` now publish
+that page as the public artifact, with the results branch's
+`explorer/latest.json` beside it as a file named `latest.json`. Both start
+private; a public link is the adopter's, from the artifact's Share menu.
+Refreshing the page means republishing `latest.json`. No edit, patch or
+retarget needed changing for this pin.
 
 Reverse: pin the old commit and drop the edits and the `regenerate` step
 named above.
