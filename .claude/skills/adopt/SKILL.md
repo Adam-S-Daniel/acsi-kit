@@ -114,18 +114,14 @@ in `docs/`; the steps table is `docs/quick-start.md`.
   systemd or launchd line instead: the desktop app there would curate the
   wrong `~/.claude`.
 - **The base never creates `skills-evals`.** Step 2 creates the other
-  five repos, step 6 the three fleet-wide Apps, and steps 5, 16, 18 and 20
-  leave `skills-evals` out while it does not exist; every check runs on the
+  five repos, step 6 the three fleet-wide Apps, and steps 5, 16 and 18
+  leave `skills-evals` out while it does not exist (step 20 applies a
+  `fleet.yml` that does not declare it yet); every check runs on the
   base track (`status.sh --track base` passes it to `verify.sh`), so none
   of them asks for that repo. Do not create it here, even when a script
   mentions it: `/adopt-evals` does. The one part of a base step to leave
   out is step 22's usage census, which only evals read: on Linux or macOS
   pass `--jobs session-miner`.
-- **Step 20 on a base-only setup**: `repo-settings`' own
-  `repo-settings.yml` reads the committed `fleet.yml`, which still declares
-  `skills-evals`, so its `plan` job fails until `/adopt-evals` adds that
-  repo. Say so, and apply from the user's machine with `apply-settings.sh`
-  meanwhile (`docs/settings-and-apps.md`, "The first apply").
 
 ## The content step
 

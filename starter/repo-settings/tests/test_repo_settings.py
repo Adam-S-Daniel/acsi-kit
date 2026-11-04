@@ -25,10 +25,34 @@ import repo_settings as rs
 KIT_APP_IDS = {"GUIDANCE_SYNC_APP_ID": "900001", "ROSTER_WRITER_APP_ID": "900003"}
 
 
+# The adoption kit's DECISIONS C13: fleet.yml declares the base repos and
+# fleet.evals.yml (until /adopt-evals merges it) skills-evals' element. While
+# the fragment exists, loading the shipped fleet.yml appends its elements, so
+# these tests hold the whole fleet; a repo declared in both is refused.
+KIT_FLEET = Path(__file__).resolve().parent.parent / "repo-settings" / "fleet.yml"
+KIT_FRAGMENT = KIT_FLEET.with_name("fleet.evals.yml")
+_REAL_LOAD_CONFIG = rs.load_config
+
+
+def _kit_load_config(path):
+    cfg = _REAL_LOAD_CONFIG(path)
+    if not KIT_FRAGMENT.is_file() or Path(path).resolve() != KIT_FLEET:
+        return cfg
+    extra = _REAL_LOAD_CONFIG(str(KIT_FRAGMENT)).get("repos") or []
+    declared = {r.get("name") for r in cfg.get("repos") or []}
+    both = sorted(r.get("name") for r in extra if r.get("name") in declared)
+    if both:
+        raise AssertionError(f"declared in both fleet.yml and fleet.evals.yml: {both}")
+    return dict(cfg, repos=list(cfg.get("repos") or []) + list(extra))
+
+
 def setUpModule():
     env = patch.dict(os.environ, KIT_APP_IDS)
     env.start()
     unittest.addModuleCleanup(env.stop)
+    loader = patch.object(rs, "load_config", _kit_load_config)
+    loader.start()
+    unittest.addModuleCleanup(loader.stop)
 
 
 ADMIN = {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
@@ -4342,6 +4366,66 @@ class EnvAppIdTests(unittest.TestCase):
         self.assertEqual(rs._bypass_entries([actor])[0]["actor_id"], 42)
 
     def test_the_real_fleet_names_both_app_ids_by_variable(self):
-        text = (Path(__file__).resolve().parent.parent / "repo-settings" / "fleet.yml").read_text(encoding="utf-8")
+        text = "".join(p.read_text(encoding="utf-8") for p in (KIT_FLEET, KIT_FRAGMENT) if p.is_file())
         self.assertIn('actor_id: "${GUIDANCE_SYNC_APP_ID}"', text)
         self.assertIn('actor_id: "${ROSTER_WRITER_APP_ID}"', text)
+
+
+class EvalsFragmentTests(unittest.TestCase):
+    """fleet.yml alone is the base; fleet.evals.yml adds skills-evals
+    (the adoption kit's DECISIONS C13)."""
+
+    def _base(self):
+        return _REAL_LOAD_CONFIG(str(KIT_FLEET))
+
+    def _names(self, cfg):
+        return [r["name"].split("/", 1)[-1] for r in cfg.get("repos") or []]
+
+    def test_the_merged_fleet_declares_skills_evals_once(self):
+        self.assertEqual(self._names(rs.load_config(str(KIT_FLEET))).count("skills-evals"), 1)
+
+    @unittest.skipUnless(KIT_FRAGMENT.is_file(), "fleet.evals.yml is merged")
+    def test_fleet_yml_alone_declares_no_skills_evals(self):
+        self.assertNotIn("skills-evals", self._names(self._base()))
+
+    @unittest.skipUnless(KIT_FRAGMENT.is_file(), "fleet.evals.yml is merged")
+    def test_the_fragment_holds_only_skills_evals(self):
+        frag = _REAL_LOAD_CONFIG(str(KIT_FRAGMENT))
+        self.assertEqual(list(frag), ["repos"])
+        self.assertEqual(self._names(frag), ["skills-evals"])
+
+    @unittest.skipUnless(KIT_FRAGMENT.is_file(), "fleet.evals.yml is merged")
+    def test_fleet_yml_alone_renders_with_only_the_guidance_sync_id(self):
+        # repo-settings.yml's plan job on a setup without evals: the
+        # ROSTER_WRITER_APP_ID variable is unset there.
+        with patch.dict(os.environ, {"GUIDANCE_SYNC_APP_ID": "900001"}):
+            os.environ.pop("ROSTER_WRITER_APP_ID", None)
+            targets = rs.resolve_targets(self._base(), None)  # renders every body
+            self.assertTrue(targets)
+            for t in targets:
+                eff = t["effective"]
+                if eff.get("ruleset"):
+                    rs.build_ruleset_body(eff["ruleset"])
+                rs.build_extra_ruleset_bodies(eff)
+
+    @unittest.skipUnless(KIT_FRAGMENT.is_file(), "fleet.evals.yml is merged")
+    def test_the_merged_fleet_needs_the_roster_id(self):
+        # The negative control for the test above: skills-evals' element names
+        # the roster App, so the merged fleet does not even resolve without it
+        # (resolve_targets renders every body).
+        with patch.dict(os.environ, {"GUIDANCE_SYNC_APP_ID": "900001"}):
+            os.environ.pop("ROSTER_WRITER_APP_ID", None)
+            with self.assertRaises(rs.ConfigError) as cm:
+                rs.resolve_targets(rs.load_config(str(KIT_FLEET)), None)
+        self.assertIn("ROSTER_WRITER_APP_ID", str(cm.exception))
+
+    def test_a_repo_declared_in_both_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            fleet, frag = Path(d).resolve() / "fleet.yml", Path(d).resolve() / "fleet.evals.yml"
+            fleet.write_text('repos:\n  - name: o/one\n    manage: []\n', encoding="utf-8")
+            frag.write_text('repos:\n  - name: o/two\n    manage: []\n', encoding="utf-8")
+            with patch.dict(globals(), {"KIT_FLEET": fleet, "KIT_FRAGMENT": frag}):
+                self.assertEqual(self._names(_kit_load_config(str(fleet))), ["one", "two"])
+                frag.write_text('repos:\n  - name: o/one\n    manage: []\n', encoding="utf-8")
+                with self.assertRaises(AssertionError):
+                    _kit_load_config(str(fleet))

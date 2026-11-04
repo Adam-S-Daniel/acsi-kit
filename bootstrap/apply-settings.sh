@@ -12,20 +12,23 @@
 #
 #   1. clones OWNER/repo-settings (its default branch: merge the repo-settings
 #      starter pull request first) to a temp dir;
-#   2. leaves skills-evals out while it does not exist: it is the evals
-#      track's (steps.json), so a base-only setup applies fleet.yml to the
-#      other repos, with its skills-evals entry dropped from a copy of the
-#      file. /adopt-evals creates it and applies again. --track base always
-#      leaves it out, and --track evals keeps only it (and fails while it
-#      does not exist); status.sh passes each step's track to --check;
+#   2. picks the track's repos. The starter's fleet.yml declares the base
+#      repos only; skills-evals' element waits in repo-settings/fleet.evals.yml
+#      until the evals track merges it (regenerate.sh evals-fleet,
+#      export/DECISIONS.md C13), so a base-only setup applies fleet.yml as it
+#      is. Once it declares skills-evals, --track base hands the engine a copy
+#      without that element and --track evals one with only it (and fails
+#      while fleet.yml does not declare it); status.sh passes each step's
+#      track to --check. The default, all, applies the file as it is;
 #   3. refuses while GUIDANCE_SYNC_APP_ID is empty in fleet.env, or
-#      ROSTER_WRITER_APP_ID while skills-evals is kept: fleet.yml names both
-#      Apps as ruleset bypass actors (roster only in skills-evals' entry), and
-#      the engine refuses to plan without their ids (export/DECISIONS.md C12).
-#      This is why the Apps come before the first apply;
-#   4. refuses while fleet.yml names another repo of this owner that does not
-#      exist (the example platform and its sites, until you remove them:
-#      export/REGENERATE.md, "repo-settings/fleet.yml's repo list");
+#      ROSTER_WRITER_APP_ID while skills-evals is applied: fleet.yml names both
+#      Apps as ruleset bypass actors (roster only in skills-evals' element),
+#      and the engine refuses to plan without their ids (export/DECISIONS.md
+#      C12). This is why the Apps come before the first apply;
+#   4. refuses while fleet.yml names a repo of this owner that does not exist
+#      (the example platform and its sites, until you remove them:
+#      export/REGENERATE.md, "repo-settings/fleet.yml's repo list"; or
+#      skills-evals, before create-repos.sh made it);
 #   5. runs `scripts/repo_settings.py apply --config repo-settings/fleet.yml
 #      --owner <owner> --cms-label-only skip` (with --dry-run, the engine's
 #      own preview), as repo-settings.yml's apply job does;
@@ -89,23 +92,18 @@ PY
 }
 mapfile -t DECLARED < <(declared "$FLEET")
 [ ${#DECLARED[@]} -gt 0 ] || die "fleet.yml in $CFG_OWNER/repo-settings declares no repo of $TARGET"
-# skills-evals is the evals track's: keep it only when it exists (all) or
-# when asked for it alone (evals); --track base always drops it.
-EVALS_KEEP=0 EVALS_DECLARED=0
+# skills-evals is the evals track's: fleet.yml declares it once
+# regenerate.sh evals-fleet's pull request is merged (DECISIONS C13).
+EVALS_DECLARED=0
 for r in "${DECLARED[@]}"; do [ "${r#*/}" != "$EVALS_REPO" ] || EVALS_DECLARED=1; done
-[ "$TRACK" != evals ] || [ "$EVALS_DECLARED" = 1 ] || die "fleet.yml in $CFG_OWNER/repo-settings declares no $TARGET/$EVALS_REPO"
-if [ "$TRACK" != base ] && [ "$EVALS_DECLARED" = 1 ]; then
-  if gh_read "repos/$TARGET/$EVALS_REPO"; then EVALS_KEEP=1
-  elif [ "$GH_HTTP" != 404 ]; then die "could not read $TARGET/$EVALS_REPO (HTTP $GH_HTTP)"
-  elif [ "$TRACK" = evals ]; then die "$TARGET/$EVALS_REPO does not exist (HTTP 404): the evals track creates it first (create-repos.sh $EVALS_REPO)"
-  else log "skip: fleet.yml declares $TARGET/$EVALS_REPO, which does not exist yet: the evals track's repo, left out of this run (/adopt-evals adds it)"; fi
-fi
-if [ "$EVALS_KEEP" = 1 ] && [ -z "$CFG_ROSTER_WRITER_APP_ID" ]; then
+[ "$TRACK" != evals ] || [ "$EVALS_DECLARED" = 1 ] \
+  || die "fleet.yml in $CFG_OWNER/repo-settings declares no $TARGET/$EVALS_REPO: run regenerate.sh evals-fleet and merge its pull request first (the evals track)"
+if [ "$TRACK" != base ] && [ "$EVALS_DECLARED" = 1 ] && [ -z "$CFG_ROSTER_WRITER_APP_ID" ]; then
   die "ROSTER_WRITER_APP_ID empty in fleet.env: fleet.yml names the roster App as a ruleset bypass actor in $EVALS_REPO's entry and the engine refuses to plan without it. Run create-apps.sh roster first (the evals track)."
 fi
-# The engine then reads a copy of fleet.yml without skills-evals' entries
-# (or, for --track evals, with only them); everything else is kept.
-if [ "$EVALS_DECLARED" = 1 ] && { [ "$EVALS_KEEP" = 0 ] || [ "$TRACK" = evals ]; }; then
+# For one track, the engine reads a copy of fleet.yml without skills-evals'
+# element (base) or with only it (evals); everything else is kept.
+if [ "$EVALS_DECLARED" = 1 ] && [ "$TRACK" != all ]; then
   python3 -I - "$FLEET" "$BOOT_WORK/fleet.yml" "$EVALS_REPO" "$TRACK" <<'PY' || die "could not write the filtered copy of fleet.yml"
 import sys, yaml
 src, dst, evals, track = sys.argv[1:5]
@@ -127,7 +125,13 @@ for r in "${DECLARED[@]}"; do
   absent+=("$r")
 done
 if [ ${#absent[@]} -gt 0 ]; then
-  for r in "${absent[@]}"; do printf 'MISSING: fleet.yml declares %s, which this gh login cannot see (HTTP 404)\n' "$r" >&2; done
+  for r in "${absent[@]}"; do
+    if [ "${r#*/}" = "$EVALS_REPO" ]; then
+      printf 'MISSING: fleet.yml declares %s, which does not exist (HTTP 404): the evals track creates it first (create-repos.sh %s)\n' "$r" "$EVALS_REPO" >&2
+    else
+      printf 'MISSING: fleet.yml declares %s, which this gh login cannot see (HTTP 404)\n' "$r" >&2
+    fi
+  done
   die "remove the repos you do not have from repo-settings/fleet.yml (and their rows in tests/test_repo_settings.py) in a pull request, or create them; then run this again"
 fi
 log "fleet.yml declares ${#DECLARED[@]} repo(s) of $TARGET; all exist"

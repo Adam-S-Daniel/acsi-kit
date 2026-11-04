@@ -326,7 +326,7 @@
     {
       "id": "20",
       "title": "Apply fleet.yml: protect every repo",
-      "run": "`bootstrap/apply-settings.sh` (and `--owner <OWNER_TWO>` signed in as that account; it leaves out `skills-evals` until the evals track creates it)",
+      "run": "`bootstrap/apply-settings.sh` (and `--owner <OWNER_TWO>` signed in as that account; `fleet.yml` declares no `skills-evals` until the evals track adds it)",
       "kind": "script",
       "part": "settings",
       "track": "base",
@@ -552,6 +552,22 @@
         ]
       },
       "minutes": 10
+    },
+    {
+      "id": "40",
+      "title": "Declare skills-evals in fleet.yml",
+      "run": "`bootstrap/regenerate.sh evals-fleet`, then merge the pull request it opens in `repo-settings` (it moves `skills-evals`' element from `repo-settings/fleet.evals.yml` into `repo-settings/fleet.yml`)",
+      "kind": "script",
+      "part": "evals",
+      "track": "evals",
+      "link": "docs/evals-and-loop.md#adding-skills-evals",
+      "check": {
+        "type": "verify",
+        "groups": [
+          "regen:evals-fleet"
+        ]
+      },
+      "minutes": 5
     },
     {
       "id": "39",

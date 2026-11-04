@@ -4,7 +4,7 @@
 #   load_config <path>     parse fleet.env strictly (no `source`), set CFG_* vars
 #   FLEET_REPOS            the six repos the kit exports (DECISIONS C1 names)
 #   EVALS_REPO             skills-evals, the one repo only the evals track needs
-#   repo_track, app_track, variable_track, group_tracks, on_track, track_repos
+#   repo_track, app_track, variable_track, regen_track, group_tracks, on_track, track_repos
 #                          which track (base or evals) a repo, App, variable or
 #                          verify group belongs to, and the repos of a track
 #   check_track <track>    refuse a --track value other than base, evals or all
@@ -308,9 +308,14 @@ regen_repos() {
     run-health-sha) printf '%s\n' repo-settings skills-evals acsi-agentskills wsl-automation ;;
     codex-pin) echo wsl-automation ;;
     actions-lock) printf '%s\n' "${FLEET_REPOS[@]}" ;;
+    evals-fleet) echo repo-settings ;;
     *) return 1 ;;
   esac
 }
+# regen_track <task> <repo>: the track a task's edit of that repo is on. A
+# task is on its repo's track, except evals-fleet: it edits the base repo
+# repo-settings, but only to declare skills-evals there (the evals track's).
+regen_track() { if [ "$1" = evals-fleet ]; then echo evals; else repo_track "$2"; fi; }
 # group_tracks <verify group>: the tracks on which that group checks
 # anything, one per line (tests/check-steps.py holds each step's checks to
 # its own track with it).
@@ -339,7 +344,7 @@ group_tracks() {
         IFS='|' read -r r _ _ n _ <<<"$e"
         [ "$(value_group "$n")" = "${g#values:}" ] && out+=" $(repo_track "$r")"
       done ;;
-    regen:*) while IFS= read -r r; do out+=" $(repo_track "$r")"; done < <(regen_repos "${g#regen:}") ;;
+    regen:*) while IFS= read -r r; do out+=" $(regen_track "${g#regen:}" "$r")"; done < <(regen_repos "${g#regen:}") ;;
     content) out=base ;;
   esac
   tr ' ' '\n' <<<"$out" | grep -v '^$' | sort -u || true
@@ -490,7 +495,7 @@ APPS=(
 
 # The generated files regenerate.sh rebuilds (export/REGENERATE.md), in the
 # order the quick start runs them; verify.sh's regen:<task> groups.
-REGEN_TASKS=(skills-locks hook-pin run-health-sha codex-pin actions-lock)
+REGEN_TASKS=(skills-locks hook-pin run-health-sha codex-pin actions-lock evals-fleet)
 
 # Secrets and variables that are not App credentials (set-secrets.sh).
 # Format: repo|environment (- = repository level)|kind (secret|variable)|name|source

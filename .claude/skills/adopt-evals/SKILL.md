@@ -52,13 +52,18 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
 
 ## Steps with a catch
 
-- **Steps 35 to 39** add `skills-evals` with the base's own scripts, which
+- **Steps 35 to 40** add `skills-evals` with the base's own scripts, which
   include it once it exists (`docs/evals-and-loop.md`, "Adding
   skills-evals"): `create-repos.sh skills-evals`, its starter pull request,
   `create-environments.sh`, `regenerate.sh run-health-sha` and
-  `actions-lock`, and `apply-settings.sh`. They come first: every other
-  evals step needs that repo. Step 39's apply also ends the base-only
-  failure of `repo-settings.yml`'s `plan` job.
+  `actions-lock`, `regenerate.sh evals-fleet` and `apply-settings.sh`. They
+  come first: every other evals step needs that repo.
+- **Step 40** (`regenerate.sh evals-fleet`) is the one that declares
+  `skills-evals` in `repo-settings/fleet.yml`: it moves the element from
+  `repo-settings/fleet.evals.yml` and deletes that file, in a pull request
+  on the user's `repo-settings`. The user merges it before step 39's apply;
+  once merged, `repo-settings.yml` applies `skills-evals` on its own run
+  too, behind the `fleet-apply` approval.
 - **Step 19** (eval.yml's default fixture): the shipped default runs as it
   is; a change is a pull request on the user's `skills-evals`.
 - **The eval runner** (steps 24 and 25): the bearer is shown once. The

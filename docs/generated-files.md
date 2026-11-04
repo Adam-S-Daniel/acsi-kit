@@ -22,6 +22,7 @@ Every item `REGENERATE.md` lists, and the quick start step that handles it:
 | `repo-settings` | `.github/workflows/actions.lock` | 18 |
 | `repo-settings` | GitHub App ids | 8, 37 |
 | `repo-settings` | `repo-settings/fleet.yml`'s repo list | 9 |
+| `repo-settings` | `repo-settings/fleet.evals.yml` | 40 |
 | `wsl-automation` | `.github/workflows/scheduled-run-health.yml` | 16 |
 | `wsl-automation` | `skills.lock` | 14 |
 | `wsl-automation` | `.github/workflows/actions.lock` | 18 |

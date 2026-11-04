@@ -35,9 +35,17 @@
 #                  .github/workflows/actions.lock, proposing any change;
 #                  --check runs `gh actions-lock --verify`. Needs the gh
 #                  extension: gh extension install github/gh-actions-lock.
+#   evals-fleet    repo-settings: merges repo-settings/fleet.evals.yml (the
+#                  starter's skills-evals element) into repo-settings/fleet.yml
+#                  and deletes the fragment, with lib/fleet_fragment.py
+#                  (PyYAML: an element fleet.yml already declares is left as
+#                  it is). The evals track's (export/DECISIONS.md C13), so it
+#                  runs only once skills-evals exists; --check passes once
+#                  fleet.yml declares OWNER/skills-evals and no fragment is left.
 #
 # skills-evals is the evals track's: the tasks leave it alone while it does
-# not exist (a base-only setup), and include it once it does. --track base
+# not exist (a base-only setup), and include it once it does; evals-fleet,
+# which edits repo-settings for it, is the evals track's too (regen_track). --track base
 # or --track evals limits a task to that track's repos (status.sh passes
 # each step's track to --check, so the base steps never look at
 # skills-evals); --track evals fails while skills-evals does not exist.
@@ -45,7 +53,8 @@
 # Each task needs the starter pull requests of the repos it reads merged.
 # Idempotent: a repo already current gets no commit and no pull request.
 # Pushes only to regenerate/<task>, never with force, and checks the commit
-# reached it (lib/pr.sh). Needs: git, gh, jq, python3 (PyYAML for hook-pin).
+# reached it (lib/pr.sh). Needs: git, gh, jq, python3 (PyYAML for hook-pin and
+# evals-fleet).
 
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -79,7 +88,7 @@ NOT_DONE=0
 # all: skills-evals counts once it exists (a base-only setup has none).
 if [ "$TRACK" = all ] && ! evals_repo_exists; then TRACK=base; log "skip: $O/$EVALS_REPO does not exist yet (the evals track creates it)"; fi
 # in_task <repo>: whether this run covers that repo.
-in_task() { on_track "$TRACK" "$(repo_track "$1")"; }
+in_task() { on_track "$TRACK" "$(regen_track "$TASK" "$1")"; }
 
 # clone <repo>: a full clone of OWNER/<repo> at $BOOT_WORK/<repo> (once).
 clone() {
@@ -282,6 +291,23 @@ task_actions_lock() {
   done
 }
 
+# ------------------------------------------------------------ evals-fleet
+FRAG="repo-settings/fleet.evals.yml"
+edit_evals_fleet() {
+  python3 -I -B "$HERE/lib/fleet_fragment.py" merge "$1" || die "could not merge $FRAG into repo-settings/fleet.yml (see above)"
+}
+task_evals_fleet() {
+  evals_repo_exists || die "$O/$EVALS_REPO does not exist (HTTP 404): the evals track creates it first (create-repos.sh $EVALS_REPO)"
+  need repo-settings repo-settings/fleet.yml
+  if python3 -I -B "$HERE/lib/fleet_fragment.py" check "$CLONE" "$O" >"$BOOT_WORK/frag.out" 2>&1; then
+    current "$O/repo-settings repo-settings/fleet.yml declares $O/$EVALS_REPO"; return 0
+  fi
+  if [ "$CHECK" = 1 ]; then sed -n 's/^NOT DONE: /&/p; s/^ERROR: /&/p' "$BOOT_WORK/frag.out"; NOT_DONE=$((NOT_DONE + 1)); return 0; fi
+  propose repo-settings "Declare skills-evals in fleet.yml" \
+    "Moves skills-evals' element from $FRAG into repo-settings/fleet.yml and deletes the fragment, so the next settings apply protects skills-evals (the kit's export/DECISIONS.md C13). Merge it once the roster App's id is set as ROSTER_WRITER_APP_ID: fleet.yml then names it." \
+    edit_evals_fleet repo-settings/fleet.yml "$FRAG"
+}
+
 [ "$CHECK" = 0 ] || [ "$DRY_RUN" = 0 ] || die "--check is read-only already; drop --dry-run"
 log "Owner $O, task $TASK$([ "$CHECK" = 1 ] && echo ', CHECK')$([ "$DRY_RUN" = 1 ] && echo ', DRY RUN')$([ "$TRACK" = all ] || echo ", $TRACK track")"
 covered=0
@@ -293,6 +319,7 @@ case $TASK in
   run-health-sha) task_run_health_sha ;;
   codex-pin) task_codex_pin ;;
   actions-lock) task_actions_lock ;;
+  evals-fleet) task_evals_fleet ;;
 esac
 if [ "$CHECK" = 1 ]; then
   if [ "$NOT_DONE" = 0 ]; then log "$TASK: done"; exit 0; fi

@@ -54,6 +54,12 @@ patches:
       ids beside the substituted App slugs; they become the placeholders
       <roster App id> and <guidance sync App id>, found from the ADRs at run
       time so the kit spells neither.
+  - file: evals_fragment.py
+    why: >-
+      C13: fleet.yml declares the base repos only. skills-evals' element is
+      found by its parsed name (exactly once, or the export fails) and moved,
+      line for line, to repo-settings/fleet.evals.yml, which /adopt-evals
+      merges; the tests read both files while the fragment exists.
 
 regenerate:
   - copy_from_kit: {repo: _agent-guidance, from: agents-md/base.md, to: .claude/hooks/fleet-guidance.md}
