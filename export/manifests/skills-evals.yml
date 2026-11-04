@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: 50daafcaf5535612491dd758b3f0c05012f31e4b
+source_sha: cdedb7e1e1523647a11cac30f560e17a6b733e0a
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -434,67 +434,7 @@ edits:
       first row) before any fixture exists.
   # ---- substitution side effects
 
-  # ---- Adopter defaults: no site to publish to until the adopter names one
-  - path: .github/workflows/site-sync.yml
-    stage: output
-    old: |
-      # repository variable SITE_REPO (default example-adopter/example-site-a); `none`
-      # is a clean skip for an adopter without a site. site-freshness.yml watches
-      # the result.
-    new: |
-      # repository variable SITE_REPO; unset or `none` (the adoption kit's
-      # default) is a clean skip for an adopter without a site, and owner/name
-      # names the site repo to publish to. site-freshness.yml watches the result.
-    why: >-
-      Adopter defaults. The source falls back to the source owner's site when
-      SITE_REPO is unset, and a run with no App on that site fails red. An
-      adopter has no site until they set one, so the kit's fallback is `none`,
-      the clean skip the source already has.
-  - path: .github/workflows/site-sync.yml
-    stage: output
-    old: "  SITE_REPO: ${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}\n"
-    new: "  SITE_REPO: ${{ vars.SITE_REPO || 'none' }}\n"
-    why: Adopter defaults. Same.
-  - path: .github/workflows/site-freshness.yml
-    stage: output
-    old: "  SITE_REPO: ${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}\n"
-    new: "  SITE_REPO: ${{ vars.SITE_REPO || 'none' }}\n"
-    why: >-
-      Adopter defaults. As in site-sync.yml: unset is `none`, so the hourly
-      check skips every step after its first while the adopter has no site.
-  - path: .github/workflows/site-freshness.yml
-    stage: output
-    old: |
-      # * SITE_REPO=none (a repository variable) skips the whole run, for adopters
-      #   without a site.
-    new: |
-      # * SITE_REPO=none (a repository variable), or SITE_REPO unset (the
-      #   adoption kit's default), skips the whole run, for adopters without a
-      #   site.
-    why: Adopter defaults. Says what an unset variable does in the kit's copy.
-  - path: test/issues/test_issue_72_site_sync.py
-    stage: output
-    old: |2
-              self.assertEqual(self.sync["env"]["SITE_REPO"],
-                               "${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}")
-    new: |2
-              # The adoption kit's default: unset is the clean skip.
-              self.assertEqual(self.sync["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
-    why: Adopter defaults. Follows the site-sync.yml fallback.
-  - path: test/issues/test_issue_72_site_sync.py
-    stage: output
-    old: "                    # The target follows SITE_REPO (default example-adopter/example-site-a).\n"
-    new: "                    # The target follows SITE_REPO (unset or none: no site, the run skips).\n"
-    why: Adopter defaults. The comment follows the fallback.
-  - path: test/issues/test_issue_site_freshness.py
-    stage: output
-    old: |2
-              self.assertEqual(self.doc["env"]["SITE_REPO"],
-                               "${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}")
-    new: |2
-              # The adoption kit's default: unset is the clean skip.
-              self.assertEqual(self.doc["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
-    why: Adopter defaults. Follows the site-freshness.yml fallback.
+  # ---- Adopter defaults
   - path: evals/public-export.yml
     stage: output
     old: |

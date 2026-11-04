@@ -1940,3 +1940,31 @@ routine's instructions to name it, and `docs/evals-and-loop.md` lists it.
 
 Reverse: pin the old commit and drop the edits and the `regenerate` step
 named above.
+
+### Third pin: site variables have no fallback (2026-11-04)
+
+The manifest moves on to the source's `main`,
+`cdedb7e1e1523647a11cac30f560e17a6b733e0a`. Its #771 removes every
+`vars.X || '<literal>'` fallback from `site-sync.yml`, `site-preview.yml` and
+`site-freshness.yml`, and the `DEFAULT_*` constants from
+`scripts/site_freshness.py`: `SITE_REPO`, `SITE_PAGE_URL`, `SITE_ASSET_URL`
+and `SITE_FRESHNESS_ROUTINE_ID` are required repository variables, `none`
+skips, and unset fails naming the variable. That is the owner's rule for
+values that name an owner's resources (`_agent-guidance`
+`docs/reference/settings-schema-design.md`, rule 4): no in-code fallback,
+set in one place, fail descriptively, and an opt-out set explicitly.
+
+- **The `SITE_REPO` edits are gone.** The seven edits above that turned the
+  fallback into `none` (two workflows, their comments, three tests) no longer
+  had a target, and the kit adds no fallback of its own, `none` included.
+- **The one place is `fleet.env`.** `SITE_REPO` is a `fleet.env` key
+  (`none` or `owner/name`, validated as `site-sync.yml` validates it), and
+  `create-environments.sh` makes it a `skills-evals` repository variable
+  (`REPO_VARIABLES`, verify group `variables`). `fleet.env.example` ships
+  `SITE_REPO=none`, so a default setup says "no website" explicitly rather
+  than by omission; an empty key is skipped with a message naming it, and
+  `verify.sh` fails on it. The other three, and the fixer routine's bearer,
+  are needed only with a site and stay on the README's by-hand list.
+
+Reverse: pin `50daafc`, restore the seven edits, and drop the `SITE_REPO`
+key, its `REPO_VARIABLES` row and the doc changes.

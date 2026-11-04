@@ -12,7 +12,8 @@
 #   environments    fleet-apply, plugin-runtime-review, routine-fire exist,
 #                   with their reviewer and branch policy (ENVIRONMENTS)
 #   variables       repo-settings' GUIDANCE_SYNC_APP_ID and (evals)
-#                   ROSTER_WRITER_APP_ID match fleet.env (REPO_VARIABLES)
+#                   ROSTER_WRITER_APP_ID and SITE_REPO match fleet.env
+#                   (REPO_VARIABLES)
 #   federation      skills-evals' four ANTHROPIC_* federation ids match
 #                   fleet.env (REPO_VARIABLES; optional, so only when named)
 #   apps:<app>      one App (APPS): its id is in fleet.env, and its client id
@@ -188,7 +189,7 @@ for entry in "${REPO_VARIABLES[@]}"; do
   tracked "$(variable_track "$r" "$src")" || continue
   want=$(repo_variable_value "$src")
   if [ -z "$want" ]; then
-    if [ "$group" = federation ]; then fail "$O/$r variable $name: ${src#cfg:} is empty in fleet.env (docs/evals-and-loop.md#workload-identity-federation)"
+    if [ "$group" = federation ] || [ "$name" = SITE_REPO ]; then fail "$O/$r variable $name: ${src#cfg:} is empty in fleet.env ($(variable_empty_hint "$name" "$group"))"
     else fail "$O/$r variable $name: ${src#cfg:} is empty in fleet.env (run create-apps.sh)"; fi
     continue
   fi
