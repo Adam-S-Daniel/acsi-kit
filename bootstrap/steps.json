@@ -394,7 +394,7 @@
     {
       "id": "28",
       "title": "Create the prompt-audit sweep routine",
-      "run": "At https://claude.ai/code/routines: API trigger only; keep its fire URL and bearer for the next step",
+      "run": "At https://claude.ai/code/routines: API trigger only; store its fire URL and bearer on _agent-guidance as PROMPT_AUDIT_SWEEP_FIRE_URL (variable) and PROMPT_AUDIT_SWEEP_FIRE_BEARER (secret)",
       "kind": "browser",
       "part": "routines",
       "track": "base",
@@ -407,7 +407,7 @@
     {
       "id": "29",
       "title": "Create the agent changelog watcher routine",
-      "run": "At https://claude.ai/code/routines: daily at 01:03 UTC, in an environment that holds the sweep's fire URL and bearer",
+      "run": "At https://claude.ai/code/routines: daily at 01:03 UTC, in an environment of its own with no variables",
       "kind": "browser",
       "part": "routines",
       "track": "base",

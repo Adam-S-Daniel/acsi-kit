@@ -87,6 +87,22 @@ fail naming it. The four below are needed only with a site; with
   `gh secret set SITE_FRESHNESS_FIRE_BEARER --repo <you>/skills-evals` and
   type the value at its prompt.
 
+The prompt-audit sweep's fire values live on `_agent-guidance`, where
+`prompt-audit-fire.yml` fires the sweep for each trigger issue the changelog
+watcher files ([routines](../docs/routines.md#prompt-audit-sweep)). Unset,
+the workflow comments on the issue that the fire is not configured, and you
+start the sweep by hand.
+
+- `PROMPT_AUDIT_SWEEP_FIRE_URL`: a repository variable on
+  `<you>/_agent-guidance`, the sweep routine's fire URL
+  (`https://api.anthropic.com/v1/claude_code/routines/<trig_id>/fire`). Set
+  it with `gh variable set PROMPT_AUDIT_SWEEP_FIRE_URL --repo <you>/_agent-guidance --body <url>`.
+- `PROMPT_AUDIT_SWEEP_FIRE_BEARER`: a repository secret on
+  `<you>/_agent-guidance`, the sweep routine's bearer, shown once when you
+  create its API trigger. Set it with
+  `gh secret set PROMPT_AUDIT_SWEEP_FIRE_BEARER --repo <you>/_agent-guidance`
+  and type the value at its prompt.
+
 ## Security
 
 - No value from `fleet.env` or GitHub reaches a shell command unquoted; each
