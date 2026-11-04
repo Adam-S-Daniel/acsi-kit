@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: 50daafcaf5535612491dd758b3f0c05012f31e4b
+source_sha: f3196c3fcfafb2f801e860bf1c700fe2bacc8cc3
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -70,12 +70,16 @@ exclude:
     why: X9 and Content tiers (a fixture for a guidance section the kit does not ship). evals/guidance/_delivery/ stays, the delivery canary.
   - path: evals/guidance/section-typescript/
     why: X9 and Content tiers (a fixture for a guidance section the kit does not ship). evals/guidance/_delivery/ stays, the delivery canary.
+  - path: evals/guidance/turn-lessons-into-checks/
+    why: X9 and Content tiers (a fixture for a guidance section the kit does not ship yet; re-pin Round 4). evals/guidance/_delivery/ stays, the delivery canary.
   - path: evals/guidance/two-github-connectors/
     why: X9 and Content tiers (a fixture for a guidance section the kit does not ship). evals/guidance/_delivery/ stays, the delivery canary.
   - path: evals/guidance/workstation-layout/
     why: X9 and Content tiers (a fixture for a guidance section the kit does not ship). evals/guidance/_delivery/ stays, the delivery canary.
   - path: evals/adam-writing-style/
     why: X2 and X9.
+  - path: evals/add-from-address/
+    why: X9 (a personal mail skill; its trigger set is new in re-pin Round 4).
   - path: evals/admin-config-render/
     why: X4 and X9 (a platform-only skill's fixtures).
   - path: evals/browser-testing/
@@ -435,29 +439,44 @@ edits:
   # ---- substitution side effects
 
   # ---- Adopter defaults: no site to publish to until the adopter names one
+  # The source's SITE_REPO has no default since 2026-11-04 (unset fails the
+  # run naming it). The kit keeps `none` as the fallback, so an adopter with
+  # no site gets the clean skip rather than a red run (hourly, for
+  # site-freshness.yml, and on pull requests, for site-preview.yml).
   - path: .github/workflows/site-sync.yml
     stage: output
     old: |
-      # repository variable SITE_REPO (default example-adopter/example-site-a); `none`
-      # is a clean skip for an adopter without a site. site-freshness.yml watches
-      # the result.
+      # repository variable SITE_REPO, which has no default (unset fails this run
+      # naming it); `none` is a clean skip for an adopter without a site. The other
     new: |
       # repository variable SITE_REPO; unset or `none` (the adoption kit's
-      # default) is a clean skip for an adopter without a site, and owner/name
-      # names the site repo to publish to. site-freshness.yml watches the result.
+      # default) is a clean skip for an adopter without a site. The other
     why: >-
-      Adopter defaults. The source falls back to the source owner's site when
-      SITE_REPO is unset, and a run with no App on that site fails red. An
-      adopter has no site until they set one, so the kit's fallback is `none`,
-      the clean skip the source already has.
+      Adopter defaults. An adopter has no site until they set one, so in the
+      kit an unset SITE_REPO falls back to `none`, the clean skip the source
+      already has, instead of failing red.
   - path: .github/workflows/site-sync.yml
     stage: output
-    old: "  SITE_REPO: ${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}\n"
+    old: "  SITE_REPO: ${{ vars.SITE_REPO }}\n"
+    new: "  SITE_REPO: ${{ vars.SITE_REPO || 'none' }}\n"
+    why: Adopter defaults. Same.
+  - path: .github/workflows/site-preview.yml
+    stage: output
+    old: |
+      # SITE_REPO is a repository variable with no default (see README, Publishing to
+      # example-site-a): unset fails the run naming it, `none` skips cleanly.
+    new: |
+      # SITE_REPO is a repository variable (see README, Publishing to
+      # example-site-a): unset or `none` (the adoption kit's default) skips cleanly.
+    why: Adopter defaults. As in site-sync.yml, on every pull request.
+  - path: .github/workflows/site-preview.yml
+    stage: output
+    old: "  SITE_REPO: ${{ vars.SITE_REPO }}\n"
     new: "  SITE_REPO: ${{ vars.SITE_REPO || 'none' }}\n"
     why: Adopter defaults. Same.
   - path: .github/workflows/site-freshness.yml
     stage: output
-    old: "  SITE_REPO: ${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}\n"
+    old: "  SITE_REPO: ${{ vars.SITE_REPO }}\n"
     new: "  SITE_REPO: ${{ vars.SITE_REPO || 'none' }}\n"
     why: >-
       Adopter defaults. As in site-sync.yml: unset is `none`, so the hourly
@@ -465,36 +484,56 @@ edits:
   - path: .github/workflows/site-freshness.yml
     stage: output
     old: |
-      # * SITE_REPO=none (a repository variable) skips the whole run, for adopters
-      #   without a site.
+      #   Variables), none of which has a default: SITE_REPO (owner/name of the
+      #   site repository, or none to skip the whole run for an adopter without a
+      #   site), SITE_PAGE_URL, SITE_ASSET_URL and, when the fire bearer secret is
     new: |
-      # * SITE_REPO=none (a repository variable), or SITE_REPO unset (the
-      #   adoption kit's default), skips the whole run, for adopters without a
-      #   site.
-    why: Adopter defaults. Says what an unset variable does in the kit's copy.
+      #   Variables): SITE_REPO (owner/name of the site repository, or none to
+      #   skip the whole run for an adopter without a site; unset is none, the
+      #   adoption kit's default), and, with no default, SITE_PAGE_URL,
+      #   SITE_ASSET_URL and, when the fire bearer secret is
+    why: Adopter defaults. Says what an unset SITE_REPO does in the kit's copy.
   - path: test/issues/test_issue_72_site_sync.py
     stage: output
     old: |2
-              self.assertEqual(self.sync["env"]["SITE_REPO"],
-                               "${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}")
+              self.assertEqual(self.sync["env"]["SITE_REPO"], "${{ vars.SITE_REPO }}")
+              self.assertEqual(self.preview["env"]["SITE_REPO"], "${{ vars.SITE_REPO }}")
     new: |2
               # The adoption kit's default: unset is the clean skip.
               self.assertEqual(self.sync["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
-    why: Adopter defaults. Follows the site-sync.yml fallback.
+              self.assertEqual(self.preview["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
+    why: Adopter defaults. Follows the site-sync.yml and site-preview.yml fallback.
   - path: test/issues/test_issue_72_site_sync.py
     stage: output
-    old: "                    # The target follows SITE_REPO (default example-adopter/example-site-a).\n"
+    old: "                    # The target follows SITE_REPO, which has no default.\n"
     new: "                    # The target follows SITE_REPO (unset or none: no site, the run skips).\n"
     why: Adopter defaults. The comment follows the fallback.
   - path: test/issues/test_issue_site_freshness.py
     stage: output
     old: |2
-              self.assertEqual(self.doc["env"]["SITE_REPO"],
-                               "${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}")
+              self.assertEqual(self.doc["env"]["SITE_REPO"], "${{ vars.SITE_REPO }}")
     new: |2
               # The adoption kit's default: unset is the clean skip.
               self.assertEqual(self.doc["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
     why: Adopter defaults. Follows the site-freshness.yml fallback.
+  - path: test/issues/test_issue_site_freshness.py
+    stage: output
+    old: |2
+                      for key, value in env.items():
+                          self.assertIsNone(re.search(r"vars\.\w+\s*\|\|", str(value)),
+                                            f"{name} {where} {key}: {value}")
+    new: |2
+                      for key, value in env.items():
+                          # The adoption kit's one fallback: an unset SITE_REPO is
+                          # none, the clean skip. Every other variable has none.
+                          if (where, key) == ("workflow", "SITE_REPO"):
+                              self.assertEqual(value, "${{ vars.SITE_REPO || 'none' }}", name)
+                              continue
+                          self.assertIsNone(re.search(r"vars\.\w+\s*\|\|", str(value)),
+                                            f"{name} {where} {key}: {value}")
+    why: >-
+      Adopter defaults. The source's test forbids every fallback; the kit's
+      copy allows exactly the SITE_REPO one above and still checks the rest.
   - path: evals/public-export.yml
     stage: output
     old: |

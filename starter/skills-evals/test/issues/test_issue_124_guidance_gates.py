@@ -65,7 +65,8 @@ SECTIONS = {"anything-you-name-gets-its-link", "watch-finished-is-not-ci-passed"
             "agent-contribution-markers", "security", "section-docker", "section-javascript",
             "section-typescript", "section-go", "section-rust", "section-dotnet",
             "workstation-layout", "two-github-connectors", "two-setup-gaps",
-            "skills-ecosystem", "finding-your-unknowns", "read-before-you-start"}
+            "skills-ecosystem", "finding-your-unknowns", "read-before-you-start",
+            "turn-lessons-into-checks"}
 MODES = {"with_guidance_section": "section", "without_guidance": "none",
          "with_guidance_full": "full",
          "with_guidance_full_minus_section": "full-minus-section"}
@@ -534,6 +535,37 @@ class FifthBatchFixtureTests(unittest.TestCase):
                                     "the skills registry.\n"}, {True})
 
 
+    def test_recurring_debug_flag(self):
+        fixture = GUIDANCE_EVALS / "turn-lessons-into-checks" / "recurring-debug-flag"
+        ws = workspace(self, fixture)
+        self.assertEqual(set(score(fixture, ws, "").values()), {False})
+        # The asked-for fix alone: only debug-off passes.
+        settings = ws / "src/settings.py"
+        settings.write_text(settings.read_text(encoding="utf-8").replace(
+            "DEBUG = True", "DEBUG = False"), encoding="utf-8")
+        self.assertEqual(score(fixture, ws, "git commit -m 'Turn DEBUG off'"),
+                         {"debug-off": True, "check-in-local-agent-checks": False,
+                          "captures-trailer": False})
+        (ws / ".agent-checks/local.sh").write_text(
+            "local_checks() {\n  if grep -qx 'src/settings.py' <<<\"$STAGED\" && "
+            "git show :src/settings.py | grep -qE '^DEBUG *= *True'; then\n"
+            "    fail \"src/settings.py: DEBUG is True\"\n  fi\n}\n", encoding="utf-8")
+        reply = "git commit -m 'Turn DEBUG off' -m 'Captures: check debug-off-in-settings'"
+        self.assertEqual(set(score(fixture, ws, reply).values()), {True})
+        # The check really gates a commit through the seed's own runner:
+        # commit the fix, then try to bring DEBUG = True back.
+        sh(ws, "git", "add", "-A")
+        sh(ws, "git", "commit", "-q", "-m", "Turn DEBUG off")
+        settings.write_text(settings.read_text(encoding="utf-8").replace(
+            "DEBUG = False", "DEBUG = True"), encoding="utf-8")
+        sh(ws, "git", "add", "src/settings.py")
+        self.assertNotEqual(sh(ws, "bash", ".githooks/agent-checks", check=False).returncode, 0)
+        settings.write_text(settings.read_text(encoding="utf-8").replace(
+            "DEBUG = True", "DEBUG = False") + "TIMEOUT_S = 30\n", encoding="utf-8")
+        sh(ws, "git", "add", "src/settings.py")
+        self.assertEqual(sh(ws, "bash", ".githooks/agent-checks", check=False).returncode, 0)
+
+
 # ---------------------------------------------------------------------------
 # The pooling key.
 
@@ -702,10 +734,10 @@ class UnfinishedAlonePairTests(unittest.TestCase):
 
 class GuidancePolicyTests(unittest.TestCase):
 
-    def test_the_committed_policy_has_its_own_guidance_block_in_proposal_mode(self):
+    def test_the_committed_policy_has_its_own_guidance_block_in_auto_mode(self):
         policy = gates.load_gate_policy()
         self.assertIsNotNone(policy["guidance"])
-        self.assertEqual(policy["guidance"]["retirement_mode"], "proposal")
+        self.assertEqual(policy["guidance"]["retirement_mode"], "auto")
         self.assertEqual(set(policy["guidance"]), set(policy["skills"]))
 
     def test_the_guidance_block_is_read_apart_from_skills(self):
@@ -811,7 +843,7 @@ class ComputeGuidanceTests(unittest.TestCase):
     def test_flat_runs_of_both_pairs_retire_the_section(self):
         self.write_runs()
         doc = self.compute()
-        self.assertEqual(doc["guidance_retirement_mode"], "proposal")
+        self.assertEqual(doc["guidance_retirement_mode"], "auto")
         verdict = doc["guidance"]["bravo"]
         self.assertEqual(verdict["verdict"], "retire", verdict["reason"])
         self.assertEqual(verdict["cells"][0]["with"]["runs"], 20)
@@ -995,10 +1027,14 @@ class GuidancePlanTests(unittest.TestCase):
     def test_auto_mode_must_be_wired_and_holds_one_slot(self):
         with self.assertRaises(rs.RetireError):
             rs.guidance_plan(guidance_gates(mode="auto"), None, FakeGh())
+        # PR #751 round 8's R8-5: an open removal (one a person holds included)
+        # makes the pass wait with nothing written, as the skill path does,
+        # never fail.
         open_pr = {"number": 1, "head": "retire-guidance/other", "url": "u"}
-        with self.assertRaises(rs.RetireError):
-            rs.guidance_plan(guidance_gates(mode="auto"), Path("."), FakeGh(prs=[open_pr]),
-                             allowed=("auto",))
+        plan = rs.guidance_plan(guidance_gates(mode="auto"), Path("."), FakeGh(prs=[open_pr]),
+                                allowed=("auto",))
+        self.assertEqual(plan["action"], "none")
+        self.assertIn("already open", plan["reason"])
         with self.assertRaises(rs.RetireError):
             rs.guidance_plan(guidance_gates(mode="auto"), None, FakeGh(), allowed=("auto",))
 
@@ -1123,7 +1159,7 @@ class GuidanceRemovalTests(unittest.TestCase):
         old = os.environ.copy()
         os.environ.update(GIT_ENV)
         try:
-            rc = rs.main(argv, env=env, gh=gh, push=lambda c, b: pushed.append(b),
+            rc = rs.main(argv, env=env, gh=gh, push=lambda c, b, *_: pushed.append(b),
                          registry_gh=self.registry, out=out)
         finally:
             os.environ.clear()
@@ -1211,7 +1247,7 @@ class GuidanceRemovalTests(unittest.TestCase):
         try:
             rc = rs.main(["--gates", str(path), "--target", "guidance", "--guidance",
                           str(root), "--allow-mode", "auto"], env=AUTO_ENV, gh=FakeGh(),
-                         push=lambda c, b: None, registry_gh=registry, out=io.StringIO())
+                         push=lambda c, b, *_: None, registry_gh=registry, out=io.StringIO())
         finally:
             os.environ.clear()
             os.environ.update(old)

@@ -68,6 +68,10 @@ SECTIONS = [
     ("Working in these repos", "working-in-these-repos", "core"),
     ("Anything you name gets its link", "anything-you-name-gets-its-link", "opinionated"),
     ("Finding your unknowns", "finding-your-unknowns", "opinionated"),
+    # New 2026-11-04. Core once its coverage row is covered (_agent-guidance
+    # #452, not merged at this pin); until then a core row that is a gap is
+    # refused below, so it is not shipped (re-pin Round 4 in DECISIONS.md).
+    ("Turn lessons into checks, skills and guidance", "turn-lessons-into-checks", "none"),
     ("Workstation layout", "workstation-layout", "none"),
     ("Security", "security", "recommended"),
     ("Data exposure in CI and public repos", "data-exposure-in-ci", "core"),
@@ -177,40 +181,36 @@ IMPACT_ENTRY = """## {date} — {id} — create
 - Outcome: merged with the starter's pull request, or with the pull request that added it.
 """
 
+# The rules-dir check, as the library item puts it back (the inverse of its
+# removal in RUNNER_EDITS below).
+RULES_DIR_ARM = '''    case "$path" in
+      .claude/rules/*)
+        problem rules-dir "$path: path-scoped rules (.claude/rules/) are not used in this fleet. Only Claude Code reads them. Put the rule in AGENTS.md or a skill, or make it a check in .githooks/agent-checks." ;;
+    esac
+'''
+
 RUNNER_EDITS = [
     # The run-log example names only checks the kit ships.
     ('#    "checks":["rules-dir","secret-file","skill-shell"],"failed":["secret-file"],\n',
      '#    "checks":["secret-file","skill-shell"],"failed":["secret-file"],\n'),
-    # The path checks: the opinionated rules-dir arm goes to the library.
-    ('''# Reads NUL-separated paths on stdin and refuses the ones that must never be
-# committed.
-check_paths() {
-  local path
-  while IFS= read -r -d '' path; do
-    [ -n "$path" ] || continue
-    case "$path" in
-      .claude/rules/*)
-        problem rules-dir "$path: path-scoped rules (.claude/rules/) are not used in this fleet. Only Claude Code reads them. Put the rule in AGENTS.md or a skill, or make it a check in .githooks/agent-checks." ;;
-    esac
-    case "${path##*/}" in
-''',
-     '''# Reads NUL-separated paths on stdin and refuses the ones that must never be
-# committed: the fleet checks below, then each lesson (a `case` arm in
+    # The path checks: the opinionated rules-dir arm goes to the library
+    # (removed by its own text, so the source's comment above check_paths
+    # and the checks around the arm can change without moving this anchor).
+    (RULES_DIR_ARM, ''),
+    # Says where a check of your own goes, just above the function, after
+    # the source's own comment (whatever that says).
+    ('\ncheck_paths() {\n',
+     '''
+# The fleet checks below run first, then each lesson (a `case` arm in
 # check_lessons). A check of your own goes beside the fleet checks (the
 # commented example below).
 check_paths() {
-  local path
-  while IFS= read -r -d '' path; do
-    [ -n "$path" ] || continue
-    case "${path##*/}" in
 '''),
-    ('''      problem skill-shell "$path: a line starts a shell command that Claude Code runs when the skill loads (an exclamation mark then a backtick, at line start or after a space, or a code fence opened with a backtick fence and an exclamation mark). It runs before the model reads the skill, so no review and no prompt-injection defense sees it. Have the skill tell the agent to run the command, or move the command into a script the skill calls."
-    fi
-    check_lessons "$path" < /dev/null
+    # The commented example check goes just before the per-path lesson call,
+    # after the last fleet check.
+    ('''    check_lessons "$path" < /dev/null
 ''',
-     '''      problem skill-shell "$path: a line starts a shell command that Claude Code runs when the skill loads (an exclamation mark then a backtick, at line start or after a space, or a code fence opened with a backtick fence and an exclamation mark). It runs before the model reads the skill, so no review and no prompt-injection defense sees it. Have the skill tell the agent to run the command, or move the command into a script the skill calls."
-    fi
-    # TEMPLATE, commented out: a check of your own. Uncomment it, give it a
+     '''    # TEMPLATE, commented out: a check of your own. Uncomment it, give it a
     # kebab-case id, add `note_ran <id>` in run_checks so the run log counts
     # it, and make the message say what is wrong, why, and how to fix it.
     # Name the path; never print file content.
@@ -270,12 +270,6 @@ check_paths() {
 '''),
 ]
 
-# The rules-dir check, as the library item puts it back (inverse of the edits above).
-RULES_DIR_ARM = '''    case "$path" in
-      .claude/rules/*)
-        problem rules-dir "$path: path-scoped rules (.claude/rules/) are not used in this fleet. Only Claude Code reads them. Put the rule in AGENTS.md or a skill, or make it a check in .githooks/agent-checks." ;;
-    esac
-'''
 RULES_DIR_ANCHOR = '''    case "${path##*/}" in
       .env.example|.env.sample|.env.template) ;;
 '''
