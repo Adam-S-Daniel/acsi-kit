@@ -355,7 +355,7 @@
     {
       "id": "22",
       "title": "Schedule the machine jobs",
-      "run": "Windows: `./scripts/register-tasks.ps1` in an elevated PowerShell 7, in your wsl-automation clone; Linux or macOS: `bash scripts/unix/install-schedule.sh <systemd|launchd|cron>` (its usage census, the Linux and macOS default, feeds only evals: without evals pass `--jobs session-miner`)",
+      "run": "First, in the distro (or on Linux or macOS), copy your wsl-automation clone's `config/settings.env.example` to `~/.config/wsl-automation/settings.env` and check its repositories; then Windows: `./scripts/register-tasks.ps1` in an elevated PowerShell 7, in your wsl-automation clone; Linux or macOS: `bash scripts/unix/install-schedule.sh <systemd|launchd|cron>` (its usage census, the Linux and macOS default, feeds only evals: without evals pass `--jobs session-miner`)",
       "kind": "machine",
       "part": "machine",
       "track": "base",

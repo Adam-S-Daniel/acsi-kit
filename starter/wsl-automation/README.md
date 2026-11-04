@@ -70,9 +70,17 @@ instead (see "Linux and macOS" below).
    `.\scripts\install-ccstatusline.ps1` from a normal PowerShell 7 prompt; see
    [Windows runtime (one-time)](#windows-runtime-one-time).
 
-5. **Session miner (once per machine).** The session miner task refuses to
+5. **Settings for the Bash tasks (once per machine, in the distro).** Copy
+   `config/settings.env.example` to `~/.config/wsl-automation/settings.env`
+   and set each key to your own repository. The census, waiting feed, memory
+   curation and Codex Cloud sync have no built-in repository: a task whose key
+   is missing exits 2 naming it. See
+   [Settings file for the Bash tasks](#settings-file-for-the-bash-tasks-settingsenv).
+
+6. **Session miner (once per machine).** The session miner task refuses to
    mine until you have set it up and run it by hand once; see
-   [Session miner task](#session-miner-task-default-name-session-miner).
+   [Session miner task](#session-miner-task-default-name-session-miner). It
+   keeps its own settings file, `session-miner.env`, not `settings.env`.
 
 ## Task descriptions
 
@@ -142,6 +150,44 @@ PR-only through the [repo-settings rulesets](https://github.com/example-adopter/
 Reviewing and merging a change therefore also authorizes it to run on the next
 task invocation. Dirty, divergent, or unavailable checkouts can continue to run
 older or local code until their warning is resolved.
+
+### Settings file for the Bash tasks (`settings.env`)
+
+A value that names one of your own resources (a repository or URL) is set in
+one place and has **no fallback in code**. The Bash tasks start through
+`wsl.exe` from Task Scheduler with no environment of their own, so those values
+live in `~/.config/wsl-automation/settings.env` inside the distro. Copy
+[`config/settings.env.example`](config/settings.env.example) there and replace
+its placeholder values with yours.
+
+| Key | Task that uses it |
+| --- | --- |
+| `SKILLS_EVALS_URL` | Usage census (the skills-evals repository to clone) |
+| `AGENT_GUIDANCE_URL` | Memory curation (the `_agent-guidance` repository to clone) |
+| `WAITING_FEED_URL` | Waiting feed (the feed repository it pushes to) |
+| `CODEX_CLOUD_GUIDANCE_REPOSITORY` | Codex Cloud environment sync (the guidance repository as `owner/name`) |
+
+- **The file is read as data, never sourced.** One `KEY=VALUE` per line; blank
+  lines and `#` comments are skipped, only the key a task asks for is taken
+  (the last occurrence wins), a value starting with `~/` expands to your home
+  directory, and nothing else is expanded: no quotes are stripped and no
+  variable is substituted. A line that is neither a comment nor `KEY=VALUE`
+  is an error that names its line number (never the path, which holds your
+  user name).
+- **The environment wins.** A key already set and non-empty in the task's
+  environment is used as is, and the file is not read for it.
+  `WSL_AUTOMATION_SETTINGS` points at a different file (tests use this).
+- **Missing means exit 2.** When a key is unset or empty everywhere, the task
+  exits 2 with `<KEY> is not set; set it in ~/.config/wsl-automation/settings.env
+  (WSL_AUTOMATION_SETTINGS; see config/settings.env.example) or the
+  environment`. The tasks that keep a log also write a line naming the key
+  (`... setting <KEY> is missing or invalid`, with `exit=2`); no path goes into
+  it. The resolver is `scripts/task-settings.sh`
+  (`wsl_automation_require_setting KEY`).
+- **The session miner has its own file.** Its wrapper reads
+  `~/.config/wsl-automation/session-miner.env`, not this one (see
+  [Session miner task](#session-miner-task-default-name-session-miner)), so
+  its `SKILLS_EVALS_URL` is set there too.
 
 ### ccstatusline config sync task (default name: `ccstatusline Config Sync`)
 
@@ -303,7 +349,9 @@ up the new PATH.
      as data, never sourced; only `PRIVACY_DENYLIST_FILE`, `LESSONS_CLONE`,
      `GUIDANCE_MANIFEST`, `MINER_REGISTRIES`, `WIN_HOME`, `MINER_STATE`,
      `SKILLS_EVALS_URL`, `PYTHON` and `FILE_ISSUES` are accepted, a leading
-     `~/` is expanded, and a variable already in the environment wins.
+     `~/` is expanded, and a variable already in the environment wins. The
+     wrapper does not read the other Bash tasks' `settings.env`, so
+     `SKILLS_EVALS_URL` goes in both files.
   5. One run by hand: `bash scripts/run-session-miner.sh --dry-run`. It mines
      and reports without pushing, and on success records
      `~/.local/state/session-miner/dry-run-ok`, which arms the scheduled run.
@@ -443,7 +491,7 @@ up the new PATH.
   401), `http_<code>` (any other HTTP status), `network` (curl failed),
   `bad_response` (the body was not the expected JSON).
 - **Publishing.** The clone is `~/.cache/waiting-feed` (`WAITING_FEED_DIR`),
-  cloned from `WAITING_FEED_URL` when missing; a clone whose `origin` is any
+  cloned from `WAITING_FEED_URL` (a [required setting](#settings-file-for-the-bash-tasks-settingsenv), no default) when missing; a clone whose `origin` is any
   other repository is refused. Each run first fetches (with `--prune`) and
   resets the clone to `origin/main`, which keeps the hooks it carries current;
   the previous feed is read from `origin/persistent/waiting-feed`, so a commit
@@ -594,7 +642,8 @@ bash scripts/unix/install-schedule.sh cron --print            # show it, change 
   the plist; or delete the block from `crontab -e`.
 - A scheduler starts jobs with no profile and no desktop session, so keep git
   credentials where such a job can reach them (`gh auth setup-git` with a
-  file-stored token) and settings in the session miner's settings file.
+  file-stored token) and settings in `~/.config/wsl-automation/settings.env`
+  (the census and waiting feed) and `session-miner.env` (the session miner).
 
 ## Task history
 

@@ -2060,3 +2060,96 @@ missing keys.
 
 Reverse: pin `cdedb7e1`, restore the two fallbacks, and drop the example and
 its tests.
+
+## Re-pin (2026-11-04): wsl-automation
+
+Only `wsl-automation` moved; every other manifest keeps its Round 4 pin.
+This section **supersedes Round 4's `wsl-automation` row** (above, which
+moved it to `1ea3397`): the two were made in parallel, and the merge takes
+`29344b2`, which contains `1ea3397`.
+
+| Repo | Old | New |
+|---|---|---|
+| `wsl-automation` | `1ea339739dd60ac86e7a5f37e912a31d525c0609` (Round 4; `913a417` before it) | `29344b2e7d23ab3d82917a494b457d0ace844602` |
+
+The overlay `NOTICE` names the new commit.
+
+### Task settings have no fallback (wsl-automation#92)
+
+The source's Bash task entries no longer fall back to the source owner's
+repositories. `publish-usage-census.sh` (`SKILLS_EVALS_URL`),
+`publish-waiting-feed.sh` (`WAITING_FEED_URL`), `run-memory-curation.sh`
+(`AGENT_GUIDANCE_URL`) and `sync-codex-cloud-environments.sh`
+(`CODEX_CLOUD_GUIDANCE_REPOSITORY`) source the new `scripts/task-settings.sh`,
+which takes each key from the environment, then from
+`~/.config/wsl-automation/settings.env` (read as data), and exits 2 naming
+the key when it is missing. This is settings-schema-design rule 4, the rule
+the third and fourth skills-evals pins above applied to the site variables
+and the kit's own session miner. All of it ships as the source has it:
+`task-settings.sh`, its test, `config/settings.env.example`, the `ci.yml`
+changes (`config/*` as a salient path, the resolver's test step, ShellCheck)
+and the README section.
+
+- **`config/settings.env.example`**, three edits: the task health key goes
+  (X10: its task is left out); the census comment no longer says the session
+  miner reads the file; and its `example-owner` placeholders become the kit's
+  `example-adopter`, as in `config/session-miner.env.example`, so
+  `copy-starter.sh` fills in the adopter's login.
+- **`docs.py`**: the README settings table loses the task health row and its
+  census row no longer names the session miner, a bullet says the miner has
+  its own file, and the kit's Install steps gain one for `settings.env`
+  (the session miner becomes step 6). The leftover check also refuses
+  `TASK_HEALTH` in README.md or AGENTS.md.
+- **The waiting feed header edit** said "(default ... waiting-feed)"; with no
+  default left it says the repository is `WAITING_FEED_URL`.
+- **The kit's `tests/unix-schedule.test.sh`** (overlay) copies
+  `task-settings.sh` beside the census entry in its "real entries" case; the
+  census sources it now, and the case failed without it. The value comes from
+  the environment there, so the case is otherwise unchanged.
+- **The suite command** runs `tests/task-settings.test.sh`, as the source's
+  `ci.yml` does.
+
+**Two config files.** An adopter now keeps two settings files on the
+machine: `settings.env` for the source's Bash tasks and `session-miner.env`
+for the kit's own session miner wrapper (overlay; Fourth pin above), which
+keeps its own reader and does not read `settings.env`. `SKILLS_EVALS_URL`
+belongs in both. Merging them (the overlay sourcing `task-settings.sh` and
+dropping `session-miner.env`) is a possible follow-up, not done here: the
+overlay accepts keys `settings.env`'s example does not carry
+(`LESSONS_CLONE`, `PRIVACY_DENYLIST_FILE`, `FILE_ISSUES` and more), and its
+tests pin its own file. The bootstrap writes neither file (`install-machine.sh`
+writes nothing of its own), so the docs say to copy both:
+REGENERATE.md's wsl-automation section (the waiting feed's repository has no
+default now), `docs/machine.md`, step 22 in `steps.json` (and the quick start
+table rendered from it) and `/adopt`'s "Steps with a catch".
+
+### Task health's nonzero count (wsl-automation#93)
+
+`publish-task-health.sh` stops counting `0x41301` (running) and `0x41303`
+(has not run yet). The script and its test stay excluded (X10). Its README
+section is dropped whole by `docs.py`, so the reworded sentence never reaches
+the kit, and the `ci.yml` edits that drop its ShellCheck entry and test step
+still match.
+
+### Sync-delivered files
+
+The range from `913a417` has four `chore: deliver ...` commits from the
+source owner's guidance sync; Round 4's `1ea3397` already includes three of
+them, so only `32e257a` (the agent-checks runner) is new past it. Each
+delivered file is treated as it already was at the old pin, the same way the
+sibling manifests treat it:
+
+- **`.claude/hooks/fleet-guidance.md` and `.githooks/agent-checks`** are
+  `copy_from_kit` steps, rebuilt from the exported `_agent-guidance`, so the
+  source's new bytes never reach the kit; this pin leaves them as Round 4
+  regenerated them.
+- **`.claude/hooks/guidance-load-record.sh`** ships as the source has it
+  (substituted), as in every sibling tree ("Re-pin (2026-11-03)",
+  `_agent-guidance`). At this pin and Round 4's, every starter that carries
+  it has the same bytes.
+- **`.claude/hooks/skills-bootstrap.sh`**: the "deliver" commit left it
+  byte-identical to the old pin; nothing changed.
+
+Reverse: pin `1ea3397` (Round 4), drop the three `config/settings.env.example` edits,
+restore the waiting feed header's "(default ...)" wording, and revert the
+`docs.py`, overlay test, suite command and doc changes.

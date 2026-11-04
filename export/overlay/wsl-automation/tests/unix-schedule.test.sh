@@ -256,7 +256,10 @@ assert_match "$(last_log)" 'job=usage-census exit=0$' 'the newest line survives 
 real="$test_root/real"
 mkdir -p "$real/scripts/unix"
 cp -- "$runner_src" "$real/scripts/unix/run-task.sh"
-cp -- "$repository_root/scripts/publish-usage-census.sh" "$repository_root/scripts/update-task-checkout.sh" "$real/scripts/"
+#     The census sources task-settings.sh for SKILLS_EVALS_URL, which the
+#     environment sets here.
+cp -- "$repository_root/scripts/publish-usage-census.sh" "$repository_root/scripts/update-task-checkout.sh" \
+    "$repository_root/scripts/task-settings.sh" "$real/scripts/"
 rc=0
 out=$(SKILLS_EVALS_URL="file://$test_root/no-such-repo" USAGE_CENSUS_LOG="$test_root/census.log" \
     bash "$real/scripts/unix/run-task.sh" usage-census 2>&1) || rc=$?
