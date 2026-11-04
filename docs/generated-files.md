@@ -28,6 +28,7 @@ Every item `REGENERATE.md` lists, and the quick start step that handles it:
 | `wsl-automation` | `.github/workflows/actions.lock` | 18 |
 | `wsl-automation` | The Codex Cloud bootstrap pin | 17 |
 | `wsl-automation` | The waiting feed's commit identity | 13 |
+| `wsl-automation` | The Bash tasks' settings | 22 |
 | `wsl-automation` | The waiting feed's repository | 2, 22 |
 | `skills-evals` | `.github/workflows/scheduled-run-health.yml` | 38 |
 | `skills-evals` | `.github/workflows/actions.lock` | 38 |

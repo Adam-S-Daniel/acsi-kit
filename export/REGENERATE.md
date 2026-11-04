@@ -128,11 +128,22 @@ a pull request with the result.
   same string in `tests/publish-waiting-feed.test.sh`'s "fallback commit
   identity" assertion.
 
+- **The Bash tasks' settings** (wsl-automation#92). No Bash task has a
+  built-in repository: each reads its key from the environment or from
+  `~/.config/wsl-automation/settings.env`, and exits 2 naming the key when it
+  is missing. On the machine, copy `config/settings.env.example` there
+  (copy-starter.sh has already put your owner in it) and check each value:
+  `SKILLS_EVALS_URL` (usage census), `AGENT_GUIDANCE_URL` (memory curation),
+  `WAITING_FEED_URL` (waiting feed) and `CODEX_CLOUD_GUIDANCE_REPOSITORY`
+  (Codex Cloud sync, `owner/name`). The session miner reads its own
+  `session-miner.env` instead (README, "Session miner task").
+
 - **The waiting feed's repository** is not one of the kit's repos.
-  `WAITING_FEED_URL` defaults to `https://github.com/<owner>/waiting-feed.git`:
-  create that repository **private** (its feed holds your session titles),
-  or point `WAITING_FEED_URL` elsewhere, before you register the task. Its
-  `persistent/waiting-feed` branch is created by the first publish.
+  `WAITING_FEED_URL` has no default: set it in `settings.env` to a
+  repository you create **private** (its feed holds your session titles;
+  `bootstrap/create-repos.sh --with-optional` creates `<owner>/waiting-feed`)
+  before you register the task. Its `persistent/waiting-feed` branch is
+  created by the first publish.
 
 ## `skills-evals`
 

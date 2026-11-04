@@ -9,6 +9,9 @@ them are reworded. The task health publish goes too, with its script
 (DECISIONS "Re-pin (2026-11-03)"). The kit's session miner section replaces
 the source's (the kit's wrapper replaces the source's), and the Linux and
 macOS schedule gets its own section. The memory curation section stays.
+The source's "Settings file for the Bash tasks" section stays, without the
+task health key, and says the kit's session miner keeps its own file; the
+Install steps gain one for that settings file.
 
 AGENTS.md's repo-specific half keeps every measured lesson that still applies
 to a kept task: there is no WSL lifecycle event (with the at-logon
@@ -146,9 +149,17 @@ README_INSTALL = """## Install
    `.\\scripts\\install-ccstatusline.ps1` from a normal PowerShell 7 prompt; see
    [Windows runtime (one-time)](#windows-runtime-one-time).
 
-5. **Session miner (once per machine).** The session miner task refuses to
+5. **Settings for the Bash tasks (once per machine, in the distro).** Copy
+   `config/settings.env.example` to `~/.config/wsl-automation/settings.env`
+   and set each key to your own repository. The census, waiting feed, memory
+   curation and Codex Cloud sync have no built-in repository: a task whose key
+   is missing exits 2 naming it. See
+   [Settings file for the Bash tasks](#settings-file-for-the-bash-tasks-settingsenv).
+
+6. **Session miner (once per machine).** The session miner task refuses to
    mine until you have set it up and run it by hand once; see
-   [Session miner task](#session-miner-task-default-name-session-miner).
+   [Session miner task](#session-miner-task-default-name-session-miner). It
+   keeps its own settings file, `session-miner.env`, not `settings.env`.
 
 """
 
@@ -195,7 +206,9 @@ README_MINER = """### Session miner task (default name: `Session Miner`)
      as data, never sourced; only `PRIVACY_DENYLIST_FILE`, `LESSONS_CLONE`,
      `GUIDANCE_MANIFEST`, `MINER_REGISTRIES`, `WIN_HOME`, `MINER_STATE`,
      `SKILLS_EVALS_URL`, `PYTHON` and `FILE_ISSUES` are accepted, a leading
-     `~/` is expanded, and a variable already in the environment wins.
+     `~/` is expanded, and a variable already in the environment wins. The
+     wrapper does not read the other Bash tasks' `settings.env`, so
+     `SKILLS_EVALS_URL` goes in both files.
   5. One run by hand: `bash scripts/run-session-miner.sh --dry-run`. It mines
      and reports without pushing, and on success records
      `~/.local/state/session-miner/dry-run-ok`, which arms the scheduled run.
@@ -275,7 +288,8 @@ bash scripts/unix/install-schedule.sh cron --print            # show it, change 
   the plist; or delete the block from `crontab -e`.
 - A scheduler starts jobs with no profile and no desktop session, so keep git
   credentials where such a job can reach them (`gh auth setup-git` with a
-  file-stored token) and settings in the session miner's settings file.
+  file-stored token) and settings in `~/.config/wsl-automation/settings.env`
+  (the census and waiting feed) and `session-miner.env` (the session miner).
 
 """
 
@@ -390,6 +404,31 @@ def readme(text: str, where: str) -> str:
         text,
         "12:37 keeps\n  it well clear of the backup's `:00` hourly retries.",
         "12:37 keeps\n  it off the hour.",
+        where,
+    )
+
+    # The kit's session miner wrapper keeps its own settings file and does not
+    # read settings.env; the task health publish is left out (X10).
+    text = T.sub_once(
+        text,
+        "| `SKILLS_EVALS_URL` | Usage census and Session miner (the skills-evals repository to clone) |\n",
+        "| `SKILLS_EVALS_URL` | Usage census (the skills-evals repository to clone) |\n",
+        where,
+    )
+    text = T.sub_once(
+        text,
+        "| `TASK_HEALTH_URL` | Task health publish (the repository it pushes to) |\n",
+        "",
+        where,
+    )
+    text = T.sub_once(
+        text,
+        "  (`wsl_automation_require_setting KEY`).\n",
+        "  (`wsl_automation_require_setting KEY`).\n"
+        "- **The session miner has its own file.** Its wrapper reads\n"
+        "  `~/.config/wsl-automation/session-miner.env`, not this one (see\n"
+        "  [Session miner task](#session-miner-task-default-name-session-miner)), so\n"
+        "  its `SKILLS_EVALS_URL` is set there too.\n",
         where,
     )
 
@@ -573,6 +612,6 @@ def apply(root: Path, ctx) -> None:
         text = (root / rel).read_text(encoding="utf-8")
         for gone in ("restic", "Keeper", "keeper task", "the keeper", "backup.lock", "Invoke-WslBackup",
                      "wt.exe", "-BackupDir", "Test-WslActivity", "Repair-WslUserRuntime",
-                     "task-health", "Task Health", "task health", "Test-ClaudeStubGitDir"):
+                     "task-health", "Task Health", "task health", "TASK_HEALTH", "Test-ClaudeStubGitDir"):
             if gone in text:
                 raise T.PatchError(f"{rel}: still mentions {gone!r}")

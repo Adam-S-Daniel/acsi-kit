@@ -122,6 +122,12 @@ in `docs/`; the steps table is `docs/quick-start.md`.
   mentions it: `/adopt-evals` does. The one part of a base step to leave
   out is step 22's usage census, which only evals read: on Linux or macOS
   pass `--jobs session-miner`.
+- **Step 22** (machine jobs): before registering anything, have the user
+  copy `config/settings.env.example` to
+  `~/.config/wsl-automation/settings.env` in the distro (or on Linux or
+  macOS) and check each repository in it. No job has a built-in repository:
+  one whose key is missing exits 2 naming it. The session miner keeps its
+  own `session-miner.env` (docs/machine.md).
 
 ## The content step
 

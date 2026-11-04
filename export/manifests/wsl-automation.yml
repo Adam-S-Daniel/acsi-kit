@@ -15,7 +15,7 @@
 repo: wsl-automation
 kit_name: wsl-automation
 source: wsl-automation
-source_sha: 913a417181edc26fcd84f32e01e2105dcc2bc125
+source_sha: 29344b2e7d23ab3d82917a494b457d0ace844602
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror,
 # the agent-checks runner) are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -173,10 +173,11 @@ edits:
   # ---- the waiting-on-you feed (X10, owner 2026-10-29: kept and renamed)
   - path: scripts/publish-waiting-feed.sh
     old: "# Publishes the \"waiting on Adam\" feed: his Claude Code cloud sessions that are\n# blocked or ready for review, as feed.json on the persistent/waiting-feed\n# branch of the private Adam-S-Daniel/waiting-feed repository.\n"
-    new: "# Publishes the \"waiting on you\" feed: your Claude Code cloud sessions that are\n# blocked or ready for review, as feed.json on the persistent/waiting-feed\n# branch of your private waiting-feed repository (default Adam-S-Daniel/waiting-feed).\n"
+    new: "# Publishes the \"waiting on you\" feed: your Claude Code cloud sessions that are\n# blocked or ready for review, as feed.json on the persistent/waiting-feed\n# branch of your private waiting-feed repository (WAITING_FEED_URL, below).\n"
     why: >-
       X10 as revised by the owner: the feed is kept and the dashboard page it
-      feeds is renamed "Waiting on you". The owner is substituted after this.
+      feeds is renamed "Waiting on you". The repository is the required
+      WAITING_FEED_URL setting, which has no default since wsl-automation#92.
   - path: scripts/publish-waiting-feed.sh
     stage: output
     old: "    export GIT_AUTHOR_NAME='the owner' GIT_COMMITTER_NAME='the owner'\n"
@@ -186,6 +187,27 @@ edits:
       user id is already 0+ (the common C12 noreply rule); the adopter puts
       their own noreply address here (REGENERATE.md), and copy-starter.sh
       renames example-adopter.
+
+  # ---- the Bash tasks' settings file (wsl-automation#92, DECISIONS "Re-pin
+  # (2026-11-04): wsl-automation")
+  - path: config/settings.env.example
+    old: "# Used by the 'Usage Census Publish' task (scripts/publish-usage-census.sh) and\n# the 'Session Miner' task (scripts/run-session-miner.sh): the skills-evals\n# repository they shallow-clone.\n"
+    new: "# Used by the 'Usage Census Publish' task (scripts/publish-usage-census.sh): the\n# skills-evals repository it shallow-clones. The 'Session Miner' task keeps its\n# own file (config/session-miner.env.example) and does not read this one.\n"
+    why: >-
+      The kit's session miner wrapper (overlay) replaces the source's and reads
+      its own session-miner.env, not settings.env.
+  - path: config/settings.env.example
+    old: "# Used by the 'Task Health Publish' task (scripts/publish-task-health.sh): the\n# repository it pushes task-health.json to.\nTASK_HEALTH_URL=https://github.com/example-owner/waiting-feed.git\n\n"
+    new: ""
+    why: X10. The task health publish is left out (DECISIONS "Re-pin (2026-11-03)").
+  - path: config/settings.env.example
+    old: "example-owner"
+    new: "example-adopter"
+    count: 4
+    why: >-
+      The kit's invented owner, as in config/session-miner.env.example, so
+      copy-starter.sh fills in the adopter's login and the copied file names
+      the adopter's own repositories.
 
   # ---- notes Q6: the Codex Cloud bootstrap pin names the source registry's
   # commit and file digest, which the adopter's registry will not have.
@@ -260,7 +282,7 @@ regenerate:
 suite:
   git_init: true
   command: >-
-    rc=0; for t in tests/sync-codex-cloud-environments.test.sh tests/update-task-checkout.test.sh
+    rc=0; for t in tests/sync-codex-cloud-environments.test.sh tests/task-settings.test.sh tests/update-task-checkout.test.sh
     tests/publish-usage-census.test.sh tests/publish-waiting-feed.test.sh tests/run-session-miner.test.sh
     tests/run-memory-curation.test.sh tests/unix-schedule.test.sh; do printf 'suite: %s\n' "$t"; bash "$t" || rc=1; done; exit $rc
   needs: bash, git, jq, curl, flock, coreutils timeout, python3
