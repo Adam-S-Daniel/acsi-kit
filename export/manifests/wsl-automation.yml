@@ -191,11 +191,12 @@ edits:
   # ---- the Bash tasks' settings file (wsl-automation#92, DECISIONS "Re-pin
   # (2026-11-04): wsl-automation")
   - path: config/settings.env.example
-    old: "# Used by the 'Usage Census Publish' task (scripts/publish-usage-census.sh) and\n# the 'Session Miner' task (scripts/run-session-miner.sh): the skills-evals\n# repository they shallow-clone.\n"
-    new: "# Used by the 'Usage Census Publish' task (scripts/publish-usage-census.sh): the\n# skills-evals repository it shallow-clones. The 'Session Miner' task keeps its\n# own file (config/session-miner.env.example) and does not read this one.\n"
+    old: "SKILLS_EVALS_URL=https://github.com/example-owner/skills-evals.git\n"
+    new: "SKILLS_EVALS_URL=https://github.com/example-owner/skills-evals.git\n\n# Used by the 'Session Miner' task (scripts/run-session-miner.sh), which takes\n# only its own keys from this file. Required: the private registry clone whose\n# origin receives the lesson records (persistent/lessons).\nLESSONS_CLONE=~/repos/acsi-agentskills-private\n\n# Optional for the session miner: the privacy denylist, kept outside every\n# repository (default ~/.config/privacy-denylist.txt).\n#PRIVACY_DENYLIST_FILE=~/.config/privacy-denylist.txt\n\n# Optional for the session miner, in WSL: the Windows profile as a WSL path,\n# which adds the Windows transcripts.\n#WIN_HOME=/mnt/c/Users/<you>\n\n# Optional for the session miner: on allows --file-issues, after you have rated\n# a sample of records.\n#FILE_ISSUES=on\n"
     why: >-
-      The kit's session miner wrapper (overlay) replaces the source's and reads
-      its own session-miner.env, not settings.env.
+      The kit's session miner keeps its settings in this one file (DECISIONS
+      "One machine config file (2026-11-04)"); these are the miner's keys,
+      which the overlay used to keep in a file of its own.
   - path: config/settings.env.example
     old: "# Used by the 'Task Health Publish' task (scripts/publish-task-health.sh): the\n# repository it pushes task-health.json to.\nTASK_HEALTH_URL=https://github.com/example-owner/waiting-feed.git\n\n"
     new: ""
@@ -205,9 +206,8 @@ edits:
     new: "example-adopter"
     count: 4
     why: >-
-      The kit's invented owner, as in config/session-miner.env.example, so
-      copy-starter.sh fills in the adopter's login and the copied file names
-      the adopter's own repositories.
+      The kit's invented owner, so copy-starter.sh fills in the adopter's
+      login and the copied file names the adopter's own repositories.
 
   # ---- notes Q6: the Codex Cloud bootstrap pin names the source registry's
   # commit and file digest, which the adopter's registry will not have.

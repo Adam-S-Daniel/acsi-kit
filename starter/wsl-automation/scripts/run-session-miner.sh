@@ -27,11 +27,13 @@
 #     (no arguments) refuses with exit 3 and mines nothing.
 #
 # Settings come from the environment or, because a scheduled action has none,
-# from an optional KEY=value file (SESSION_MINER_CONFIG, default
-# ~/.config/wsl-automation/session-miner.env). The file is read as data, never
-# sourced: blank lines and # comments are skipped, only the keys below are
-# accepted, a leading ~/ is expanded, and a variable already in the
-# environment wins. config/session-miner.env.example carries the keys.
+# from the settings file every Bash task here reads (WSL_AUTOMATION_SETTINGS,
+# default ~/.config/wsl-automation/settings.env; see task-settings.sh). The file
+# is read as data, never sourced: blank lines and # comments are skipped, only
+# the keys below are taken (other tasks' keys are ignored), a leading ~/ is
+# expanded, and a variable already in the environment wins. A line that is not
+# KEY=value, a comment or blank exits 2. config/settings.env.example carries
+# the keys.
 #   PRIVACY_DENYLIST_FILE  LESSONS_CLONE  GUIDANCE_MANIFEST  MINER_REGISTRIES
 #   WIN_HOME  MINER_STATE  SKILLS_EVALS_URL  PYTHON
 #   FILE_ISSUES            `on` allows --file-issues (off until a sample of
@@ -68,7 +70,7 @@ wsl_automation_task_bootstrap "$scripts_dir/run-session-miner.sh" 0 300 "$@"
 
 log=${SESSION_MINER_LOG:-$HOME/.cache/session-miner.log}
 marker=${SESSION_MINER_MARKER:-$HOME/.local/state/session-miner/dry-run-ok}
-config=${SESSION_MINER_CONFIG:-$HOME/.config/wsl-automation/session-miner.env}
+config=${WSL_AUTOMATION_SETTINGS:-$HOME/.config/wsl-automation/settings.env}
 notes=''
 
 # finish CODE MESSAGE: log one line, print the message, exit with CODE.
@@ -109,11 +111,14 @@ if [[ -f $config ]]; then
     line_number=0
     while IFS= read -r line || [[ -n $line ]]; do
         line_number=$((line_number + 1))
+        line=${line%$'\r'}
         if [[ $line =~ ^[[:space:]]*(#.*)?$ ]]; then continue; fi
         # The message names the line, not the file: the path holds the user name.
-        if ! [[ $line =~ ^([A-Z_]+)=(.*)$ ]] || [[ $allowed != *" ${BASH_REMATCH[1]} "* ]]; then
-            finish 2 "session miner: config line $line_number is not an allowed KEY=value"
+        if ! [[ $line =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]]; then
+            finish 2 "session miner: settings line $line_number is not KEY=value, a # comment or blank"
         fi
+        # The file holds every task's settings: take only the miner's keys.
+        if [[ $allowed != *" ${BASH_REMATCH[1]} "* ]]; then continue; fi
         key=${BASH_REMATCH[1]}
         value=${BASH_REMATCH[2]}
         # A literal ~/ prefix, not an expansion: the value is data.
@@ -127,7 +132,7 @@ export PRIVACY_DENYLIST_FILE=${PRIVACY_DENYLIST_FILE:-$HOME/.config/privacy-deny
 # These two name your own repositories: no fallback, set them explicitly.
 for key in LESSONS_CLONE SKILLS_EVALS_URL; do
     if [[ -z ${!key:-} ]]; then
-        finish 2 "session miner: $key is not set; set it in ~/.config/wsl-automation/session-miner.env (SESSION_MINER_CONFIG; see config/session-miner.env.example) or the environment"
+        finish 2 "session miner: $key is not set; set it in ~/.config/wsl-automation/settings.env (WSL_AUTOMATION_SETTINGS; see config/settings.env.example) or the environment"
     fi
     export "${key?}"
 done

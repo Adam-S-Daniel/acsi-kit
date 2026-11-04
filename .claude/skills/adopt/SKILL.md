@@ -126,8 +126,8 @@ in `docs/`; the steps table is `docs/quick-start.md`.
   copy `config/settings.env.example` to
   `~/.config/wsl-automation/settings.env` in the distro (or on Linux or
   macOS) and check each repository in it. No job has a built-in repository:
-  one whose key is missing exits 2 naming it. The session miner keeps its
-  own `session-miner.env` (docs/machine.md).
+  one whose key is missing exits 2 naming it. The session miner's
+  `LESSONS_CLONE` is in the same file (docs/machine.md).
 
 ## The content step
 

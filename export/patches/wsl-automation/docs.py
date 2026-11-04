@@ -9,9 +9,9 @@ them are reworded. The task health publish goes too, with its script
 (DECISIONS "Re-pin (2026-11-03)"). The kit's session miner section replaces
 the source's (the kit's wrapper replaces the source's), and the Linux and
 macOS schedule gets its own section. The memory curation section stays.
-The source's "Settings file for the Bash tasks" section stays, without the
-task health key, and says the kit's session miner keeps its own file; the
-Install steps gain one for that settings file.
+The source's "Settings file for the Bash tasks" section stays, with the task
+health key replaced by the session miner's `LESSONS_CLONE` (the kit's miner
+reads the same file); the Install steps gain one for that settings file.
 
 AGENTS.md's repo-specific half keeps every measured lesson that still applies
 to a kept task: there is no WSL lifecycle event (with the at-logon
@@ -151,15 +151,15 @@ README_INSTALL = """## Install
 
 5. **Settings for the Bash tasks (once per machine, in the distro).** Copy
    `config/settings.env.example` to `~/.config/wsl-automation/settings.env`
-   and set each key to your own repository. The census, waiting feed, memory
-   curation and Codex Cloud sync have no built-in repository: a task whose key
-   is missing exits 2 naming it. See
+   and set each key to your own repository. The census, waiting feed, session
+   miner, memory curation and Codex Cloud sync have no built-in repository: a
+   task whose key is missing exits 2 naming it. See
    [Settings file for the Bash tasks](#settings-file-for-the-bash-tasks-settingsenv).
 
 6. **Session miner (once per machine).** The session miner task refuses to
    mine until you have set it up and run it by hand once; see
-   [Session miner task](#session-miner-task-default-name-session-miner). It
-   keeps its own settings file, `session-miner.env`, not `settings.env`.
+   [Session miner task](#session-miner-task-default-name-session-miner). Its
+   settings go in the same `settings.env`.
 
 """
 
@@ -196,19 +196,20 @@ README_MINER = """### Session miner task (default name: `Session Miner`)
      Its git credential must work with no desktop session: `gh auth setup-git`
      with a file-stored token, as for the census.
   3. python3 with PyYAML (`sudo apt install python3-yaml`).
-  4. Settings in `~/.config/wsl-automation/session-miner.env`
-     (`SESSION_MINER_CONFIG`), one `KEY=value` per line: copy
-     `config/session-miner.env.example` there and edit it. `LESSONS_CLONE`
-     (that clone) and `SKILLS_EVALS_URL` (your skills-evals) are required and
-     have no default, because they name your own repositories; unset, the
-     wrapper exits 2 naming the key. A scheduled action has
-     no environment of its own, so this is where settings go. The file is read
-     as data, never sourced; only `PRIVACY_DENYLIST_FILE`, `LESSONS_CLONE`,
+  4. Settings in the Bash tasks' one settings file,
+     `~/.config/wsl-automation/settings.env` (`WSL_AUTOMATION_SETTINGS`; see
+     [Settings file for the Bash tasks](#settings-file-for-the-bash-tasks-settingsenv)),
+     copied from `config/settings.env.example`. `LESSONS_CLONE` (that clone)
+     and `SKILLS_EVALS_URL` (your skills-evals) are required and have no
+     default, because they name your own repositories; unset, the wrapper
+     exits 2 naming the key. A scheduled action has no environment of its own,
+     so this is where settings go. The file is read as data, never sourced;
+     the wrapper takes only `PRIVACY_DENYLIST_FILE`, `LESSONS_CLONE`,
      `GUIDANCE_MANIFEST`, `MINER_REGISTRIES`, `WIN_HOME`, `MINER_STATE`,
-     `SKILLS_EVALS_URL`, `PYTHON` and `FILE_ISSUES` are accepted, a leading
-     `~/` is expanded, and a variable already in the environment wins. The
-     wrapper does not read the other Bash tasks' `settings.env`, so
-     `SKILLS_EVALS_URL` goes in both files.
+     `SKILLS_EVALS_URL`, `PYTHON` and `FILE_ISSUES` from it and ignores the
+     other tasks' keys, a leading `~/` is expanded, a line that is not
+     `KEY=value`, a comment or blank exits 2, and a variable already in the
+     environment wins.
   5. One run by hand: `bash scripts/run-session-miner.sh --dry-run`. It mines
      and reports without pushing, and on success records
      `~/.local/state/session-miner/dry-run-ok`, which arms the scheduled run.
@@ -288,8 +289,8 @@ bash scripts/unix/install-schedule.sh cron --print            # show it, change 
   the plist; or delete the block from `crontab -e`.
 - A scheduler starts jobs with no profile and no desktop session, so keep git
   credentials where such a job can reach them (`gh auth setup-git` with a
-  file-stored token) and settings in `~/.config/wsl-automation/settings.env`
-  (the census and waiting feed) and `session-miner.env` (the session miner).
+  file-stored token) and settings in `~/.config/wsl-automation/settings.env`,
+  which every job reads.
 
 """
 
@@ -407,28 +408,22 @@ def readme(text: str, where: str) -> str:
         where,
     )
 
-    # The kit's session miner wrapper keeps its own settings file and does not
-    # read settings.env; the task health publish is left out (X10).
-    text = T.sub_once(
-        text,
-        "| `SKILLS_EVALS_URL` | Usage census and Session miner (the skills-evals repository to clone) |\n",
-        "| `SKILLS_EVALS_URL` | Usage census (the skills-evals repository to clone) |\n",
-        where,
-    )
+    # The kit's session miner wrapper reads settings.env too, with keys of its
+    # own; the task health publish is left out (X10).
     text = T.sub_once(
         text,
         "| `TASK_HEALTH_URL` | Task health publish (the repository it pushes to) |\n",
-        "",
+        "| `LESSONS_CLONE` | Session miner (the private registry clone that receives lesson records) |\n",
         where,
     )
     text = T.sub_once(
         text,
         "  (`wsl_automation_require_setting KEY`).\n",
         "  (`wsl_automation_require_setting KEY`).\n"
-        "- **The session miner has its own file.** Its wrapper reads\n"
-        "  `~/.config/wsl-automation/session-miner.env`, not this one (see\n"
-        "  [Session miner task](#session-miner-task-default-name-session-miner)), so\n"
-        "  its `SKILLS_EVALS_URL` is set there too.\n",
+        "- **The session miner reads this file too**, with its own reader: it\n"
+        "  takes `LESSONS_CLONE` (required) and its optional keys from here and\n"
+        "  ignores the other tasks' keys (see\n"
+        "  [Session miner task](#session-miner-task-default-name-session-miner)).\n",
         where,
     )
 

@@ -14,7 +14,7 @@ trap 'rm -rf -- "$test_root"' EXIT
 # clear those for every case except the one that sets them on purpose.
 unset CI GITHUB_ACTIONS CLAUDE_CODE_REMOTE CLAUDE_CODE_REMOTE_SESSION_ID
 unset PRIVACY_DENYLIST_FILE LESSONS_CLONE LESSONS_REPO_URL GUIDANCE_MANIFEST MINER_REGISTRIES
-unset MINER_ROOTS WIN_HOME MINER_STATE PYTHON FILE_ISSUES SESSION_MINER_CONFIG WSL_DISTRO_NAME
+unset MINER_ROOTS WIN_HOME MINER_STATE PYTHON FILE_ISSUES WSL_AUTOMATION_SETTINGS WSL_DISTRO_NAME
 export HOME="$test_root/home"
 mkdir -p "$HOME"
 
@@ -96,7 +96,7 @@ printf '%s\n' 'example-pattern' >"$denylist"
 log_file="$test_root/cache/session-miner.log"
 marker="$test_root/state/dry-run-ok"
 export SESSION_MINER_LOG="$log_file" SESSION_MINER_MARKER="$marker" SESSION_MINER_WSL=0
-export SESSION_MINER_CONFIG="$test_root/no-config.env"
+export WSL_AUTOMATION_SETTINGS="$test_root/no-settings.env"
 
 line_count() {
     if [[ -f $log_file ]]; then wc -l <"$log_file" | tr -d ' '; else echo 0; fi
@@ -200,22 +200,22 @@ git -C "$HOME/repos/acsi-agentskills-private" remote add origin 'https://example
 rm -f -- "$STUB_RECORD"
 run PYTHON="$test_root/bin/python-ok" bash "$script" --dry-run
 assert_eq "$rc" 2 'an unset LESSONS_CLONE exits 2'
-assert_match "$out" '^session miner: LESSONS_CLONE is not set; set it in ~/\.config/wsl-automation/session-miner\.env' 'the missing LESSONS_CLONE is named with where to set it'
+assert_match "$out" '^session miner: LESSONS_CLONE is not set; set it in ~/\.config/wsl-automation/settings\.env \(WSL_AUTOMATION_SETTINGS; see config/settings\.env\.example\)' 'the missing LESSONS_CLONE is named with where to set it'
 assert_eq "$([[ -f $STUB_RECORD ]] && echo ran || echo idle)" idle 'an unset LESSONS_CLONE runs no miner'
 run PYTHON="$test_root/bin/python-ok" LESSONS_CLONE="$HOME/repos/acsi-agentskills-private" SKILLS_EVALS_URL= bash "$script" --dry-run
 assert_eq "$rc" 2 'an unset SKILLS_EVALS_URL exits 2'
-assert_match "$out" '^session miner: SKILLS_EVALS_URL is not set; set it in ~/\.config/wsl-automation/session-miner\.env' 'the missing SKILLS_EVALS_URL is named with where to set it'
+assert_match "$out" '^session miner: SKILLS_EVALS_URL is not set; set it in ~/\.config/wsl-automation/settings\.env \(WSL_AUTOMATION_SETTINGS; see config/settings\.env\.example\)' 'the missing SKILLS_EVALS_URL is named with where to set it'
 assert_eq "$([[ -f $STUB_RECORD ]] && echo ran || echo idle)" idle 'an unset SKILLS_EVALS_URL runs no miner'
 run PYTHON="$test_root/bin/python-ok" LESSONS_CLONE="$HOME/repos/acsi-agentskills-private" bash "$script" --dry-run
 assert_eq "$rc" 0 'the denylist default runs'
 assert_eq "$(record denylist)" "$HOME/.config/privacy-denylist.txt" 'default denylist path'
 assert_eq "$(record clone)" "$HOME/repos/acsi-agentskills-private" 'the registry clone is the one set'
-example="$repository_root/config/session-miner.env.example"
+example="$repository_root/config/settings.env.example"
 for key in LESSONS_CLONE SKILLS_EVALS_URL; do
-    assert_eq "$(grep -c "^$key=" "$example")" 1 "the config example carries $key"
+    assert_eq "$(grep -c "^$key=" "$example")" 1 "the settings example carries $key"
 done
 
-config="$test_root/session-miner.env"
+config="$test_root/settings.env"
 cat >"$config" <<EOF
 # comment line
 
@@ -224,24 +224,32 @@ LESSONS_CLONE=~/repos/acsi-agentskills-private
 PYTHON=$test_root/bin/python-ok
 WIN_HOME=~/win
 EOF
-run SESSION_MINER_CONFIG="$config" bash "$script" --dry-run
+run WSL_AUTOMATION_SETTINGS="$config" bash "$script" --dry-run
 assert_eq "$rc" 0 'config file run'
 assert_eq "$(record denylist)" "$denylist" 'config sets the denylist'
 assert_eq "$(record clone)" "$HOME/repos/acsi-agentskills-private" 'config expands a leading ~/'
 assert_eq "$(record win_home)" "$HOME/win" 'config sets WIN_HOME'
-run SESSION_MINER_CONFIG="$config" WIN_HOME=/mnt/c/Users/example bash "$script" --dry-run
+run WSL_AUTOMATION_SETTINGS="$config" WIN_HOME=/mnt/c/Users/example bash "$script" --dry-run
 assert_eq "$(record win_home)" /mnt/c/Users/example 'the environment wins over the config file'
 
-printf 'PATH=/evil\n' >>"$config"
+# The file holds every task's settings: another task's key is skipped, and a
+# key outside the miner's allowlist never reaches its environment.
+printf 'WAITING_FEED_URL=https://example.com/waiting-feed.git\nPATH=/evil\n' >>"$config"
 rm -f -- "$STUB_RECORD"
-run SESSION_MINER_CONFIG="$config" bash "$script" --dry-run
-assert_eq "$rc" 2 'a key outside the allowlist exits 2'
-assert_eq "$out" 'session miner: config line 7 is not an allowed KEY=value' 'bad config line is named by number'
-assert_no_match "$out" "$test_root" 'the config path is not printed'
+run WSL_AUTOMATION_SETTINGS="$config" bash "$script" --dry-run
+assert_eq "$rc" 0 'another task'"'"'s key in the settings file is ignored'
+assert_eq "$(record denylist)" "$denylist" 'the miner'"'"'s own keys still apply beside them'
+printf 'not a setting\n' >>"$config"
+rm -f -- "$STUB_RECORD"
+run WSL_AUTOMATION_SETTINGS="$config" bash "$script" --dry-run
+assert_eq "$rc" 2 'a malformed line exits 2'
+assert_eq "$out" 'session miner: settings line 9 is not KEY=value, a # comment or blank' 'the malformed line is named by number'
+assert_no_match "$out" "$test_root" 'the settings path is not printed'
+assert_eq "$([[ -f $STUB_RECORD ]] && echo ran || echo idle)" idle 'a malformed line runs no miner'
 # A literal command substitution: the file must never run it.
 # shellcheck disable=SC2016
 printf 'PRIVACY_DENYLIST_FILE=%s\n$(touch %s)\n' "$denylist" "$test_root/pwned" >"$config"
-run SESSION_MINER_CONFIG="$config" bash "$script" --dry-run
+run WSL_AUTOMATION_SETTINGS="$config" bash "$script" --dry-run
 assert_eq "$rc" 2 'a non KEY=value line exits 2'
 assert_eq "$([[ -e $test_root/pwned ]] && echo ran || echo inert)" inert 'the config file is never executed'
 
