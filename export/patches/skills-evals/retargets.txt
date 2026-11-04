@@ -825,3 +825,21 @@ if __name__ == "__main__":
 @@@ new
                 .replace("null", f"https://github.com/{gate.stakes.FLEET_OWNERS[1].title()}/example-site/pull/12"),
 @@@ end
+@@@ old
+        # The repository's own example set passes the same check.
+        self.assertTrue(gate.trigger_set_ok(
+            (ROOT / SET_PATH).read_bytes()))
+@@@ new
+        # The repository's own example set passes the same check. The kit's
+        # writing-adrs set is in the library (Content tiers); a core skill's
+        # committed set stands in.
+        self.assertTrue(gate.trigger_set_ok(
+            (ROOT / "evals" / "skills-doctor" / "trigger-eval-set.json").read_bytes()))
+@@@ end
+=== test/issues/test_issue_124_guidance_gates.py
+# why: the in-situ refusal needs any skill fixture; the kit's writing-adrs fixtures are in the library (Content tiers), so it reads the invented example copy under test/fixtures/evals/.
+@@@ old
+        skill = ROOT / "evals" / "writing-adrs" / "bootstrap"
+@@@ new
+        skill = ROOT / "test" / "fixtures" / "evals" / "writing-adrs" / "bootstrap"
+@@@ end

@@ -386,20 +386,60 @@ the two sections nearest one until those decide.
 **The two-week batch** (THE BATCH in `scripts/plan_week.py`; the owner's
 steady-state goal, 2026-11-02: at 25% of the weekly allowance, every two
 weeks pick a batch of skills and guidance sections numbering about three
-times the historical weekly addition rate, bring them all to a verdict, then
-start the next). `evals/batch-policy.yml` sets the start (the 2026-11-09
-17:00 UTC reset, when the cap returns to 25%), the 14-day period, the
-multiplier (3) and the weekly addition rates (skills 0.75, guidance 0.5), so
-a batch holds 2 skills and 2 sections. Only the weekly workflow passes the
-policy (`--batch-policy`).
+times the weekly addition rate, bring them all to a verdict, then start the
+next). `evals/batch-policy.yml` sets the start (the 2026-11-09 17:00 UTC
+reset, when the cap returns to 25%), the 14-day period, the multiplier (3),
+the rate and cost windows, the expected pairs per cell and fallback addition
+rates. Only the weekly workflow passes the policy (`--batch-policy`).
 
+- **Fit to the budget** (the owner, 2026-11-03: "The rate is measured each
+  period. The batch takes as many subjects as fit 50 points, most-used
+  first. The rest wait. No new spend."). Each new batch:
+  - measures each kind's addition rate over `rate_window_days` (28): skills
+    added to acsi-agentskills' `scripts/plugin_layout.json`, sections (ids)
+    added to _agent-guidance's `agents-md/eval-coverage.yml`, per week, on
+    each checkout's first-parent history. A file younger than the window is
+    measured from its first version. An unreadable history (no checkout, a
+    shallow one, under 7 days) uses the policy's constant (skills 0.75,
+    guidance 0.5) and the record says so. The target size per kind is
+    max(1, 3 x rate, half rounded up).
+  - prices each subject at its cells with headroom (undecided, schedulable,
+    not fixture-broken). Each is charged its remaining observations,
+    min(`pairs_per_cell`, `max_runs_per_cell` from `gate-policy.yml` less
+    the observations the gate already counts in it), at least 0, times its
+    model's mean cost per observation. An observation is one fire, one
+    paired run whatever its trial count, as the gate counts it. The cost per
+    observation is the points in `cost_estimate.json` over the paired runs
+    of the routine runs of the last `cost_window_days` (14), judge included
+    (a guidance fire's `alone` pair is not an observation of its cell).
+    `pairs_per_cell` is 15: the 2026-11-03 gate threshold sweep's 10.5
+    points per new subject over 0.70 points per observation on both models.
+  - takes candidates while their total stays within the budget,
+    `budget.yml`'s `weekly_cap` x the period's weeks (0.25 x 2 = 50
+    points); a total equal to the budget fits. Carried members stay first
+    and count first. Then the kinds take turns. Skills go most used first
+    (the usage weight), then high stakes, then the longest without a run,
+    then name. Guidance has no per-section use signal, so sections go high
+    stakes first, then the longest without a run, then name. A subject that
+    alone would overflow the room left is skipped and waits; a cheaper one
+    after it can still join. If nothing would join while subjects wait, the
+    cheapest joins over budget, so the batch is never empty. With no
+    measured cost the fit picks by target size alone.
+  - **Today** (2026-11-03, results branch at cba7b38): skills 4 added
+    since the layout pin of 2026-10-26 (3.37 a week, target 10), sections
+    3 in 28 days (0.75 a week, target 2); 0.00152 of the allowance per Opus
+    observation and 0.00064 per Sonnet one, so a fixture with no runs yet
+    on both models is about 3.2 points. The fitted batch is 9 skills (one
+    with two fixtures) and 2 sections (one the four-fixture, high-stakes
+    `data-exposure-in-ci`), 48.6 of 50 points; 18 subjects wait: 13
+    sections past the guidance target size and 5 skills for the budget.
 - **What it changes.** While a batch is open the missing, near, focus and
   guidance-rest bands take only its members' cells, and every guidance
   member is in the focus. Safety, re-checks, improvements and bare
   baselines are unchanged.
 - **Who joins.** Open subjects only: verdict still open, no removal pull
   request, no blocking cell, and some cell that would plan a fire. Never a
-  private skill. High stakes first, then the longest without a run.
+  private skill. In the fit's order, within the budget (above).
 - **When it turns over.** When every member has left `open` (decided,
   blocked, stalled or gone), or at the due time, whichever is first. Open
   members are carried into the next batch first; new picks fill the rest.
@@ -408,8 +448,12 @@ policy (`--batch-policy`).
 - **Where it lives.** `batches/current.json` and `batches/<number>.json` on
   `persistent/eval-results`, written by the weekly workflow's
   `batch-publish` job only when a plan starts a batch. Each record lists the
-  previous batch's members with their final status. The job summary names
-  the batch, each member's status and how many cells wait outside it.
+  previous batch's members with their final status and, for audit, the
+  rates and how each was had (`rate_basis`), the target `sizes`, the fit
+  (`budget`, `pair_costs`, `pairs_per_cell`, `total`, `floor`), each
+  member's expected `cost` and the subjects left `waiting` with theirs and
+  why (`budget` or `size`). The job summary names the batch, each member's
+  status, how many cells wait outside it and the fit's line.
 - **The explorer** queues only the published batch's members in those
   bands. A finished batch stays published until the next sweep replaces it,
   so for that gap the page shows the old batch's queue.
@@ -733,7 +777,7 @@ explorer lists removed skills and sections (#557). One loop pull request
 is open at a time: nothing is
 opened while an `eval-improve/`, `draft-skill/` or `retire-skill/` pull
 request is open there, and a closed `retire-skill/<skill>` one means the
-skill is decided. That branch carries everything the registry's required
+skill is decided, unless the loop withdrew it (below). That branch carries everything the registry's required
 checks read — the skill gone, the plugin's major version raised, a
 `docs/skill-impact.md` entry, the layout pin in its
 `scripts/plugin_layout.json`, the README skill table and, when the plugin is
@@ -747,6 +791,114 @@ back to `proposal`: one skills-evals issue that is filed or updated and that
 a human acts on; once that issue is closed, the skill is not proposed
 again. Preview either mode with
 `python3 scripts/retire_skill.py --gates FILE --registry acsi-agentskills=PATH --dry-run`.
+
+**Withdrawal.** An open removal pull request is armed on the verdict it was
+opened on, so `scripts/retire_skill.py --withdraw-stale` re-reads that
+verdict (ADR 0014, round 8's known limit). It runs in two places:
+
+- before each pass of this job;
+- after every ingest, in `loop-pr-refresh.yml`'s `withdraw` job, which
+  recomputes the verdicts the same way.
+
+Each pass, skills and then guidance, is its own step that runs unless the run
+was cancelled, so one failing never skips the other; the failed step still
+fails the job.
+
+It reads every open pull request in the target repository that the loop
+opened: the head is `retire-skill/` (or `retire-guidance/` in the guidance
+pass), it carries `agent-authored`, and its author is the eval-improve App's
+bot, `skills-evals-improve[bot]`. It skips any labeled `on-hold`.
+
+The pull request is withdrawn when the verdict no longer supports an
+automatic removal: `keep`, `insufficient` (a roster model just added
+included), a `retire` lowered to a proposal (for a section, also an
+unfinished section-alone pair), or a `retire-pending` that was not a
+supported `retire` before
+`finalize` ranked it. A `retire-pending` whose raw verdict is a supported
+`retire` keeps its pull request, since only one subject retires per
+evaluation and it is simply next.
+
+To withdraw, auto-merge is turned off and read back and the pull request is
+labeled `loop-withdrawn` (the pass creates the label if the repository lacks
+it). Then the subject's retirement issue here (the one proposal mode files)
+is filed, or the oldest open one gets a comment (its body is left as it is),
+to record the withdrawal and link the pull request; only then does a comment
+give the new verdict, why and the override, and the pull request is closed.
+The label is read back before the issue: one that did not land leaves the
+pull request open. A failure at any of those steps leaves the pull request
+open for the next pass. After the close, the branch is deleted, leased on
+the closed pull request's head, so a commit anyone pushed since keeps it;
+that needs the App token's `contents: write`. A failed delete keeps the
+pause, and the status line names only the error's type. Any open removal
+notice for the subject is closed as not planned and then commented on; if
+that fails, the withdrawal still stands and the status line says so.
+
+In `auto` mode, an open removal whose verdict still supports it but which
+carries `loop-withdrawn`, or whose auto-merge is off, is a withdrawal that
+stopped part way, so the pass finishes it as a pause and the next daily run
+opens a fresh, armed one. The auto-merge test counts only a pull request
+opened before the verdicts' `as_of`, and one found armed after all is
+kept, so a removal the retirement job is still arming is never caught. In
+`proposal` mode such a pull request is only disarmed, as before.
+
+A pass judges a pull request only by verdicts at least as new as the results
+it was opened on: the `as_of` its body's first line records ("Removes ... is
+**retire** as of ..."), ignored when later than the pull request's own
+creation time. With no such line, one created after the verdicts' `as_of`,
+or with either time unknown, is kept for a newer pass to judge. The `withdraw` job in
+`loop-pr-refresh.yml` runs one pass at a time (its own concurrency group,
+`cancel-in-progress: false`).
+
+A withdrawal is a pause, not a decision. A closed, unmerged removal counts
+as a pause only if the App opened it, it carries `loop-withdrawn`, AND the
+App closed it (`closed_by`, read from the issue). Such a pause does not
+decide its subject, so when the verdict supports an automatic removal again,
+this job opens a fresh one with a plain push to the same branch name. If
+that branch still exists (a failed delete, say), the run fails rather than
+push over it; a person restores its pull request or deletes the branch.
+Nothing here force-pushes. A subject whose verdict swings back and forth is
+withdrawn and reopened each time, up to `MAX_LOOP_PAUSES` (3) pauses; from
+then on this job files or updates the subject's proposal issue instead of
+opening a removal. Any other closed removal decides the subject: merged,
+closed by a person (labeled or not), one whose closer cannot be read, or one
+a person removed `loop-withdrawn` from. So to decline a withdrawn removal for
+good, remove that label, or close the next removal yourself. In `auto`
+mode, closing the retirement issue declines nothing, and the issue says so.
+To remove the subject anyway, remove the `agent-authored` label first, then
+restore the branch from the pull request page, then reopen it and merge it
+by hand. Without that label it is not the loop's, and no pass touches it;
+reopening it with the label only gets it withdrawn again.
+
+One pull request's failure does not stop the pass: the others still act,
+every status line is printed, and the step then fails.
+
+While `retirement_mode` is `proposal`, a removal that is not withdrawn is
+disarmed instead: auto-merge is turned off, the pull request stays open, and
+it is commented once. Disarming goes one way only: switching the mode back to
+`auto` does not re-arm it. While it stays open, it blocks later removals and
+keeps the skill out of the weekly plan's improve fires. Close it, or turn
+auto-merge on again by hand (a merge commit).
+
+Unknown data withdraws nothing:
+
+- a missing or unreadable verdicts document exits 0 with a status naming no
+  subject;
+- a subject the document does not list, so an empty or partial block
+  withdraws nothing;
+- a subject whose verdict raised in `compute_gates.py`;
+- a subject whose `retire` fails the re-check.
+
+The pull request writes use the same App token as the removal; with
+something to withdraw or disarm and no token, the step fails. A pass that
+only keeps pull requests needs no token. The issue uses the job's token.
+
+`loop-pr-refresh.yml` brings a removal pull request up to date only while
+`scripts/refresh_loop_prs.py removal-check` finds its verdict still
+supported in `auto` mode. With the verdicts unknown, it refreshes none, so a
+refresh never re-runs a stale removal's checks. Its push is leased on the
+head it fetched, so it never recreates a branch a withdrawal just deleted.
+
+Preview with `python3 scripts/retire_skill.py --withdraw-stale --gates FILE [--target guidance] --dry-run`.
 
 A fixture moved into a named subdirectory with its content unchanged keeps
 its evidence: `FIXTURE_ALIASES` in `harness/gates.py` maps the old name (""
@@ -790,7 +942,14 @@ Other unattributed failures stay records with no proposal, and the subject
    none accepted, the rest of that family is not drafted. It dispatches
    `routine-eval-fire.yml` in draft mode only when one fire fits the
    weekly allowance guard.
-2. **Triage, hooks first** (the owner, 2026-10-26: "I want the first choice to
+2. **Upstream check, then triage, hooks first.** Anthropic's own skills
+   (the claude.ai account skills and Claude Code's bundled ones,
+   `harness/upstream_skills.yml`) are background, never subjects (the owner,
+   2026-11-03): the selector skips a subject with an upstream name, and
+   if a skill Anthropic ships already does what the lesson asks, the
+   routine drafts nothing and records `decision: upstream-covered`; the
+   gate opens nothing for it and the subject is final. Next, **triage,
+   hooks first** (the owner, 2026-10-26: "I want the first choice to
    be git hooks whenever possible"). The routine first asks whether the
    lesson can be enforced mechanically: a check in the fleet's
    `.githooks/agent-checks` runner (_agent-guidance ADR 0021, enforced by
@@ -951,8 +1110,13 @@ so no excerpt reaches this repository:
 The same job also reads an `_agent-guidance` checkout. Five sections have
 fixtures under `evals/guidance/<section id>/<name>/`, and
 `anything-you-name-gets-its-link` has four. Each fixture runs the section
-inside the whole guidance against the guidance without it, and the section
-alone against no guidance. The in-situ runs are pooled by the rest of the
+inside the whole guidance against the guidance without it (in situ), and the
+section alone against no guidance. Since 2026-11-03 the weekly planner runs
+the alone pair only for a section leaning toward removal: its in-situ
+verdict is `retire`, or its in-situ test is at least halfway to a removal
+(`ALONE_PAIR_FROM_PROGRESS` in `scripts/plan_week.py`); every other section's
+fires run only the in-situ pair (`arms: in-situ`), which saves about a third
+of guidance spend. The in-situ runs are pooled by the rest of the
 guidance each ran beside, and only the runs beside the current rest decide
 (2026-11-03; #557's weighting across older rests favored removal, so older
 rests are ignored and an edit elsewhere in the guidance starts the evidence
@@ -960,12 +1124,24 @@ over). A section is `retire` by the skills' rule above, with the guidance
 block of `evals/gate-policy.yml` (today the same numbers).
 There is no separate confirmation step. If a `retire` section helps only
 when alone, it is `shorten-or-merge` instead, because the rest of the
-guidance already covers it. In `auto` mode, the committed
+guidance already covers it. A `retire` whose alone check has not finished
+(no alone cell yet, or one still undecided) is only ever proposed, never
+removed automatically, since the alone check could still turn it into
+`shorten-or-merge`. The Evals Explorer shows a section's alone results only
+when its in-situ verdict is `retire`, because only then do they count; its
+whole-guidance headline still pools every run with no guidance, and each
+section card's trend, help-per-word order and early sign use the in-situ
+gain. In `auto` mode, the committed
 `guidance.retirement_mode`, a `retire` opens an auto-merging removal pull
 request in `_agent-guidance` that passes that repository's own checks; in
 `proposal` mode it becomes one skills-evals issue. A `shorten-or-merge`
 verdict never removes the section; it files an issue. Preview with
 `python3 scripts/retire_skill.py --gates FILE --target guidance --guidance PATH --dry-run`.
+An open `retire-guidance/<section>` removal pull request is withdrawn (or,
+in `guidance: retirement_mode: proposal`, disarmed) the same way as a
+skill's (Withdrawal, above), from the guidance verdicts. A closed one
+decides the section, so no removal is opened for it again, unless it is a
+loop pause as for a skill (and then only up to `MAX_LOOP_PAUSES`).
 
 ### The eval scope pass
 

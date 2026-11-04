@@ -1021,7 +1021,11 @@ class DispatchLegTests(unittest.TestCase):
         plan_week.validate_fire({**good, "ARMS": "bare"})
         guidance = {"FIXTURE": GUIDANCE_FIXTURE, "EVAL_KEY": GUIDANCE_FIXTURE[len("evals/"):]}
         plan_week.validate_fire({**good, **guidance})
+        # A guidance cell not leaning toward removal: its in-situ pair alone.
+        plan_week.validate_fire({**good, **guidance, "ARMS": "in-situ"})
         for change in ({"EVAL_KEY": "writing-adrs/supersede"}, {"MODEL": "claude-fable-5-1"},
+                       # The in-situ pair is a guidance fixture's only.
+                       {"ARMS": "in-situ"},
                        # An unscheduled fixture (evals/unscheduled.yml).
                        {"FIXTURE": "evals/browser-testing", "EVAL_KEY": "browser-testing"},
                        {"SKILL": "writing-adrs"}, {"MODE": "scaffold"},
@@ -1086,10 +1090,10 @@ class DispatchLegTests(unittest.TestCase):
             check.side_effect = improve_gate.Rejected("x")
             with self.assertRaises(plan_week.PlanError):
                 plan_week.validate_fire(leg)
-        # Unmocked: writing-adrs commits a trigger set; skills-doctor has none.
+        # Unmocked: writing-adrs commits a trigger set; an unknown skill has none.
         plan_week.validate_fire(leg)
         with self.assertRaises(plan_week.PlanError):
-            plan_week.validate_fire({**leg, "SKILL": "skills-doctor"})
+            plan_week.validate_fire({**leg, "SKILL": "no-trigger-set-skill"})
         # "false" and absent are the ordinary improve leg, holdout required.
         improve = {**leg, "HOLDOUT": "bootstrap", "TRIGGER_ONLY": "false"}
         plan_week.validate_fire(improve)

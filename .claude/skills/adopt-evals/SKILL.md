@@ -1,6 +1,6 @@
 ---
 name: adopt-evals
-description: Guide the user step by step through adding evals to this kit's system on their own GitHub account (the skills-evals repo, its loop's eval runner routine, its secrets and Apps, the eval fixture default, the optional federation and dashboard), driven by bootstrap/status.sh --track evals, after checking the base is in place. From a fresh start it runs the base steps first, so it also sets up the whole system in one go. Use when the user types /adopt-evals, asks to add or continue setting up evals or the improvement loop, or wants the whole system including evals. For guidance and skills alone, use /adopt.
+description: Guide the user step by step through adding evals to this kit's system on their own GitHub account (the skills-evals repo, its loop's eval runner routine, its secrets and Apps, the eval fixture default, the optional federation, dashboard and explorer page), driven by bootstrap/status.sh --track evals, after checking the base is in place. From a fresh start it runs the base steps first, so it also sets up the whole system in one go. Use when the user types /adopt-evals, asks to add or continue setting up evals or the improvement loop, or wants the whole system including evals. For guidance and skills alone, use /adopt.
 ---
 
 # Add evals, one step at a time
@@ -71,6 +71,35 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
   `set-secrets.sh --only routine-fire` themselves.
 - **Steps 26 and 32** are optional: offer them, and move on when the user
   declines.
+- **Step 32** makes two claude.ai artifacts from one build
+  (`docs/routines.md`, "Dashboard refresh"). Both start private; never turn
+  on a public link for the user, it is their choice in claude.ai. An
+  artifact can load only its own files (its content security policy allows
+  only `'self'`), so the data travels with it:
+  1. In a clone of `<you>/skills-evals`, run `npm ci` and `npm run check` in
+     `explorer/` (both pages match their source), and fetch the results
+     branch: `git fetch origin persistent/eval-results` and
+     `git show origin/persistent/eval-results:explorer/latest.json > <work>/latest.json`.
+     No `latest.json` yet means `explorer-data.yml` has not run: wait for its
+     first scheduled run, or dispatch it.
+  2. The private build: a Dashboard artifact, as `dashboard/README.md`,
+     "Adopting it", says. Its page is `dashboard/page/index.html`; its
+     datasets are every entry of `dashboard/page/datasets.json`, including
+     `explorer` (`dashboard/build.py` copies `explorer/latest.json` into
+     it), with the user's owner and repo names in the live queries. Then
+     run one refresh by hand and schedule `dashboard/tasks/refresh.md`
+     every 2 hours.
+  3. The public build: publish `tool/index.html` as a plain page, with
+     `<work>/latest.json` beside it as a file at `explorer/latest.json`
+     (the Artifact tool's `publish` with
+     `files: {"explorer/latest.json": "<work>/latest.json"}`). Read
+     `docs/routines.md` first: until `skills-evals`' web adapter reads that
+     sibling file, the page shows its load error, and the user may prefer
+     to skip this artifact.
+  4. Say what stays off: `evals/public-export.yml` ships
+     `include_spend: false`, and `SITE_REPO` unset (or `none`) makes
+     `site-sync.yml` and `site-freshness.yml` skip. Changing either is the
+     user's pull request or repository variable.
 - **Steps 33 and 34** (`create-apps.sh eval-improve roster registry-read`,
   then the installations): `create-apps.sh` wants the URL GitHub redirects
   to, so it runs in the user's own terminal. Step 34 also adds

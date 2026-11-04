@@ -3,7 +3,9 @@
 DECISIONS P3 says generated files are rebuilt with each repo's own tooling.
 `export.py` does that wherever the tool runs offline (the fleet payload
 mirror, the section byte counts, `AGENTS.md`, the vendored hook's sha256 in
-`repos.yml`). The files below need a GitHub API, a commit that exists only
+`repos.yml`, and `skills-evals`' two explorer pages, `tool/index.html` and
+`dashboard/page/index.html`, built from `explorer/src` with the source's
+pinned esbuild). The files below need a GitHub API, a commit that exists only
 once you have pushed, or your own GitHub App, so the export leaves them
 substituted and you run the command after adoption. No test in the exported
 trees depends on their hashes.

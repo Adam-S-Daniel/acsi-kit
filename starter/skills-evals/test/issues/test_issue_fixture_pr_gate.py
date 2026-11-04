@@ -18,7 +18,7 @@ import draft_new_skill  # noqa: E402
 import fixture_pr_gate as gate  # noqa: E402
 
 REG = "https://github.com/example-adopter/acsi-agentskills"
-REQUEST = "https://github.com/Adam-S-Daniel/skills-evals/issues/42"
+REQUEST = "https://github.com/example-adopter/skills-evals/issues/42"
 #: Every fixture a fix PR adds says where it came from (the owner, 2026-11-03).
 ORIGIN = f"origin:\n  kind: invented\n  source: null\n  request: {REQUEST}\n"
 SKILL_FIXTURE = f"skill: writing-adrs\nregistry: {REG}\nprompt: Write an ADR.\n{ORIGIN}"
@@ -36,7 +36,7 @@ def issue(number=42, kind="needs-harder-fixtures", key="writing-adrs", **over):
             "body": f"<!-- skills-evals:{kind}:{key} -->\n\ntext\n", **over}
 
 
-def pr(body="Refs Adam-S-Daniel/skills-evals#42", **over):
+def pr(body="Refs example-adopter/skills-evals#42", **over):
     repo = {"full_name": "example-adopter/skills-evals"}
     return {"user": {"login": "example-adopter"}, "labels": [{"name": "agent-authored"}],
             "head": {"repo": repo}, "base": {"repo": repo}, "body": body, **over}
@@ -115,7 +115,7 @@ class FixturePrGateTests(unittest.TestCase):
     def test_closes_and_full_urls_count_as_references(self):
         self.add_skill_fixture()
         self.commit("change")
-        for body in ("Closes #42", "fixes https://github.com/Adam-S-Daniel/skills-evals/issues/42"):
+        for body in ("Closes #42", "fixes https://github.com/example-adopter/skills-evals/issues/42"):
             with self.subTest(body=body):
                 self.assertTrue(gate.classify(self.repo, "main", "pr", pr(body=body),
                                               [issue()])["eligible"])
@@ -162,7 +162,7 @@ class FixturePrGateTests(unittest.TestCase):
         # The owner, 2026-11-03 (skills-evals#656): real fleet work or invented,
         # always recorded, and always naming the request it answers.
         base = f"skill: writing-adrs\nregistry: {REG}\nprompt: Write an ADR.\n"
-        real = "https://github.com/Adam-S-Daniel/example-repo/pull/7"
+        real = "https://github.com/example-adopter/example-repo/pull/7"
         bad = {
             "missing": ("", "no origin mapping"),
             "not a mapping": ("origin: real-work\n", "no origin mapping"),
@@ -286,9 +286,11 @@ class TriggerSetGateTests(unittest.TestCase):
         result = self.judge_set()
         self.assertEqual((result["lane"], result["eligible"], result["issue"]), (True, True, 42))
         self.assertEqual(result["reason"], "adds the trigger set for writing-adrs")
-        # The repository's own example set passes the same check.
+        # The repository's own example set passes the same check. The kit's
+        # writing-adrs set is in the library (Content tiers); a core skill's
+        # committed set stands in.
         self.assertTrue(gate.trigger_set_ok(
-            (ROOT / SET_PATH).read_bytes()))
+            (ROOT / "evals" / "skills-doctor" / "trigger-eval-set.json").read_bytes()))
 
     def test_anything_else_is_not_eligible(self):
         minimum = gate.propose_skill_edit.TRIGGER_ONLY_MIN_CLASS
@@ -318,6 +320,44 @@ class TriggerSetGateTests(unittest.TestCase):
                 result = self.judge_set()
                 self.assertTrue(result["lane"])
                 self.assertFalse(result["eligible"], name)
+
+    def test_the_readme_layout_line_for_the_skill_is_allowed(self):
+        # skills-evals#744: every trigger-set pull request also lists the
+        # skill's directory in README.md's layout; that one line may ride.
+        for line in ("  writing-adrs/", "  writing-adrs/  # reviewed trigger-eval-set.json only"):
+            with self.subTest(line=line):
+                git(self.repo, "checkout", "-q", "-B", "pr", "main")
+                self.write(SET_PATH, trigger_set())
+                self.write("README.md", f"x\n{line}\n")
+                result = self.judge_set()
+                self.assertTrue(result["eligible"], result["reason"])
+
+    def test_any_other_readme_change_is_not_eligible(self):
+        cases = {
+            "two lines": "x\n  writing-adrs/\n  more/\n",
+            "a removed line": "  writing-adrs/\n",
+            "a changed line": "y\n  writing-adrs/\n",
+            "another skill": "x\n  other-skill/\n",
+            "not indented": "x\nwriting-adrs/\n",
+            "text after the entry": "x\n  writing-adrs/ see https://example.com\n",
+            "too long": "x\n  writing-adrs/  # " + "a" * gate.README_LINE_MAX + "\n",
+        }
+        for name, text in cases.items():
+            with self.subTest(case=name):
+                git(self.repo, "checkout", "-q", "-B", "pr", "main")
+                self.write(SET_PATH, trigger_set())
+                self.write("README.md", text)
+                self.assertFalse(self.judge_set()["eligible"], name)
+        with self.subTest(case="README.md alone"):
+            git(self.repo, "checkout", "-q", "-B", "pr", "main")
+            self.write("README.md", "x\n  writing-adrs/\n")
+            self.assertFalse(self.judge_set()["eligible"])
+        with self.subTest(case="README.md made executable"):
+            git(self.repo, "checkout", "-q", "-B", "pr", "main")
+            self.write(SET_PATH, trigger_set())
+            self.write("README.md", "x\n  writing-adrs/\n")
+            (self.repo / "README.md").chmod(0o755)
+            self.assertFalse(self.judge_set()["eligible"])
 
     def test_an_executable_set_is_not_eligible(self):
         self.write(SET_PATH, trigger_set())
@@ -362,6 +402,13 @@ class FixturePrWorkflowTests(unittest.TestCase):
         self.assertIs(checkout["with"]["persist-credentials"], False)
         self.assertEqual(jobs["arm"]["permissions"], {})
         self.assertIn("lane == 'true'", jobs["disarm"]["if"])
+        # Disabling auto-merge needs repository write access; with
+        # contents: read the job token is refused and the PR merges anyway
+        # (skills-evals#744).
+        self.assertEqual(
+            jobs["disarm"]["permissions"],
+            {"contents": "write", "pull-requests": "write"},
+        )
         for job in jobs.values():
             self.assertNotIn("concurrency", job)
             for step in job["steps"]:
@@ -369,6 +416,27 @@ class FixturePrWorkflowTests(unittest.TestCase):
                 if "ROSTER_APP_PRIVATE_KEY" in str(step):
                     self.assertIs(step.get("continue-on-error"), True)
 
+
+    def test_disarm_uses_the_app_token_with_the_job_token_as_fallback(self):
+        # 2026-11-04: the job token with `contents: read` was refused
+        # ("Resource not accessible by integration
+        # (disablePullRequestAutoMerge)") and #744 merged while ineligible.
+        disarm = self.load("fixture-pr-gate.yml")["jobs"]["disarm"]
+        self.assertEqual(disarm["permissions"], {"contents": "write", "pull-requests": "write"})
+        mint, turn_off = disarm["steps"]
+        self.assertTrue(mint["uses"].startswith("actions/create-github-app-token@"))
+        self.assertEqual(mint["id"], "app-token")
+        self.assertIs(mint["continue-on-error"], True)
+        self.assertEqual(turn_off["env"]["APP_TOKEN"], "${{ steps.app-token.outputs.token }}")
+        self.assertEqual(turn_off["env"]["JOB_TOKEN"], "${{ github.token }}")
+        self.assertNotIn("GH_TOKEN", turn_off["env"])
+        run = turn_off["run"]
+        self.assertIn('*) token="$APP_TOKEN" ;;', run)
+        merges = [line.strip() for line in run.splitlines() if "pr merge" in line]
+        self.assertEqual(merges, ['if ! GH_TOKEN="$token" GITHUB_TOKEN="" gh pr merge "$NUMBER" '
+                                  '--repo "$REPO" --disable-auto > /dev/null; then'])
+        # A failed disable, or one that does not read back as off, is red.
+        self.assertEqual(run.count("exit 1"), 3)
 
 if __name__ == "__main__":
     unittest.main()
