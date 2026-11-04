@@ -70,7 +70,7 @@ class SiteWorkflowTests(unittest.TestCase):
             for step in mints:
                 self.assertIs(step.get("continue-on-error"), True, name)
                 if name == "sync":
-                    # The target follows SITE_REPO (unset or none: no site, the run skips).
+                    # The target follows SITE_REPO, which has no default.
                     self.assertEqual(step["with"]["repositories"],
                                      "${{ steps.site.outputs.name }}")
                     self.assertEqual(step["with"]["owner"], "${{ steps.site.outputs.owner }}")
@@ -108,9 +108,8 @@ class SiteWorkflowTests(unittest.TestCase):
             self.assertNotIn("example-adopter", doc["env"]["FIX_HINT"], name)
 
     def test_site_repo_comes_from_a_variable_and_none_skips_cleanly(self):
-        # The adoption kit's default: unset is the clean skip.
-        self.assertEqual(self.sync["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
-        self.assertEqual(self.preview["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
+        self.assertEqual(self.sync["env"]["SITE_REPO"], "${{ vars.SITE_REPO }}")
+        self.assertEqual(self.preview["env"]["SITE_REPO"], "${{ vars.SITE_REPO }}")
         resolve = [s for _, s in steps(self.sync) if s.get("id") == "site"]
         self.assertEqual(len(resolve), 1)
         run = resolve[0]["run"]

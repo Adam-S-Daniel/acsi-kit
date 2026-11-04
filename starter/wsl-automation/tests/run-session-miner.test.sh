@@ -191,15 +191,29 @@ for var in CI GITHUB_ACTIONS CLAUDE_CODE_REMOTE CLAUDE_CODE_REMOTE_SESSION_ID; d
     assert_eq "$([[ -f $STUB_RECORD ]] && echo ran || echo idle)" idle "$var: the miner is not run"
 done
 
-# 8. Defaults under HOME, then a config file read as data.
+# 8. The denylist default under HOME; LESSONS_CLONE and SKILLS_EVALS_URL have
+# none (they name the adopter's own repositories); then a config file read as data.
 mkdir -p "$HOME/.config" "$HOME/repos"
 cp -- "$denylist" "$HOME/.config/privacy-denylist.txt"
 git init --quiet "$HOME/repos/acsi-agentskills-private"
 git -C "$HOME/repos/acsi-agentskills-private" remote add origin 'https://example.com/registry.git'
+rm -f -- "$STUB_RECORD"
 run PYTHON="$test_root/bin/python-ok" bash "$script" --dry-run
-assert_eq "$rc" 0 'defaults run'
+assert_eq "$rc" 2 'an unset LESSONS_CLONE exits 2'
+assert_match "$out" '^session miner: LESSONS_CLONE is not set; set it in ~/\.config/wsl-automation/session-miner\.env' 'the missing LESSONS_CLONE is named with where to set it'
+assert_eq "$([[ -f $STUB_RECORD ]] && echo ran || echo idle)" idle 'an unset LESSONS_CLONE runs no miner'
+run PYTHON="$test_root/bin/python-ok" LESSONS_CLONE="$HOME/repos/acsi-agentskills-private" SKILLS_EVALS_URL= bash "$script" --dry-run
+assert_eq "$rc" 2 'an unset SKILLS_EVALS_URL exits 2'
+assert_match "$out" '^session miner: SKILLS_EVALS_URL is not set; set it in ~/\.config/wsl-automation/session-miner\.env' 'the missing SKILLS_EVALS_URL is named with where to set it'
+assert_eq "$([[ -f $STUB_RECORD ]] && echo ran || echo idle)" idle 'an unset SKILLS_EVALS_URL runs no miner'
+run PYTHON="$test_root/bin/python-ok" LESSONS_CLONE="$HOME/repos/acsi-agentskills-private" bash "$script" --dry-run
+assert_eq "$rc" 0 'the denylist default runs'
 assert_eq "$(record denylist)" "$HOME/.config/privacy-denylist.txt" 'default denylist path'
-assert_eq "$(record clone)" "$HOME/repos/acsi-agentskills-private" 'default registry clone'
+assert_eq "$(record clone)" "$HOME/repos/acsi-agentskills-private" 'the registry clone is the one set'
+example="$repository_root/config/session-miner.env.example"
+for key in LESSONS_CLONE SKILLS_EVALS_URL; do
+    assert_eq "$(grep -c "^$key=" "$example")" 1 "the config example carries $key"
+done
 
 config="$test_root/session-miner.env"
 cat >"$config" <<EOF

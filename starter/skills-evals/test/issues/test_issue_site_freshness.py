@@ -427,8 +427,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(mint["with"]["owner"], "${{ steps.site.outputs.owner }}")
 
     def test_site_repo_none_skips_every_step_after_the_decision(self):
-        # The adoption kit's default: unset is the clean skip.
-        self.assertEqual(self.doc["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
+        self.assertEqual(self.doc["env"]["SITE_REPO"], "${{ vars.SITE_REPO }}")
         decide = [s for s in self.steps if s.get("id") == "site"][0]
         self.assertIn('[ "$SITE_REPO" = none ]', decide["run"])
         for step in self.steps:
@@ -444,11 +443,6 @@ class WorkflowTests(unittest.TestCase):
                 envs += [(f"{job_id}/{s.get('name')}", s.get("env", {})) for s in job["steps"]]
             for where, env in envs:
                 for key, value in env.items():
-                    # The adoption kit's one fallback: an unset SITE_REPO is
-                    # none, the clean skip. Every other variable has none.
-                    if (where, key) == ("workflow", "SITE_REPO"):
-                        self.assertEqual(value, "${{ vars.SITE_REPO || 'none' }}", name)
-                        continue
                     self.assertIsNone(re.search(r"vars\.\w+\s*\|\|", str(value)),
                                       f"{name} {where} {key}: {value}")
 

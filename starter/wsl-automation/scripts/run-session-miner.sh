@@ -16,9 +16,12 @@
 #   - a privacy denylist kept outside every repository (PRIVACY_DENYLIST_FILE,
 #     default ~/.config/privacy-denylist.txt); without it nothing is mined;
 #   - the private registry clone whose origin receives persistent/lessons
-#     (LESSONS_CLONE, default ~/repos/acsi-agentskills-private), with a git
-#     credential that works with no desktop session (`gh auth git-credential`
-#     and a file-stored token, not a desktop credential manager);
+#     (LESSONS_CLONE, required, no default), with a git credential that works
+#     with no desktop session (`gh auth git-credential` and a file-stored
+#     token, not a desktop credential manager);
+#   - the skills-evals repository to clone the miner from (SKILLS_EVALS_URL,
+#     required, no default). Both name your own repositories, so neither has
+#     a fallback: unset, the wrapper exits 2 naming the key;
 #   - python3 with PyYAML;
 #   - one run by hand with --dry-run. Until one has succeeded, a scheduled run
 #     (no arguments) refuses with exit 3 and mines nothing.
@@ -28,7 +31,7 @@
 # ~/.config/wsl-automation/session-miner.env). The file is read as data, never
 # sourced: blank lines and # comments are skipped, only the keys below are
 # accepted, a leading ~/ is expanded, and a variable already in the
-# environment wins.
+# environment wins. config/session-miner.env.example carries the keys.
 #   PRIVACY_DENYLIST_FILE  LESSONS_CLONE  GUIDANCE_MANIFEST  MINER_REGISTRIES
 #   WIN_HOME  MINER_STATE  SKILLS_EVALS_URL  PYTHON
 #   FILE_ISSUES            `on` allows --file-issues (off until a sample of
@@ -121,8 +124,13 @@ if [[ -f $config ]]; then
 fi
 
 export PRIVACY_DENYLIST_FILE=${PRIVACY_DENYLIST_FILE:-$HOME/.config/privacy-denylist.txt}
-export LESSONS_CLONE=${LESSONS_CLONE:-$HOME/repos/acsi-agentskills-private}
-export SKILLS_EVALS_URL=${SKILLS_EVALS_URL:-https://github.com/example-adopter/skills-evals.git}
+# These two name your own repositories: no fallback, set them explicitly.
+for key in LESSONS_CLONE SKILLS_EVALS_URL; do
+    if [[ -z ${!key:-} ]]; then
+        finish 2 "session miner: $key is not set; set it in ~/.config/wsl-automation/session-miner.env (SESSION_MINER_CONFIG; see config/session-miner.env.example) or the environment"
+    fi
+    export "${key?}"
+done
 # Never wait on a credential prompt: a scheduled run has no one to answer it.
 export GIT_TERMINAL_PROMPT=0
 

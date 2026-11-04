@@ -18,7 +18,8 @@
 # Then sets the repository variables REPO_VARIABLES lists: repo-settings'
 # GUIDANCE_SYNC_APP_ID and ROSTER_WRITER_APP_ID, the App ids fleet.yml names
 # as ruleset bypass actors (export/DECISIONS.md C12), and skills-evals' four
-# ANTHROPIC_* federation ids eval.yml's token exchange reads. A key that is
+# ANTHROPIC_* federation ids eval.yml's token exchange reads, and its
+# SITE_REPO, which the site workflows require (none: no website). A key that is
 # still empty in fleet.env is left alone, so run this again after
 # create-apps.sh, and after filling in the federation ids.
 #
@@ -143,9 +144,9 @@ for entry in "${ENVIRONMENTS[@]}"; do
 done
 declare -A HAVE_VARS
 ensure_repo_variable() { # repo name source group
-  local r=$1 name=$2 src=$3 group=$4 want hint="run create-apps.sh, then this again"
-  [ "$group" = federation ] && hint="optional; docs/evals-and-loop.md#workload-identity-federation"
-  [ "$group" = federation ] || [ "$(variable_track "$r" "$src")" = base ] || hint="the evals track's App; /adopt-evals creates it"
+  local r=$1 name=$2 src=$3 group=$4 want hint
+  hint=$(variable_empty_hint "$name" "$group")
+  [[ $src == cfg:*_APP_ID ]] && [ "$(variable_track "$r" "$src")" != base ] && hint="the evals track's App; /adopt-evals creates it"
   absent_evals_repo "$r" "variable $name" && return 0
   want=$(repo_variable_value "$src")
   if [ -z "$want" ]; then

@@ -25,10 +25,9 @@
 #   never printed, only the status code. Missing variable or secret: the
 #   issue gets one comment saying so.
 # * Repository variables (Settings > Secrets and variables > Actions >
-#   Variables): SITE_REPO (owner/name of the site repository, or none to
-#   skip the whole run for an adopter without a site; unset is none, the
-#   adoption kit's default), and, with no default, SITE_PAGE_URL,
-#   SITE_ASSET_URL and, when the fire bearer secret is
+#   Variables), none of which has a default: SITE_REPO (owner/name of the
+#   site repository, or none to skip the whole run for an adopter without a
+#   site), SITE_PAGE_URL, SITE_ASSET_URL and, when the fire bearer secret is
 #   set, SITE_FRESHNESS_ROUTINE_ID. A missing one fails the first step
 #   naming it.
 name: Site freshness
@@ -51,7 +50,7 @@ permissions:
   actions: write
 
 env:
-  SITE_REPO: ${{ vars.SITE_REPO || 'none' }}
+  SITE_REPO: ${{ vars.SITE_REPO }}
   SITE_PAGE_URL: ${{ vars.SITE_PAGE_URL }}
   SITE_ASSET_URL: ${{ vars.SITE_ASSET_URL }}
 

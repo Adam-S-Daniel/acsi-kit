@@ -8,8 +8,8 @@
 # supersede the mirror. Derived from claude-memory-map's site-preview.yml, the
 # reference implementation.
 #
-# SITE_REPO is a repository variable (see README, Publishing to
-# example-site-a): unset or `none` (the adoption kit's default) skips cleanly.
+# SITE_REPO is a repository variable with no default (see README, Publishing to
+# example-site-a): unset fails the run naming it, `none` skips cleanly.
 #
 # No paths filter, deliberately: the teardown leg must run even when the final
 # diff no longer touches tool/index.html, and the mirror leg closes a stale
@@ -37,7 +37,7 @@ permissions:
   pull-requests: write # comment the preview links on this PR (GITHUB_TOKEN)
 
 env:
-  SITE_REPO: ${{ vars.SITE_REPO || 'none' }}
+  SITE_REPO: ${{ vars.SITE_REPO }}
   PREVIEW_BRANCH: tool-preview/skills-evals-pr-${{ github.event.pull_request.number }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   COMMENT_MARKER: "<!-- skills-evals-site-preview -->"

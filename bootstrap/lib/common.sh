@@ -131,6 +131,7 @@ CONFIG_KEYS=(
   EVAL_IMPROVE_APP_ID ROSTER_WRITER_APP_ID REGISTRY_READ_APP_ID
   ANTHROPIC_FEDERATION_RULE_ID ANTHROPIC_ORGANIZATION_ID
   ANTHROPIC_SERVICE_ACCOUNT_ID ANTHROPIC_WORKSPACE_ID
+  SITE_REPO
 )
 
 _valid_value() { # key value
@@ -150,6 +151,8 @@ _valid_value() { # key value
     ANTHROPIC_ORGANIZATION_ID) [[ $v =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] ;;
     ANTHROPIC_SERVICE_ACCOUNT_ID) [[ $v =~ ^svac_[A-Za-z0-9]{8,64}$ ]] ;;
     ANTHROPIC_WORKSPACE_ID) [[ $v =~ ^wrkspc_[A-Za-z0-9]{8,64}$ ]] ;;
+    # The pattern site-sync.yml accepts: none, or owner/name.
+    SITE_REPO) [[ $v == none || $v =~ ^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$ ]] ;;
     *) return 1 ;;
   esac
 }
@@ -517,6 +520,8 @@ value_group() { case $1 in PRIVACY_DENYLIST) echo privacy ;; *) echo routine-fir
 # Anthropic workload identity federation set-up (docs/evals-and-loop.md,
 # "Workload identity federation"): optional, so verify.sh checks it only when
 # named (--only federation), and an empty fleet.env key is skipped.
+# SITE_REPO is required and has no default anywhere (settings-schema-design
+# rule 4): fleet.env.example ships it as none, the explicit "no website".
 REPO_VARIABLES=(
   "repo-settings|GUIDANCE_SYNC_APP_ID|cfg:GUIDANCE_SYNC_APP_ID|variables"
   "repo-settings|ROSTER_WRITER_APP_ID|cfg:ROSTER_WRITER_APP_ID|variables"
@@ -524,7 +529,15 @@ REPO_VARIABLES=(
   "skills-evals|ANTHROPIC_ORGANIZATION_ID|cfg:ANTHROPIC_ORGANIZATION_ID|federation"
   "skills-evals|ANTHROPIC_SERVICE_ACCOUNT_ID|cfg:ANTHROPIC_SERVICE_ACCOUNT_ID|federation"
   "skills-evals|ANTHROPIC_WORKSPACE_ID|cfg:ANTHROPIC_WORKSPACE_ID|federation"
+  "skills-evals|SITE_REPO|cfg:SITE_REPO|variables"
 )
+
+# variable_empty_hint <name> <group>: what to do about an empty fleet.env key.
+variable_empty_hint() {
+  if [ "$1" = SITE_REPO ]; then echo "required: none for no website, or the site's owner/name; docs/routines.md#dashboard-refresh"
+  elif [ "$2" = federation ]; then echo "optional; docs/evals-and-loop.md#workload-identity-federation"
+  else echo "run create-apps.sh, then this again"; fi
+}
 
 # repo_variable_value <source>: the value a REPO_VARIABLES source stands for.
 repo_variable_value() {
