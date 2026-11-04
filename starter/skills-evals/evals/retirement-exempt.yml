@@ -16,6 +16,7 @@ guidance:
   - git-push-does-not-mean-commit-exists
   - pinning-github-actions
   - skills-ecosystem
+  - turn-lessons-into-checks
   - two-setup-gaps
   - watch-finished-is-not-ci-passed
   - working-in-these-repos

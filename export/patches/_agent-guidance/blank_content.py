@@ -68,10 +68,9 @@ SECTIONS = [
     ("Working in these repos", "working-in-these-repos", "core"),
     ("Anything you name gets its link", "anything-you-name-gets-its-link", "opinionated"),
     ("Finding your unknowns", "finding-your-unknowns", "opinionated"),
-    # New 2026-11-04. Core once its coverage row is covered (_agent-guidance
-    # #452, not merged at this pin); until then a core row that is a gap is
-    # refused below, so it is not shipped (re-pin Round 4 in DECISIONS.md).
-    ("Turn lessons into checks, skills and guidance", "turn-lessons-into-checks", "none"),
+    # New 2026-11-04; core since its coverage row was covered (_agent-guidance
+    # #452, re-pin Round 4 in DECISIONS.md).
+    ("Turn lessons into checks, skills and guidance", "turn-lessons-into-checks", "core"),
     ("Workstation layout", "workstation-layout", "none"),
     ("Security", "security", "recommended"),
     ("Data exposure in CI and public repos", "data-exposure-in-ci", "core"),

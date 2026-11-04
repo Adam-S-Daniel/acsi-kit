@@ -70,8 +70,6 @@ exclude:
     why: X9 and Content tiers (a fixture for a guidance section the kit does not ship). evals/guidance/_delivery/ stays, the delivery canary.
   - path: evals/guidance/section-typescript/
     why: X9 and Content tiers (a fixture for a guidance section the kit does not ship). evals/guidance/_delivery/ stays, the delivery canary.
-  - path: evals/guidance/turn-lessons-into-checks/
-    why: X9 and Content tiers (a fixture for a guidance section the kit does not ship yet; re-pin Round 4). evals/guidance/_delivery/ stays, the delivery canary.
   - path: evals/guidance/two-github-connectors/
     why: X9 and Content tiers (a fixture for a guidance section the kit does not ship). evals/guidance/_delivery/ stays, the delivery canary.
   - path: evals/guidance/workstation-layout/

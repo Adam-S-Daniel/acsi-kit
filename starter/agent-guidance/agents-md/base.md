@@ -36,6 +36,21 @@ exists, then `covered`), add an entry to `docs/guidance-impact.md`, and run
   Only the owner adds or removes the label, or an agent the owner directs in
   that session.
 
+## Turn lessons into checks, skills and guidance
+
+When a mistake, an owner correction or a procedure you had to work out
+could recur, capture it before you finish, unasked (the one addition "fix
+what was asked" allows), in its own commit:
+
+- **A check first**, when a commit can show the problem: fleet-wide in
+  `_agent-guidance`'s `templates/agent-checks/agent-checks`, one repo's in
+  `.agent-checks/local.sh`.
+- **Else a skill** for a multi-step procedure, in the skills registry.
+- **Else a guidance section** in `_agent-guidance`'s `agents-md/base.md`.
+
+Name each in a commit trailer, `Captures: check|skill|section <id>`; the
+evals dashboard counts these and their blocks, uses and eval verdicts.
+
 ## Data exposure in CI and public repos
 
 CI logs, summaries, artifacts, run pages and git history are public on a

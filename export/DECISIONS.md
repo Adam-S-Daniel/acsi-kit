@@ -1792,7 +1792,7 @@ and `agentskills-private` stays at `c5b1bc9` (not re-exported, as above).
 
 | Repo | Old | New |
 |---|---|---|
-| `_agent-guidance` | `ba30b6f61437e84bbe8696d11d2a5818d4b12bba` | `37c073e7dab10d61f3b0c35164b625030167d5a9` |
+| `_agent-guidance` | `ba30b6f61437e84bbe8696d11d2a5818d4b12bba` | `a406262b2a726ccb84e892e513b2b51c28d6a002` |
 | `agentskills` (the public registry) | `13075c83be711d134d7e39e3d00584dea736b933` | `126e8e0f7cd48be1ff280dd6eaa0f64d9b28408d` |
 | `repo-settings` | `4308b61cd0a482b38c9c683094f85ed96132958e` | `9db16b62932a351fb4d6a903ffe132f9cd594ba1` |
 | `skills-evals` | `50daafcaf5535612491dd758b3f0c05012f31e4b` | `f3196c3fcfafb2f801e860bf1c700fe2bacc8cc3` |
@@ -1813,18 +1813,18 @@ Neither Node lockfile moved (`_agent-guidance`'s root, `skills-evals`'
   32 KiB" rule, which the kit's `AGENTS.md` carries, so it is machinery
   like `pr-tldr`.
 - **`_agent-guidance`, the new section "Turn lessons into checks, skills
-  and guidance"** (`turn-lessons-into-checks`) is to be core, as the owner
-  asked, but is **not shipped at this pin**. The kit refuses a core section
-  whose coverage row is neither covered by a fixture nor skipped with a
-  reason, and at `37c073e` its row is `gap`; the row turns `covered` in
-  `_agent-guidance` [#452](https://github.com/Adam-S-Daniel/_agent-guidance/pull/452),
-  which had not merged. So `blank_content.py` lists it with tier `none`,
-  and the `skills-evals` manifest leaves its fixture
-  (`evals/guidance/turn-lessons-into-checks/`) out, as for every section
-  the kit does not ship. Once #452 merges: pin its merge commit, set the
-  tier to `core`, drop that exclusion, and add a core
-  `turn-lessons-into-checks` guidance item to `bootstrap/content-catalog.json`
-  (which also puts it in `retirement-exempt.yml`).
+  and guidance"** (`turn-lessons-into-checks`) ships as core, as the owner
+  asked. The kit refuses a core section whose coverage row is neither
+  covered by a fixture nor skipped with a reason; the row turned `covered`
+  in `_agent-guidance` [#452](https://github.com/Adam-S-Daniel/_agent-guidance/pull/452),
+  which is why the pin is `a406262` (past #452's merge, `2e53728`) rather
+  than the `37c073e` this round first took. Its fixture,
+  `evals/guidance/turn-lessons-into-checks/`, ships with it, and
+  `bootstrap/content-catalog.json` lists it as a core guidance item, which
+  also puts it in `retirement-exempt.yml`. The same pin brings
+  `_agent-guidance` #453, which makes the runner's `problem()` print an
+  `::error` annotation in CI; it ships as the source has it, and no kit
+  edit is anchored on either changed line.
 - **`_agent-guidance`, the prompt-audit sweep is fired by a workflow.**
   The new `prompt-audit-fire.yml` fires the sweep for each trigger issue
   the changelog watcher files, with the bearer in an Actions secret instead
