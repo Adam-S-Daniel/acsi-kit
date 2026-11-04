@@ -1968,3 +1968,25 @@ set in one place, fail descriptively, and an opt-out set explicitly.
 
 Reverse: pin `50daafc`, restore the seven edits, and drop the `SITE_REPO`
 key, its `REPO_VARIABLES` row and the doc changes.
+
+### Fourth pin, and the session miner's repository settings (2026-11-04)
+
+The manifest moves on to the source's `main`,
+`af2163e9302b2f0e7954c52cddef2c3352f54432` (the site freshness check's
+iframe fix and a glossary entry). No edit, patch or retarget needed changing.
+
+The kit's own session miner wrapper
+(`overlay/wsl-automation/scripts/run-session-miner.sh`) fell back to
+`~/repos/acsi-agentskills-private` for `LESSONS_CLONE` and to the adopter's
+`skills-evals` URL for `SKILLS_EVALS_URL`. Both name the adopter's own
+repositories, so under settings-schema-design rule 4 neither has a default
+now: each comes from the environment or `session-miner.env`, and unset the
+wrapper exits 2 naming the key and where to set it. A new
+`config/session-miner.env.example` carries both keys, and the README's
+"Session miner task" and `docs/machine.md` say to copy it.
+`PRIVACY_DENYLIST_FILE` keeps its `~/.config` default: it names a path on
+the machine, not a repository. `tests/run-session-miner.test.sh` covers both
+missing keys.
+
+Reverse: pin `cdedb7e1`, restore the two fallbacks, and drop the example and
+its tests.
