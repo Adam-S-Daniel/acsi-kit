@@ -7,8 +7,10 @@ and one no-permission "pushed" workflow per lane listens for them
 (on.push.branches) and hands off to its gate. So:
 
   * the lanes are the claude/ branch patterns of skills-evals' workflows,
-    and there are the six the system has: results (claude/eval-*),
+    and there are the six the routine pushes: results (claude/eval-*),
     improve, improve cost, guidance improve, scaffold and draft-skill;
+    plus the one the private dashboard's refresh pushes, weekly spend
+    totals (claude/spend-*), which the routine's instructions need not name;
   * every claude/<lane>- branch the routine's instructions
     (docs/routine/eval-runner-instructions.md, which the routine's stub
     prompt reads at each run) or another skills-evals doc names matches a
@@ -54,9 +56,12 @@ for path in sorted((SE / ".github" / "workflows").glob("*.yml")):
         if b.startswith("claude/"):
             paths = push.get("paths")
             lanes[b] = (path.name, {p.split("/")[0] for p in paths} if paths else None)
-check(f"skills-evals listens on the six routine lanes ({sorted(lanes)})", set(lanes) == {
+# Lanes pushed by something other than the eval runner routine: the private
+# dashboard's refresh pushes the weekly spend totals (spend-pushed.yml).
+DASHBOARD_LANES = {"claude/spend-*"}
+check(f"skills-evals listens on the six routine lanes and the dashboard's ({sorted(lanes)})", set(lanes) == {
     "claude/eval-*", "claude/eval-improve-*", "claude/eval-cost-*", "claude/eval-guidance-improve-*",
-    "claude/scaffold-*", "claude/draft-skill-*"})
+    "claude/scaffold-*", "claude/draft-skill-*"} | DASHBOARD_LANES)
 
 BRANCH = re.compile(r"claude/[a-z][a-z-]*-")
 prompt = (SE / "docs" / "routine" / "eval-runner-instructions.md").read_text(encoding="utf-8")
@@ -77,7 +82,7 @@ for doc in sorted((SE / "docs").rglob("*.md")):
                     check(f"{rel}: the lanes {token}<run> matches write disjoint directories ({sorted(seen & d)})",
                           not (seen & d))
                     seen |= d
-for pattern in sorted(lanes):
+for pattern in sorted(set(lanes) - DASHBOARD_LANES):
     check(f"the routine's instructions push to {pattern} ({lanes[pattern][0]} listens)",
           any(fnmatch.fnmatchcase(t + "run", pattern) for t in named_in_prompt))
 

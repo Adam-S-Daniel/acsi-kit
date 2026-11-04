@@ -685,6 +685,12 @@ def expected_guidance(evals_dir: Path, section: str, guidance_dir: Path | None) 
     return out
 
 
+#: The reason prefix of a verdict that could not be computed (the verdict
+#: function raised). Such a verdict is unknown data, not `insufficient`
+#: evidence: retire_skill.py's withdrawal never acts on it.
+VERDICT_RAISED = "the verdict raised "
+
+
 def load_exempt(evals_dir: Path) -> dict:
     """The core items the retirement never removes: {"skills": set,
     "guidance": set} from <evals_dir>/retirement-exempt.yml (none when the
@@ -747,7 +753,7 @@ def compute(tree: Path, roster_path: Path, policy_path: Path, evals_dir: Path,
                 gates.prior_from_history(history, skill, policy["objective_margin"]))
         except Exception as exc:  # noqa: BLE001 - one skill's failure is its own
             skills[skill] = {"verdict": "insufficient", "cells": [], "runs_used": [],
-                             "reason": f"the verdict raised {type(exc).__name__}"}
+                             "reason": f"{VERDICT_RAISED}{type(exc).__name__}"}
     finalize(skills, load_exempt(evals_dir)["skills"])
     doc = {"schema_version": 1, "as_of": as_of,
             "newest_run": max((r["timestamp"] for r in index["runs"]), default=None),
@@ -783,7 +789,7 @@ def guidance_section_verdicts(index: dict, models: list, policy: dict, evals_dir
                 gates.prior_from_history(history, section, policy["objective_margin"]))
         except Exception as exc:  # noqa: BLE001 - one section's failure is its own
             sections[section] = {"verdict": "insufficient", "cells": [], "runs_used": [],
-                                 "reason": f"the verdict raised {type(exc).__name__}"}
+                                 "reason": f"{VERDICT_RAISED}{type(exc).__name__}"}
     finalize(sections, load_exempt(evals_dir)["guidance"])
     return {"guidance": sections, "guidance_policy": policy,
             "guidance_retirement_mode": policy["retirement_mode"],

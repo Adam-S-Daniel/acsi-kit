@@ -323,7 +323,8 @@ class TestScheduledFixtures(unittest.TestCase):
                     "eval": {"contents": "read", "id-token": "write"},
                     "publish": {"contents": "write"},
                     "roster": {"contents": "read", "id-token": "write", "issues": "write"},
-                    "disarm": {"contents": "read", "pull-requests": "write"},
+                    # `contents: write`: GitHub refuses --disable-auto without it.
+                    "disarm": {"contents": "write", "pull-requests": "write"},
                     "roster-pr": {"contents": "read", "pull-requests": "write", "issues": "write"},
                     "roster-wait": {"contents": "read", "pull-requests": "write"},
                     "failure-watch": {"issues": "write"}}
@@ -752,7 +753,17 @@ class WeeklyRoutineCallerTests(unittest.TestCase):
                                       "--raw-field", "model=claude-opus-5-5",
                                       "--raw-field", "arms=bare",
                                       "--raw-field", f"trials={bare_trials()}"])
-        for arms in ("", "with", "without", "both bare"):
+        # A guidance cell not leaning toward removal fires its in-situ pair
+        # alone (owner, 2026-11-03), at one trial like `both`.
+        guidance = "evals/guidance/anything-you-name-gets-its-link/handoff"
+        result, sent = self.dispatch({"MODE": "eval", "ARMS": "in-situ", "FIXTURE": guidance,
+                                      "MODEL": "claude-opus-5-5"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(sent[-8:], ["--raw-field", "fixture=" + guidance,
+                                      "--raw-field", "model=claude-opus-5-5",
+                                      "--raw-field", "arms=in-situ",
+                                      "--raw-field", "trials=1"])
+        for arms in ("", "with", "without", "both bare", "in-situ both"):
             with self.subTest(arms=arms):
                 result, sent = self.dispatch({"MODE": "eval", "ARMS": arms,
                                               "FIXTURE": EXPECTED[0], "MODEL": "m"})

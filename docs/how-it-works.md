@@ -40,7 +40,7 @@ the generic `acsi-` (automatic continuous self-improvement;
 | `repo-settings` | private | Every repo's settings as code: `repo-settings/fleet.yml` and the engine `scripts/repo_settings.py`, applied by a workflow behind your approval | [`starter/repo-settings/`](../starter/repo-settings/README.md) |
 | `acsi-agentskills` | public | Shareable skills, as a Claude Code plugin marketplace with four plugins; the cloud skills bootstrap hook; `setup.sh` for machines | [`starter/agent-skills/`](../starter/agent-skills/README.md) |
 | `acsi-agentskills-private` | private | Skills that touch personal data, and the lessons the session miner writes (`persistent/lessons`) | [`starter/agent-skills-private/`](../starter/agent-skills-private/README.md) |
-| `skills-evals` | public (paid plan: your choice) | Fixtures, the eval harness, the planner, the gates, the results branch, the dashboard; only the evals track (`/adopt-evals`) creates it | [`starter/skills-evals/`](../starter/skills-evals/README.md) |
+| `skills-evals` | public (paid plan: your choice) | Fixtures, the eval harness, the planner, the gates, the results branch, the explorer pages (public and private); only the evals track (`/adopt-evals`) creates it | [`starter/skills-evals/`](../starter/skills-evals/README.md) |
 | `wsl-automation` | public (paid plan: your choice) | Your durable machine's scheduled jobs: the usage census, the waiting-on-you feed, the session miner | [`starter/wsl-automation/`](../starter/wsl-automation/README.md) |
 
 Every other repo you work in is a **consumer**; together they are your

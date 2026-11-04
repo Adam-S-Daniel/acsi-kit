@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: c6b38e18c441888d8458979f75d020bce2253655
+source_sha: 50daafcaf5535612491dd758b3f0c05012f31e4b
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -42,6 +42,7 @@ substitutions:
   - {name: skills-evals guidance removal rule test name, literal: test_the_committed_guidance_removal_rule_is_adams, to: test_the_committed_guidance_removal_rule_is_the_owners}
   - {name: skills-evals guidance removal notice test name, literal: test_auto_mode_notifies_adam_with_the_removal_and_its_reversal, to: test_auto_mode_notifies_the_owner_with_the_removal_and_its_reversal}
   - {name: skills-evals registry size constant, literal: _ADAM_AGENTSKILLS_NOW, to: _ACSI_AGENTSKILLS_NOW}
+  - {name: skills-evals explorer page names-no-person check, literal: "!/\\bAdam(?:'s|\\s)/.test(html)", to: "!/\\bExample Adopter(?:'s|\\s)/.test(html)", paths: [explorer/test/run.js]}
   - {name: skills-evals Google-key-shaped test strings split so secret scanning does not read them as live keys, regex: '"AIza(?=[0-9A-Za-z_-]{30,}")', to: '"AI" + "za', paths: [test/run_tests.py]}
 
 exclude:
@@ -212,12 +213,12 @@ edits:
       X9. The browser-testing fixture whose parser this step installed is left
       out; Node stays for the real-work fixtures' own npm installs below.
   - path: scripts/dev_setup.sh
-    old: "    --print-npm-dirs) echo evals/browser-testing/seed; real_work_dirs npm; exit 0 ;;\n"
-    new: "    --print-npm-dirs) real_work_dirs npm; exit 0 ;;\n"
+    old: "    --print-npm-dirs) echo evals/browser-testing/seed; echo explorer; real_work_dirs npm; exit 0 ;;\n"
+    new: "    --print-npm-dirs) echo explorer; real_work_dirs npm; exit 0 ;;\n"
     why: X9. Follows ci.yml, which no longer installs the left-out browser-testing fixture.
   - path: scripts/dev_setup.sh
-    old: "for dir in evals/browser-testing/seed $npm_dirs; do\n"
-    new: "for dir in $npm_dirs; do\n"
+    old: "for dir in evals/browser-testing/seed explorer $npm_dirs; do\n"
+    new: "for dir in explorer $npm_dirs; do\n"
     why: X9. Same.
 
   # ---- C7: the routine's trigger id is the adopter's, held in a repo variable
@@ -433,6 +434,127 @@ edits:
       first row) before any fixture exists.
   # ---- substitution side effects
 
+  # ---- Adopter defaults: no site to publish to until the adopter names one
+  - path: .github/workflows/site-sync.yml
+    stage: output
+    old: |
+      # repository variable SITE_REPO (default example-adopter/example-site-a); `none`
+      # is a clean skip for an adopter without a site. site-freshness.yml watches
+      # the result.
+    new: |
+      # repository variable SITE_REPO; unset or `none` (the adoption kit's
+      # default) is a clean skip for an adopter without a site, and owner/name
+      # names the site repo to publish to. site-freshness.yml watches the result.
+    why: >-
+      Adopter defaults. The source falls back to the source owner's site when
+      SITE_REPO is unset, and a run with no App on that site fails red. An
+      adopter has no site until they set one, so the kit's fallback is `none`,
+      the clean skip the source already has.
+  - path: .github/workflows/site-sync.yml
+    stage: output
+    old: "  SITE_REPO: ${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}\n"
+    new: "  SITE_REPO: ${{ vars.SITE_REPO || 'none' }}\n"
+    why: Adopter defaults. Same.
+  - path: .github/workflows/site-freshness.yml
+    stage: output
+    old: "  SITE_REPO: ${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}\n"
+    new: "  SITE_REPO: ${{ vars.SITE_REPO || 'none' }}\n"
+    why: >-
+      Adopter defaults. As in site-sync.yml: unset is `none`, so the hourly
+      check skips every step after its first while the adopter has no site.
+  - path: .github/workflows/site-freshness.yml
+    stage: output
+    old: |
+      # * SITE_REPO=none (a repository variable) skips the whole run, for adopters
+      #   without a site.
+    new: |
+      # * SITE_REPO=none (a repository variable), or SITE_REPO unset (the
+      #   adoption kit's default), skips the whole run, for adopters without a
+      #   site.
+    why: Adopter defaults. Says what an unset variable does in the kit's copy.
+  - path: test/issues/test_issue_72_site_sync.py
+    stage: output
+    old: |2
+              self.assertEqual(self.sync["env"]["SITE_REPO"],
+                               "${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}")
+    new: |2
+              # The adoption kit's default: unset is the clean skip.
+              self.assertEqual(self.sync["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
+    why: Adopter defaults. Follows the site-sync.yml fallback.
+  - path: test/issues/test_issue_72_site_sync.py
+    stage: output
+    old: "                    # The target follows SITE_REPO (default example-adopter/example-site-a).\n"
+    new: "                    # The target follows SITE_REPO (unset or none: no site, the run skips).\n"
+    why: Adopter defaults. The comment follows the fallback.
+  - path: test/issues/test_issue_site_freshness.py
+    stage: output
+    old: |2
+              self.assertEqual(self.doc["env"]["SITE_REPO"],
+                               "${{ vars.SITE_REPO || 'example-adopter/example-site-a' }}")
+    new: |2
+              # The adoption kit's default: unset is the clean skip.
+              self.assertEqual(self.doc["env"]["SITE_REPO"], "${{ vars.SITE_REPO || 'none' }}")
+    why: Adopter defaults. Follows the site-freshness.yml fallback.
+  - path: evals/public-export.yml
+    stage: output
+    old: |
+      # plan name), and each eval run keeps its meter readings. When false, `spend`
+      # is null and the meter readings are null.
+      include_spend: true
+    new: |
+      # plan name), and each eval run keeps its meter readings. When false, `spend`
+      # is null and the meter readings are null.
+      #
+      # The adoption kit ships false: what an account spends is the adopter's to
+      # publish, so the public document carries none of it until they choose to.
+      include_spend: false
+    why: >-
+      Adopter defaults. The source owner publishes their spend; an adopter's
+      public explorer document starts without it, and turning it on is one
+      line here.
+  - path: test/issues/test_issue_public_data_contract.py
+    stage: output
+    old: |2
+          def test_the_committed_export_policy_includes_spend(self):
+              self.assertTrue(pub.include_spend(ROOT / "evals" / "public-export.yml"))
+              off = write(self.t.root / "export.yml", "include_spend: false\n")
+              self.assertFalse(pub.include_spend(off))
+    new: |2
+          def test_the_committed_export_policy_leaves_spend_out(self):
+              # The adoption kit's default (its export record, Adopter defaults).
+              self.assertFalse(pub.include_spend(ROOT / "evals" / "public-export.yml"))
+              on = write(self.t.root / "export.yml", "include_spend: true\n")
+              self.assertTrue(pub.include_spend(on))
+              off = write(self.t.root / "export.yml", "include_spend: false\n")
+              self.assertFalse(pub.include_spend(off))
+    why: >-
+      Adopter defaults. The committed policy is false in the kit; the test
+      still checks the flag reads both ways.
+  - path: test/issues/test_issue_explorer_lessons.py
+    stage: output
+    old: |2
+                  record("red-ci-after-push", "none", "", repo="example-site-a")),
+                  ("red-ci-example-site-a-ai", "new-skill"))
+    new: |2
+                  record("red-ci-after-push", "none", "", repo="example-site-a")),
+                  ("red-ci-example-site-a", "new-skill"))
+    why: >-
+      Substitution side effect. The source derives the subject from the repo
+      name (dots to hyphens): its site's name has a dot, the kit's invented
+      one does not, so the expected subject loses the source's `-ai`.
+  - path: test/issues/test_issue_dashboard_build.py
+    stage: output
+    old: |2
+                  for name in ("Waiting on the owner", "the owner's", "the owner "):
+    new: |2
+                  # The kit's invented person (bootstrap/lib/substitute.py gives
+                  # it the adopter's name); "the owner" is the page's own word.
+                  for name in ("Waiting on Example Adopter", "Example Adopter's", "Example Adopter "):
+    why: >-
+      Substitution side effect. The source checks that the page never names
+      its owner by first name; C10 turns that name into "the owner", which
+      the page now says on purpose (its shared public strings), so the check
+      looks for the kit's invented person instead.
   # ---- Cold-start fixes (2026-10-29): the dashboard builds from nothing
   - path: dashboard/build.py
     stage: output
@@ -466,14 +588,16 @@ edits:
       Cold start. `loop_status.json` is the loop thread's own gap list, which
       an adopter has no source for yet; build() exited "missing input". An
       absent file builds as no gaps, like the other optional dumps.
-  - path: dashboard/page/index.html
+  - path: explorer/src/private/datasets.js
     stage: output
-    old: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', half_built_issues: 'key', fixture_requests: 'key', cost_benefit_weeks: 'week', cost_benefit_summary: 'key', ci_red_runs: 'key' };\n"
-    new: "  const PH = { eval_runs: 'run_id', bare_runs: 'run_id', usage_rows: 'kind', usage_sources: 'key', half_built_issues: 'key', fixture_requests: 'key', cost_benefit_weeks: 'week', cost_benefit_summary: 'key', ci_red_runs: 'key', threads: 'id', loop_gaps: 'gap' };\n"
+    old: "  cost_benefit_weeks: 'week', half_built_issues: 'key'\n};\n"
+    new: "  cost_benefit_weeks: 'week', half_built_issues: 'key', threads: 'id', loop_gaps: 'gap'\n};\n"
     why: >-
       Cold start. The two new placeholder rows are hidden the way the other
       key-field placeholders are, so the loop gap counts stay 0 of 0 and the
-      tables stay empty rather than showing a "none" row.
+      tables stay empty rather than showing a "none" row. The private page
+      (dashboard/page/index.html) is built from this file; the regenerate
+      step below rebuilds it.
   - path: dashboard/README.md
     stage: output
     old: "| `loop_status.json` | The loop's gap list (`gaps[]`: `gap`, `title`, `status`, `owner`, `pr`), kept by the loop thread |\n"
@@ -490,6 +614,9 @@ edits:
               empty_results, empty_inputs, out = self.tmp / "r0", self.tmp / "i0", self.tmp / "ds0"
               empty_results.mkdir()
               empty_inputs.mkdir()
+              # The one input a build requires: the public explorer document,
+              # which explorer-data.yml writes on its first run.
+              write(empty_results / "explorer" / "latest.json", {"schema_version": 1})
               build.main(["--results", str(empty_results), "--inputs", str(empty_inputs),
                           "--config", str(DASH / "config.example"), "--out", str(out), "--now", NOW.isoformat()])
               threads = json.loads((out / "threads.json").read_text())
@@ -498,8 +625,9 @@ edits:
               self.assertEqual([r["gap"] for r in gaps], ["none"])
               for name in {p.stem for p in out.glob("*.json")}:
                   self.assertTrue(json.loads((out / f"{name}.json").read_text()), name)
-              page = (DASH / "page" / "index.html").read_text()
-              self.assertIn("threads: 'id', loop_gaps: 'gap'", page)  # the page hides both placeholders
+              # The page (built from explorer/src) hides both placeholders.
+              keys = (REPO / "explorer" / "src" / "private" / "datasets.js").read_text()
+              self.assertIn("threads: 'id', loop_gaps: 'gap'", keys)
 
           def test_the_page_names_no_owner(self):
     why: Cold start. Regression test that build.py succeeds on fully empty inputs.
@@ -588,6 +716,27 @@ protect_except:
       (citation-shaped test data) that mine_real_work.closing_refs must
       resolve against the substituted owner; left as the source owner's,
       the "another owner's repo" cases would test the wrong thing.
+  - path: test/issues/test_issue_fixture_pr_gate.py
+    why: >-
+      Its pull request bodies name the fixture-need issue as an
+      owner/repo#N reference (citation-shaped test data) that
+      fixture_pr_gate.py's substituted owner pattern must find; left as the
+      source owner's, no request matches and every lane test fails.
+  - path: test/issues/test_issue_explorer_lessons.py
+    why: >-
+      Its expected issue and pull request URLs (citation-shaped test data)
+      are what explorer_data.py builds from the substituted owner and
+      registry names, so both sides are substituted together.
+  - path: test/issues/test_issue_dashboard_build.py
+    why: >-
+      Its expected half-built issue keys (owner/repo#N, citation-shaped test
+      data) are built by dashboard/build.py from the substituted owner, so
+      both sides are substituted together.
+  - path: test/issues/test_issue_public_data_contract.py
+    why: >-
+      Its expected activity URLs (citation-shaped test data) are built by
+      explorer_public.py from the substituted owner, so both sides are
+      substituted together.
 
 regenerate:
   - copy_from_kit: {repo: _agent-guidance, from: agents-md/base.md, to: .claude/hooks/fleet-guidance.md}
@@ -605,6 +754,21 @@ regenerate:
       "$(sed -n '/^## Repo-specific additions/,$p' AGENTS.md)" > AGENTS.md.new
       && mv AGENTS.md.new AGENTS.md
     why: AGENTS.md's managed half is the kit's build-agents-md.sh output, as the sync writes it.
+  - run: >-
+      nm="$EXPORT_SOURCES/skills-evals/explorer/node_modules";
+      [ -d "$nm/esbuild" ] || { echo "no $nm/esbuild: run npm ci in the source's explorer/ (export/REGENERATE.md, explorer)" >&2; exit 1; };
+      ln -s "$nm" explorer/node_modules;
+      (cd explorer && node build.js >/dev/null); rc=$?;
+      rm explorer/node_modules; exit $rc
+    why: >-
+      The three pages are the build output of explorer/src (tool/index.html,
+      the public Evals Explorer; explorer/dist/artifact/index.html, the same
+      page as a claude.ai artifact; and dashboard/page/index.html, the
+      private dashboard). They are rebuilt from the substituted source, so the
+      exported pages equal a fresh `npm run build` of the exported tree and
+      the tree's own `npm run check` passes. The pinned esbuild comes from
+      the source checkout's explorer/node_modules, installed from the
+      source's lockfile at source_sha (ci.yml and resync.yml do that).
 
 suite:
   git_init: true

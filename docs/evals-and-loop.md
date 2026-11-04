@@ -17,7 +17,13 @@ guidance sections and acts on the numbers:
   gates, ingest, and the improve, draft, scaffold and retire lanes.
 - `.github/workflows/` holds the workflows that fire the eval runner routine
   and turn what it pushes into pull requests.
-- `dashboard/` is the optional project dashboard.
+- `explorer/` is the source of the three explorer pages, built with esbuild
+  (`npm run build`): the public Evals Explorer for a website,
+  `tool/index.html`; the same Explorer as a claude.ai artifact,
+  `explorer/dist/artifact/index.html`; and the optional private project
+  dashboard, `dashboard/page/index.html` (`dashboard/` holds its datasets,
+  build and refresh tasks; [routines](routines.md#dashboard-refresh) says
+  how to publish them).
 
 The deepest account is its
 [`docs/how-it-works.md`](../starter/skills-evals/docs/how-it-works.md);
@@ -100,6 +106,7 @@ it and acts:
 | scaffold | `claude/scaffold-*` | `routine-scaffold-gate.yml` opens a fixtures pull request here with the `roster` App |
 | improve cost | `claude/eval-cost-*` (`improve-cost/`) | `routine-eval-ingest.yml` validates the cost record of an improve or guidance-improve run |
 | draft skill | `claude/draft-skill-*` (`draft-skill/`, `evals/`) | `routine-draft-skill-gate.yml` opens a skill pull request in `acsi-agentskills` and a fixtures one here, or a hook-proposal issue |
+| weekly spend | `claude/spend-*` (`spend/`) | `routine-eval-ingest.yml` validates `spend/weekly.json` and writes it to `persistent/eval-results`. This lane is the private dashboard refresh's (`dashboard/build.py --spend`), not the routine's; the public document carries it only with `include_spend: true` |
 
 An improve or cost branch also matches `claude/eval-*`; the lanes' path
 filters are disjoint, and the results lane excludes cost branches, so only

@@ -158,11 +158,57 @@ snapshot with `scripts/capture-routine.py`.
 
 ## Dashboard refresh
 
-Optional. `skills-evals`' [`dashboard/README.md`](../starter/skills-evals/dashboard/README.md),
-"Adopting it", sets up a project dashboard (test results, the allowance,
-routine health); a routine refreshes it every 2 hours from
-`dashboard/tasks/refresh.md`, and one merge relay per loop repo from
-`dashboard/tasks/merge-relay.md`. The loop runs without it.
+Optional; the loop runs without it. One source tree in `skills-evals`,
+[`explorer/src`](../starter/skills-evals/explorer/src), builds three pages
+(`npm run build` in `explorer/`; `npm run check` fails when any committed
+page differs from a fresh build):
+
+- [`tool/index.html`](../starter/skills-evals/tool/index.html), the public
+  Evals Explorer for a website. It reads `explorer/latest.json`, the public
+  document `explorer-data.yml` writes to `persistent/eval-results`, from
+  GitHub. The repository it reads is one value, `DATA_REPO` in
+  `explorer/src/config.js`, which `copy-starter.sh` sets to
+  `<you>/skills-evals`.
+- [`explorer/dist/artifact/index.html`](../starter/skills-evals/explorer/dist/artifact/index.html),
+  the same public Explorer as a claude.ai artifact. It reads a file named
+  `latest.json` beside the page instead of GitHub.
+- [`dashboard/page/index.html`](../starter/skills-evals/dashboard/page/index.html),
+  the private build: the same views plus "Needs you", the loop, operations
+  and your own datasets, read from a claude.ai Dashboard artifact.
+
+The private dashboard and the artifact build are claude.ai artifacts, and
+both start private. An artifact's content security policy allows only
+`'self'`, so neither page can fetch GitHub: its data travels with the
+artifact, and a refresh republishes it.
+
+1. **The private dashboard.** Follow `skills-evals`'
+   [`dashboard/README.md`](../starter/skills-evals/dashboard/README.md),
+   "Adopting it": a Dashboard artifact with `page/index.html` as its page and
+   every entry of `page/datasets.json` as a dataset, the `explorer` dataset
+   (`build.py` copies `explorer/latest.json` into it) among them, with your
+   owner and repo names in the live queries. A routine refreshes it every
+   2 hours from `dashboard/tasks/refresh.md`, and one merge relay per loop
+   repo from `dashboard/tasks/merge-relay.md`.
+2. **The public explorer page.** Publish
+   `explorer/dist/artifact/index.html` as a claude.ai artifact, with your
+   `persistent/eval-results` branch's `explorer/latest.json` published as a
+   file named `latest.json` beside it (in Claude Code: the Artifact tool's
+   `publish` with `files: {"latest.json": "<your local copy>"}`). Both start
+   private, visible only to you. If you want a public link, turn it on from
+   the artifact's Share menu; nothing in the kit turns it on. Refreshing the
+   page means republishing `latest.json` (the refresh routine can do it: add
+   the step to your copy of `dashboard/tasks/refresh.md`).
+
+The public document leaves your spend out: the kit ships
+`evals/public-export.yml` with `include_spend: false`. Set it to `true` in a
+pull request on `<you>/skills-evals` to publish your weekly totals.
+
+A website is optional too. `site-sync.yml` (vendors `tool/index.html` into a
+site repo) and `site-freshness.yml` (checks that site hourly) read the
+repository variable `SITE_REPO`; unset or `none` (the kit's default) skips
+both cleanly, every step after the first. To publish to a site of your own,
+set `SITE_REPO` to `<owner>/<site repo>` and install the `eval-improve` App
+on that repo; a site sync without that App fails red, by design.
 
 ## Optional routines the kit does not ship
 

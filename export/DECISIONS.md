@@ -1825,3 +1825,118 @@ starter `repo-settings/fleet.yml` no longer declares `skills-evals` (C13).
   declares it only after step 40, so an absent one is reported like any
   missing repo, with the `create-repos.sh` hint. The filtered copy stays for
   `--track base` and `--track evals` once `fleet.yml` declares it.
+
+## Unified explorer (2026-11-04)
+
+`skills-evals` now builds both of its pages, the public Evals Explorer
+(`tool/index.html`) and the private dashboard (`dashboard/page/index.html`),
+with esbuild from one source tree, `explorer/` (`src/`, `build.js`,
+`package.json`, `package-lock.json`, `template/`, `test/`, `schema.json`).
+The manifest moves `skills-evals` from `c6b38e18c441888d8458979f75d020bce2253655`
+to `22f9adafc05a6d3b18e0660a5d17d7b40e3fd628`, the head of the source's then open
+pull request skills-evals#754 (the private build of the same app). That
+commit contains the source's `main` at the time. Re-run the export once that
+pull request merges, and pin the merge commit. The other manifests keep their
+pins.
+
+The tree is exported whole, so everything new since the old pin comes along
+too: `explorer/`, `scripts/eval_facts.py`, `scripts/explorer_public.py`,
+`scripts/site_freshness.py`, `evals/hook-policy.yml`,
+`evals/public-export.yml`, `.github/workflows/site-freshness.yml`,
+`docs/routines/site-freshness-fixer.md` and their tests. No file the kit
+exported before went away in the source.
+
+### The pages are rebuilt, not substituted
+
+The two pages are build output now. A new `regenerate` step runs
+`node build.js` in the staged `explorer/` after substitution, so each page is
+a fresh build of the substituted source, and the exported tree's own
+`npm run check` (the source's CI drift step) passes. The owner name reaches
+the public page in one place, `DATA_REPO` in `explorer/src/config.js`,
+which the ordinary C2 rule rewrites. No rule or edit names `tool/index.html`.
+Before this, the substitution ran over the committed page like any other
+file. `bootstrap/lib/substitute.py` keeps the pages in step too: it rewrites
+the owner in the source and in the built pages the same way. Checked with an
+invented login: `node build.js --check` still passes.
+
+The step takes esbuild from the source checkout's `explorer/node_modules`.
+`ci.yml` and `resync.yml` install it from the source's own lockfile at the
+pinned commit, as they already did for `_agent-guidance`. By hand, run
+`npm ci` in the source's `explorer/` first. Without it the step fails and
+names the folder.
+
+### Moved edits
+
+- **Cold start:** the placeholder-key edit that hid the `threads` and
+  `loop_gaps` placeholder rows targeted `dashboard/page/index.html`. It now
+  edits `PLACEHOLDER_KEY` in `explorer/src/private/datasets.js`, and the
+  rebuild carries it into the page. `test_builds_from_fully_empty_inputs`
+  reads the source file, because esbuild rewrites the quotes in the bundle.
+- **X9:** the `scripts/dev_setup.sh` edits keep the source's new
+  `explorer` npm folder and drop only `evals/browser-testing/seed`.
+- **Content tiers:** the guidance half of `retirement_exempt.py` follows the
+  source's rename of `proposal_only` to `guidance_proposal_only`.
+
+### What the new source needed
+
+- **Cold start:** `loop-pr-refresh.yml` gained a `withdraw` job that
+  computes the verdicts as `skill-coverage.yml` does, and a test compares the
+  two steps. `cold_start_registries.py` drops its two example-site checkouts
+  and `--registry` flags too.
+- **Citation-shaped test data** (`protect_except`):
+  `test_issue_fixture_pr_gate.py` (a pull request body's `owner/repo#N`),
+  `test_issue_explorer_lessons.py`, `test_issue_dashboard_build.py` and
+  `test_issue_public_data_contract.py` (expected URLs and keys that the code
+  builds from the substituted owner). Both sides are substituted together.
+- **Substitution side effects:** the explorer test's and the dashboard
+  test's check that the page names no person look for the kit's invented
+  person, "Example Adopter" (which `substitute.py` turns into the adopter's
+  name), not "the owner", which the page says on purpose. A lesson record's
+  subject follows the invented site name, which has no dot.
+- **Retargets** (machinery tests on library fixtures): the in-situ refusal
+  test reads `test/fixtures/evals/writing-adrs/bootstrap`, and the trigger-set
+  gate's "the repository's own set passes" check reads the core skill
+  `skills-doctor`'s committed set.
+- **The empty-inputs build** writes a minimal explorer document first:
+  `build.py` now refuses to build without `explorer/latest.json`, and a test
+  in the source locks that.
+
+### Adopter defaults
+
+- **`evals/public-export.yml`** ships `include_spend: false`; the source
+  owner publishes spend, and an adopter chooses to. The test that read the
+  committed value as true reads it as false and still checks both values.
+- **`SITE_REPO`:** `site-sync.yml` and `site-freshness.yml` fell back to the
+  source owner's site when the variable was unset, and a site sync with no
+  App on that site fails red. In the kit the fallback is `none`, the source's
+  own clean skip: every step after the first is skipped. The two tests that
+  pin the fallback follow. `site-freshness.yml` stays: with `none` it does
+  nothing but skip.
+- **Docs:** `docs/routines.md` ("Dashboard refresh"), step 32 and
+  `/adopt-evals` describe the two claude.ai artifacts: the private build as
+  the Dashboard artifact, with its datasets including `explorer`, and the
+  public build as an artifact with the data beside it. Both start private.
+  An artifact's content security policy allows only `'self'`, so the data
+  travels with the artifact.
+
+### Second pin (2026-11-04)
+
+skills-evals#754, #755 and #757 merged, and the manifest moves on to the
+source's `main`, `50daafcaf5535612491dd758b3f0c05012f31e4b`. Its #755 adds a
+third build, `explorer/dist/artifact/index.html` (entry
+`src/entries/artifact.js`; `build.js` swaps `adapters/web.js` for
+`adapters/artifact.js`, which reads a `latest.json` beside the page). The
+same `regenerate` step builds it, and the exported tree's `npm run check`
+covers all three pages. The docs, step 32 and `/adopt-evals` now publish
+that page as the public artifact, with the results branch's
+`explorer/latest.json` beside it as a file named `latest.json`. Both start
+private; a public link is the adopter's, from the artifact's Share menu.
+Refreshing the page means republishing `latest.json`. No edit, patch or
+retarget needed changing for this pin. The source's #757 adds a seventh push
+lane, `claude/spend-*` (`spend-pushed.yml`), which the private dashboard's
+refresh pushes rather than the eval runner routine, so
+`bootstrap/tests/check-branch-prefixes.py` expects it without requiring the
+routine's instructions to name it, and `docs/evals-and-loop.md` lists it.
+
+Reverse: pin the old commit and drop the edits and the `regenerate` step
+named above.

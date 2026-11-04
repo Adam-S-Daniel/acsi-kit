@@ -124,6 +124,7 @@ evals/
   platform-release-and-bump/ # A/B eval, Class A+B: local platform consumer bump
     fixture.yaml           # tagged verifier exit, structural refs, caller set, replay restraint
     seed/                  # older consumer pins and fixed platform release machinery
+  sync-cc-settings-between-wsl-and-windows/  # reviewed trigger-eval-set.json only, no fixture yet
   skills-doctor/           # A/B eval, Class B: diagnose what a session is
     bucketed-account-store/ # actually being delivered, when the account store
       fixture.yaml         # is bucketed per account and its copy of a skill is
@@ -687,10 +688,17 @@ HISTORY.
 self-contained public page that explains the published results in plain
 language for someone who has never opened a terminal (issues
 [#72](https://github.com/Adam-S-Daniel/skills-evals/issues/72) and
-[#123](https://github.com/Adam-S-Daniel/skills-evals/issues/123)). It has no
-build step and no dependencies: vanilla JavaScript, inline CSS, and inline SVG
-charts it draws itself, light and dark. example-site-a iframes it once, at
-`/tools/evals/` (the owner, 2026-11-02: one Evals Explorer, not two pages). The
+[#123](https://github.com/Adam-S-Daniel/skills-evals/issues/123)). It loads
+nothing but its data: vanilla JavaScript, inline CSS, and inline SVG charts it
+draws itself, light and dark. It is a committed build output: the source is
+[`explorer/src`](explorer/src) (shared core, one module per panel, and an
+adapter per data source), and `npm run build` in `explorer/` (esbuild, pinned
+in its lockfile) writes `tool/index.html`; CI fails when the two drift. The same
+build writes `explorer/dist/artifact/index.html`, this page for a claude.ai
+artifact that reads `latest.json` beside it (see
+[`dashboard/README.md`](dashboard/README.md), "One app, three builds").
+example-site-a iframes it once, at `/tools/evals/` (the owner, 2026-11-02: one
+Evals Explorer, not two pages). The
 skills view is the default; an on-page toggle switches to the guidance view
 and updates the URL (`?subject=guidance` opens it directly).
 
@@ -722,9 +730,10 @@ or local paths. The page also renders every data string as text only and
 links only `https://github.com/` URLs.
 
 The status-chip thresholds (26-week window, 3 paired runs per model, a gain
-of 5 points) are named constants at the top of the page's script, and every
-sentence it shows is in its `STRINGS` table. Each guidance section's
-plain-language line is in `GLOSSES`, keyed by the `id` in `_agent-guidance`'s
+of 5 points) are named constants in `explorer/src/core/rules.js`, and every
+sentence it shows is in the `STRINGS` table in `explorer/src/core/strings.js`.
+Each guidance section's plain-language line is in `GLOSSES`
+(`explorer/src/core/glosses.js`), keyed by the `id` in `_agent-guidance`'s
 `agents-md/eval-coverage.yml`; a new manifest id needs a gloss there and an
 entry in [`tool/test/guidance-ids.json`](tool/test/guidance-ids.json).
 
@@ -737,9 +746,11 @@ cd tool && python3 -m http.server 8000
 ```
 
 `?data=` is honored only for `http://localhost`, `http://127.0.0.1` and this
-repository on `raw.githubusercontent.com`. Tests: `node tool/test/run.js`
-(plain Node, no network), which `test/issues/test_issue_72_explorer_page.py`
-runs inside the main suite.
+repository on `raw.githubusercontent.com`; the repository is the one
+`DATA_REPO` value in `explorer/src/config.js`. Tests: `node tool/test/run.js`
+(plain Node, no network, against the built page) and `npm test` in `explorer/`
+(the adapters, the bundle and the build), which
+`test/issues/test_issue_72_explorer_page.py` runs inside the main suite.
 
 ### Publishing to example-site-a
 
@@ -764,10 +775,17 @@ they mint an installation token for `example-site-a` alone from the
 `EVAL_IMPROVE_APP_CLIENT_ID` and `EVAL_IMPROVE_APP_PEM` secrets that the other
 routine gates already use. The App must be installed on
 `example-adopter/example-site-a` with Contents and Pull requests read-write.
-Without the secrets, or when the App is not installed there, the mint fails
-and both workflows **warn and succeed**: `site-preview` skips the mirror, and
-`site-sync` skips the publish, so the live site goes stale. In both cases the
-`::warning::` and the run's step summary name the fix. The sync script,
+Without the secrets, or when the App is not installed there, the mint fails:
+`site-preview` **warns and succeeds** (it skips the mirror), but `site-sync`
+**fails** (red), because a green run that published nothing left the live site
+stale with nothing to say so. Each names the fix in its `::warning::` or
+`::error::` and the run's step summary. Set the repository variable `SITE_REPO`
+to `none` to skip the sync cleanly on a repository with no site.
+[`site-freshness.yml`](.github/workflows/site-freshness.yml) checks hourly that
+the site's design, data and drawn page are current, heals a behind sync PR, and
+keeps one `Site freshness check is failing` issue while anything is stale
+([`docs/routines/site-freshness-fixer.md`](docs/routines/site-freshness-fixer.md)
+is the prompt of the routine it fires). The sync script,
 [`scripts/sync_to_site.sh`](scripts/sync_to_site.sh), no-ops with a warning if
 the site has no `assets/tools/skills-evals/` directory yet.
 

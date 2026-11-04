@@ -76,15 +76,25 @@ jobs:
           set -euo pipefail
           sources="$RUNNER_TEMP/kit-sources"
           python3 export/fetch_sources.py --owner "$SOURCE_OWNER" --dest "$sources" --skip agentskills-private
-          ag="$sources/_agent-guidance"
-          ag_sha=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["source_sha"])' export/manifests/_agent-guidance.yml)
-          [[ "$ag_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::_agent-guidance manifest has no full source_sha"; exit 1; }
-          npm_dir="$RUNNER_TEMP/agent-guidance-npm"
-          mkdir -p "$npm_dir"
-          git -C "$ag" show "$ag_sha:package.json" > "$npm_dir/package.json"
-          git -C "$ag" show "$ag_sha:package-lock.json" > "$npm_dir/package-lock.json"
-          npm ci --prefix "$npm_dir" --ignore-scripts --no-audit --no-fund --silent
-          mv "$npm_dir/node_modules" "$ag/node_modules"
+          # Two exports run a source's own Node code (their manifests'
+          # regenerate steps), and a fetched source has no work tree: the
+          # _agent-guidance export runs that repo's scripts with NODE_PATH at
+          # its node_modules, and the skills-evals export builds its three
+          # explorer pages with esbuild from explorer/node_modules. Install
+          # each from its own lockfile at the manifest's pinned commit.
+          npm_at_pin() {  # npm_at_pin <manifest> <source checkout> <folder in it, or "" for its root>
+            local sha npm_dir pre=${3:+$3/}
+            sha=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["source_sha"])' "$1")
+            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::$1 has no full source_sha"; exit 1; }
+            npm_dir=$(mktemp -d "$RUNNER_TEMP/npm-XXXXXX")
+            git -C "$2" show "$sha:${pre}package.json" > "$npm_dir/package.json"
+            git -C "$2" show "$sha:${pre}package-lock.json" > "$npm_dir/package-lock.json"
+            npm ci --prefix "$npm_dir" --ignore-scripts --no-audit --no-fund --silent
+            mkdir -p "$2/$pre"
+            mv "$npm_dir/node_modules" "$2/${pre}node_modules"
+          }
+          npm_at_pin export/manifests/_agent-guidance.yml "$sources"/_agent-guidance ""
+          npm_at_pin export/manifests/skills-evals.yml "$sources"/skills-evals explorer
           python3 export/export.py --sources "$sources" --skip agentskills-private
           # Stage new starter files now: export/tests checks every kit file is
           # tracked by git, and a file a source just added is not yet.

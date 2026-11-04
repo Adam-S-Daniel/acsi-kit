@@ -142,6 +142,11 @@ def apply(root: Path, ctx) -> None:
     _drop_site_flags(root, wf + "skill-coverage.yml", 6)
     _drop_site_checkouts(root, wf + "propagation.yml", 2)
     _drop_site_flags(root, wf + "propagation.yml", 2)
+    # loop-pr-refresh.yml's withdraw job computes the verdicts as
+    # skill-coverage.yml's retirement job does (test_issue_removal_withdrawal
+    # compares the two steps), so it loses the same checkouts and flags.
+    _drop_site_checkouts(root, wf + "loop-pr-refresh.yml", 2)
+    _drop_site_flags(root, wf + "loop-pr-refresh.yml", 2)
 
     ev = wf + "eval.yml"
     _drop_site_checkouts(root, ev, 2)

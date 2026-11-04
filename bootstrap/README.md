@@ -56,12 +56,33 @@ installer `add-content.sh` runs).
 Every `vars.NAME` and `secrets.NAME` an exported workflow reads is set by a
 script: App client ids and keys by `create-apps.sh`, `PRIVACY_DENYLIST`,
 `EVAL_ROUTINE_FIRE_BEARER` and `ROUTINE_TRIGGER_ID` by `set-secrets.sh`,
-and the repository variables by `create-environments.sh`. None is left to
-set by hand. If you add a workflow that reads a value no script sets, list
-it here as a list item, "- `NAME`: where it lives and how to set it";
-`tests/check-refs.py` fails on any name that is neither set by a script nor
-listed here, and on a name listed here that a script already sets or
+and the repository variables by `create-environments.sh`, except the
+optional site ones below. If you add a workflow that reads a value no script
+sets, list it here as a list item, "- `NAME`: where it lives and how to set
+it"; `tests/check-refs.py` fails on any name that is neither set by a script
+nor listed here, and on a name listed here that a script already sets or
 nothing reads.
+
+The site ones are for publishing the Evals Explorer to a website of your own
+(`skills-evals`' `site-sync.yml` and `site-freshness.yml`,
+[routines](../docs/routines.md#dashboard-refresh)). Leave them all unset to
+have no site: both workflows then skip cleanly.
+
+- `SITE_REPO`: a repository variable on `<you>/skills-evals`, the site repo
+  as `owner/name`. Unset or `none`: no site. Set it with
+  `gh variable set SITE_REPO --repo <you>/skills-evals --body <owner>/<site>`.
+- `SITE_PAGE_URL`: a repository variable on `<you>/skills-evals`, the live
+  page's URL that `site-freshness.yml` loads. Set it the same way.
+- `SITE_ASSET_URL`: a repository variable on `<you>/skills-evals`, the URL of
+  the vendored page file on the site. Set it the same way.
+- `SITE_FRESHNESS_ROUTINE_ID`: a repository variable on `<you>/skills-evals`,
+  the `trig_...` id of a routine made from `skills-evals`'
+  `docs/routines/site-freshness-fixer.md`, which `site-freshness.yml` fires
+  when the site stays stale. Set it the same way.
+- `SITE_FRESHNESS_FIRE_BEARER`: a repository secret on `<you>/skills-evals`,
+  that routine's bearer, shown once when you create it. Set it with
+  `gh secret set SITE_FRESHNESS_FIRE_BEARER --repo <you>/skills-evals` and
+  type the value at its prompt.
 
 ## Security
 

@@ -18,7 +18,10 @@ For the kit's owner and the agents working on it; adopters can skip this.
   watch for that issue rather than the Actions tab. It never re-pins
   `agentskills-private` (its source is private) and does not rewrite
   `library/`, so do those by hand. By hand, the fallback: check the sources
-  out beside this clone, move the shas, run
+  out beside this clone, move the shas, run `npm ci` in the
+  `_agent-guidance` checkout and in the `skills-evals` checkout's
+  `explorer/` (two exports run that Node code: `_agent-guidance`'s scripts,
+  and the esbuild build of `skills-evals`' three explorer pages), run
   `python3 export/export.py` to rewrite `starter/`, then
   `bash run-all-tests.sh` (as root: `unshare --pid --fork --mount-proc --
   bash run-all-tests.sh`), and record every departure in
