@@ -1932,7 +1932,11 @@ that page as the public artifact, with the results branch's
 `explorer/latest.json` beside it as a file named `latest.json`. Both start
 private; a public link is the adopter's, from the artifact's Share menu.
 Refreshing the page means republishing `latest.json`. No edit, patch or
-retarget needed changing for this pin.
+retarget needed changing for this pin. The source's #757 adds a seventh push
+lane, `claude/spend-*` (`spend-pushed.yml`), which the private dashboard's
+refresh pushes rather than the eval runner routine, so
+`bootstrap/tests/check-branch-prefixes.py` expects it without requiring the
+routine's instructions to name it, and `docs/evals-and-loop.md` lists it.
 
 Reverse: pin the old commit and drop the edits and the `regenerate` step
 named above.
