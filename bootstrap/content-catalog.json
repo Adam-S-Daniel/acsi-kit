@@ -91,6 +91,14 @@
       "source_link": "starter/agent-guidance/agents-md/base.md"
     },
     {
+      "id": "turn-lessons-into-checks",
+      "kind": "guidance",
+      "tier": "core",
+      "title": "Turn lessons into checks, skills and guidance",
+      "short": "Turns a mistake or correction that could happen again into a check first, else a skill, else a guidance section, in its own commit.",
+      "source_link": "starter/agent-guidance/agents-md/base.md"
+    },
+    {
       "id": "data-exposure-in-ci",
       "kind": "guidance",
       "tier": "core",

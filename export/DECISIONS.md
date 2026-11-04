@@ -1779,6 +1779,76 @@ the `agentskills` README plugin-table edit no longer matched its source.
 
 The re-sync's failure issue (#14) caught skills-evals' dashboard gaining a `ci_red_runs` placeholder key, which broke the cold-start edit on `dashboard/page/index.html`. The edit's old and new text now carry that key; its intent (hide the two cold-start placeholder rows like the others) is unchanged. _agent-guidance → ba30b6f and skills-evals → c6b38e1 needed nothing else.
 
+### Round 4 (2026-11-04)
+
+The daily re-sync failed in "Regenerate starter/"
+([run 41847534882](https://github.com/Adam-S-Daniel/acsi-kit/actions/runs/41847534882),
+issue [#18](https://github.com/Adam-S-Daniel/acsi-kit/issues/18)):
+`_agent-guidance` commit 2133d52 added an `AGENTS.md` size check to
+`templates/agent-checks/agent-checks`, and `blank_content.py`'s
+`check_paths` anchor no longer matched. `export/resync.py` moved every
+public pin to its source's `main`; the platform `imports:` are unchanged,
+and `agentskills-private` stays at `c5b1bc9` (not re-exported, as above).
+
+| Repo | Old | New |
+|---|---|---|
+| `_agent-guidance` | `ba30b6f61437e84bbe8696d11d2a5818d4b12bba` | `a406262b2a726ccb84e892e513b2b51c28d6a002` |
+| `agentskills` (the public registry) | `13075c83be711d134d7e39e3d00584dea736b933` | `126e8e0f7cd48be1ff280dd6eaa0f64d9b28408d` |
+| `repo-settings` | `4308b61cd0a482b38c9c683094f85ed96132958e` | `9db16b62932a351fb4d6a903ffe132f9cd594ba1` |
+| `skills-evals` | `50daafcaf5535612491dd758b3f0c05012f31e4b` | `f3196c3fcfafb2f801e860bf1c700fe2bacc8cc3` |
+| `wsl-automation` | `913a417181edc26fcd84f32e01e2105dcc2bc125` | `1ea339739dd60ac86e7a5f37e912a31d525c0609` |
+
+Neither Node lockfile moved (`_agent-guidance`'s root, `skills-evals`'
+`explorer/`), so the installs are the same.
+
+- **`_agent-guidance`, the runner edits are anchored on code.** The
+  rules-dir arm is removed by its own text (`RULES_DIR_ARM`, the same text
+  the library item puts back), the kit's "a check of your own" note is
+  added on its own lines just above `check_paths() {`, after the source's
+  comment whatever it says, and the commented example check goes just
+  before the per-path `check_lessons` call. None of the three anchors
+  includes the source's comment or the checks beside the arm, so a new
+  fleet check no longer breaks them. The new `agents-md-size` check ships
+  as the source has it: it enforces the floor's "keep this file under
+  32 KiB" rule, which the kit's `AGENTS.md` carries, so it is machinery
+  like `pr-tldr`.
+- **`_agent-guidance`, the new section "Turn lessons into checks, skills
+  and guidance"** (`turn-lessons-into-checks`) ships as core, as the owner
+  asked. The kit refuses a core section whose coverage row is neither
+  covered by a fixture nor skipped with a reason; the row turned `covered`
+  in `_agent-guidance` [#452](https://github.com/Adam-S-Daniel/_agent-guidance/pull/452),
+  which is why the pin is `a406262` (past #452's merge, `2e53728`) rather
+  than the `37c073e` this round first took. Its fixture,
+  `evals/guidance/turn-lessons-into-checks/`, ships with it, and
+  `bootstrap/content-catalog.json` lists it as a core guidance item, which
+  also puts it in `retirement-exempt.yml`. The same pin brings
+  `_agent-guidance` #453, which makes the runner's `problem()` print an
+  `::error` annotation in CI; it ships as the source has it, and no kit
+  edit is anchored on either changed line.
+- **`_agent-guidance`, the prompt-audit sweep is fired by a workflow.**
+  The new `prompt-audit-fire.yml` fires the sweep for each trigger issue
+  the changelog watcher files, with the bearer in an Actions secret instead
+  of the watcher's environment. It ships (the sweep and the watcher are
+  kit routines). `docs/routines.md`, steps 28 and 29 and
+  `bootstrap/README.md`'s by-hand list now put `PROMPT_AUDIT_SWEEP_FIRE_URL`
+  (variable) and `PROMPT_AUDIT_SWEEP_FIRE_BEARER` (secret) on
+  `_agent-guidance`, and the watcher's environment holds no variables.
+- **`skills-evals`, no `SITE_REPO` fallback.** This round first kept
+  `|| 'none'` in the site workflows; kit
+  [#19](https://github.com/Adam-S-Daniel/acsi-kit/pull/19), merged first,
+  follows the owner's no-fallback rule instead (`SITE_REPO` is set in
+  `fleet.env`, `none` by default), so the merge takes #19's side and the
+  workflows and their tests ship as the source has them.
+- **`skills-evals`, smaller:** `removed_tests.txt` names the renamed
+  schedule-count test (`..._twenty_three_guidance_fixtures`), and the
+  REVIEWED list retarget carries the new turn-lessons fixture, as the
+  source's list does. The new `evals/add-from-address/` (a trigger set for
+  the source owner's personal mail skill) is excluded, like the PDF
+  skills' folders. The new `scripts/agent_made.py` (counts the
+  `Captures:` commit trailers) and its test ship as machinery.
+- **`agentskills`, `repo-settings`, `wsl-automation`:** only the delivered
+  hooks and runner changed; no manifest change.
+
 ## Evals fragment (2026-11-03)
 
 Issue [#12](https://github.com/Adam-S-Daniel/acsi-kit/issues/12): the

@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: af2163e9302b2f0e7954c52cddef2c3352f54432
+source_sha: f3196c3fcfafb2f801e860bf1c700fe2bacc8cc3
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -76,6 +76,8 @@ exclude:
     why: X9 and Content tiers (a fixture for a guidance section the kit does not ship). evals/guidance/_delivery/ stays, the delivery canary.
   - path: evals/adam-writing-style/
     why: X2 and X9.
+  - path: evals/add-from-address/
+    why: X9 (a personal mail skill; its trigger set is new in re-pin Round 4).
   - path: evals/admin-config-render/
     why: X4 and X9 (a platform-only skill's fixtures).
   - path: evals/browser-testing/

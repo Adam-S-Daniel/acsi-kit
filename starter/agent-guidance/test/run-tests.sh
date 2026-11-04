@@ -13934,8 +13934,8 @@ test_on_hold_label() {
 }
 
 # Prompt-audit sweep policy (ADR 0017): the sweep spec, the changelog
-# routine's step 4a that fires it, and the ADR index. Never piped: the count
-# and exit code are read from a file.
+# routine's step 4a that files the trigger, the fire workflow, and the ADR
+# index. Never piped: the count and exit code are read from a file.
 test_prompt_audit_sweep() {
     echo ""
     echo "=== Test: prompt-audit sweep policy and fire call ==="
@@ -13944,10 +13944,10 @@ test_prompt_audit_sweep() {
     local pass_n fail_n
     pass_n=$(grep -oE '^# pass [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
     fail_n=$(grep -oE '^# fail [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
-    if [[ "$rc" -eq 0 && "$pass_n" == "16" && "$fail_n" == "0" ]]; then
-        pass "prompt-audit sweep policy: 16 passed"
+    if [[ "$rc" -eq 0 && "$pass_n" == "19" && "$fail_n" == "0" ]]; then
+        pass "prompt-audit sweep policy: 19 passed"
     else
-        fail "prompt-audit sweep policy: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=16, fail=0): $(tail -20 "$out" | tr '\n' ' ')"
+        fail "prompt-audit sweep policy: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=19, fail=0): $(tail -20 "$out" | tr '\n' ' ')"
     fi
 }
 
@@ -24602,6 +24602,114 @@ test_agent_checks_persistent_delete() {
     fi
 }
 
+# agents-md-size: a change that leaves the root AGENTS.md over 32,768 bytes
+# (Codex's project_doc_max_bytes, where it silently truncates) is refused in
+# every event, measured in bytes; a change that does not touch it passes even
+# when it is already oversized, and a nested AGENTS.md is not measured.
+ac_size_run() {   # <repo> <out prefix> <runner args...> — runs the runner, prints its exit code
+    local repo=$1 out=$2 rc=0
+    shift 2
+    (cd "$repo" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 AGENT_CHECKS_LOG=off \
+        AGENT_CHECKS_DATED_PHRASING_MODULES="$TEST_DIR/ac-size-no-modules" \
+        bash "$REPO_ROOT/templates/agent-checks/agent-checks" "$@") \
+        > "$out.out" 2> "$out.err" < /dev/null || rc=$?
+    echo "$rc"
+}
+
+ac_size_file() {   # <path> <bytes> — a file of exactly that many ASCII bytes
+    head -c "$2" /dev/zero | tr '\0' 'a' > "$1"
+}
+
+test_agent_checks_agents_md_size() {
+    echo ""
+    echo "=== Test: agent-checks refuses a root AGENTS.md over 32768 bytes ==="
+    local repo="$TEST_DIR/ac-size" out="$TEST_DIR/ac-size-run" base rc sha
+    local -a g=(git -C "$repo" -c user.name=Example -c user.email=agent@example.com -c commit.gpgsign=false)
+    git init -q -b main "$repo"
+    "${g[@]}" commit -q --allow-empty -m base
+    base=$("${g[@]}" rev-parse HEAD)
+
+    # pre-commit reads the index: 32768 passes, 32769 refuses with the fix.
+    ac_size_file "$repo/AGENTS.md" 32768
+    "${g[@]}" add AGENTS.md
+    rc=$(ac_size_run "$repo" "$out" pre-commit)
+    [[ $rc -eq 0 ]] && pass "agents-md-size: pre-commit passes AGENTS.md of exactly 32768 bytes" \
+        || fail "agents-md-size: pre-commit passes AGENTS.md of exactly 32768 bytes — exit $rc: $(cat "$out.err")"
+    ac_size_file "$repo/AGENTS.md" 32769
+    "${g[@]}" add AGENTS.md
+    rc=$(ac_size_run "$repo" "$out" pre-commit)
+    if [[ $rc -eq 1 ]] \
+       && grep -qF 'agent-checks: AGENTS.md: it is 32769 bytes, over the 32768-byte limit. Codex silently truncates' "$out.err" \
+       && grep -qF 'wc -c AGENTS.md' "$out.err"; then
+        pass "agents-md-size: pre-commit refuses 32769 bytes, naming the size, the limit, Codex and the fix"
+    else
+        fail "agents-md-size: pre-commit refuses 32769 bytes, naming the size, the limit, Codex and the fix — exit $rc: $(cat "$out.err")"
+    fi
+    # The worktree copy does not matter; the staged blob does.
+    ac_size_file "$repo/AGENTS.md" 100
+    rc=$(ac_size_run "$repo" "$out" pre-commit)
+    [[ $rc -eq 1 ]] && pass "agents-md-size: pre-commit measures the staged content, not the worktree" \
+        || fail "agents-md-size: pre-commit measures the staged content, not the worktree — exit $rc"
+
+    # Bytes, not characters: 16385 two-byte characters are 32770 bytes.
+    head -c 16385 /dev/zero | tr '\0' 'a' | sed 's/a/é/g' > "$repo/AGENTS.md"
+    "${g[@]}" add AGENTS.md
+    rc=$(ac_size_run "$repo" "$out" pre-commit)
+    if [[ $rc -eq 1 ]] && grep -qF 'it is 32770 bytes' "$out.err"; then
+        pass "agents-md-size: multibyte text is measured in bytes (16385 characters, 32770 bytes)"
+    else
+        fail "agents-md-size: multibyte text is measured in bytes — exit $rc: $(cat "$out.err")"
+    fi
+
+    # ci over a range: 32769 bytes committed refuses; 32768 passes.
+    ac_size_file "$repo/AGENTS.md" 32769
+    "${g[@]}" add AGENTS.md
+    "${g[@]}" commit -q -m "oversized AGENTS.md"
+    rc=$(ac_size_run "$repo" "$out" ci "$base" HEAD)
+    [[ $rc -eq 1 ]] && grep -qF 'AGENTS.md: it is 32769 bytes' "$out.err" \
+        && pass "agents-md-size: ci refuses a range that leaves AGENTS.md at 32769 bytes" \
+        || fail "agents-md-size: ci refuses a range that leaves AGENTS.md at 32769 bytes — exit $rc: $(cat "$out.err")"
+    # pre-push over the same commit refuses too.
+    sha=$("${g[@]}" rev-parse HEAD)
+    rc=$(cd "$repo" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 AGENT_CHECKS_LOG=off \
+        AGENT_CHECKS_DATED_PHRASING_MODULES="$TEST_DIR/ac-size-no-modules" \
+        bash "$REPO_ROOT/templates/agent-checks/agent-checks" pre-push origin https://example.com/r.git \
+        <<< "refs/heads/feature/x $sha refs/heads/feature/x $base" > "$out.out" 2> "$out.err"; echo $?)
+    [[ $rc -eq 1 ]] && grep -qF 'AGENTS.md: it is 32769 bytes' "$out.err" \
+        && pass "agents-md-size: pre-push refuses a push that leaves AGENTS.md at 32769 bytes" \
+        || fail "agents-md-size: pre-push refuses a push that leaves AGENTS.md at 32769 bytes — exit $rc: $(cat "$out.err")"
+    # tree measures the whole tree, so it reports the oversized file.
+    rc=$(ac_size_run "$repo" "$out" tree HEAD)
+    [[ $rc -eq 1 ]] && pass "agents-md-size: tree reports an oversized AGENTS.md" \
+        || fail "agents-md-size: tree reports an oversized AGENTS.md — exit $rc"
+
+    # A change that does not touch AGENTS.md passes although it is oversized.
+    local over=$sha
+    echo '# Example' > "$repo/README.md"
+    mkdir -p "$repo/docs"
+    ac_size_file "$repo/docs/AGENTS.md" 40000
+    "${g[@]}" add README.md docs/AGENTS.md
+    "${g[@]}" commit -q -m "unrelated change"
+    rc=$(ac_size_run "$repo" "$out" ci "$over" HEAD)
+    [[ $rc -eq 0 ]] && pass "agents-md-size: a change not touching the root AGENTS.md passes while it is oversized (a nested AGENTS.md is not measured)" \
+        || fail "agents-md-size: a change not touching the root AGENTS.md passes while it is oversized — exit $rc: $(cat "$out.err")"
+
+    # Shrinking it back to the limit passes, even though the range's earlier
+    # commit was oversized: the check reads the head's content.
+    ac_size_file "$repo/AGENTS.md" 32768
+    "${g[@]}" add AGENTS.md
+    "${g[@]}" commit -q -m "trim AGENTS.md"
+    rc=$(ac_size_run "$repo" "$out" ci "$base" HEAD)
+    [[ $rc -eq 0 ]] && pass "agents-md-size: ci passes a range whose head leaves AGENTS.md at exactly 32768 bytes" \
+        || fail "agents-md-size: ci passes a range whose head leaves AGENTS.md at exactly 32768 bytes — exit $rc: $(cat "$out.err")"
+
+    # This repo's own AGENTS.md (generated; the stub build) is under the limit.
+    local own
+    own=$(wc -c < "$REPO_ROOT/AGENTS.md")
+    (( own <= 32768 )) && pass "agents-md-size: this repo's generated AGENTS.md is $own bytes, within the limit" \
+        || fail "agents-md-size: this repo's generated AGENTS.md is $own bytes, over 32768"
+}
+
 # The dated-phrasing warning pass (templates/agent-checks/dated-phrasing.js):
 # it warns on dated history and migration-relative phrasing in the prose of
 # the Markdown agents load, never in code, quotes, HTML, URLs, link text or an
@@ -24609,6 +24717,36 @@ test_agent_checks_persistent_delete() {
 # markdown-it comes from this repo's node_modules (CI's `npm ci`), never npm.
 dated_lines() {   # <stderr file> — the "path:line" of each warning, sorted
     sed -n 's/^agent-checks (warning): \([^:]*:[0-9]*\): dated phrasing: .*/\1/p' "$1" | sort | tr '\n' ' '
+}
+
+test_agent_checks_ci_annotation() {
+    echo ""
+    echo "=== Test: in CI a refusal is an ::error annotation titled with the check id ==="
+    local repo="$TEST_DIR/ac-annot" out="$TEST_DIR/ac-annot-run" rc
+    git init -q -b main "$repo"
+    git -C "$repo" -c user.name=Example -c user.email=agent@example.com -c commit.gpgsign=false commit -q --allow-empty -m base
+    printf 'EXAMPLE=1\n' > "$repo/.env"
+    git -C "$repo" add -f .env
+    rc=0
+    (cd "$repo" && GITHUB_ACTIONS=true GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 AGENT_CHECKS_LOG=off \
+        AGENT_CHECKS_DATED_PHRASING_MODULES="$TEST_DIR/ac-size-no-modules" \
+        bash "$REPO_ROOT/templates/agent-checks/agent-checks" pre-commit) \
+        > "$out.out" 2> "$out.err" < /dev/null || rc=$?
+    if [[ $rc -eq 1 ]] && grep -qF '::error title=agent-checks secret-file::agent-checks: .env: looks like a secret' "$out.err"; then
+        pass "agent-checks (CI): a refusal prints ::error title=agent-checks <id>::"
+    else
+        fail "agent-checks (CI): a refusal prints ::error title=agent-checks <id>:: — exit $rc: $(cat "$out.err")"
+    fi
+    rc=0
+    (cd "$repo" && env -u GITHUB_ACTIONS GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 AGENT_CHECKS_LOG=off \
+        AGENT_CHECKS_DATED_PHRASING_MODULES="$TEST_DIR/ac-size-no-modules" \
+        bash "$REPO_ROOT/templates/agent-checks/agent-checks" pre-commit) \
+        > "$out.out" 2> "$out.err" < /dev/null || rc=$?
+    if [[ $rc -eq 1 ]] && grep -qF 'agent-checks: .env: looks like a secret' "$out.err" && ! grep -qF '::error' "$out.err"; then
+        pass "agent-checks (CI): outside GitHub Actions the refusal has no ::error line"
+    else
+        fail "agent-checks (CI): outside GitHub Actions the refusal has no ::error line — exit $rc: $(cat "$out.err")"
+    fi
 }
 
 test_agent_checks_dated_phrasing() {
@@ -25063,8 +25201,8 @@ PY
 
 # The guidance-load-record Stop hook's own unit tests, counted as the lane
 # module above is: unittest's real count goes into PASS, so a module that
-# discovers nothing cannot pass, and under CI (where openssl is present) a
-# skipped upload case is a failure rather than a quiet gap.
+# discovers nothing cannot pass, and under CI a skipped case is a failure
+# rather than a quiet gap.
 test_guidance_load_record() {
     echo ""
     echo "=== Test: guidance-load-record.sh unit tests ==="
@@ -25086,7 +25224,7 @@ PY
     elif (( passed == 0 )); then
         fail "guidance-load-record: test/test_guidance_load_record.py ran zero tests"
     elif [[ "${CI:-}" == true ]] && (( skipped > 0 )); then
-        fail "guidance-load-record: $skipped unit test(s) skipped under CI, where openssl is installed"
+        fail "guidance-load-record: $skipped unit test(s) skipped under CI"
     else
         PASS=$((PASS + passed))
         echo "  guidance-load-record: $passed unit test(s) passed, $skipped skipped"
@@ -25666,6 +25804,8 @@ GROUP_automerge=(
 GROUP_agent_checks=(
     test_agent_checks_guard
     test_agent_checks_persistent_delete
+    test_agent_checks_agents_md_size
+    test_agent_checks_ci_annotation
     test_agent_checks_dated_phrasing
     test_agent_checks_dated_phrasing_lock
     test_self_agent_checks

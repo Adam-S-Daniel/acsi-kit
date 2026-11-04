@@ -6,6 +6,7 @@
       "fragment": "section.md",
       "heading": "## Security",
       "follows": [
+        "## Turn lessons into checks, skills and guidance",
         "## Finding your unknowns",
         "## Anything you name gets its link",
         "## Working habits",
@@ -18,6 +19,7 @@
       "fragment": "coverage-row.yml",
       "id": "security",
       "follows": [
+        "turn-lessons-into-checks",
         "finding-your-unknowns",
         "anything-you-name-gets-its-link",
         "working-habits",
