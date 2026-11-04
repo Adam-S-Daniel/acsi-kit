@@ -133,10 +133,11 @@ a pull request with the result.
   `~/.config/wsl-automation/settings.env`, and exits 2 naming the key when it
   is missing. On the machine, copy `config/settings.env.example` there
   (copy-starter.sh has already put your owner in it) and check each value:
-  `SKILLS_EVALS_URL` (usage census), `AGENT_GUIDANCE_URL` (memory curation),
+  `SKILLS_EVALS_URL` (usage census and session miner), `LESSONS_CLONE`
+  (session miner), `AGENT_GUIDANCE_URL` (memory curation),
   `WAITING_FEED_URL` (waiting feed) and `CODEX_CLOUD_GUIDANCE_REPOSITORY`
-  (Codex Cloud sync, `owner/name`). The session miner reads its own
-  `session-miner.env` instead (README, "Session miner task").
+  (Codex Cloud sync, `owner/name`). The session miner's optional keys are
+  commented out in the same file (README, "Session miner task").
 
 - **The waiting feed's repository** is not one of the kit's repos.
   `WAITING_FEED_URL` has no default: set it in `settings.env` to a

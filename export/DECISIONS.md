@@ -2153,3 +2153,49 @@ sibling manifests treat it:
 Reverse: pin `1ea3397` (Round 4), drop the three `config/settings.env.example` edits,
 restore the waiting feed header's "(default ...)" wording, and revert the
 `docs.py`, overlay test, suite command and doc changes.
+
+## One machine config file (2026-11-04)
+
+This closes the follow-up "Re-pin (2026-11-04): wsl-automation" named: an
+adopter now keeps one settings file on the machine,
+`~/.config/wsl-automation/settings.env` (`WSL_AUTOMATION_SETTINGS`), the
+file the source's `scripts/task-settings.sh` reads. The kit's session miner
+wrapper (`overlay/wsl-automation/scripts/run-session-miner.sh`) reads it
+instead of its own `session-miner.env`.
+
+- **The wrapper keeps its own reader**, not `wsl_automation_require_setting`.
+  The resolver takes one key per call and only for required keys; the miner
+  also takes seven optional keys, and its exit paths log through its own
+  `finish`. Its reader is the smaller correct change. It still reads the file
+  as data, takes only its allowlisted keys, expands a leading `~/`, and lets
+  the environment win. Because the file now holds every task's keys, a key
+  outside the allowlist is **ignored**, where it used to exit 2. A line that is
+  not `KEY=value`, a comment or blank still exits 2 naming its line number,
+  never the path. Its key pattern and CR stripping now match
+  `task-settings.sh`. The required `LESSONS_CLONE` and `SKILLS_EVALS_URL` exit
+  2 naming the key and pointing at `settings.env` and
+  `config/settings.env.example`.
+- **Removed:** `SESSION_MINER_CONFIG` and `config/session-miner.env.example`.
+  Their keys and comments move into `config/settings.env.example` through a
+  manifest edit: `LESSONS_CLONE` (required) after `SKILLS_EVALS_URL`, and the
+  optional `PRIVACY_DENYLIST_FILE`, `WIN_HOME` and `FILE_ISSUES` commented out.
+  The source's census comment, which names both the census and the session
+  miner, ships unedited again. The README's settings table gains a
+  `LESSONS_CLONE` row.
+- **No back-compat read of `session-miner.env`.** The kit has no adopters on
+  that file yet, so nothing reads it.
+- **Tests:** `tests/run-session-miner.test.sh` (overlay) points
+  `WSL_AUTOMATION_SETTINGS` at its files. It checks that another task's key
+  (`WAITING_FEED_URL`) in the file is ignored while the miner's own keys still
+  apply, and that a malformed line exits 2 named by number, with no path and
+  no miner run. Each new assertion was shown to fail against the old behavior:
+  rejecting unknown keys fails "another task's key ... is ignored", and
+  skipping malformed lines fails "a malformed line exits 2".
+- **Docs:** the README (`docs.py`: Install steps 5 and 6, the settings
+  section, "Session miner task" step 4, the Linux and macOS note),
+  `docs/machine.md`, REGENERATE.md, step 22 (and the quick start rendered
+  from it) and `/adopt` name the one file.
+
+Reverse: restore the overlay's `config/session-miner.env.example`,
+`SESSION_MINER_CONFIG` and reject-unknown-keys reader, drop the
+`LESSONS_CLONE` edit, and revert the test and doc changes.
