@@ -2,7 +2,7 @@
 
 A routine is a claude.ai cloud session started by a schedule or an API
 trigger (Claude Code's "cloud scheduled tasks"); you create each one at
-https://claude.ai/code/routines. The system runs five, plus the eval
+https://claude.ai/code/routines. The system runs four, plus the eval
 runner. Each one's prompt is short and points at a spec file in a repo, so
 the procedure is reviewed as a pull request, not edited in a web form
 nobody can diff. The one exception is the eval runner, whose long prompt is
@@ -143,23 +143,6 @@ in `_agent-guidance`:
 
 It merges duplicate notes, archives stale ones, and promotes facts into
 issues in the repo the note names as its home.
-
-## Guidance centralization audit
-
-| Setting | Value |
-|---|---|
-| Schedule | daily at 08:00 UTC (`0 8 * * *`), fresh session per fire |
-| Connector | the GitHub connector |
-| Repos | every fleet repo (attached on the routine's page) |
-| Notifications | push on, "Auto-fix pull requests" on |
-| Prompt | the one in `_agent-guidance`'s [`docs/routines/guidance-centralization.routine.md`](../starter/agent-guidance/docs/routines/guidance-centralization.routine.md), which also records every other setting |
-| Spec | [`docs/routines/guidance-centralization.md`](../starter/agent-guidance/docs/routines/guidance-centralization.md) |
-
-It checks daily that no rule that applies to many repos is stranded in one,
-and that every repo gets `base.md` and the right sections. Its prompt is
-long on purpose: a fired session may not load the repo's guidance, so it
-restates the coverage check. When you change the routine, regenerate the
-snapshot with `scripts/capture-routine.py`.
 
 ## Dashboard refresh
 

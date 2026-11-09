@@ -81,7 +81,7 @@ plugin contains a symlink.
 | --- | --- | --- | --- |
 | `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance and a hook that blocks unmarked GitHub writes | claude.ai web, iOS, Chrome, Desktop, and Claude Code |
 | `acsi-coding-anywhere` | enabled | coding skills (CI, GitHub, skill delivery) | Claude Code terminals and cloud sessions |
-| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser), plus the clone-sync and API-credit-lane hooks | Claude Code on the owner's machines |
+| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes), plus the clone-sync and API-credit-lane hooks | Claude Code on the owner's machines |
 | `acsi-non-coding-local` | opt-in; on in Windows, off in WSL/Linux on the owner's machines ([below](#which-bundles-on-which-os)) | document and browser skills | the Claude Desktop app's local Cowork |
 
 Sensitive skills live in the private sibling registry,

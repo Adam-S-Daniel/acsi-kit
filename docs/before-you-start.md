@@ -97,8 +97,8 @@ The shares are a model, not a measurement on smaller plans. They assume Max
 5x is a quarter of Max 20x's weekly allowance and Pro a twentieth (the plan
 multipliers; Anthropic does not publish the weekly ratios), the owner's
 measured routine costs, and an adopter whose own work fills 30% of the week.
-On Pro the changelog watcher and the centralization audit, daily, are most of
-what is left of the base's cost; leave the optional dashboard refresh off on
+On Pro the daily changelog watcher is most of what is left of the base's
+cost; leave the optional dashboard refresh off on
 Pro and Max 5x (it adds about 44% and 12%). Most Pro adopters are better
 served by the base alone.
 

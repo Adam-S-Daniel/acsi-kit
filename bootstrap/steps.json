@@ -431,19 +431,6 @@
       "minutes": 15
     },
     {
-      "id": "31",
-      "title": "Create the guidance centralization audit routine",
-      "run": "At https://claude.ai/code/routines: daily at 08:00 UTC, the GitHub connector, the prompt in _agent-guidance's `docs/routines/guidance-centralization.routine.md`",
-      "kind": "browser",
-      "part": "routines",
-      "track": "base",
-      "link": "docs/routines.md#guidance-centralization-audit",
-      "check": {
-        "type": "ask"
-      },
-      "minutes": 20
-    },
-    {
       "id": "35",
       "title": "Create skills-evals",
       "run": "`bootstrap/create-repos.sh skills-evals` (with its labels and its `persistent/eval-results` branch)",

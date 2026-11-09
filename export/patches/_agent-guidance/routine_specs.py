@@ -247,6 +247,17 @@ def _repo_table(owner: str) -> str:
 def apply(root: Path, ctx) -> None:
     owner = ctx["common"]["kit_owners"][0]
 
+    # The source retired the guidance centralization audit on 2026-11-09 and
+    # deleted its spec and snapshot (the drift report's overlap section and the
+    # fleet health audit took over). Both files are edited only while the
+    # pinned source still has them, so a re-pin past the deletion keeps working.
+    if (root / SNAPSHOT).exists() and (root / SPEC).exists():
+        _centralization(root, owner)
+    path = root / SWEEP
+    path.write_text(_edit(path.read_text(encoding="utf-8"), SWEEP_EDITS, SWEEP), encoding="utf-8")
+
+
+def _centralization(root: Path, owner: str) -> None:
     path = root / SNAPSHOT
     text = _edit(path.read_text(encoding="utf-8"), SNAPSHOT_EDITS, SNAPSHOT)
     start = text.index("## Attached repositories\n")
@@ -265,5 +276,3 @@ def apply(root: Path, ctx) -> None:
 
     path = root / SPEC
     path.write_text(_edit(path.read_text(encoding="utf-8"), SPEC_EDITS, SPEC), encoding="utf-8")
-    path = root / SWEEP
-    path.write_text(_edit(path.read_text(encoding="utf-8"), SWEEP_EDITS, SWEEP), encoding="utf-8")
