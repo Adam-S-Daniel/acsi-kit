@@ -2199,3 +2199,44 @@ instead of its own `session-miner.env`.
 Reverse: restore the overlay's `config/session-miner.env.example`,
 `SESSION_MINER_CONFIG` and reject-unknown-keys reader, drop the
 `LESSONS_CLONE` edit, and revert the test and doc changes.
+
+## Re-pin (2026-11-09): four sources, wsl-automation held
+
+The daily re-sync failed from 2026-11-05 to 2026-11-09 (issue #23): source
+edits after the Round 4 pins left four kit edits matching nothing. This
+re-pins every source but `wsl-automation`.
+
+| Repo | Old | New |
+|---|---|---|
+| `_agent-guidance` | `a406262b2a726ccb84e892e513b2b51c28d6a002` | `4e3f70c7a88f3a5dfd1d22b961e153f789b62399` |
+| `agentskills` | `126e8e0f7cd48be1ff280dd6eaa0f64d9b28408d` | `13029c6c4de08428515aeb47c1c8fa50faef1364` |
+| `repo-settings` | `9db16b62932a351fb4d6a903ffe132f9cd594ba1` | `c3574f28da69f607e964929662cd96a08cc24ed5` |
+| `skills-evals` | `f3196c3fcfafb2f801e860bf1c700fe2bacc8cc3` | `88e65b3ef4656dea104e9ee5803de6da9e8ea2ba` |
+
+Edits that followed their source, with no change to what the kit ships:
+
+- `agentskills` `AGENTS.md` (X9): the source now says the suite command is
+  "the one CI runs, minus its flags" and names CI's `-rfEs -n auto`; the
+  edit's old and new text carry that sentence.
+- `skills-evals` `evals/budget.yml` and `test_issue_68_allowance_guard.py`
+  (C6): the source's finish-week stop moved 0.95 to 0.85, 0.90 and 0.96, and
+  its permanent per-run values became `per_run_overrun` 0.0005 and
+  `points_per_usd` 0.0005. The kit still ships the standing 0.30 cap and 0.80
+  stop, and its test now expects the source's new per-run values. Expect
+  this pair to move again when the source restores its budget after the
+  2026-11-09 17:00 UTC reset.
+- `skills-evals` `test_issue_371_scheduled_fixtures.py`: the removed test's
+  name follows the source's count (`..._twenty_eight_guidance_fixtures`).
+- `skills-evals` `test_issue_scheduled_fixtures.py` retarget: the replaced
+  `REVIEWED` list gains the source's five "Harder fixtures, set A" rows.
+
+### `wsl-automation` stays at `29344b2`
+
+Its head (`3f973ee`) adds a Docker Desktop WSL-integration watchdog: a new
+scheduled task, its module functions and 707 lines of Pester tests, which
+change the task counts `export/patches/wsl-automation/pester_tests.py`
+asserts. Whether the kit ships that task is a content decision, not a
+mechanical re-pin, so this pin waits for it. Until then the daily re-sync
+still moves this pin and fails at "Regenerate starter/"; `starter/wsl-automation`
+did change here, but only in the vendored fleet files rebuilt from the kit's
+own `_agent-guidance`.

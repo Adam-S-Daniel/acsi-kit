@@ -4,7 +4,7 @@
 repo: agentskills
 kit_name: agent-skills
 source: adam-agentskills
-source_sha: 126e8e0f7cd48be1ff280dd6eaa0f64d9b28408d
+source_sha: 13029c6c4de08428515aeb47c1c8fa50faef1364
 after: [_agent-guidance]
 
 exclude:
@@ -122,16 +122,20 @@ edits:
         ends with `unittest.main()`, and running THAT one directly really does run
         its tests — which is why the habit to build is naming the runner rather than
         auditing each file for a footer. The one command that actually runs this
-        repo's suite is the one CI runs:
-        `python3 -m pytest scripts/ plugins/*/skills/*/tests/ plugins/*/skills/*/scripts/ -q`,
+        repo's suite is the one CI runs, minus its flags:
+        `python3 -m pytest scripts/ plugins/*/skills/*/tests/ plugins/*/skills/*/scripts/ -q`
+        (CI adds `-rfEs -n auto`, parallel through `pytest-xdist`; the plain form
+        is the same tests run serially, so slower),
         and read its result from `$?` directly rather than through a pipe.
     new: |2
         A skill's own test file may end in `unittest.main()` (one in the source
         registry did), and running THAT one directly really does run its tests —
         which is why the habit to build is naming the runner rather than
         auditing each file for a footer. The one command that actually runs this
-        repo's suite is the one CI runs:
-        `shopt -s nullglob; python3 -m pytest scripts/ plugins/*/skills/*/tests/ plugins/*/skills/*/scripts/ -q`,
+        repo's suite is the one CI runs, minus its flags:
+        `shopt -s nullglob; python3 -m pytest scripts/ plugins/*/skills/*/tests/ plugins/*/skills/*/scripts/ -q`
+        (CI adds `-rfEs -n auto`, parallel through `pytest-xdist`; the plain form
+        is the same tests run serially, so slower),
         and read its result from `$?` directly rather than through a pipe.
         (`nullglob` because a registry with no skill tests yet leaves the two
         plugin globs unmatched, and pytest refuses a literal glob.)

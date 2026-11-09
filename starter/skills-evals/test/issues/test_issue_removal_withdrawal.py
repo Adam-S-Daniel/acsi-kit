@@ -2483,9 +2483,9 @@ class RoundSevenDocTests(unittest.TestCase):
         header = wf.split("\non:", 1)[0]
         self.assertNotIn("never a force-push", header)
         self.assertIn("fast-forward only", header)
-        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        agents = (ROOT / "docs" / "workflows.md").read_text(encoding="utf-8")
         row = next(line for line in agents.splitlines()
-                   if line.startswith("  | `loop-pr-refresh.yml`"))
+                   if line.startswith("| `loop-pr-refresh.yml`"))
         self.assertIn("(fast-forward only, leased)", row)
         self.assertNotIn("never a force-push", row)
         self.assertIn("contents: write", row)
@@ -2493,6 +2493,12 @@ class RoundSevenDocTests(unittest.TestCase):
 
     def test_agents_md_fits_codex(self):
         self.assertLessEqual(len((ROOT / "AGENTS.md").read_bytes()), 32768)
+
+    def test_agents_md_points_at_the_workflow_table(self):
+        # The table moved to docs/workflows.md for headroom under Codex's cut.
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("[`docs/workflows.md`](docs/workflows.md)", agents)
+        self.assertNotIn("| Workflow | Triggers |", agents)
 
     def test_local_agent_check_refuses_an_agents_md_codex_would_truncate(self):
         # ci.yml's suite skips a docs-only change, so the size limit is held
@@ -2909,7 +2915,7 @@ class GuidancePushHeadsTests(unittest.TestCase):
             with self.assertRaises(rs.RetireError):  # FakeGh prints no pull request URL
                 rs.guidance_execute(plan, Path("."), FakeGh(),
                                     lambda c, b, heads=(): pushed.append((b, list(heads))),
-                                    AUTO_ENV)
+                                    AUTO_ENV, window_open=lambda tree: True)
         self.assertEqual(pushed, [(f"{rs.GUIDANCE_BRANCH_PREFIX}{SECTION}", [SHA_A])])
 
 
@@ -3578,7 +3584,8 @@ class RoundTenTests(t70.Base):
                   "body": "b", "notice": {"title": "n", "body": "{removal_pr}"}}
         with mock.patch.object(rs, "guidance_prepare_branch"), \
                 mock.patch.object(rs, "_git", return_value="a" * 40 + "\n"):
-            out = rs.guidance_execute(action, Path("."), gh, lambda *a: None, AUTO_ENV, gh)
+            out = rs.guidance_execute(action, Path("."), gh, lambda *a: None, AUTO_ENV, gh,
+                                       window_open=lambda tree: True)
         self.assertIn("commented on its open proposal issue #900", out)
         note = next(s for a, s in base.calls if a[:3] == ["issue", "comment", "900"])
         self.assertIn("guidance removal pull request", note)

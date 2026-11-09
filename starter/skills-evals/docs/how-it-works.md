@@ -135,8 +135,8 @@ weekly allowance):
 |---|---|---|
 | `weekly_cap` | 0.30 | all automated evals, in each allowance week of the account (from Monday 17:00 UTC) |
 | `per_run_cap` | 0.01 | one run stops starting new work after this much (the owner, 2026-11-01; was 0.03) |
-| `per_run_overrun` | 0.0018 | added to every run: its last call is never measured. The 95th percentile of each run's largest single call (the owner, 2026-11-01, standing rule; `scripts/run_costs.py` prints the value; was 0.005, then 0.002) |
-| `points_per_usd` | 0.00214 | the allowance one dollar of the CLI's reported call cost uses (`scripts/run_costs.py` prints it), so `per_run_cap` is charged the run's own spend (2026-11-03) |
+| `per_run_overrun` | 0.0005 | added to every run: the routine session's own cost (about $0.67 per fire) and the run's last call, which no reading includes (was 0.005, then 0.002, then 0.0018; 2026-11-06) |
+| `points_per_usd` | 0.0005 | the allowance one dollar of the CLI's reported call cost uses: $20 per point, the low end of the rate measured on 2026-11-04 (about $24, range $20 to $35), so charges err high. `per_run_cap` and the weekly total both charge a run its own spend at this rate (was 0.00214, fitted to the account meter's movement, which other use inflated; 2026-11-06) |
 | `stop_when_account_above` | 0.80 | a run stops, and no fire starts, once the account's weekly meter reads this |
 
 Three layers enforce it:
@@ -159,13 +159,17 @@ Three layers enforce it:
    account's current allowance week, from its last weekly reset
    (`ACCOUNT_WEEK_RESET` plus whole weeks: Monday 17:00 UTC, so daylight
    saving does not move it; a rolling seven days until 2026-10-26; a manual reset the owner pressed, listed in `MANUAL_RESETS`, starts it at that instant for the rest of its week): each ingested run on `persistent/eval-results` at its
-   measured weekly delta plus the overrun (or the full reservation,
-   `per_run_cap + per_run_overrun`, when unmeasured), plus every successful
-   fire without results: at the full reservation when it is under 2 hours
+   own dollars (`usage.cost_estimate.usd` times `points_per_usd`) plus the
+   overrun; at its measured weekly delta plus the overrun when it has no
+   dollar figure (the delta is the whole account's movement, so it charged
+   each run every other thread's use: 116 points booked against about 23 real
+   in the week to 2026-11-04); or at the full reservation,
+   `per_run_cap + per_run_overrun`, when neither is known, plus every successful
+   fire without results: at the full reservation when it is under 90 minutes
    old, and at the overrun alone after that (a routine run finishes within
-   minutes, so a fire with no results two hours later failed or never
-   started). An improve fire (or a guidance-improve fire) never lands
-   results, so it is charged its own
+   minutes and a pair fire's two runs stop 40 minutes each, so a fire with no
+   results 90 minutes later failed or never started). An improve fire (or a
+   guidance-improve fire) never lands results, so it is charged its own
    cost for the whole week: eight eval fires at their measured mean
    (eight full reservations until anything is measured; twelve until
    2026-11-02, when the account meter around improve fires measured 2.3 to
@@ -254,7 +258,7 @@ model) and improve fires (one skill, with a fixed holdout) in eight bands:
    heaviest-used model first. A cell whose fires twice produced nothing
    becomes a "fixture broken" work item instead (a guidance cell too).
 3. **Near a decision** (at least 20%): undecided skill cells, nearest a
-   verdict first.
+   verdict first (deep before wide, below).
 4. **Guidance focus** (at least 15%): the undecided guidance cells (no run,
    or not yet decided) of the two sections nearest a verdict, below.
 5. **Improvements** (at least 20%): skills with four or more fixtures, train
@@ -303,6 +307,30 @@ model is fired only once the cheaper cell has decided without a keep. A
 cheaper cell that more runs cannot move (blocking, below), or that already
 has 10 pairs without a decision (`CHEAPER_FIRST_MAX_PAIRS`), holds nothing,
 so a stuck cheaper cell never starves the dearer one.
+
+**Deep before wide** (the owner, 2026-11-08: of 3,010 eval runs, 1,354 sat in
+cells near zero confidence either way, because sweeps spread a few runs over
+every subject). In the missing, near, focus and guidance-rest bands, after
+high stakes, a cell's place is set by its projected pairs to a verdict
+(`pairs_to_verdict`): how many more pairs the gate's keep or remove test
+needs to reach its level, from the level it has reached and D's mean and
+variance as the gate's next bet sees them. Fewest projected points per use
+(pairs x fire cost / (1 + the subject's use)) go first; a cell of a subject
+with some cells settled goes before one of a fresh subject; a cell projected
+past its 40-pair cap, with at least three pairs measured, goes last and is a
+`cell-projected-past-cap` work item (a step summary count, not an issue). A
+cell with no measured difference yet keeps the band's old order behind the
+projected ones. Only a route that can still decide counts: a provisional
+pooled keep is projected to the current rest's own keep test (its lapse at
+the cap is no keep), a cell whose without arm is too high to show the margin
+to its ceiling stop at 20 pairs (its remove test cannot decide it), and a
+crossed remove test still waiting for a second Claude Code version has no
+projection. The two-week batch already caps how many subjects are open
+at once; it now also takes a partly decided subject before the longest
+without a run, and a subject whose every projected cell is past its cap
+after all others. A guidance section whose `eval-coverage.yml` row in
+_agent-guidance is `skipped` is never fired, even with fixtures on the
+schedule.
 7. **Bare baselines** (no minimum share, only the room left): one fire with
    `arms: bare` and three trials per scheduled fixture that runs in place
    and roster model, once per model id
@@ -313,7 +341,8 @@ so a stuck cheaper cell never starves the dearer one.
    counts as done; a new roster model gets its own. Bare runs are listed
    apart (`bare_runs` in the verdict document) and never pooled into a cell.
 8. **Guidance rest** (no minimum share): every other undecided guidance
-   cell, cells with no run first. It gets only what every other band leaves,
+   cell, by deep before wide, then cells with no run first. It gets only
+   what every other band leaves,
    so when the 30-fire cap binds a section outside the focus can wait weeks.
 
 **The guidance focus** (`guidance_focus` in `scripts/plan_week.py`; the owner's
@@ -475,6 +504,21 @@ a fixture whose `fixture.yaml` has a top-level `context` mapping; its run is
 titled `Fire eval routine: eval bare <fixture> <model>`. The allowance guard
 holds it as one run, like any eval fire; the plan reserves it as one arm
 (the cell's cost per arm trial, times three).
+
+**Pair fires.** A routine session costs about $0.67 of its own on every fire,
+and nothing counts it, so when one sweep plans a fixture's cells on two
+roster models with the same arms, it sends them as one fire with
+`model: m1,m2`, in roster order (`scripts/plan_week.py`, PAIR FIRES). The
+fire workflow checks each id as it checks one and sends `models: [m1, m2]`;
+the routine runs the harness once per model, in that order, under one run id
+and one results branch, and each summary keeps its own model. The run is
+titled `Fire eval routine: eval <fixture> m1,m2`, which the planner and the
+explorer read as a fire of each model's cell. Each invocation is stopped 40
+minutes after it starts, so the planner holds a pending pair fire's cells for
+90 minutes (a one-model fire's for 50) and counts it in flight for twice a
+one-model fire's 20 minutes. The allowance guard reserves it
+as one fire and, once its run is ingested, charges each of its two
+invocations.
 
 A skill is paused while an improve pull request is open, an attempt is in
 flight, an open `on-hold` issue names it, for 14 days after a rejection, and
@@ -754,8 +798,15 @@ pending, and `harness/gates.py`'s docstring is the full statement):
 - *The judge* is reported beside each cell and does not vote; single
   checks no longer keep on their own.
 - *Current content only.* A cell decides on runs of the skill and fixture
-  on main; for a guidance section, on runs beside the current rest of the
-  guidance. Older runs are ignored.
+  on main. For a guidance section, the guidance block's `rest_policy`
+  (2026-11-07, default `pooled-with-current-guard`) pools the runs beside
+  every rest of the guidance, pair by pair at equal weight, for keeping
+  once the current rest has 6 pairs (a keep test over the current rest
+  alone runs beside it, each at half the keep level);
+  any removal also needs at least `rest_guard_min_pairs` (6) pairs beside
+  the current rest whose own share of the test reaches the removal level,
+  and ceilings, floors and the cap read the current rest only. `current`
+  reads the current rest only, as from 2026-11-03.
 - *The bet prior.* Each cell's first bet starts from a prior learned from
   other subjects' pairs made before the Monday of the cell's first pair
   (three pseudo-runs, mean clamped to -0.2..0.5, variance at least 0.001).
@@ -1222,11 +1273,14 @@ the alone pair only for a section leaning toward removal: its in-situ
 verdict is `retire`, or its in-situ test is at least halfway to a removal
 (`ALONE_PAIR_FROM_PROGRESS` in `scripts/plan_week.py`); every other section's
 fires run only the in-situ pair (`arms: in-situ`), which saves about a third
-of guidance spend. The in-situ runs are pooled by the rest of the
-guidance each ran beside, and only the runs beside the current rest decide
-(2026-11-03; #557's weighting across older rests favored removal, so older
-rests are ignored and an edit elsewhere in the guidance starts the evidence
-over). A section is `retire` by the skills' rule above, with the guidance
+of guidance spend. The in-situ runs are grouped by the rest of the
+guidance each ran beside. From 2026-11-03 only the runs beside the current
+rest decided (#557's weighting across older rests favored removal), so an
+edit elsewhere in the guidance started the evidence over; since 2026-11-07
+(`rest_policy: pooled-with-current-guard`) every rest's pairs count at equal
+weight, a removal still needs the current rest's own evidence, and a keep made
+on the pooled pairs alone gives way to such a removal (ADR 0014,
+"Pooled-rest addendum (2026-11-07)"). A section is `retire` by the skills' rule above, with the guidance
 block of `evals/gate-policy.yml` (today the same numbers).
 There is no separate confirmation step. If a `retire` section helps only
 when alone, it is `shorten-or-merge` instead, because the rest of the

@@ -33,6 +33,21 @@ export function stakesLine(st) {
   return null;
 }
 
+// The owner, 2026-11-07: the recorded runs the decision does not count, their
+// list-price cost and the top reasons; nothing when `discarded_runs` is null
+// (unknown) or empty.
+export function discardedLine(d) {
+  if (!d || typeof d !== 'object' || !Number.isInteger(d.total) || d.total <= 0) return null;
+  const usd = typeof d.cost_usd === 'number' && isFinite(d.cost_usd) ? '$' + d.cost_usd.toFixed(2) : STRINGS.noValue;
+  const rows = Object.entries(d.by_reason && typeof d.by_reason === 'object' ? d.by_reason : {})
+    .filter(([, r]) => r && Number.isInteger(r.runs) && r.runs > 0)
+    .sort((a, b) => b[1].runs - a[1].runs || (a[0] < b[0] ? -1 : 1))
+    .slice(0, 3)
+    .map(([k, r]) => (Object.prototype.hasOwnProperty.call(STRINGS.discardedReasons, k) ? STRINGS.discardedReasons[k] : clean(k)) + ' (' + r.runs + ')');
+  const unknown = Number.isInteger(d.cost_unknown) ? d.cost_unknown : 0;
+  return h('p', { class: 'meta' }, STRINGS.discarded(d.total, usd, unknown, rows.join(', ')));
+}
+
 export function usageLine(u, window, refMs) {
   if (!u || typeof u.invocations !== 'number' || !window) return null;
   return h('p', { class: 'meta' }, STRINGS.used(u.invocations, fmtUtcDay(parseTime(window.from), refMs), fmtUtcDay(parseTime(window.to), refMs)));
@@ -62,8 +77,8 @@ export function skillCard(it, refMs, doc) {
     nextLine(it.raw.next_test, refMs, 'skill'),
     stakesLine(it.raw.stakes),
     h('p', { class: 'sent' }, clean(it.sentence)),
-    hasData(it.pooled) ? [legendFor('skills', it.pooled), modelCharts(it.pooled, 'skills'), trendChart(it.trend, refMs)] : null,
-    confidenceView(it.raw.confidence, doc && doc.policy, 'skills'),
+    hasData(it.pooled) ? [legendFor('skills', it.pooled), modelCharts(it.pooled, 'skills'), trendChart(it.trend, refMs, true)] : null,
+    confidenceView(it.raw.confidence, doc && doc.policy, 'skills', true),
     verdictLine(it.raw.verdict));
 }
 
@@ -77,8 +92,8 @@ export function sectionCard(it, refMs, doc) {
     stakesLine(it.raw.stakes),
     h('p', { class: 'sent' }, clean(it.sentence)),
     hasAlone(it.pooled) ? h('p', { class: 'meta' }, STRINGS.aloneShown) : null,
-    hasData(it.pooled) ? [legendFor('guidance', it.pooled), modelCharts(it.pooled, 'guidance'), trendChart(it.trend, refMs)] : null,
-    confidenceView(it.raw.confidence, doc && doc.policy, 'guidance'),
+    hasData(it.pooled) ? [legendFor('guidance', it.pooled), modelCharts(it.pooled, 'guidance'), trendChart(it.trend, refMs, true)] : null,
+    confidenceView(it.raw.confidence, doc && doc.policy, 'guidance', true),
     verdictLine(it.raw.verdict));
 }
 
