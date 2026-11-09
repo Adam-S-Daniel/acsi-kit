@@ -4,7 +4,7 @@
 repo: agentskills
 kit_name: agent-skills
 source: adam-agentskills
-source_sha: 193d05bbad257ed7c8d0247de26ce3d1a73c5b0c
+source_sha: bf7aa5a022a6737fcb6808ace4ff2f8ffcb43806
 after: [_agent-guidance]
 
 exclude:
@@ -149,8 +149,8 @@ edits:
     why: X9. The same command as ci.yml and AGENTS.md.
   - path: README.md
     stage: output
-    old: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance and a hook that blocks unmarked GitHub writes | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | CI, GitHub and skill-delivery skills | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser) | Claude Code on the owner's machines |\n"
-    new: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance and a hook that blocks unmarked GitHub writes | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | coding skills (CI, GitHub, skill delivery) | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes, a signed-in browser), plus the clone-sync and API-credit-lane hooks | Claude Code on the owner's machines |\n"
+    old: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance and a hook that blocks unmarked GitHub writes | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | CI, GitHub and skill-delivery skills | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes): settings sync, session and memory management, elevation from WSL | Claude Code on the owner's machines |\n"
+    new: "| `acsi-anything-anywhere` | enabled | general thinking and writing skills, plus a startup hook that installs the fleet guidance and a hook that blocks unmarked GitHub writes | claude.ai web, iOS, Chrome, Desktop, and Claude Code |\n| `acsi-coding-anywhere` | enabled | coding skills (CI, GitHub, skill delivery) | Claude Code terminals and cloud sessions |\n| `acsi-coding-local` | opt-in | machine-bound coding skills (WSL/Windows homes), plus the clone-sync and API-credit-lane hooks | Claude Code on the owner's machines |\n"
     why: X9. Says what each plugin is for, not which skills the source registry happened to ship.
   - path: README.md
     stage: output
