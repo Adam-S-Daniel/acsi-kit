@@ -15,7 +15,11 @@ For the kit's owner and the agents working on it; adopters can skip this.
   writes what it would change to the run summary. A failed run opens or
   updates one open issue, "Re-sync from sources is failing", with the run's
   link and the failed step's name, and the next successful run closes it:
-  watch for that issue rather than the Actions tab. It never re-pins
+  watch for that issue rather than the Actions tab. The fleet's daily
+  scheduled-run health audit (`.github/workflows/scheduled-run-health.yml`)
+  also watches the job's scheduled runs and files its own `ci` issue, the
+  one the owner's fleet agents pick up (`_agent-guidance` lists this repo
+  under `cron_coverage.fleet` in its `repos.yml`). It never re-pins
   `agentskills-private` (its source is private) and does not rewrite
   `library/`, so do those by hand. By hand, the fallback: check the sources
   out beside this clone, move the shas, run `npm ci` in the

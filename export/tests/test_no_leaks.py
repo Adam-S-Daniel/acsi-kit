@@ -73,6 +73,14 @@ ALLOWED: dict[str, dict[str, int]] = {
     # check must catch.
     "starter/skills-evals/test/issues/test_issue_124_guidance_gates.py": {"email": 2},
 }
+# The kit's own scheduled-run health caller: its one `uses:` names the source
+# owner's fleet reusable, which audits this repo's daily re-sync
+# (_agent-guidance#492). It is this repo's CI, not kit content, and no starter
+# tree carries it. The hits are those of the owner's login, computed so that
+# this file need not spell them.
+_SOURCE_OWNER = _COMMON["source_owners"][0]
+ALLOWED[".github/workflows/scheduled-run-health.yml"] = {
+    name: len(rx.findall(_SOURCE_OWNER)) for name, rx in TOKENS if rx.search(_SOURCE_OWNER)}
 MANIFESTS_DIR = "export/manifests/"
 
 SKIP_PARTS = {"__pycache__", ".pytest_cache", "node_modules", ".git"}
