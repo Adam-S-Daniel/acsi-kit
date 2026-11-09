@@ -35,11 +35,11 @@ ADR14_F = ("https://github.com/{EVALS_REPO}/blob/main/docs/decisions/"
 EDITS = {
     "AGENTS.md": [
         ("  stands, what is parked on the owner and why, and how to resume it. The live\n"
-         "  operational state is the status board,\n"
-         "  [skills-evals#126](https://github.com/Adam-S-Daniel/skills-evals/issues/126).\n",
-         "  stands, what is parked on the owner and why, and how to resume it. Keep the\n"
-         "  live operational state on a status-board issue of your own, linked from\n"
-         "  `HANDOFF.md`'s \"Current state\".\n"),
+         "  operational state is HANDOFF.md's \"Current state\" section. The old status\n"
+         "  board, [skills-evals#126](https://github.com/Adam-S-Daniel/skills-evals/issues/126),\n"
+         "  is closed and not updated.\n",
+         "  stands, what is parked on the owner and why, and how to resume it. The live\n"
+         "  operational state is HANDOFF.md's \"Current state\" section.\n"),
     ],
     "docs/how-it-works.md": [
         ("operating record in [`HANDOFF.md`](../HANDOFF.md), and the live status board is\n"

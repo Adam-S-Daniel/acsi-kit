@@ -2267,3 +2267,22 @@ starter/" ([run 42645286648](https://github.com/Adam-S-Daniel/acsi-kit/actions/r
 
 Reverse: restore round 4's pins and the edits named above, and remove
 `standing_budget.py` and the pattern support in `machinery_tests.py`.
+
+## Re-pin round 6 (2026-11-09)
+
+Two sources moved between round 5's pin and the first re-sync after it:
+
+| Source | Round 5 | Round 6 |
+|---|---|---|
+| skills-evals | `508181f9da3b` | `f6f16f835d4e` |
+| wsl-automation | `3f973eec89b5` | `5118c58b887e` |
+
+- skills-evals' `AGENTS.md` now says the live operational state is
+  `HANDOFF.md`'s "Current state" section and that the old status board issue
+  is closed. `owner_links.py`'s edit follows the new text and keeps only its
+  first sentence, since the kit has no such issue.
+- Two new guidance fixtures (skills-ecosystem `lockless-repo`,
+  watch-finished-is-not-ci-passed `grep-q-pipe-race`) ship with their
+  `scheduled.yml` rows, because both sections ship.
+
+Reverse: restore round 5's pins and the old `owner_links.py` edit.
