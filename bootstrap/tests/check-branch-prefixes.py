@@ -13,7 +13,7 @@ and one no-permission "pushed" workflow per lane listens for them
     totals (claude/spend-*), which the routine's instructions need not name;
   * every claude/<lane>- branch the routine's instructions
     (docs/routine/eval-runner-instructions.md, which the routine's stub
-    prompt reads at each run) or another skills-evals doc names matches a
+    prompt reads at each run, and its per-mode files under docs/routine/modes/) or another skills-evals doc names matches a
     lane, and every lane is named by the instructions (no workflow listens
     for a branch nothing pushes);
   * where one branch name matches two lanes (claude/eval-improve-<run> also
@@ -64,7 +64,11 @@ check(f"skills-evals listens on the six routine lanes and the dashboard's ({sort
     "claude/scaffold-*", "claude/draft-skill-*"} | DASHBOARD_LANES)
 
 BRANCH = re.compile(r"claude/[a-z][a-z-]*-")
-prompt = (SE / "docs" / "routine" / "eval-runner-instructions.md").read_text(encoding="utf-8")
+# The instructions are split per mode (docs/routine/modes/*.md), each read
+# by the eval runner for its own mode, so the branches are named across them.
+prompt = "".join(p.read_text(encoding="utf-8") for p in
+                 [SE / "docs" / "routine" / "eval-runner-instructions.md",
+                  *sorted((SE / "docs" / "routine" / "modes").glob("*.md"))])
 named_in_prompt = set(BRANCH.findall(prompt))
 check("the routine's instructions name its branches", bool(named_in_prompt))
 for doc in sorted((SE / "docs").rglob("*.md")):

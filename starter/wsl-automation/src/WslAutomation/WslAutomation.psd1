@@ -14,6 +14,7 @@
         'Update-CcstatuslineConfig',
         'Set-CcstatuslineStatusLine',
         'Invoke-CodexCloudEnvironmentSync',
+        'Invoke-DockerWslIntegrationWatchdog',
         'Update-WslAutomationRepo',
         'Set-AgentWorkspaceTrust',
         'Install-AgentTrustGitHook'

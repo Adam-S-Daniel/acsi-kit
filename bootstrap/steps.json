@@ -381,7 +381,7 @@
     {
       "id": "27",
       "title": "Create the fleet worker routine",
-      "run": "At https://claude.ai/code/routines: hourly at :20, the GitHub connector, the prompt in docs/routines.md",
+      "run": "At https://claude.ai/code/routines: an API trigger only (no schedule), the GitHub connector, the prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it every 3 hours",
       "kind": "browser",
       "part": "routines",
       "track": "base",

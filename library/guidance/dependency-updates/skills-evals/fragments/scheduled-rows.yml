@@ -1,2 +1,4 @@
   - path: evals/guidance/dependency-updates/dependabot-cooldown
     readiness: "Isolation pair of four guidance arms (section vs none, full vs full-minus-section), unpinned (the committed roster then named arm claude-sonnet-5-5 and judge claude-fable-5-1). No paid run yet; hermetic: the seed's trap fails its checks and the fix passes them (test_issue_124_guidance_gates.py, 2026-10-27)."
+  - path: evals/guidance/dependency-updates/hand-bump-cooldown
+    readiness: "Added by a fixture pull request for skills-evals#856: a by-hand bump where the latest release is four days old; the section says take the newest release past seven days, pinned exact. Isolation pair of four guidance arms, unpinned. No paid run yet; scored offline: ^2.5.0 fails, 2.4.0 passes."

@@ -1,0 +1,7 @@
+acsi-anything-anywhere:finding-unknowns
+acsi-anything-anywhere:writing-adrs
+acsi-coding-anywhere:debug-github-workflows
+acsi-coding-anywhere:skills-doctor
+debug-github-workflows
+standup-notes
+writing-adrs

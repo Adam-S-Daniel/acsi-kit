@@ -551,7 +551,8 @@ class CellTests(unittest.TestCase):
         self.assertLess(result["objective"]["keep_p"], 0.2)
         self.assertGreater(result["objective"]["keep_p"], 0.05)
         self.assertEqual(result["keep_tests"],
-                         [{"route": "objective", "p": result["objective"]["keep_p"]}])
+                         [{"route": "objective", "p": result["objective"]["keep_p"],
+                           "log_wealth": result["objective"]["keep_log_wealth"]}])
         self.assertEqual(cell(series("with", GAIN * 2), series("without", LOSS * 2),
                               family=4)["objective"]["keep_at"], 11)
 
@@ -1464,7 +1465,15 @@ class ComputeGatesTests(unittest.TestCase):
         _, with_bare = self.run_gates("b.json")
         shutil.rmtree(base.parent.parent)
         _, without_bare = self.run_gates("c.json")
+        # The verdict is the same; only the discarded-runs report and the
+        # run-utility ledger name it.
+        bare_discards = with_bare["skills"]["ctxbot"].pop("discarded_runs")
+        without_bare["skills"]["ctxbot"].pop("discarded_runs")
+        bare_ledger = with_bare["skills"]["ctxbot"].pop("run_utility")
+        without_bare["skills"]["ctxbot"].pop("run_utility")
+        self.assertEqual([r["reason"] for r in bare_ledger if r["reason"]], ["bare_run"])
         self.assertEqual(with_bare["skills"], without_bare["skills"])
+        self.assertEqual(bare_discards["by_reason"]["bare_run"]["runs"], 1)
         self.assertEqual(len(with_bare["bare_runs"]), 1)
         self.assertEqual(without_bare["bare_runs"], [])
 

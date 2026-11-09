@@ -55,7 +55,7 @@ DROPPED_ITS = [
     "It 'no longer schedules the wsl --export backup or passes -Format'",
     "It 'requires -ResticRepoDir'",
     "It 'creates the keeper task with an action",
-    "It 'creates exactly one daily trigger for the backup task and no logon trigger'",
+    "It 'creates exactly one daily trigger for the backup task and no logon trigger",
     "It 'registers the backup task via Register-WslScheduledTask",
     "It 'registers the keeper task via Register-WslScheduledTask",
     "It 'registers the interactive launcher task",
@@ -125,14 +125,15 @@ WINDOWSTYLE_OLD = """            $keeperAction = $script:capturedActions | Where
             $ccstatuslineAction"""
 WINDOWSTYLE_NEW = """            $ccstatuslineAction"""
 
-INTERACTIVE_OLD_START = "        It 'runs only the two launchers interactively; the backup task is S4U for the current user, never SYSTEM' {\n"
+INTERACTIVE_OLD_START = "        It 'runs only the two launchers and the Docker watchdog interactively; the backup task is S4U for the current user, never SYSTEM' {\n"
 INTERACTIVE_OLD_END = "        It 'creates the ccstatusline sync task with an action"
-INTERACTIVE_NEW = """        It 'runs no task interactively; the usage census task is S4U for the current user, never SYSTEM' {
+INTERACTIVE_NEW = """        It 'runs only the Docker watchdog interactively; the usage census task is S4U for the current user, never SYSTEM' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
                 -PwshPath 'C:\\fake\\pwsh.exe' -Confirm:$false
 
-            # Every task runs in the background; none needs to show a window.
-            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskPrincipal -Times 0 -Exactly -ParameterFilter {
+            # The Docker watchdog must restart Docker Desktop in the user's session; every other
+            # task runs in the background.
+            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskPrincipal -Times 1 -Exactly -ParameterFilter {
                 $LogonType -eq 'Interactive'
             }
             Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 1 -Exactly -ParameterFilter {
@@ -202,29 +203,31 @@ DISCOVERY_NEW = """                # Every wsl.exe action runs one Bash entry fr
                 if ($expanded.Value -match '--exec /bin/bash \\./([A-Za-z0-9._-]+\\.sh)$') { $Matches[1] }
 """
 
-COVERS_OLD = """    It 'covers all nine script actions among eleven registered task actions' {
-        $script:actionCount | Should -Be 11
-        $script:actionScripts.Count | Should -Be 9
+COVERS_OLD = """    It 'covers all ten script actions among twelve registered task actions' {
+        $script:actionCount | Should -Be 12
+        $script:actionScripts.Count | Should -Be 10
         @($script:actionScripts | Sort-Object) | Should -Be @(
-            'ensure-claude-session.ps1', 'publish-task-health.sh', 'publish-usage-census.sh', 'publish-waiting-feed.sh', 'run-memory-curation.sh', 'run-session-miner.sh',
+            'ensure-claude-session.ps1', 'ensure-docker-wsl-integration.ps1', 'publish-task-health.sh', 'publish-usage-census.sh', 'publish-waiting-feed.sh', 'run-memory-curation.sh', 'run-session-miner.sh',
             'sync-ccstatusline-config.ps1', 'sync-codex-cloud-environments.ps1', 'wsl-restic-backup.ps1'
         )
 """
-COVERS_NEW = """    It 'covers all six script actions among six registered task actions' {
-        $script:actionCount | Should -Be 6
-        $script:actionScripts.Count | Should -Be 6
+COVERS_NEW = """    It 'covers all seven script actions among seven registered task actions' {
+        $script:actionCount | Should -Be 7
+        $script:actionScripts.Count | Should -Be 7
         @($script:actionScripts | Sort-Object) | Should -Be @(
-            'publish-usage-census.sh', 'publish-waiting-feed.sh', 'run-memory-curation.sh', 'run-session-miner.sh',
+            'ensure-docker-wsl-integration.ps1', 'publish-usage-census.sh', 'publish-waiting-feed.sh', 'run-memory-curation.sh', 'run-session-miner.sh',
             'sync-ccstatusline-config.ps1', 'sync-codex-cloud-environments.ps1'
         )
 """
 
 FOREACH_OLD = """        @{ Entry = 'ensure-claude-session.ps1'; Work = 'Invoke-ClaudeSessionKeeper' },
+        @{ Entry = 'ensure-docker-wsl-integration.ps1'; Work = 'Invoke-DockerWslIntegrationWatchdog' },
         @{ Entry = 'sync-ccstatusline-config.ps1'; Work = 'Update-CcstatuslineConfig' },
         @{ Entry = 'sync-codex-cloud-environments.ps1'; Work = 'Invoke-CodexCloudEnvironmentSync' },
         @{ Entry = 'wsl-restic-backup.ps1'; Work = 'Invoke-WslResticBackup' }
 """
-FOREACH_NEW = """        @{ Entry = 'sync-ccstatusline-config.ps1'; Work = 'Update-CcstatuslineConfig' },
+FOREACH_NEW = """        @{ Entry = 'ensure-docker-wsl-integration.ps1'; Work = 'Invoke-DockerWslIntegrationWatchdog' },
+        @{ Entry = 'sync-ccstatusline-config.ps1'; Work = 'Update-CcstatuslineConfig' },
         @{ Entry = 'sync-codex-cloud-environments.ps1'; Work = 'Invoke-CodexCloudEnvironmentSync' }
 """
 
@@ -236,8 +239,8 @@ def _tasks(text: str, where: str) -> str:
         text = T.drop_block(text, opener, where, " " * 4)
     text = T.sub_once(text, FIXTURE_OLD, FIXTURE_NEW, where)
     n = text.count(ARGS_OLD)
-    if n != 44:
-        raise T.PatchError(f"{where}: expected 44 -BackupDir/-ResticRepoDir argument lines after the removals, found {n}")
+    if n != 49:
+        raise T.PatchError(f"{where}: expected 49 -BackupDir/-ResticRepoDir argument lines after the removals, found {n}")
     text = text.replace(ARGS_OLD, ARGS_NEW)
     text = T.sub_once(text, S4U_OLD, S4U_NEW, where)
     text = T.sub_once(text, WINDOWSTYLE_OLD, WINDOWSTYLE_NEW, where)

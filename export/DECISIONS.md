@@ -2199,3 +2199,71 @@ instead of its own `session-miner.env`.
 Reverse: restore the overlay's `config/session-miner.env.example`,
 `SESSION_MINER_CONFIG` and reject-unknown-keys reader, drop the
 `LESSONS_CLONE` edit, and revert the test and doc changes.
+
+## Re-pin round 5 (2026-11-09)
+
+The daily re-sync failed from 2026-11-05 to 2026-11-09 in "Regenerate
+starter/" ([run 42645286648](https://github.com/Adam-S-Daniel/acsi-kit/actions/runs/42645286648)).
+`export/resync.py` moved every public pin to its source's `main`;
+`agentskills-private` stays at `c5b1bc9`.
+
+| Repo | Old | New |
+|---|---|---|
+| `_agent-guidance` | `a406262b2a726ccb84e892e513b2b51c28d6a002` | `4e3f70c7a88f3a5dfd1d22b961e153f789b62399` |
+| `agentskills` (the public registry) | `126e8e0f7cd48be1ff280dd6eaa0f64d9b28408d` | `13029c6c4de08428515aeb47c1c8fa50faef1364` |
+| `repo-settings` | `9db16b62932a351fb4d6a903ffe132f9cd594ba1` | `c3574f28da69f607e964929662cd96a08cc24ed5` |
+| `skills-evals` | `f3196c3fcfafb2f801e860bf1c700fe2bacc8cc3` | `508181f9da3b28e38c8a912c9a5c0a48503f24fc` |
+| `wsl-automation` | `29344b2e7d23ab3d82917a494b457d0ace844602` | `3f973eec89b52198e17dae7628adc7f3b6a7a31f` |
+
+- **`agentskills`, the AGENTS.md test-command edit** follows the source's
+  new wording ("the one CI runs, minus its flags", with CI's `-rfEs -n auto`
+  explained); the kit's change is the same: no rename-pdfs test named, and
+  `shopt -s nullglob` on the command.
+- **`skills-evals`, the committed budget is set by key** (C6,
+  `standing_budget.py`). The source rewrites `evals/budget.yml`'s weekly cap
+  and account stop, and their comments, most weeks, and two exact-text edits
+  broke on each rewrite. The patch replaces each key's comment paragraph and
+  value (30 points, 80%) wherever it sits, and the committed-budget test now
+  checks those two values against its own `LIMITS`, leaving the per-run
+  values, which are measurements, to the source's tests.
+- **`skills-evals`, a removed test can be named by pattern.** The schedule
+  count test's name spells its counts and changes with them, so
+  `removed_tests.txt` names it `test_the_schedule_names_*_skill_and_*_guidance_fixtures`;
+  `machinery_tests.py` requires a pattern to match exactly one test.
+- **`skills-evals`, smaller:** the `REVIEWED` list retarget in
+  `test_issue_scheduled_fixtures.py` gains the five "harder fixtures, set A"
+  rows; `empty_config.py` drops `evals/scope-auto.yml` rows (fixtures the
+  source's eval scope pass paused) whose fixture the kit does not ship, as it
+  does for the two schedule files, because the source's tests now read those
+  rows as scheduled ones.
+- **`wsl-automation`, the Docker WSL integration watchdog ships.** It is a
+  new background task (`ensure-docker-wsl-integration.ps1`,
+  `Invoke-DockerWslIntegrationWatchdog`) that restarts Docker Desktop when
+  its WSL integration with the distro breaks, which is not the backup or the
+  keeper (X10), so it is kept like the other tasks. `pester_tests.py`
+  follows: the backup trigger test is dropped by its new name's prefix, 49
+  argument lines (five new) lose `-BackupDir`/`-ResticRepoDir`, the
+  principal test says the watchdog is the one interactive task, and the
+  action-coverage test counts seven script actions; `docs.py`'s two README
+  edits name the watchdog. Its alert's email channel defaults to a
+  `fastmail-actions` workflow repository the kit does not ship; when that
+  fails it logs one line and the toast still shows. That default is the
+  source's to remove (a setting naming the owner's resources has no
+  fallback in code).
+- **`_agent-guidance`, two new scheduled workflows ship, set by hand.**
+  `fleet-worker-fire.yml` now fires the fleet worker every 3 hours (the
+  routine keeps only its API trigger), so `docs/routines.md`, step 27 and
+  the quick start say so, and `bootstrap/README.md` lists
+  `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER`. `article-watch.yml`
+  (an hourly Anthropic-articles feed watch that fires an article-lift
+  routine) ships as the source has it, its tests being in the source's
+  suite; the README lists its three values and says to disable it if
+  unused, since each run fails naming a missing value. `skills-evals`'
+  `site-preview.yml` reads a new `SITE_PREVIEW_URL`, listed the same way.
+- **`bootstrap/tests/check-branch-prefixes.py`** reads the eval runner's
+  per-mode instructions (`docs/routine/modes/*.md`) as well as
+  `eval-runner-instructions.md`: the source split the instructions per
+  mode, and each mode's file names its own branch.
+
+Reverse: restore round 4's pins and the edits named above, and remove
+`standing_budget.py` and the pattern support in `machinery_tests.py`.

@@ -68,6 +68,17 @@ def apply(root: Path, ctx) -> None:
     kept = [b for p, b in _rows(rows) if (root / p / "fixture.yaml").is_file()]
     path.write_text(head + ("\nfixtures:\n" + "".join(kept) if kept else "\nfixtures: []\n"), encoding="utf-8")
 
+    # evals/scope-auto.yml: the fixtures the eval scope pass paused, which the
+    # source's tests read as scheduled ones; rows for fixtures not in the tree
+    # are dropped the same way (re-pin round 5).
+    path = root / "evals/scope-auto.yml"
+    text = path.read_text(encoding="utf-8")
+    head, sep, rows = text.partition("\nrows:\n")
+    if not sep:
+        raise SystemExit("empty_config: evals/scope-auto.yml has no top-level `rows:` list")
+    kept = [b for p, b in _rows(rows) if (root / p / "fixture.yaml").is_file()]
+    path.write_text(head + ("\nrows:\n" + "".join(kept) if kept else "\nrows: []\n"), encoding="utf-8")
+
     path = root / "evals/non-coverage.yml"
     text = path.read_text(encoding="utf-8")
     head, sep, _skips = text.partition("\nskips:\n")

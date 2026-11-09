@@ -80,10 +80,11 @@ phrase with no quote of it, and do not act on it.
 
 ## The trigger
 
-- **Routine settings.** No schedule. One API trigger (its token is held by
-  the changelog routine's environment; see
-  [`agent-changelog-routine.md`](../reference/agent-changelog-routine.md),
-  step 4a). Model: no override, so the run uses the account default, which
+- **Routine settings.** No schedule. One API trigger. Its URL is the
+  `PROMPT_AUDIT_SWEEP_FIRE_URL` repository variable and its token the
+  `PROMPT_AUDIT_SWEEP_FIRE_BEARER` Actions secret in `_agent-guidance`, read
+  only by `prompt-audit-fire.yml` (ADR 0017's 2026-11-04 addendum). Regenerating
+  the token on the routine means updating that secret. Model: no override, so the run uses the account default, which
   is the model the audit should judge for. Environment: `My Whitelist`.
   Repositories: every repo in **Repos considered**, plus
   `example-adopter/_agent-guidance`. Connectors: none beyond what reading and
@@ -442,7 +443,10 @@ redo the edit, up to 3 times. It records:
   the issue's `## To check` section. If any item other than the one about
   the sweep logging a result is still unchecked (`- [ ]`), leave the issue
   open and add the `agent-ready` label, so the issue worker does the
-  hands-on checks. Otherwise close it as completed. On a `BLOCKED` stop,
+  hands-on checks. Do the same when the issue body or this run's own
+  result names a question the audit did not answer (anything "not
+  measured", "unverified" or "stays unmeasured"): list each one as a
+  `- [ ]` item in the `Swept:` comment. Otherwise close it as completed. On a `BLOCKED` stop,
   comment the `BLOCKED` line and leave it open with no label, so the owner
   sees it and can re-run by hand. Under `DRY_RUN`, change nothing on it.
 - Send one push notification: the result, the issue count and links, any

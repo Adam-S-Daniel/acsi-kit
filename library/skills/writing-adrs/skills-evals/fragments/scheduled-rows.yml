@@ -2,3 +2,5 @@
     readiness: "Isolation pair on pins since removed (agent claude-sonnet-5, judge claude-opus-4-8). Local N=3 judged baseline 2026-10-05 (Claude Code 2.1.289, skills-evals c1bf71c), 0 errors: objective with 8/9 vs without 2.33/9; judge 9.03 vs 1.17, ranges 8.9-9.3 vs 0.4-1.9."
   - path: evals/writing-adrs/existing-convention
     readiness: "Promoted automatically on 2026-11-03 by contextualize_fixtures.py: a drafted isolation pair given an in-place context on example-adopter/example-site-platform at 7cf559388b9e (ADR 0012), budgets measured with 25% headroom; its isolation pair ran when it was drafted."
+  - path: evals/writing-adrs/pr-body-outgrows-itself
+    readiness: "Promoted automatically on 2026-11-07 by contextualize_fixtures.py: a drafted isolation pair given an in-place context on example-adopter/example-site-platform at a101cdd3301d (ADR 0012), budgets measured with 25% headroom; its isolation pair ran when it was drafted."

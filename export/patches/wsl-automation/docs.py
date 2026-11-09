@@ -340,9 +340,9 @@ def readme(text: str, where: str) -> str:
     text = T.sub_once(
         text,
         "Every task action that runs a repo script (backup, keeper, ccstatusline sync,\n"
-        "Codex Cloud sync, usage census, session miner, memory curation, waiting feed, and task health) first updates",
+        "Codex Cloud sync, usage census, session miner, memory curation, waiting feed, task health, and the Docker watchdog) first updates",
         "Every task action runs a repo script (ccstatusline sync, Codex Cloud sync,\n"
-        "usage census, session miner, memory curation, and waiting feed), and first updates",
+        "usage census, session miner, memory curation, waiting feed, and the Docker watchdog), and first updates",
         where,
     )
     text = T.sub_once(
@@ -354,8 +354,8 @@ def readme(text: str, where: str) -> str:
     )
     text = T.sub_once(
         text,
-        "| PowerShell (backup, keeper, ccstatusline, Codex Cloud) |",
-        "| PowerShell (ccstatusline, Codex Cloud) |",
+        "| PowerShell (backup, keeper, ccstatusline, Codex Cloud, Docker watchdog) |",
+        "| PowerShell (ccstatusline, Codex Cloud, Docker watchdog) |",
         where,
     )
     text = T.sub_once(

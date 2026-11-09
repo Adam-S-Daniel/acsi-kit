@@ -99,7 +99,11 @@ blocked comments. The on-hold stop overrides step 7 below.
    `docs/skill-impact.md` entry (add lines only) and a `PURPOSE.md` beside
    the `SKILL.md`, and the PR body states how the eval touch gate was met
    (eval command, exit code and counts; a fixture PR link; or the skill's
-   non-coverage row), so the PR qualifies for the merge rule. If
+   non-coverage row), so the PR qualifies for the merge rule. In
+   `skills-evals`, every new `fixture.yaml` a fixture PR adds carries the
+   top-level `origin:` mapping (`kind`, `source`, `request`) that
+   `scripts/fixture_pr_gate.py` requires, even when the issue's own text
+   predates that rule; without it the PR never auto-merges. If
    the items need no file change (a measurement, a confirmation), comment
    the evidence on the issue, close it as completed, and take the next one. Run the
    repo's own test suite unpiped and record the count and the exit code.
@@ -109,10 +113,13 @@ blocked comments. The on-hold stop overrides step 7 below.
    message alone does not prove the commit exists.
 5. **Open the PR,** ready for review, not a draft, labeled
    `agent-authored`, with commits carrying `Agent: claude-code`. Its body
-   starts with `Closes <owner>/<repo>#<n>` (closing the issue is intended
-   here) or, when it fixes only some of the issue's findings and leaves the
-   rest open, `Refs <owner>/<repo>#<n>` followed by the findings it fixes,
-   then
+   starts with a `## TLDR` heading and one to three plain sentences on what
+   changes and why (the required `agent-checks` check fails a body that
+   starts with anything else, so write it before the PR is opened, not after
+   the first red run). The next line is `Closes <owner>/<repo>#<n>` (closing
+   the issue is intended here) or, when it fixes only some of the issue's
+   findings and leaves the rest open, `Refs <owner>/<repo>#<n>` followed by
+   the findings it fixes. The body then
    summarizes what changed and why, gives the test command and its result,
    says what the worker could not verify, and ends with
    `<sub>🤖 Written by Claude Code on behalf of @example-adopter</sub>`. For the three

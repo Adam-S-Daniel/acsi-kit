@@ -20,6 +20,8 @@ import { mergePrivate } from '../src/private/merge.js';
 import { rowsOf, some } from '../src/private/datasets.js';
 import { renderRoute } from '../src/views/page.js';
 import { agentMadeRows } from '../src/views/impact.js';
+import { conversionTotals, conversionView, conversionBody, PLANNER_CHANGE } from '../src/private/conversion.js';
+import { utilityTotals, periodStart, inPeriod, NO_USE } from '../src/views/utility.js';
 import { textOf, findAll } from '../src/core/h.js';
 import { STRINGS, useVoice } from '../src/core/strings.js';
 
@@ -290,7 +292,8 @@ await test('no source file but config.js names the owner/repo', () => {
 
 // --- the public bundle -------------------------------------------------------------
 const publicJs = await bundle('public.js');
-const privateJs = await bundle('private.js');
+// Unminified, so the module path comments the leak checks look for survive.
+const privateJs = await bundle('private.js', { minifyWhitespace: false });
 await test('the leak check sees the dashboard adapter in the private bundle', () => {
   // The negative control: the same check must flag what it exists to keep out.
   const leaks = privateLeaks(privateJs);
@@ -342,6 +345,13 @@ await test('tool/index.html is one self-contained file', () => {
 await test('dashboard/page/index.html is a fresh build of explorer/src', async () => {
   const fresh = await buildPrivatePage();
   ok(fresh === fs.readFileSync(PRIVATE_PAGE, 'utf8'), 'dashboard/page/index.html differs from a build: run `npm run build` in explorer/ and commit both');
+});
+await test('the private page fits an ArtifactData document once JSON-serialized', async () => {
+  // The console stores the page as the `text` field of files/index.html, a
+  // document capped at 262,144 bytes of UTF-8 after JSON.stringify.
+  const page = await buildPrivatePage();
+  const size = Buffer.byteLength(JSON.stringify({ text: page }), 'utf8');
+  ok(size < 262144, 'serialized private page is ' + size + ' bytes, over the 262,144 limit');
 });
 await test('dashboard/page/index.html is one self-contained Dashboard fragment', () => {
   const html = fs.readFileSync(PRIVATE_PAGE, 'utf8');
@@ -463,6 +473,140 @@ await test('explorer/dist/artifact/index.html is a fresh, self-contained build',
   eq(privateLeaks(scripts[0]).join('; '), '');
   ok(!namesRawHost(html), 'the page, noscript text included, names no raw URL');
   ok(html.includes('latest.json') && !html.includes('{{') && !html.includes('__BUNDLE__'), 'the noscript names latest.json; no template marker left');
+});
+
+await test('a subject page shows its discarded runs, their cost and top reasons, and nothing when unknown', () => {
+  const skill = (d) => doc({ skills: [{ name: 'demo-skill', status: 'covered', verdict: 'keep', runs: [], discarded_runs: d }] });
+  const page = (d) => textOf(renderRoute(skill(d), { name: 'skills', id: 'demo-skill' }, {}));
+  const text = page({ total: 9, cost_usd: 1.23456, cost_unknown: 1, by_reason: {
+    over_cap: { runs: 2, cost_usd: 0.2, cost_unknown: 0 }, fixture_changed: { runs: 5, cost_usd: 1, cost_unknown: 1 },
+    unpaired: { runs: 1, cost_usd: 0.03456, cost_unknown: 0 }, duplicate: { runs: 1, cost_usd: 0, cost_unknown: 0 } } });
+  ok(text.includes('Discarded runs: 9 runs not counted toward this decision, $1.23 (1 with no recorded cost)'), text);
+  ok(text.includes('Most often: fixture changed (5), past the run cap (2), duplicate copy (1)'), text);
+  ok(!text.includes('no partner arm'), 'three reasons at most');
+  for (const d of [null, { total: 0, cost_usd: 0, cost_unknown: 0, by_reason: {} }]) ok(!page(d).includes('Discarded runs'), JSON.stringify(d));
+});
+
+// Run usefulness (the owner, 2026-11-07): rows of `run_utility`, summed over a period
+// counted back from the document's generated_at, in UTC days.
+const U = (date, cls, runs, cost, reason) => ({ date, model: 'model-a', class: cls, reason: reason || null, runs, cost_usd: cost, cost_unknown: 0 });
+const UREF = Date.parse('2026-11-07T20:00:00Z');
+const UROWS = [U('2026-11-07', 'decisive', 2, 0.5), U('2026-11-01', 'after_decision', 4, 1), U('2026-10-31', 'stranded', 6, 1.5, 'fixture_changed'),
+  U('2026-10-09', 'building', 8, 2), U('2026-10-08', 'discarded', 10, 2.5, 'unpaired'), U(null, 'discarded', 1, 0.25, 'invalid_run'),
+  U('2026-11-06', 'decisive_superseded', 3, 0.75, 'subject_changed')];
+await test('a period counts back from the reference day, itself included', () => {
+  eq(periodStart('7', UREF), '2026-11-01');
+  eq(periodStart('30', UREF), '2026-10-09');
+  eq(periodStart('all', UREF), null);
+  // 2026-11-01 is the 7th day back and in; 2026-10-31 is the 8th and out.
+  eq(inPeriod(UROWS, '7', UREF).map((r) => r.date).join(','), '2026-11-07,2026-11-01,2026-11-06');
+  // 2026-10-09 is in the last 30 days, 2026-10-08 is not; a row with no day only in all time.
+  eq(inPeriod(UROWS, '30', UREF).length, 5);
+  eq(inPeriod(UROWS, 'all', UREF).length, 7);
+});
+await test('the totals split by class, no use is after the decision plus stranded plus discarded', () => {
+  eq(NO_USE.join(','), 'after_decision,stranded,discarded');
+  const all = utilityTotals(UROWS, 'all', UREF);
+  eq(all.total.runs, 34);
+  eq(all.noUse.runs, 4 + 6 + 10 + 1);
+  eq(all.noUse.cost, 1 + 1.5 + 2.5 + 0.25);
+  eq(all.classes.stranded.runs, 6);
+  eq(all.classes.decisive_superseded.runs, 3);
+  eq(Object.keys(all.reasons).sort().join(','), 'fixture_changed,invalid_run,subject_changed,unpaired');
+  const week = utilityTotals(UROWS, '7', UREF);
+  eq(week.noUse.runs, 4);
+  eq(week.days.map((d) => d.date).join(','), '2026-11-01,2026-11-02,2026-11-03,2026-11-04,2026-11-05,2026-11-06,2026-11-07');
+  eq(week.days[1].decisive, undefined, 'an empty day is a gap');
+});
+await test('a subject page shows run usefulness for the last 30 days, stranded on its own line, and decisions over time', () => {
+  const d = doc({ generated_at: '2026-11-07T20:00:00Z', skills: [{ name: 'demo-skill', status: 'covered', verdict: 'keep', runs: [], run_utility: UROWS,
+    decisions: [{ fixture: 'task-a', model: 'claude-sonnet-4-5', current: false, from: '2026-10-28', to: '2026-11-02', class: 'benefit', decided: '2026-11-02', pair: null },
+      { fixture: 'task-a', model: 'claude-sonnet-4-5', current: true, from: '2026-11-05', to: '2026-11-07', class: 'insufficient', decided: null, pair: null },
+      { fixture: 'task-b', model: 'claude-sonnet-4-5', current: false, from: '2026-10-20', to: '2026-10-21', class: 'insufficient', decided: null, pair: null }] }] });
+  const node = renderRoute(d, { name: 'skills', id: 'demo-skill' }, {});
+  const text = textOf(node);
+  ok(text.includes('Run usefulness'), text);
+  ok(text.includes('No use: 10 of 23 runs, $2.50 of $5.75.'), text);
+  ok(text.includes('Stranded') && text.includes('fixture changed 6 ($1.50)'), text);
+  ok(text.includes('v1 kept (helps) on 2026-11-02, runs 2026-10-28 to 2026-11-02; v2 (current) building, runs 2026-11-05 to 2026-11-07'), text);
+  ok(text.includes('on task-b: v1 never decided before it changed (stranded), runs 2026-10-20 to 2026-10-21'), text);
+  const pressed = findAll(node, (n) => n.tag === 'button' && n.attrs['data-period'] && n.attrs['aria-pressed'] === 'true');
+  eq(pressed.map((n) => n.attrs['data-period']).join(','), '30');
+  ok(findAll(node, (n) => n.tag === 'rect' && n.attrs['data-class'] === 'stranded').length === 1, 'stranded has its own segment');
+  const none = textOf(renderRoute(doc({ skills: [{ name: 'demo-skill', status: 'covered', verdict: 'keep', runs: [], run_utility: null }] }), { name: 'skills', id: 'demo-skill' }, {}));
+  ok(!none.includes('Run usefulness'), 'nothing when unknown');
+});
+await test('the summary shows run usefulness for every subject, skills and guidance', () => {
+  const d = doc({ generated_at: '2026-11-07T20:00:00Z', skills: [{ name: 'a', run_utility: [U('2026-11-07', 'decisive', 2, 0.5)] }],
+    guidance: { sections: [{ id: 's', run_utility: [U('2026-11-07', 'stranded', 4, 1, 'rest_changed')] }] } });
+  const text = textOf(renderRoute(d, { name: 'summary' }, {}));
+  ok(text.includes('Run usefulness, every subject'), text);
+  ok(text.includes('No use: 4 of 6 runs, $1.00 of $1.50.'), text);
+  ok(text.includes('All subjects') && text.includes('Skills') && text.includes('Guidance'), text);
+  ok(!textOf(renderRoute(doc({}), { name: 'summary' }, {})).includes('Run usefulness'), 'nothing without a ledger');
+});
+
+// Building into decisive (2026-11-08): building runs against decisive ones.
+const CDOC = () => doc({ generated_at: '2026-11-08T20:00:00Z',
+  skills: [
+    { name: 'a', status: 'covered', confidence: { helps: 0.7, no_help: 0.1 }, run_utility: [U('2026-11-05', 'decisive', 10, 1), U('2026-11-05', 'building', 20, 2), U('2026-11-08', 'building', 5, 0.5)],
+      decisions: [{ decided: '2026-11-05' }, { decided: '2026-11-05' }, { decided: null }] },
+    { name: 'b', status: 'covered', confidence: { helps: 0.4, no_help: 0.2 }, run_utility: [U('2026-11-06', 'decisive_superseded', 4, 0.4), U('2026-11-06', 'stranded', 6, 0.6),
+      U('2026-11-08', 'building', 10, 1), U('2026-11-06', 'discarded', 99, 9), U('2026-11-07', 'after_decision', 2, 0.2)], decisions: [{ decided: '2026-11-07' }] },
+    { name: 'c', status: 'covered', run_utility: [U('2026-11-07', 'building', 3, 0.3), U('2026-11-07', 'decisive', 1, 0.1)] }],
+  guidance: { sections: [{ id: 'g', status: 'skipped', confidence: { helps: 0.9, no_help: 0 }, run_utility: [U('2026-11-07', 'building', 8, 0.8), U('2026-11-08', 'stranded', 2, 0.2)] }] } });
+const near = (a, b) => Math.abs(a - b) < 1e-9;
+await test('conversion totals sum decided, building and stranded, group building runs by distance, and ignore discarded rows', () => {
+  const t = conversionTotals(CDOC());
+  eq(t.decided.runs, 15); ok(near(t.decided.cost, 1.5), String(t.decided.cost));
+  eq(t.building.runs, 46); ok(near(t.building.cost, 4.6), String(t.building.cost));
+  eq(t.stranded.runs, 8); eq(t.after.runs, 2);
+  eq(t.resolved.runs, 23);
+  ok(near(t.conversion, 15 / 23) && near(t.strandedPerDecided, 8 / 15), 'ratios');
+  eq(['near', 'partway', 'far', 'never'].map((g) => t.groups[g].runs).join(','), '25,10,3,8');
+  eq(['near', 'partway', 'far', 'never'].map((g) => t.groups[g].subjects).join(','), '1,1,1,1');
+  ok(near(t.groups.near.expected, 17.5) && near(t.groups.partway.expected, 3) && near(t.groups.far.expected, 0.3) && t.groups.never.expected === 0, 'expected');
+  eq(t.groupsTotal.runs, 46); eq(t.groupsTotal.subjects, 4); ok(near(t.groupsTotal.expected, 20.8), String(t.groupsTotal.expected));
+  eq(t.days.map((d) => d.date + ':' + d.decided + '/' + d.building + '/' + d.stranded + '/' + d.after).join(' '), '2026-11-05:10/20/0/0 2026-11-06:4/0/6/0 2026-11-07:1/11/0/2 2026-11-08:0/15/2/0');
+  eq(JSON.stringify(t.decisionsByDay), JSON.stringify([{ date: '2026-11-05', cells: 2 }, { date: '2026-11-07', cells: 1 }]));
+  eq(['near', 'partway', 'far', 'never', 'total'].map((g) => t.planner.before[g]).join(','), '30,12,4,8,54');
+  eq(['near', 'partway', 'far', 'never', 'total'].map((g) => t.planner.since[g]).join(','), '5,10,0,2,17');
+  const empty = conversionTotals(doc({ skills: [{ name: 'x', run_utility: [U('2026-11-05', 'building', 3, 1)] }] }));
+  eq(empty.conversion, null); eq(empty.strandedPerDecided, null);
+});
+await test('the summary shows building into decisive with its lead, table, planner link and stranded segments', () => {
+  const node = renderRoute(CDOC(), { name: 'summary' }, { ext: makeExt(fakeDash({})) });
+  ok(!textOf(renderRoute(CDOC(), { name: 'summary' }, {})).includes('Building into decisive'), 'public render has no panel');
+  const text = textOf(node);
+  ok(text.includes('Building into decisive'), text);
+  ok(text.includes('Of 23 runs that have resolved, 15 helped decide keep or remove (65%) and 8 were stranded by a change first: 0.5 stranded for every one that decided. 46 runs ($4.60) are still building.'), text);
+  for (const l of ['Near a verdict (confidence 65% or more)', 'Partway (30% to 65%)', 'Far (under 30%)', 'Never (subject no longer tested)', 'Total']) ok(text.includes(l), l);
+  ok(text.includes('~18') && text.includes('~21'), 'expected counts');
+  ok(text.includes('Cells that reached a verdict, by day: 11-05 2, 11-07 1.'), text);
+  ok(text.includes('Since the deep-before-wide planner change (') && text.includes(', Nov 8 UTC): 17 runs, 29% near a verdict, 59% partway, 0% far, 12% never.') && text.includes('Before it: 54 runs, 56% near a verdict, 22% partway, 7% far, 15% never.'), text);
+  const a = findAll(node, (n) => n.tag === 'a' && n.attrs.href === PLANNER_CHANGE.url);
+  eq(a.length, 1);
+  ok(findAll(node, (n) => n.tag === 'rect' && n.attrs['data-group'] === 'stranded').length === 2, 'stranded segments');
+});
+await test('building into decisive toggles between percent and run counts', () => {
+  const node = renderRoute(CDOC(), { name: 'summary' }, { ext: makeExt(fakeDash({})) });
+  const btns = findAll(node, (n) => n.tag === 'button' && n.attrs['data-mode']);
+  eq(btns.map((b) => b.attrs['data-mode'] + ':' + b.attrs['aria-pressed']).join(','), 'share:true,count:false');
+  const share = textOf(conversionBody(CDOC(), 'share'));
+  ok(share.includes('17 runs, 29% near a verdict, 59% partway'), share);
+  const count = textOf(conversionBody(CDOC(), 'count'));
+  ok(count.includes(', Nov 8 UTC): 17 runs: 5 near a verdict, 10 partway, 0 far, 2 never.'), count);
+  ok(count.includes('Before it: 54 runs: 30 near a verdict, 12 partway, 4 far, 8 never.'), count);
+  ok(count.includes('Runs by the day they ran, and where they stand now.') && !count.includes('fills from decided'), count);
+  // The busiest day (2026-11-05) has 30 runs, so the axis tops out there.
+  const top = findAll(conversionBody(CDOC(), 'count'), (n) => n.tag === 'text' && n.children[0] === '30');
+  eq(top.length, 1);
+  ok(findAll(conversionBody(CDOC(), 'count'), (n) => n.attrs && typeof n.attrs['data-tip'] === 'string' && n.attrs['data-tip'].includes('decided 10, building 20')).length === 1, 'count tooltip');
+  ok(findAll(conversionBody(CDOC(), 'share'), (n) => n.tag === 'text' && n.children[0] === '100%').length === 1, 'share axis');
+});
+await test('no building into decisive panel when no subject has run_utility', () => {
+  ok(conversionView(doc({ skills: [{ name: 'a' }] })) === null, 'null view');
+  ok(!textOf(renderRoute(doc({ skills: [{ name: 'a' }] }), { name: 'summary' }, { ext: makeExt(fakeDash({})) })).includes('Building into decisive'), 'no heading');
 });
 
 for (const f of failures) console.log('FAIL ' + f);

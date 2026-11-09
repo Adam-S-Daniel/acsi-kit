@@ -1130,12 +1130,13 @@ def _capped(detail: str) -> str:
 
 
 def cap_summary_details(doc) -> bool:
-    """Cut every over-cap objective check `detail` and `error.detail` string
-    in a summary to MAX_STRING, in place; True when one was cut. A harness
-    from before the cap wrote them whole, and that one long string (a
-    passing `files_unchanged` naming every file, 2026-11-03) rejected the
-    whole paid run. Only these two fields are cut, and only strings: a
-    wrong type is still check_summary's to refuse."""
+    """Cut every over-cap objective check `detail`, `error.detail` and
+    `judge.error` string in a summary to MAX_STRING, in place; True when one
+    was cut. A harness from before the cap wrote them whole, and that one long
+    string (a passing `files_unchanged` naming every file, 2026-11-03; a judge
+    parse error quoting 5000+ chars of the judge's raw output, 2026-11-07)
+    rejected the whole paid run. Only these three fields are cut, and only
+    strings: a wrong type is still check_summary's to refuse."""
     if not isinstance(doc, dict):
         return False
     holders = [doc.get("error")]
@@ -1147,6 +1148,11 @@ def cap_summary_details(doc) -> bool:
                 and len(holder["detail"]) > MAX_STRING:
             holder["detail"] = _capped(holder["detail"])
             cut = True
+    judge = doc.get("judge")
+    if isinstance(judge, dict) and isinstance(judge.get("error"), str) \
+            and len(judge["error"]) > MAX_STRING:
+        judge["error"] = _capped(judge["error"])
+        cut = True
     return cut
 
 
@@ -1765,13 +1771,18 @@ def _generated_at(data: bytes) -> str | None:
 
 def check_cost_target(mode: str, target: str, evals: Path) -> None:
     """Refuse a target the public results branch must not name: a private
-    skill, or one with no committed fixture set here. A guidance section
-    must have fixtures under evals/guidance/<section>/ (the manifest is in
-    _agent-guidance, which this workflow does not check out; the fire
-    workflow's fire-check already required both)."""
+    skill, or one with no committed fixture set here. A skill's set is its
+    fixtures or, for a trigger-only improve fire, its reviewed
+    evals/<skill>/trigger-eval-set.json (2026-11-07: every trigger-only
+    fire's record was refused). A guidance section must have fixtures under
+    evals/guidance/<section>/ (the manifest is in _agent-guidance, which this
+    workflow does not check out; the fire workflow's fire-check already
+    required both)."""
     folder = evals / target if mode == "improve" else evals / "guidance" / target
-    if folder.is_symlink() or not folder.is_dir() \
-            or not any(folder.rglob("fixture.yaml")):
+    trigger_set = folder / "trigger-eval-set.json"
+    has_set = any(folder.rglob("fixture.yaml")) or (
+        mode == "improve" and trigger_set.is_file() and not trigger_set.is_symlink())
+    if folder.is_symlink() or not folder.is_dir() or not has_set:
         raise Rejected("the record's target has no committed fixture set")
     if mode == "improve":
         sys.path.insert(0, str(Path(__file__).resolve().parent))

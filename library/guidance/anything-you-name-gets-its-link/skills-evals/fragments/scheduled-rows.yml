@@ -4,5 +4,7 @@
     readiness: "Isolation pair of four guidance arms (section vs none, full vs full-minus-section), unpinned (the committed roster then named arm claude-sonnet-5-5 and judge claude-fable-5-1). No paid run yet; hermetic: the seed's trap fails its checks and the fix passes them (test_issue_124_guidance_gates.py, 2026-10-26)."
   - path: evals/guidance/anything-you-name-gets-its-link/no-url
     readiness: "Isolation pair of four guidance arms (section vs none, full vs full-minus-section), unpinned (the committed roster then named arm claude-sonnet-5-5 and judge claude-fable-5-1). No paid run yet; hermetic: the seed's trap fails its checks and the fix passes them (test_issue_124_guidance_gates.py, 2026-10-26)."
+  - path: evals/guidance/anything-you-name-gets-its-link/stale-run-review
+    readiness: "Added by a fixture pull request for skills-evals#854: two deploy runs wait on a staging review, one on a stale head; the reply must link the current run's job page. Isolation pair of four guidance arms, unpinned. No paid run yet; scored offline: a run-page reply fails, the current job page passes."
   - path: evals/guidance/anything-you-name-gets-its-link/waiting-on-review
     readiness: "Isolation pair of four guidance arms (section vs none, full vs full-minus-section), unpinned (the committed roster then named arm claude-sonnet-5-5 and judge claude-fable-5-1). No paid run yet; hermetic: the seed's trap fails its checks and the fix passes them (test_issue_124_guidance_gates.py, 2026-10-26)."

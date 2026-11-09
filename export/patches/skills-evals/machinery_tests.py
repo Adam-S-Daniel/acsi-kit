@@ -21,6 +21,7 @@ Runs on the substituted tree.
 from __future__ import annotations
 
 import ast
+import fnmatch
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -74,6 +75,18 @@ def _remove_from(root: Path, rel: str, spec: dict) -> list[str]:
         methods = {b.name: b for b in node.body if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef))}
         test_names = {n for n in methods if n.startswith("test")}
         if tests is not None:
+            # A name with `*` is a pattern for a test the source renames as a
+            # count in its name changes; it must match exactly one test.
+            resolved = set()
+            for name in tests:
+                if "*" in name:
+                    hits = fnmatch.filter(sorted(test_names), name)
+                    if len(hits) != 1:
+                        raise SystemExit(f"machinery_tests: {rel}::{cls}: {name} matched {hits}")
+                    resolved.add(hits[0])
+                else:
+                    resolved.add(name)
+            tests = resolved
             missing = tests - test_names
             if missing:
                 raise SystemExit(f"machinery_tests: {rel}::{cls} has no {sorted(missing)}")

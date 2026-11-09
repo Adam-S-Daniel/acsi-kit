@@ -54,6 +54,12 @@ export AGENT_CHECKS_LOG=off
 # copy CI's `npm ci` puts in this repo's node_modules themselves.
 export AGENT_CHECKS_DATED_PHRASING_MODULES="$TEST_DIR/no-markdown-it"
 
+# Nor may it install zizmor from PyPI for gha-template-injection: point it at
+# a path with no zizmor, so a run over a workflow file warns (or, under
+# GITHUB_ACTIONS, refuses) without the network. test_agent_checks_gha_injection
+# points it at a stub of its own.
+export AGENT_CHECKS_ZIZMOR="$TEST_DIR/no-zizmor"
+
 # A stamp exported in the developer's shell would otherwise skew the older
 # fleet-memory tests that never set it.
 unset FLEET_GUIDANCE_PAYLOAD_STAMP
@@ -13816,6 +13822,29 @@ for (const v of (Array.isArray(cursor) ? cursor : [cursor])) console.log(String(
 ' "$REPO_ROOT" "$1" "$2" "${3:-}"
 }
 
+# ── Test 7a2: sync.yml runs one at a time ────────────────────────────────
+#
+# Two overlapping runs pushed the same agents-md-sync/update branches and the
+# loser went red ("cannot lock ref", "fetch first"). A workflow-level group
+# without cancel-in-progress serializes them and never cuts a writing run off.
+test_sync_workflow_serialized() {
+    echo ""
+    echo "=== Test: sync.yml serializes its runs ==="
+    local wf="$REPO_ROOT/.github/workflows/sync.yml" group cancel
+    group=$(yaml_field "$wf" "concurrency.group" 2>/dev/null) || group=""
+    cancel=$(yaml_field "$wf" "concurrency.cancel-in-progress" 2>/dev/null) || cancel=""
+    if [[ "$group" == "sync-agents-md" ]]; then
+        pass "sync serialized: workflow concurrency group is sync-agents-md"
+    else
+        fail "sync serialized: workflow concurrency group is '${group}', want sync-agents-md"
+    fi
+    if [[ "$cancel" == "false" ]]; then
+        pass "sync serialized: cancel-in-progress is false"
+    else
+        fail "sync serialized: cancel-in-progress is '${cancel}', want false (never cut off a run mid-push)"
+    fi
+}
+
 # ── Test 7a: sync.yml fires on every file that decides what a run does ────
 #
 # THE BUG THIS PINS. sync.sh reads its policy out of this checkout while it
@@ -13948,6 +13977,23 @@ test_prompt_audit_sweep() {
         pass "prompt-audit sweep policy: 19 passed"
     else
         fail "prompt-audit sweep policy: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=19, fail=0): $(tail -20 "$out" | tr '\n' ' ')"
+    fi
+}
+
+# The fleet worker fire workflow (fleet-worker-fire.yml): every 3 hours, the
+# bearer on stdin only, an unconfigured URL or bearer fails. Never piped.
+test_fleet_worker_fire() {
+    echo ""
+    echo "=== Test: fleet worker fire workflow ==="
+    local out="$TEST_DIR/fleet-worker-fire-tap.txt" rc=0
+    node --test --test-reporter=tap "$REPO_ROOT/test/test-fleet-worker-fire.js" > "$out" 2>&1 || rc=$?
+    local pass_n fail_n
+    pass_n=$(grep -oE '^# pass [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
+    fail_n=$(grep -oE '^# fail [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
+    if [[ "$rc" -eq 0 && "$pass_n" == "5" && "$fail_n" == "0" ]]; then
+        pass "fleet worker fire workflow: 5 passed"
+    else
+        fail "fleet worker fire workflow: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=5, fail=0): $(tail -20 "$out" | tr '\n' ' ')"
     fi
 }
 
@@ -19776,6 +19822,31 @@ test_discrepancy_alert() {
 }
 
 
+test_base_md_merge_window() {
+    echo ""
+    echo "=== Test: base-md-merge-window.js (node:test suite) ==="
+
+    if [[ ! -d "$REPO_ROOT/node_modules/yaml" ]]; then
+        fail "base.md merge window: node_modules/yaml is missing — run \`npm ci\` first"
+        return
+    fi
+
+    local out="$TEST_DIR/base-md-merge-window-tap.txt" rc=0
+    # NEVER pipe this: a pipe's exit status belongs to its last command.
+    node --test --test-reporter=tap "$REPO_ROOT/test/test-base-md-merge-window.js" > "$out" 2>&1 || rc=$?
+
+    local pass_n fail_n
+    pass_n=$(grep -oE '^# pass [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
+    fail_n=$(grep -oE '^# fail [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
+
+    # 14 is the suite's count, so a deleted test fails here.
+    if [[ "$rc" -eq 0 && "$fail_n" == "0" && -n "$pass_n" && "$pass_n" -ge 14 ]]; then
+        pass "base.md merge window: node:test suite is green ($pass_n passed)"
+    else
+        fail "base.md merge window: node:test suite — exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, fail=0, pass>=14): $(tail -20 "$out" | tr '\n' ' ')"
+    fi
+}
+
 test_routine_merge_gate() {
     echo ""
     echo "=== Test: routine-merge-gate.js (node:test suite) ==="
@@ -20278,15 +20349,17 @@ test_agents_md_size_budget() {
         fail "size budget: full build with every section is $full_bytes bytes, over 29696 — trim agents-md/base.md; Codex cuts a repo's AGENTS.md at 32768 bytes with nothing on screen to say so"
     fi
 
-    # STUB mode, which is what all 19 repos are on. 8192 is deliberately
-    # generous: the claim being pinned is that the always-on floor stays small
-    # enough that a repo's own additions have effectively the whole budget.
+    # STUB mode, which is what all 19 repos are on. The stub is loaded once
+    # per attached repo on every model call, so a five-repo session pays for
+    # it five times (_agent-guidance#473). The floor lives in base.md, the
+    # installed user-memory block; the stub keeps only the verdict pointer and
+    # the irreversible rules. 2048 holds it near the ~1 KB that design chose.
     local stub_bytes
     stub_bytes=$("$REPO_ROOT/scripts/build-agents-md.sh" | wc -c | tr -d ' ')
-    if [[ "$stub_bytes" -le 8192 ]]; then
-        pass "size budget: stub build is $stub_bytes bytes (<= 8192)"
+    if [[ "$stub_bytes" -le 2048 ]]; then
+        pass "size budget: stub build is $stub_bytes bytes (<= 2048)"
     else
-        fail "size budget: stub build is $stub_bytes bytes, over 8192 — agents-md/stub.md is the always-on floor in every repo"
+        fail "size budget: stub build is $stub_bytes bytes, over 2048 — agents-md/stub.md is the always-on floor in every repo"
     fi
 }
 
@@ -22220,6 +22293,36 @@ test_fleet_memory_check_value() {
 
 # Codex's generated records are audited after generation; all memory, sidecar,
 # and CLI configuration paths in this group are synthetic and isolated.
+# The Anthropic article watch (scripts/article_watch.py). Its unittest module
+# fires only into a recording stub, so it needs no network or fixtures. A
+# module that discovers nothing fails, so a renamed test file cannot pass.
+test_article_watch() {
+    echo ""
+    echo "TEST: article_watch.py (new agent articles fire the lift routine once)"
+    local counts="$TEST_DIR/article-watch-counts" ran failed
+    python3 - "$SCRIPT_DIR" "$counts" <<'PY' || true
+import pathlib
+import sys
+import unittest
+
+suite = unittest.TestLoader().discover(sys.argv[1], pattern="test_article_watch.py")
+result = unittest.TextTestRunner(verbosity=2).run(suite)
+bad = len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses)
+pathlib.Path(sys.argv[2]).write_text("%d %d\n" % (result.testsRun, bad), encoding="ascii")
+PY
+    if ! read -r ran failed < "$counts" 2>/dev/null; then
+        fail "article-watch: the unittest module did not report a count"
+        return
+    fi
+    if (( ran == 0 )); then
+        fail "article-watch: test_article_watch.py ran zero tests"
+        return
+    fi
+    PASS=$((PASS + ran - failed))
+    FAIL=$((FAIL + failed))
+    (( failed == 0 )) && echo "  PASS: article-watch: $ran unittest cases" || echo "  FAIL: article-watch: $failed of $ran unittest cases"
+}
+
 # The memory curation audit (docs/decisions/0026). Its unittest module owns
 # temporary memory directories of invented notes and needs no shell fixtures.
 # Each test counts as one PASS or FAIL here, and a module that discovers
@@ -24710,6 +24813,115 @@ test_agent_checks_agents_md_size() {
         || fail "agents-md-size: this repo's generated AGENTS.md is $own bytes, over 32768"
 }
 
+# gha-template-injection: the runner hands changed workflow and action files to
+# zizmor and refuses its Medium and High template-injection findings. A stub
+# zizmor stands in for the real one (no PyPI, no network): it prints a fixed
+# report naming the first .yml it was given, so these tests pin the plumbing
+# (which paths go in, which findings refuse, what an unavailable zizmor does).
+test_agent_checks_gha_injection() {
+    echo ""
+    echo "=== Test: agent-checks gha-template-injection (zizmor findings refuse; others pass) ==="
+    local repo="$TEST_DIR/ac-gha" out="$TEST_DIR/ac-gha-run" stub="$TEST_DIR/ac-gha-zizmor" rc
+    local -a g=(git -C "$repo" -c user.name=Example -c user.email=agent@example.com -c commit.gpgsign=false)
+    git init -q -b main "$repo"
+    "${g[@]}" commit -q --allow-empty -m base
+    # The stub reports, for every file it finds, findings chosen by a marker
+    # line in that file: HIGH (refuse), INFO (Informational, pass) or OTHER (a
+    # different audit, pass). It also records that it ran.
+    cat > "$stub" <<'STUB'
+#!/usr/bin/env bash
+echo ran >> "$ZIZMOR_STUB_LOG"
+first=true
+printf '['
+while IFS= read -r f; do
+  for kind in HIGH INFO OTHER; do
+    grep -q "# $kind" "$f" || continue
+    case $kind in HIGH) id=template-injection sev=High ;; INFO) id=template-injection sev=Informational ;; OTHER) id=unpinned-uses sev=High ;; esac
+    $first || printf ','
+    first=false
+    printf '{"ident":"%s","determinations":{"severity":"%s"},"locations":[{"symbolic":{"kind":"Related","key":{"Local":{"given_path":"%s"}}},"concrete":{"location":{"start_point":{"row":0}}}},{"symbolic":{"kind":"Primary","key":{"Local":{"given_path":"%s"}}},"concrete":{"location":{"start_point":{"row":6}}}}]}' "$id" "$sev" "$f" "$f"
+  done
+done < <(find . -name '*.y*ml' | sort)
+printf ']\n'
+$first && exit 0 || exit 14
+STUB
+    chmod +x "$stub"
+    ac_gha_run() {   # <event...> — run the runner in $repo with the stub; prints the exit code
+        local r=0
+        # A local run: CI's own GITHUB_ACTIONS=true would make it fail closed.
+        (cd "$repo" && env -u GITHUB_ACTIONS GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 AGENT_CHECKS_LOG=off \
+            ZIZMOR_STUB_LOG="$out.log" AGENT_CHECKS_ZIZMOR="${AC_GHA_ZIZMOR:-$stub}" \
+            bash "$REPO_ROOT/templates/agent-checks/agent-checks" "$@") \
+            > "$out.out" 2> "$out.err" < /dev/null || r=$?
+        echo "$r"
+    }
+    mkdir -p "$repo/.github/workflows" "$repo/.github/actions/a" "$repo/docs/.github/workflows"
+    rm -f "$out.log"
+
+    # A non-workflow YAML file never reaches zizmor.
+    printf 'x: 1 # HIGH\n' > "$repo/docs/notes.yml"
+    printf 'x: 1 # HIGH\n' > "$repo/docs/.github/workflows/seed.yml"
+    "${g[@]}" add docs
+    rc=$(ac_gha_run pre-commit)
+    if [[ $rc -eq 0 && ! -e "$out.log" ]]; then
+        pass "gha-template-injection: YAML outside .github/workflows/ and action.yml (a fixture's nested .github too) is not audited"
+    else
+        fail "gha-template-injection: YAML outside the workflow paths is not audited — exit $rc, stub ran: $([[ -e $out.log ]] && echo yes || echo no): $(cat "$out.err")"
+    fi
+
+    # A High template-injection refuses with the path, the Primary line and the fix.
+    printf 'on: push # HIGH\n' > "$repo/.github/workflows/w.yml"
+    "${g[@]}" add .github/workflows/w.yml
+    rc=$(ac_gha_run pre-commit)
+    if [[ $rc -eq 1 ]] && grep -qF 'agent-checks: .github/workflows/w.yml:7: a ${{ }} expression an outsider can steer' "$out.err" \
+       && grep -qF "pass it through the step's env:" "$out.err" && [[ -e "$out.log" ]]; then
+        pass "gha-template-injection: a High finding refuses, naming path:line (the Primary location) and the env: fix"
+    else
+        fail "gha-template-injection: a High finding refuses, naming path:line and the env: fix — exit $rc: $(cat "$out.err")"
+    fi
+    # It reads the staged blob, not the worktree.
+    printf 'on: push\n' > "$repo/.github/workflows/w.yml"
+    rc=$(ac_gha_run pre-commit)
+    [[ $rc -eq 1 ]] && pass "gha-template-injection: pre-commit audits the staged content, not the worktree" \
+        || fail "gha-template-injection: pre-commit audits the staged content, not the worktree — exit $rc"
+
+    # Informational template-injection and other audits pass.
+    printf 'on: push # INFO\n# OTHER\n' > "$repo/.github/workflows/w.yml"
+    "${g[@]}" add .github/workflows/w.yml
+    rc=$(ac_gha_run pre-commit)
+    [[ $rc -eq 0 ]] && ! grep -q 'gha-template-injection\|outsider can steer' "$out.err" \
+        && pass "gha-template-injection: Informational findings and other zizmor audits do not refuse" \
+        || fail "gha-template-injection: Informational findings and other zizmor audits do not refuse — exit $rc: $(cat "$out.err")"
+
+    # A local action's action.yml is audited; ci reads the head commit.
+    printf 'runs: {} # HIGH\n' > "$repo/.github/actions/a/action.yml"
+    "${g[@]}" add -A .github
+    "${g[@]}" commit -q -m "action"
+    rc=$(ac_gha_run ci "$("${g[@]}" rev-parse HEAD~1)" HEAD)
+    if [[ $rc -eq 1 ]] && grep -qF '.github/actions/a/action.yml:7:' "$out.err" && ! grep -qF 'w.yml:7' "$out.err"; then
+        pass "gha-template-injection: ci audits a changed .github/actions/*/action.yml at the head commit"
+    else
+        fail "gha-template-injection: ci audits a changed local action — exit $rc: $(cat "$out.err")"
+    fi
+
+    # zizmor unavailable: a local run warns and passes; CI refuses.
+    rc=$(AC_GHA_ZIZMOR="$TEST_DIR/ac-gha-none" ac_gha_run tree HEAD)
+    if [[ $rc -eq 0 ]] && grep -qF 'agent-checks (warning): gha-template-injection skipped: zizmor 1.31.1 could not be installed' "$out.err"; then
+        pass "gha-template-injection: locally, an unavailable zizmor warns and does not refuse"
+    else
+        fail "gha-template-injection: locally, an unavailable zizmor warns and does not refuse — exit $rc: $(cat "$out.err")"
+    fi
+    rc=0
+    (cd "$repo" && GITHUB_ACTIONS=true GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 AGENT_CHECKS_LOG=off \
+        AGENT_CHECKS_ZIZMOR="$TEST_DIR/ac-gha-none" \
+        bash "$REPO_ROOT/templates/agent-checks/agent-checks" tree HEAD) > "$out.out" 2> "$out.err" < /dev/null || rc=$?
+    if [[ $rc -eq 1 ]] && grep -qF '::error title=agent-checks gha-template-injection::agent-checks: workflow expressions were not checked' "$out.err"; then
+        pass "gha-template-injection: in CI, an unavailable zizmor refuses (CI is the enforcement)"
+    else
+        fail "gha-template-injection: in CI, an unavailable zizmor refuses — exit $rc: $(cat "$out.err")"
+    fi
+}
+
 # The dated-phrasing warning pass (templates/agent-checks/dated-phrasing.js):
 # it warns on dated history and migration-relative phrasing in the prose of
 # the Markdown agents load, never in code, quotes, HTML, URLs, link text or an
@@ -25269,6 +25481,7 @@ TEST_GROUPS=(
     codex
     memory_home
     memory_audit
+    article_watch
     github_write_marker
     gitattr
     automerge
@@ -25448,7 +25661,9 @@ GROUP_hook_pin=(
 GROUP_self_hosted=(
     test_on_hold_label
     test_prompt_audit_sweep
+    test_fleet_worker_fire
     test_sync_workflow_trigger
+    test_sync_workflow_serialized
     test_self_hosted_hook_pin
     test_self_hosted_fleet_payload
     test_bootstrap_allowlist_disjoint
@@ -25469,6 +25684,7 @@ GROUP_self_hosted=(
     test_impact_report
     test_discrepancy_alert
     test_routine_merge_gate
+    test_base_md_merge_window
     test_eval_protected
     test_fleet_guidance_mirror
     test_check_agent_markdown
@@ -25509,6 +25725,11 @@ GROUP_codex_memory_audit=(
 # shellcheck disable=SC2034
 GROUP_memory_audit=(
     test_memory_audit
+)
+
+# shellcheck disable=SC2034
+GROUP_article_watch=(
+    test_article_watch
 )
 
 GROUP_runner=(
@@ -25806,6 +26027,7 @@ GROUP_agent_checks=(
     test_agent_checks_persistent_delete
     test_agent_checks_agents_md_size
     test_agent_checks_ci_annotation
+    test_agent_checks_gha_injection
     test_agent_checks_dated_phrasing
     test_agent_checks_dated_phrasing_lock
     test_self_agent_checks

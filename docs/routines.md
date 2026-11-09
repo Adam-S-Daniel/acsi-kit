@@ -45,7 +45,7 @@ when the stub itself changes.
 
 | Setting | Value |
 |---|---|
-| Schedule | hourly at :20 (`20 * * * *`), fresh session per fire |
+| Schedule | none on claude.ai: an API trigger only, fired every 3 hours by `_agent-guidance`'s `fleet-worker-fire.yml` (set `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER` there, [bootstrap README](../bootstrap/README.md#variables-and-secrets-set-by-hand)); fresh session per fire |
 | Connector | the GitHub connector |
 | Repos | it attaches the repos in `_agent-guidance`'s `repos.yml` `cron_coverage.fleet` itself |
 | Notifications | push on, "Auto-fix pull requests" on |
