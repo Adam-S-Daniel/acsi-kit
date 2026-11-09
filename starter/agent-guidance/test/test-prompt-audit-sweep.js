@@ -151,6 +151,7 @@ test('a trigger issue with hands-on checks stays open and gets agent-ready', () 
   const finish = prose(section(spec, '7. Finish'));
   includes(finish, ['comment `Swept: <run-log line link and issue links>`', 'any item other than the one about the sweep logging a result is still unchecked (`- [ ]`)', 'leave the issue open and add the `agent-ready` label', 'Otherwise close it as completed', 'On a `BLOCKED` stop, comment the `BLOCKED` line and leave it open with no label', 'Under `DRY_RUN`, change nothing on it']);
   includes(prose(section(spec, 'Constraints')), ['then either its closing or the `agent-ready` label']);
+  includes(finish, ['names a question the audit did not answer', 'as a `- [ ]` item in the `Swept:` comment']);
   includes(prose(section(spec, 'Switches')), ['change nothing on the trigger issue']);
 });
 
@@ -282,13 +283,14 @@ test('the fire workflow skips an issue it already fired for and anything that is
   assert.equal(runFire({ issue: triggerIssue(), dispatch: true }).curl.length, 1);
 });
 
-test('the fire workflow comments instead of firing when unconfigured, and fails on a bad status', () => {
+test('the fire workflow comments and fails instead of firing when unconfigured, and fails on a bad status', () => {
   for (const missing of [{ url: '' }, { bearer: '' }]) {
     const run = runFire({ issue: triggerIssue(), ...missing });
-    assert.equal(run.result.status, 0, run.result.stderr);
+    assert.notEqual(run.result.status, 0, 'an unconfigured fire must fail the run, not pass it');
     assert.equal(run.curl.length, 0);
     assert.equal(run.posted.length, 1);
     assert.ok(commentBody(run.posted[0]).includes('start the sweep by hand'));
+    assert.ok(commentBody(run.posted[0]).includes('re-run this workflow with this issue\'s number'));
     assert.ok(!commentBody(run.posted[0]).includes('<!-- prompt-audit-fired -->'));
     assert.ok(run.result.stdout.includes('fire URL or bearer not configured'));
   }

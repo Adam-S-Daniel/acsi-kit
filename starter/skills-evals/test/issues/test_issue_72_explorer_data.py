@@ -160,7 +160,7 @@ class ShapeAndMathTests(unittest.TestCase):
         # spend, keeping schema_version 1
         # (test_issue_public_data_contract.py covers them).
         self.assertEqual(sorted(d), ["activity", "alerts", "context_drift_unknown",
-                                     "coverage", "evals", "fires_without_results",
+                                     "coverage", "discarded_runs", "evals", "fires_without_results",
                                      "fixture_queue", "generated_at",
                                      "guidance", "hooks", "lesson_funnel", "lessons",
                                      "newest_run", "policy", "removed_skills",
@@ -193,8 +193,9 @@ class ShapeAndMathTests(unittest.TestCase):
                                          "skipped": 1, "gap": 0, "total": 4})
         for s in d["skills"]:
             self.assertEqual(sorted(s), ["bundle", "confidence", "copies", "current_text_runs",
-                                         "description", "name",
-                                         "next_test", "registry", "runs", "skip_reason",
+                                         "decisions", "description", "discarded_runs", "name",
+                                         "next_test", "registry", "run_utility", "runs",
+                                         "skip_reason",
                                          "stakes", "status", "usage", "verdict",
                                          "verdict_reason"])
             # No evals/stakes.yml row: normal.

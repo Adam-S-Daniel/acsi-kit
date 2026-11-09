@@ -92,6 +92,11 @@ function Set-WslAutomationScheduledTasks {
         Path to wsl.exe used as the usage census, session miner, memory curation and waiting
         feed tasks' action. Defaults to %SystemRoot%\System32\wsl.exe.
 
+    .PARAMETER ConhostPath
+        Path to conhost.exe used as the Docker watchdog task's action executable, with
+        --headless so the interactive run shows no console window. Defaults to
+        %SystemRoot%\System32\conhost.exe.
+
     .PARAMETER PwshPath
         Path to pwsh.exe used as the action executable for the pwsh-based tasks. Defaults to an
         MSI install of PowerShell 7 (C:\Program Files\PowerShell\7) when present - required for
@@ -156,7 +161,15 @@ function Set-WslAutomationScheduledTasks {
 
         [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',
 
+        [string]$DockerWatchdogTaskName = 'Docker WSL Integration Watchdog',
+
+        [int]$DockerWatchdogIntervalMinutes = 30,
+
+        [int]$DockerWatchdogLogonDelayMinutes = 12,
+
         [string]$WslExePath = (Join-Path $env:SystemRoot 'System32\wsl.exe'),
+
+        [string]$ConhostPath = (Join-Path $env:SystemRoot 'System32\conhost.exe'),
 
         [string]$PwshPath = (Get-WslAutomationDefaultPwshPath),
 
@@ -473,5 +486,6 @@ function Set-WslAutomationScheduledTasks {
     Write-Information -MessageData "Session miner task '$SessionMinerTaskName' (background/S4U): $WslExePath $sessionMinerArguments (daily at $SessionMinerTime)" -InformationAction Continue
     Write-Information -MessageData "Memory curation task '$MemoryCurationTaskName' (background/S4U): $WslExePath $memoryCurationArguments (weekly on Monday at $MemoryCurationTime)" -InformationAction Continue
     Write-Information -MessageData "Waiting feed task '$WaitingFeedTaskName' (background/S4U): $WslExePath $waitingFeedArguments (repeats every 1 min, indefinitely)" -InformationAction Continue
+    Write-Information -MessageData "Docker watchdog task '$DockerWatchdogTaskName' (interactive, headless): $ConhostPath $dockerWatchdogArguments (at logon after $DockerWatchdogLogonDelayMinutes min, then every $DockerWatchdogIntervalMinutes min, indefinitely)" -InformationAction Continue
     Write-Information -MessageData "Task Scheduler history (Microsoft-Windows-TaskScheduler/Operational): $taskHistoryResult" -InformationAction Continue
 }

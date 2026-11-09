@@ -62,6 +62,10 @@
     Path to wsl.exe used as the usage census, session miner, memory curation and waiting feed
     tasks' action. Defaults to %SystemRoot%\System32\wsl.exe.
 
+.PARAMETER ConhostPath
+    Path to conhost.exe used as the watchdog task's action executable (with --headless, so its
+    interactive run shows no console window). Defaults to %SystemRoot%\System32\conhost.exe.
+
 .PARAMETER PwshPath
     Path to pwsh.exe used as the action executable for the pwsh-based tasks. Defaults to an MSI
     install of PowerShell 7 (C:\Program Files\PowerShell\7\pwsh.exe) when present - required for
@@ -121,7 +125,15 @@ param(
 
     [string]$WaitingFeedTaskName = 'Claude Waiting Feed Publish',
 
+    [string]$DockerWatchdogTaskName = 'Docker WSL Integration Watchdog',
+
+    [int]$DockerWatchdogIntervalMinutes = 30,
+
+    [int]$DockerWatchdogLogonDelayMinutes = 12,
+
     [string]$WslExePath = (Join-Path $env:SystemRoot 'System32\wsl.exe'),
+
+    [string]$ConhostPath = (Join-Path $env:SystemRoot 'System32\conhost.exe'),
 
     # This script runs before Import-Module (the module isn't loaded until the body below), so
     # it cannot call the module's private Get-WslAutomationDefaultPwshPath helper and instead

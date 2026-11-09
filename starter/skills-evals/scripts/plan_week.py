@@ -16,7 +16,8 @@ stays in scripts/propose_skill_edit.py.
 
 WHAT IS MEASURED. Eval fires are cells, (fixture, roster arm model), of the
 reviewed fixtures in evals/scheduled.yml only (ADR 0008): every fire is one
-routine-eval-fire.yml dispatch in eval mode with that `model`, both arms
+routine-eval-fire.yml dispatch in eval mode with that `model` (or with a
+fixture's two model cells at once, PAIR FIRES), both arms
 (for a guidance cell not leaning toward removal, its in-situ pair alone:
 THE ALONE PAIR, at FOCUS_VERDICTS), one trial. A cell's evidence is scripts/compute_gates.py's verdict document,
 computed here over the results tree, so the cells are pooled exactly as the
@@ -44,11 +45,11 @@ THE BANDS (rule D), in order:
      request's head, is not planned: routine arms run only the registries'
      default branches (ADR 0010 decision 1).
   2. missing evidence, at least 30%: cells with no run on their model,
-     cheaper model first, then heaviest model usage (usage/latest.json on the results branch;
-     equal weights without it).
-  3. near a decision, at least 20%: insufficient cells, fewest runs first,
-     then the cheaper model (every run can decide a cell: harness/gates.py
-     checks a confidence sequence after each one).
+     by DEEP BEFORE WIDE (below), then the cheaper model, then heaviest model
+     usage (usage/latest.json on the results branch; equal weights without it).
+  3. near a decision, at least 20%: insufficient cells, by DEEP BEFORE
+     WIDE, then fewest runs, then the cheaper model (every run can decide a
+     cell: harness/gates.py checks a confidence sequence after each one).
   Bands 2 and 3 skip every cell of a skill or guidance section whose
   verdict is already `keep` (one confident benefit decides it; band 6
   re-checks it), and order the cheaper model first within a tie (the owner,
@@ -83,7 +84,8 @@ THE BANDS (rule D), in order:
          `max_runs_per_cell` pairs (gates' `at_cap`). A ceiling or
          ceiling-unconfirmed cell does not block: it is not fired, and the
          section's other cells still are.
-     Within it the higher-scored section goes first, then its binding
+     Within it DEEP BEFORE WIDE goes first; where a cell has no
+     projection, the higher-scored section, then its binding
      cell: the lowest retire progress, or, when the section's score came
      from the keep side, the highest keep progress; then the cheaper
      model. The plan records the sections as
@@ -122,9 +124,9 @@ THE BANDS (rule D), in order:
   "no run after two fires", whatever the cause. A cell whose verdict
   document lacks `newest_on_model` or `run_stamps_on_model` counts none and
   joins no window (fail safe). Safety cells are exempt. Every band, safety included, skips a cell with a
-  PENDING fire: one younger than PENDING_WINDOW (the routine's 30-minute
-  eval stop plus 10 minutes), successful or still running, with no run on
-  the cell since it started; past that the fire cannot deliver, so the
+  PENDING fire: one younger than its `pending_window` (the routine's
+  40-minute eval stop per model plus 10 minutes), successful or still
+  running, with no run on the cell since it started; past that the fire cannot deliver, so the
   cell is planned again, a lost fire re-fired within the hour. THE CIRCUIT BREAKER
   (#583): the routine is down from the start of an outage fire until a
   paired eval fire on a known cell delivers (or, for the breaker only,
@@ -182,7 +184,55 @@ THE BANDS (rule D), in order:
      own; nothing is repeated on a clock.
   8. guidance rest: every other undecided guidance cell, with no minimum
      share, so only room every other band leaves, in band 3's order
-     (fewest runs, so missing cells first, then the cheaper model). When
+     (DEEP BEFORE WIDE, then fewest runs, then the cheaper model).
+  DEEP BEFORE WIDE (the owner, 2026-11-08: of 3,010 eval runs, 1,354 sat in
+     cells near zero confidence either way, because sweeps spread a few runs
+     over every subject; only 166 ever decided a standing verdict). In the
+     verdict-seeking bands 2, 3, 4 and 8 (BATCH_BANDS) every cell is ordered
+     first by (after high stakes) the key `depth_order`:
+       1. projected past its cap last: `pairs_to_verdict` exceeds the pairs
+          left under `max_runs_per_cell`, with at least
+          PROJECTION_MIN_PAIRS (3) pairs measured. It is still fired when
+          room is left, and is a `cell-projected-past-cap` work item.
+       2. a cell of a partly decided subject (`partly_decided`: some cell
+          settled, some open) first: a removal needs every cell, so
+          finishing a started subject is nearer a verdict than opening one.
+       3. fewest projected points to a verdict per use:
+          pairs_to_verdict x fire cost / (1 + use), use the skill's usage
+          weight or the guidance session rate (one value for every section,
+          so guidance cells compare on points alone). Improve value's
+          headroom term is left out: a cell near its ceiling already shows
+          a small D, hence more projected pairs, and counting it twice
+          would double the penalty. 1 + use keeps a skill nobody invoked in
+          four weeks ranked by its points.
+     pairs_to_verdict: each gate test (keep, remove) is a betting
+     confidence sequence that rejects when its log wealth reaches
+     log(1/alpha). The wealth so far is log(1/p) of the level it reached;
+     the rest grows per pair at the aGRAPA bet's expected gain,
+     lambda mu - lambda^2 (var + mu^2) / 2 at lambda = mu / (var + mu^2)
+     (capped), with mu and var of D (margin - D for the remove test) as the
+     gate's next bet sees them: the observed mean D and the arms' run-mean
+     variance pooled with the cell's bet prior. A pooled removal also
+     waits for the current rest's `rest_guard_min_pairs`. The projection is
+     the nearer test's pairs. A cell with no measured D (a missing cell)
+     has none and keeps its band's old order behind every projected cell.
+     Only a route that can still decide counts (2026-11-08: a crossed test
+     projected 0 pairs and led every plan): a provisional keep's is the
+     current rest's own keep test (its lapse at the cap is no keep, so with
+     neither route under the cap it is past it); a high cell's is the
+     `ceiling-unconfirmed` stop at `max_runs_high_cell`, never the remove
+     test; a crossed remove test waiting for a second CLI version has no
+     projection (`blocked`), so it ranks behind the projected cells.
+     There is no separate cap on open subjects: from its start THE BATCH
+     already funds only its members in these bands (a few subjects per
+     kind, fitted to the budget), and partly decided subjects now join it
+     ahead of the longest without a run.
+  SCOPE: a guidance section whose _agent-guidance eval-coverage.yml row
+     is `skipped` (no real sessions, or enforced elsewhere) is held
+     (`scope_holds`, HOLD_SCOPE) like a private cell: no band, probe or
+     batch funds it, even when its fixtures are on evals/scheduled.yml.
+     Skills are scoped by evals/scheduled.yml, stakes `none` and the
+     private hold, as before. When
      the 30-fire cap binds, a section outside the focus can wait weeks.
 
 THE BATCH (the owner's steady-state goal, 2026-11-02 18:57 UTC: at 25% of the
@@ -201,8 +251,10 @@ and only from the policy's `start`. `batch_state` decides it each plan:
     open, no removal pull request, no blocking cell, some cell would plan a
     fire). Carried members first; then the kinds take turns, skills ranked
     most used first, then high stakes, guidance sections (no per-section
-    use) high stakes first; then the longest without a run (never run
-    first), then name. Each cell with headroom is charged its remaining
+    use) high stakes first; then a partly decided subject (DEEP BEFORE
+    WIDE); then the longest without a run (never run first), then name. A
+    subject whose every projected open cell is projected past its cap
+    (DEEP BEFORE WIDE) ranks after all of these. Each cell with headroom is charged its remaining
     observations, min(`pairs_per_cell`, the gate's `max_runs_per_cell` -
     the observations it has), at its model's measured cost per observation
     (`pair_costs`: points per paired run); a subject that alone would
@@ -314,7 +366,8 @@ improvement nothing is attempted until a with-arm run of the new content
 lands (the gates pool only runs of the content on main).
 
 WORK ITEMS are not fires: `needs-fixtures`, `needs-harder-fixtures`,
-`fixture-ceiling` and `fixture-broken` (change type `fixture`), `cell-at-cap`
+`fixture-ceiling`, `fixture-broken` and `cell-projected-past-cap` (change
+type `fixture`; the last a cell DEEP BEFORE WIDE ranks last), `cell-at-cap`
 (change type None: an undecided cell whose pairs reached the cap, with its
 gates reason; none for a kept subject), `paused-unmeasured` (change type
 `fixture`: a subject the gate marked `unmeasured`, every cell parked and a
@@ -330,8 +383,8 @@ fire workflow refuses, see above). Every item carries `change_type`:
 DESCRIPTION TRIMS), `guidance-edit` for a guidance-improve fire, `fixture`,
 `trigger` for a trigger-only improve fire (THE TRIGGER LANE), or None for
 `routine-outage` and
-`routine-down`. `fixture-ceiling`, `cell-at-cap`, `paused-unmeasured` and `paused-ceiling` are
-routed SUMMARY_ROUTE: the step summary counts them and the plan JSON lists
+`routine-down`. `fixture-ceiling`, `cell-at-cap`, `cell-projected-past-cap`, `paused-unmeasured`
+and `paused-ceiling` are routed SUMMARY_ROUTE: the step summary counts them and the plan JSON lists
 them, but scripts/work_item_issues.py files no issue for them (round 4's
 m1). Lesson proposals of kind `agent-check` are not planned
 here: _agent-guidance's fleet worker reads them (its ADR 0027), so a
@@ -407,6 +460,28 @@ for a guidance-improve leg, `trigger_only`, the string "true" for a
 trigger-only improve leg and "false" otherwise, and `trim_description`, the
 same for a description trim) and `count=`. The log and job summary carry numbers and
 public skill names only.
+
+PAIR FIRES. A routine session costs about $0.67 of its own on every fire,
+counted nowhere, so one fire runs a fixture on two models when it can
+(`pair_fires`, after the allocation): two chosen eval fires on one fixture
+with the same `arms` (so the same trials) on two roster models become ONE
+leg whose `model` is "m1,m2", in roster order (ctx["roster_models"]; a
+hand-built ctx without it pairs nothing). Its `cost` is the two cells'
+sum, its `band` the earlier cell's, and its `cells` lists each model with
+its own band and cost. A lone cell, an improve or guidance-improve fire,
+a probe and the refresh fire stay single legs. `--max-fires` caps cells,
+so pairing only ever shortens the matrix, and wait-slot still counts
+fires. The fire workflow sends the pair as `models: [m1, m2]`; the
+routine runs run_eval once per model, in that order, into one run id. Each
+run gets its own 40 minutes, so a pending pair fire holds its cells for
+`routine_deadlines.deadline("eval", 2)`, 90 minutes, and counts in flight
+for twice EVAL_FLIGHT (`fire_models`). Its
+run title, `... <fixture> m1,m2`, holds a cell of each model: every
+reader here expands it per model (`improve_outcomes.title_models`), so a
+pending pair fire holds both cells and its two runs are judged each on
+its own model. `validate-fire` checks each model as it checks one, and
+the pair as the fire workflow does (two distinct ids, each matching
+PAIR_MODEL_RE).
 
 FIRE CHECK. `guidance-headroom SECTION` is routine-eval-fire.yml's check
 before a guidance-improve fire: the same rule A headroom over the same
@@ -487,9 +562,10 @@ RECHECK_AFTER_HIGH = timedelta(weeks=4)
 BROKEN_AFTER_FIRES = 2
 #: A successful eval fire this old with no run on its cell produced nothing.
 FIRE_RESULT_WINDOW = timedelta(hours=2)
-#: How long a fire with no run yet holds its cell (`pending`): the routine's
-#: own eval-mode stop plus a margin (scripts/routine_deadlines.py), after
-#: which the fire cannot deliver, so the cell is planned again. The owner,
+#: How long a one-model fire with no run yet holds its cell (`pending`): the
+#: routine's own eval-mode stop plus a margin (scripts/routine_deadlines.py),
+#: after which the fire cannot deliver, so the cell is planned again. The
+#: stop is per model, so a pair fire holds for `pending_window` of two. The owner,
 #: 2026-11-03: a lost fire must not wait FIRE_RESULT_WINDOW, two hours, for
 #: someone to notice it. The fire itself is still classified only at
 #: FIRE_RESULT_WINDOW, so the outage windows and PROBE_WAIT keep their
@@ -530,7 +606,11 @@ OUTAGE_REPORT_WINDOW = timedelta(hours=24)
 #: provisional trip. An eval run lands in 4 to 12 minutes; FIRE_RESULT_WINDOW
 #: still decides whether a fire was empty.
 PROBE_WAIT = timedelta(minutes=45)
-SHARES = (("missing", 0.30), ("near", 0.20), ("focus", 0.15), ("improve", 0.20))
+#: The guidance focus takes its share first until the 2026-11-09 17:00 UTC
+#: reset (the owner, 2026-11-07: guidance verdicts first while base.md is frozen),
+#: so the --max-fires cap cannot fill with cheaper bands before it. Restore
+#: the order missing, near, focus, improve after that reset.
+SHARES = (("focus", 0.15), ("missing", 0.30), ("near", 0.20), ("improve", 0.20))
 BANDS = ("safety", "missing", "near", "focus", "improve", "recheck", "bare", "guidance-rest")
 #: The guidance focus (module docstring, band 4; the owner's rule, 2026-11-02
 #: 18:42 UTC: remove a section at 90% confidence it does not improve results
@@ -540,7 +620,13 @@ BANDS = ("safety", "missing", "near", "focus", "improve", "recheck", "bare", "gu
 #: refuses `--trials > 1` for a guidance fixture, and trials collapse into
 #: one run mean, so three cost as much per verdict (2026-11-02 design
 #: review).
-GUIDANCE_FOCUS_SECTIONS = 2
+#: 40 (every section) until the 2026-11-09 17:00 UTC reset, while base.md
+#: is frozen so in-situ runs pool (the owner, 2026-11-07); restore 2 after it.
+GUIDANCE_FOCUS_SECTIONS = 40
+#: True holds every guidance-improve fire. It was True from 2026-11-07,
+#: while base.md was frozen (an accepted one edits base.md and resets every
+#: section's in-situ evidence); the owner ended the freeze 2026-11-08 19:21 UTC.
+GUIDANCE_IMPROVE_HELD = False
 #: The decision levels a cell's progress is normalized by when the verdict
 #: document carries no `guidance_policy` (evals/gate-policy.yml's).
 DEFAULT_RETIRE_CONFIDENCE = 0.90
@@ -582,7 +668,8 @@ BLOCKING_MIN_RUNS = 3
 PARKED_CLASSES = ("ceiling", "ceiling-unconfirmed", "paused")
 #: The route of a work item listed only in the sweep's step summary (its
 #: kind and count, `summary_lines`) and the plan JSON: `fixture-ceiling`,
-#: `cell-at-cap`, `paused-unmeasured` and `paused-ceiling` (round 4's m1 and M1, round 6's M1). scripts/work_item_issues.py files issues
+#: `cell-at-cap`, `cell-projected-past-cap` (DEEP BEFORE WIDE), `paused-unmeasured`
+#: and `paused-ceiling` (round 4's m1 and M1, round 6's M1). scripts/work_item_issues.py files issues
 #: for its KINDS only, so routing these to `issue` promised one that never came.
 SUMMARY_ROUTE = "summary"
 IMPROVE_TRIALS = 3
@@ -597,13 +684,31 @@ GUIDANCE_FIXTURE_RE = re.compile(r"guidance/[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
 USE_WINDOW_DAYS = 28
 #: Trials of a bare fire's one arm (routine-eval-weekly.yml sends them).
 BARE_TRIALS = 3
+#: An eval leg's one model id: the fire workflow's own shape check.
+MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+#: PAIR FIRES: each id of a pair fire, the routine payload contract's
+#: pattern, which routine-eval-fire.yml checks too before it fires a pair.
+PAIR_MODEL_RE = re.compile(r"claude-[a-z0-9][a-z0-9.-]{0,62}")
 #: wait-slot: at most this many fires in flight, each counted in flight this
-#: long after it started (an eval run takes 4 to 12 minutes, an improve run
-#: a few hours), polled once a minute. 6 for the allowance week ending
-#: 2026-11-09 17:00 UTC only (the owner, 2026-11-03: spend the rest of the week's
-#: allowance as fast as possible before his manual reset); restore to 3 with
-#: evals/budget.yml's restore after that reset.
-MAX_IN_FLIGHT = 6
+#: long per model after it started, polled once a minute. 20 and 10 minutes
+#: for the allowance week ending 2026-11-09 17:00 UTC only (the owner,
+#: 2026-11-07: run enough in parallel to use the week's remaining allowance):
+#: at 6 and 20 minutes the first slim sweep found every slot held by fires
+#: that had finished in about 5 minutes, which capped it near 9 fires an
+#: hour, and at 10 a pair fire (20 minutes) would cap pairs at one every two
+#: minutes. The routine's fire limit (about 20 fires an hour) now paces the
+#: sweep first. A routine eval run takes
+#: p50 3.5 and p90 17 minutes per model (471 runs). Restore 3 and 20 minutes
+#: with evals/budget.yml's restore after that reset. Restored early, on
+#: 2026-11-07 at 20:00 UTC: the owner asked at 17:51 UTC to slow evals, and the
+#: weekly sweep's 400-second spacing did not, since every re-plan starts a
+#: fresh sweep whose first leg fires at once. Three slots held 20 minutes
+#: each cap fires near 9 an hour whatever starts the sweep.
+MAX_IN_FLIGHT = 3
+#: plan --max-fires: the most cells one sweep may plan. 60 lets a sweep
+#: pick both models' cells of a fixture so they pair (PAIR FIRES); the
+#: dispatch matrix's limit is 256 legs.
+MAX_FIRES_CAP = 60
 EVAL_FLIGHT = timedelta(minutes=20)
 IMPROVE_FLIGHT = timedelta(hours=3)
 POLL_SECONDS = 60
@@ -673,6 +778,14 @@ BATCH_BUDGET_SLACK = 1e-9
 #: The PlanError for a malformed evals/unscheduled.yml or evals/scope-auto.yml
 #: (compute_gates raises ValueError for either; round 4's m4).
 SCHEDULE_FILES_MALFORMED = "evals/unscheduled.yml or evals/scope-auto.yml is malformed"
+#: `gather` refuses to plan with --guidance but no markdown parser. Without
+#: it compute_gates cannot read a section's digests, so every guidance cell
+#: reads "pooling key incomplete" (insufficient, no progress), and the sweep
+#: fired kept sections for nothing (2026-11-08: agent-contribution-markers,
+#: kept since 2026-11-07, about every 40 minutes, because the plan job
+#: installed PyYAML alone).
+GUIDANCE_PARSER_MISSING = ("--guidance needs markdown-it-py (pip install markdown-it-py==4.2.0): "
+                           "without it no guidance cell can be read")
 
 
 class PlanError(Exception):
@@ -695,6 +808,19 @@ def _stamp_time(stamp) -> datetime | None:
         return datetime.strptime(stamp, STAMP).replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return None
+
+
+def fire_models(title: dict | None) -> int:
+    """How many run_eval commands a fire of this parsed run title runs, one
+    after the other: two for a pair fire (PAIR FIRES), else one."""
+    return max(1, len(outcomes_mod.title_models(title)))
+
+
+def pending_window(title: dict | None) -> timedelta:
+    """How long an eval fire of this run title with no run yet holds its
+    cells: PENDING_WINDOW for one model, the routine's per-model stop twice
+    over plus the margin for a pair fire."""
+    return routine_deadlines.deadline("eval", fire_models(title))
 
 
 # ---------------------------------------------------------------------------
@@ -835,10 +961,20 @@ def with_run_after(cells: dict, moment: datetime) -> bool:
 # ---------------------------------------------------------------------------
 # Rule D: the bands.
 
+#: Until the 2026-11-09 17:00 UTC reset, a cell with no cost history is
+#: reserved at this many points instead of a full reservation: every guidance
+#: cell lost its history when base.md last changed (2026-11-04), and at one
+#: point each they filled the room (the owner, 2026-11-07). The per-fire guard
+#: still checks the full reservation. None after that reset.
+UNKNOWN_FIRE_POINTS = 0.1
+
+
 def fire_cost(cell: dict, ctx: dict) -> float:
     """A cell's fire at its historical cost (module docstring)."""
     reserve, ratio = ctx["reservation"], ctx.get("points_per_usd")
     usd = cell.get("usd_per_fire")
+    if usd is None and UNKNOWN_FIRE_POINTS is not None:
+        return min(reserve, UNKNOWN_FIRE_POINTS)
     if not ratio or usd is None:
         return reserve
     return min(reserve, max(ctx["overrun"], usd * ratio))
@@ -943,15 +1079,32 @@ def _level(block, field: str) -> float:
 def retire_progress(cell: dict, level: float) -> float:
     """How near a guidance cell is to no-benefit, as a share of the decision
     level: its objective's no-help confidence (the remove test's level so
-    far). The judge does not vote (harness/gates.py, 2026-11-03), so it is
-    not read. An absent value is 0."""
+    far), or for a pooled in-situ cell (`rest_guard`) the level its removal
+    evidence reached (`remove_evidence_confidence`), which is what decides
+    its removal (the pooled adversarial round 3's m3). The judge does not
+    vote (harness/gates.py, 2026-11-03), so it is not read. An absent value
+    is 0."""
+    guard = cell.get("rest_guard")
+    if isinstance(guard, dict):
+        return _level(guard, "remove_evidence_confidence") / level
     return _level(cell.get("objective"), "no_help_confidence") / level
 
 
 def keep_progress(cell: dict, level: float) -> float:
     """How near a guidance cell is to benefit, as a share of the decision
     level: its objective's helps confidence (the keep test's level so far,
-    per cell; the subject's keep family asks more of it)."""
+    per cell; the subject's keep family asks more of it). For a pooled
+    in-situ cell (`rest_guard`), 1 - the smallest p over its keep routes
+    (`keep_tests`, each p doubled, the pooled route's 1 until the current
+    rest's pair floor), as the explorer reads it; a provisional keep's
+    pooled route is left out, since that keep is not final (the pooled
+    adversarial round 4's m(c))."""
+    tests = cell.get("keep_tests")
+    if isinstance(cell.get("rest_guard"), dict) and isinstance(tests, list):
+        ps = [t["p"] for t in tests if isinstance(t, dict)
+              and isinstance(t.get("p"), (int, float))
+              and not (cell.get("provisional_keep") and t.get("route") == "objective")]
+        return max(0.0, 1 - min(ps)) / level if ps else 0.0
     return _level(cell.get("objective"), "helps_confidence") / level
 
 
@@ -960,10 +1113,25 @@ def _produces_item(cell: dict) -> bool:
     is schedulable, its subject is not stakes `none`, and its fires have
     not come back empty (a fixture-broken item). A `pending` cell still
     counts: its fire may yet land a run, and dropping its section from the
-    focus for one sweep would hand the slot to another."""
+    focus for one sweep would hand the slot to another. A provisional keep
+    (`provisional_keep`) is undecided too (the pooled adversarial round 4's
+    M1)."""
     return cell.get("schedulable", True) and cell.get("stakes", "normal") != "none" \
-        and cell["class"] in ("missing", "insufficient") \
+        and (cell["class"] in ("missing", "insufficient") or bool(cell.get("provisional_keep"))) \
         and cell.get("empty_fires", 0) < BROKEN_AFTER_FIRES
+
+
+def verdict_open(cells: list) -> bool:
+    """Whether a subject's verdict is still open: every cell's subject
+    verdict is in FOCUS_VERDICTS, or it is `keep` only on provisional keeps
+    (`provisional_keep`: no cell keeps finally), which a removal can still
+    override and which lapse at the cap (the pooled adversarial round 4's
+    M1: such a section left the focus and its keep was never tested)."""
+    if all(c.get("verdict") in FOCUS_VERDICTS for c in cells):
+        return True
+    return all(c.get("verdict") == "keep" for c in cells) \
+        and any(c.get("provisional_keep") for c in cells) \
+        and not any(c["class"] == "benefit" and not c.get("provisional_keep") for c in cells)
 
 
 def _blocking(cell: dict) -> bool:
@@ -983,7 +1151,7 @@ def guidance_focus(ctx: dict) -> tuple:
     from the eval cells alone (module docstring, band 4). A section's score
     is max(min over its cells of retire progress, max over its cells of
     keep progress): it retires only when every cell clears, and keeps on
-    one. Eligible: its verdict is still open (FOCUS_VERDICTS), some cell
+    one. Eligible: its verdict is still open (`verdict_open`), some cell
     would plan a fire (`_produces_item`), no removal pull request is open
     for it (ctx["guidance_removal_prs"]) and no cell is blocking (every
     cell, held ones too). The top GUIDANCE_FOCUS_SECTIONS by score, then
@@ -1003,7 +1171,7 @@ def guidance_focus(ctx: dict) -> tuple:
             sections.setdefault(cell["section"], []).append(cell)
     ranked = []
     for section, cells in sections.items():
-        if section in removals or any(c.get("verdict") not in FOCUS_VERDICTS for c in cells) \
+        if section in removals or not verdict_open(cells) \
                 or not any(_produces_item(c) for c in cells) or any(_blocking(c) for c in cells):
             continue
         retire = min(retire_progress(c, retire_level) for c in cells)
@@ -1020,16 +1188,18 @@ def guidance_focus(ctx: dict) -> tuple:
 
 
 def _guidance_band(cell: dict, focused: dict, near_order: tuple) -> tuple:
-    """(band, order) for an undecided guidance cell's fire: `focus` for a
-    focused section, the higher-scored section first, then by the cell's
-    own progress on the side the section's score came from (the binding
-    cell first: lowest retire progress, or highest keep progress), then the
-    cheaper model. Sections go first because the two sides' progress do not
-    compare: a keep-side cell's would sort before every retire-side cell.
-    `guidance-rest` for any other section, in the near band's order
-    (`near_order`: fewest runs, then the cheaper model), so a missing cell
-    leads. High stakes first in both."""
-    rank, _least, price = near_order[:3]
+    """(band, order) for an undecided guidance cell's fire. `near_order` is
+    (rank, past cap, not partly decided, projected points per use, fewest
+    runs, cheaper model, heavier model), DEEP BEFORE WIDE's `depth_order`
+    after the stakes rank. `focus` for a focused section: the DEEP BEFORE
+    WIDE key first (it compares the keep and remove sides, both in pairs),
+    then, where the projection is unknown, the higher-scored section, then
+    the cell's own progress on the side the section's score came from (the
+    binding cell first: lowest retire progress, or highest keep progress),
+    then the cheaper model. `guidance-rest` for any other section, in
+    `near_order`, so a missing cell (no projection) keeps the fewest-runs
+    order behind the projected ones. High stakes first in both."""
+    rank, past_cap, opened, points, _least, price = near_order[:6]
     focus = focused.get(cell["section"])
     if focus is None:
         return "guidance-rest", near_order
@@ -1037,7 +1207,7 @@ def _guidance_band(cell: dict, focused: dict, near_order: tuple) -> tuple:
         progress = -keep_progress(cell, focus["benefit_level"])
     else:
         progress = retire_progress(cell, focus["retire_level"])
-    return "focus", (rank, focus["position"], progress, price)
+    return "focus", (rank, past_cap, opened, points, focus["position"], progress, price)
 
 
 # ---------------------------------------------------------------------------
@@ -1249,6 +1419,53 @@ def addition_histories(registries: dict, guidance: Path | None) -> dict:
     return out
 
 
+def _number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) \
+        and math.isfinite(value) and value >= 0
+
+
+def _invocation_usd(directory: Path) -> float | None:
+    """The dollars of the run_eval invocation that wrote one run directory
+    (`routine-results/<run id>/<key>/<timestamp>`): each distinct run-level
+    `usage` block's `cost_estimate.usd`, summed as ingest's `estimate` sums
+    them; None when a summary there is unreadable or lacks one."""
+    if directory.is_symlink() or not directory.is_dir():
+        return None
+    blocks = {}
+    for path in guard._summary_paths(directory):
+        summary = guard._load_summary(path)
+        usage = summary.get("usage") if isinstance(summary, dict) else None
+        estimate = usage.get("cost_estimate") if isinstance(usage, dict) else None
+        usd = estimate.get("usd") if isinstance(estimate, dict) else None
+        if not _number(usd):
+            return None
+        level = {key: value for key, value in usage.items() if key != "measured"}
+        blocks[json.dumps(level, sort_keys=True)] = float(usd)
+    return sum(blocks.values()) if blocks else None
+
+
+def model_shares(tree: Path, dir_models: dict, doc: dict) -> dict | None:
+    """PAIR FIRES: {model: its share of a routine run's points} for a run
+    holding more than one model, or None when that cannot be told. Each run
+    directory (one run_eval invocation) must hold one model, and its share
+    is its dollars (`_invocation_usd`) over the estimate's `usd`, which the
+    directories' dollars must add up to: the estimate's points are those
+    dollars times one rate, so the split is exact."""
+    total = doc.get("usd")
+    if not _number(total) or total <= 0:
+        return None
+    usd: dict = {}
+    for path, models in sorted(dir_models.items()):
+        spent = _invocation_usd(tree / path)
+        if len(models) != 1 or spent is None:
+            return None
+        (model,) = models
+        usd[model] = usd.get(model, 0.0) + spent
+    if not math.isclose(sum(usd.values()), total, rel_tol=1e-9, abs_tol=1e-12):
+        return None
+    return {model: value / total for model, value in usd.items()}
+
+
 def pair_costs(records: list, tree: Path, now: datetime, window: timedelta) -> dict:
     """{roster model: mean allowance fraction per observation}: over the
     routine runs of the last `window` whose cost_estimate.json carries
@@ -1261,14 +1478,19 @@ def pair_costs(records: list, tree: Path, now: datetime, window: timedelta) -> d
     fire's `alone` pair is read for contrast, not counted in its cell, so
     only its `in_situ` pair is an observation. Judge and guard calls are in a
     run's points, so they are in the mean. A model with no such run is
-    absent."""
+    absent. A pair fire's run (PAIR FIRES) holds two models, one per run
+    directory: its points are split by `model_shares`, and each model gets
+    its share over its own directories' observations; a run that cannot be
+    split (one directory holding two models, say) is left out."""
     runs: dict = {}
     for record in records:
         parts = str(record.get("path", "")).split("/")
         if parts[0] != guard.DEST_ROOT or len(parts) < 2:
             continue
-        entry = runs.setdefault(parts[1], {"models": set(), "roles": {}, "newest": None})
+        entry = runs.setdefault(parts[1], {"models": set(), "roles": {}, "dirs": {},
+                                           "newest": None})
         entry["models"].add(record.get("model"))
+        entry["dirs"].setdefault(record["path"], set()).add(record.get("model"))
         if record.get("pair") in (None, "in_situ"):
             entry["roles"].setdefault(record["path"], set()).add(record.get("role"))
         at = _stamp_time(record.get("timestamp"))
@@ -1277,8 +1499,10 @@ def pair_costs(records: list, tree: Path, now: datetime, window: timedelta) -> d
     points: dict = {}
     observations: dict = {}
     for run_id, entry in sorted(runs.items()):
-        count = sum(1 for roles in entry["roles"].values() if {"with", "without"} <= roles)
-        if len(entry["models"]) != 1 or None in entry["models"] or count <= 0 \
+        paired = {path: 1 for path, roles in entry["roles"].items()
+                  if {"with", "without"} <= roles}
+        count = sum(paired.values())
+        if None in entry["models"] or count <= 0 \
                 or entry["newest"] is None or not now - window <= entry["newest"] <= now:
             continue
         try:
@@ -1287,12 +1511,21 @@ def pair_costs(records: list, tree: Path, now: datetime, window: timedelta) -> d
         except (OSError, ValueError, UnicodeDecodeError, RecursionError):
             continue
         cost = doc.get("points") if isinstance(doc, dict) else None
-        if not isinstance(cost, (int, float)) or isinstance(cost, bool) \
-                or not math.isfinite(cost) or cost < 0:
+        if not _number(cost):
             continue
-        (model,) = entry["models"]
-        points[model] = points.get(model, 0.0) + cost
-        observations[model] = observations.get(model, 0) + count
+        if len(entry["models"]) == 1:
+            shares = {next(iter(entry["models"])): 1.0}
+        else:
+            shares = model_shares(tree, entry["dirs"], doc)
+            if shares is None:
+                continue
+        for model, share in sorted(shares.items()):
+            seen = sum(paired.get(path, 0) for path, models in entry["dirs"].items()
+                       if model in models)
+            if seen <= 0:
+                continue
+            points[model] = points.get(model, 0.0) + cost * share
+            observations[model] = observations.get(model, 0) + seen
     return {model: points[model] / observations[model] for model in points}
 
 
@@ -1303,9 +1536,11 @@ def subject_cost(cells: list, costs: dict, pairs_per_cell: float,
     fixture-broken), each cell's model's measured mean cost per observation
     (the dearest measured model for one with none) times the observations
     it still needs: min(`pairs_per_cell`, `cap` - the gate's own count of
-    its observations, `pairs`), at least 0. `cap` is the gate policy's
-    `max_runs_per_cell` (None: no cap). None when no model's cost is
-    measured."""
+    its observations toward the cap, `current_rest_pairs` for a pooled
+    in-situ guidance cell (its older rests' pairs do not fill the current
+    rest's window) and `pairs` otherwise), at least 0. `cap` is the gate
+    policy's `max_runs_per_cell` (None: no cap). None when no model's cost
+    is measured."""
     if not costs:
         return None
     dearest = max(costs.values())
@@ -1315,7 +1550,9 @@ def subject_cost(cells: list, costs: dict, pairs_per_cell: float,
             continue
         remaining = pairs_per_cell
         if cap is not None:
-            done = cell.get("pairs")
+            done = cell.get("current_rest_pairs")
+            if done is None:
+                done = cell.get("pairs")
             done = done if isinstance(done, int) and not isinstance(done, bool) else 0
             remaining = min(remaining, cap - done)
         total += costs.get(cell["model"], dearest) * max(0.0, remaining)
@@ -1367,7 +1604,7 @@ def batch_subjects(ctx: dict) -> dict:
     """{(kind, subject): {status, rank, newest}} for every subject with a
     schedulable eval cell. Private skills are never listed (the record is
     public). Status, first match:
-      decided  its verdict is closed (anything but FOCUS_VERDICTS) or a
+      decided  its verdict is closed (not `verdict_open`) or a
                removal pull request is open for it;
       blocked  some cell is blocking (`_blocking`): more runs on the current
                content cannot move it;
@@ -1375,10 +1612,14 @@ def batch_subjects(ctx: dict) -> dict:
                every cell held or stakes `none`);
       open     otherwise.
     `rank` is 0 for a high-stakes subject, else 1; `newest` its newest run
-    on any cell (None for never run)."""
+    on any cell (None for never run); `partly` whether some cell is settled
+    and some still open (`partly_decided`); `past_cap` whether every open
+    cell it would fire that has a projection is projected past its cap
+    (`past_cap_subject`)."""
     private = set(ctx.get("private_skills") or ())
     removal_skills = set(ctx.get("removal_prs") or ())
     removal_sections = set(ctx.get("guidance_removal_prs") or ())
+    started = partly_decided(ctx["cells"])
     grouped: dict = {}
     for cell in ctx["cells"]:
         key = ("guidance", cell["section"]) if cell.get("section") else ("skill", cell["skill"])
@@ -1390,7 +1631,7 @@ def batch_subjects(ctx: dict) -> dict:
                 or not BATCH_SUBJECT_RE.fullmatch(name or ""):
             continue
         removal = name in (removal_sections if kind == "guidance" else removal_skills)
-        if removal or any(c.get("verdict") not in FOCUS_VERDICTS for c in cells):
+        if removal or not verdict_open(cells):
             status = "decided"
         elif any(_blocking(c) for c in cells):
             status = "blocked"
@@ -1401,6 +1642,8 @@ def batch_subjects(ctx: dict) -> dict:
         stamps = [t for t in (_stamp_time(c.get("newest")) for c in cells) if t is not None]
         subjects[(kind, name)] = {
             "status": status, "newest": max(stamps) if stamps else None,
+            "partly": (kind, name) in started,
+            "past_cap": past_cap_subject(live, ctx),
             "rank": 0 if any(c.get("stakes") == "high" for c in cells) else 1}
     return subjects
 
@@ -1468,12 +1711,16 @@ def fit_batch(ctx: dict, subjects: dict, carry: list, sizes: dict, number: int) 
     wait."). Pure. Returns {carried, picks, waiting, fit}.
 
     Carried members stay whatever they cost, and their cost counts first.
-    The candidates, open subjects not carried, are ranked per kind. Skills:
+    The candidates, open subjects not carried, are ranked per kind, a
+    subject projected past its caps (`past_cap`, DEEP BEFORE WIDE) after
+    every other. Then skills:
     most used first (the usage weight, `neutral_weights` of
     ctx["skill_weights"]), then high stakes, then the longest without a run
     (never run first), then name. Guidance has no per-section use, so its
     sections rank high stakes first, then the longest without a run, then
-    name. The kinds take turns, so neither kind's list starves the other. A
+    name. In both, a partly decided subject (`partly`, DEEP BEFORE WIDE)
+    goes before the longest without a run. The kinds take turns, so
+    neither kind's list starves the other. A
     candidate joins while its kind is under its target size and its expected
     cost (`subject_cost`, the remaining observations of its cells with
     headroom up to the gate's `max_runs_per_cell`) fits the room the budget
@@ -1510,9 +1757,14 @@ def fit_batch(ctx: dict, subjects: dict, carry: list, sizes: dict, number: int) 
     for kind in BATCH_KINDS:
         # Skills: most used first, then stakes. Guidance has no per-section
         # use, so stakes stay first there.
-        ranked[kind] = [name for _w, _r, _n, name in sorted(
-            (-(weights.get(name, 0.0) if kind == "skill" else 0.0), info["rank"],
-             info["newest"] or floor_time, name)
+        # DEEP BEFORE WIDE: then a partly decided subject before one with
+        # nothing settled, ahead of the longest without a run.
+        # A subject projected not to decide before its caps waits behind
+        # every other (DEEP BEFORE WIDE: a batch slot is a verdict to reach).
+        ranked[kind] = [name for *_key, name in sorted(
+            (bool(info.get("past_cap")),
+             -(weights.get(name, 0.0) if kind == "skill" else 0.0), info["rank"],
+             not info.get("partly"), info["newest"] or floor_time, name)
             for (k, name), info in subjects.items()
             if k == kind and info["status"] == "open" and (k, name) not in taken)]
     room = {kind: sizes[kind] - sum(1 for m in carry if m["kind"] == kind)
@@ -1579,6 +1831,15 @@ def eval_items(ctx: dict, now: datetime) -> tuple:
     count, not an issue), and a decided cell at the cap is not re-checked
     (round 3's m5).
 
+    A PROVISIONAL KEEP (`provisional_keep`: a pooled in-situ cell kept by
+    the pooled keep test alone, which a later removal on the current rest's
+    evidence overrides and which lapses at the cap; harness/gates.py, THE
+    STALE KEEP) is fired as an undecided guidance cell (`_guidance_band`:
+    focus or guidance-rest; its section stays eligible, `verdict_open`),
+    until the current rest's own keep crosses or the cell is `at_cap`, so
+    the override gets its pairs; not when another cell of its section has a
+    final keep, which keeps the section whatever this cell does.
+
     CHEAPER MODEL FIRST (2026-11-03, the threshold sweep's adaptive
     allocation): in the missing, near, focus and guidance-rest bands a cell
     plans no fire while its subject's cell of the same fixture on a cheaper
@@ -1603,6 +1864,10 @@ def eval_items(ctx: dict, now: datetime) -> tuple:
     _focus, focused = guidance_focus(ctx)
     held = cheaper_first(ctx["cells"], costs)
     members = batch_members(ctx)
+    started = partly_decided(ctx["cells"])
+    final_kept = {c["section"] for c in ctx["cells"]
+                  if c.get("section") and c["class"] == "benefit"
+                  and not c.get("provisional_keep")}
     bands = {band: [] for band in BANDS}
     work = []
     for cell in ctx["cells"]:
@@ -1619,6 +1884,10 @@ def eval_items(ctx: dict, now: datetime) -> tuple:
         newest = _stamp_time(cell["newest"])
         kept = cell.get("verdict") == "keep"
         due = newest is not None and now - newest >= recheck_after(cell)
+        provisional = False
+        # DEEP BEFORE WIDE: read only by the verdict-seeking bands below.
+        depth = depth_order(cell, ctx, item["cost"], started)
+        near_order = (rank, *depth, least, price, -item["weight"])
         if not cell.get("section") and cell["skill"] in removal:
             band, order = "safety", ()
         elif cell["class"] in PARKED_CLASSES:
@@ -1652,18 +1921,30 @@ def eval_items(ctx: dict, now: datetime) -> tuple:
             # Round 3's m5: a decided cell at the cap is not re-checked; a
             # new pair cannot enter its frozen window.
             band, order = None, None
+        elif cell.get("provisional_keep") and cell.get("section") not in final_kept:
+            # The pooled adversarial rounds 2 and 4: a pooled keep is not
+            # final (a removal on the current rest's evidence overrides it,
+            # and it lapses at the cap), so it is fired like an undecided
+            # guidance cell (the focus band when its section is focused,
+            # `verdict_open`; guidance-rest otherwise), until the current
+            # rest's own keep test crosses or its window is full (`at_cap`,
+            # above). In the recheck band, which has no share, a full focus
+            # band starved it. A section with a final keep on another cell
+            # is kept whatever this cell does.
+            band, order = _guidance_band(cell, focused, near_order)
+            provisional = True
         elif kept and cell["class"] in ("missing", "insufficient"):
             # More runs cannot change a keep, but its re-check still comes
             # due, or a kept subject with an unsettled cell would never be
             # tested again.
             band, order = ("recheck", (rank, newest.timestamp())) if due else (None, None)
         elif cell["class"] == "missing":
-            band, order = (_guidance_band(cell, focused, (rank, least, price, -item["weight"]))
-                           if cell.get("section") else ("missing", (rank, price, -item["weight"])))
+            band, order = (_guidance_band(cell, focused, near_order) if cell.get("section")
+                           else ("missing", (rank, *depth, price, -item["weight"])))
         elif cell["class"] == "insufficient" and cell.get("section"):
-            band, order = _guidance_band(cell, focused, (rank, least, price, -item["weight"]))
+            band, order = _guidance_band(cell, focused, near_order)
         elif cell["class"] == "insufficient":
-            band, order = "near", (rank, least, price, -item["weight"])
+            band, order = "near", near_order
         elif due:
             band, order = "recheck", (rank, newest.timestamp())
         else:
@@ -1672,8 +1953,15 @@ def eval_items(ctx: dict, now: datetime) -> tuple:
             continue
         subject = ("guidance", cell["section"]) if cell.get("section") \
             else ("skill", cell["skill"])
-        if members is not None and band in BATCH_BANDS and subject not in members:
-            continue  # THE BATCH: measured once its subject joins one
+        if members is not None and band in BATCH_BANDS and subject not in members \
+                and not provisional:
+            # THE BATCH: measured once its subject joins one. A provisional
+            # pooled keep is exempt (round 4 review): it is a verdict already
+            # reached that only the current rest's own runs can confirm or
+            # undo, as the recheck band fired it before round 4, and a
+            # section a blocking sibling keeps out of the batch must not
+            # strand it.
+            continue
         if band in CHEAPER_FIRST_BANDS and id(cell) in held:
             continue  # its cheaper model's cell of the same fixture goes first
         if band != "safety" and cell.get("empty_fires", 0) >= BROKEN_AFTER_FIRES:
@@ -1685,6 +1973,20 @@ def eval_items(ctx: dict, now: datetime) -> tuple:
             work.append(broken)
         elif not cell.get("pending"):
             bands[band].append({**item, "band": band, "order": order})
+        if band in BATCH_BANDS and depth[0] \
+                and cell.get("empty_fires", 0) < BROKEN_AFTER_FIRES:
+            # DEEP BEFORE WIDE: still fired, last in its band, and counted
+            # in the step summary: only a fixture that discriminates more
+            # (or a person) can let it decide before its cap.
+            projection = pairs_to_verdict(cell, ctx)
+            ahead = {"kind": "cell-projected-past-cap", "change_type": "fixture",
+                     "skill": cell["skill"], "fixture": cell["fixture"],
+                     "model": cell["model"], "route": SUMMARY_ROUTE,
+                     "pairs": None if math.isinf(projection["pairs"])
+                     else projection["pairs"], "remaining": projection["remaining"]}
+            if cell.get("section"):
+                ahead["section"] = cell["section"]
+            work.append(ahead)
     # No fixture names: an outage is the routine's, not any fixture's, and
     # the step summary counts work items by kind.
     outages = [{"kind": "routine-outage", "change_type": None, "route": "issue",
@@ -1786,6 +2088,317 @@ def cheaper_first(cells: list, costs: dict) -> set:
                     for other in group if other is not cell):
                 held.add(id(cell))
     return held
+
+
+# ---------------------------------------------------------------------------
+# DEEP BEFORE WIDE (module docstring): the projection that orders bands 2, 3,
+# 4 and 8, and the guidance sections out of scope.
+
+#: harness/gates.py's betting constants, copied because this module imports
+#: gates only lazily (test_issue_deep_before_wide.py pins them equal): the
+#: bet cap, the neutral prior (mean, variance, pseudo-pairs) and the least
+#: variance a bet uses.
+BET_CAP = 0.9
+NEUTRAL_BET_PRIOR = (0.0, 0.25, 1.0)
+MIN_BET_VARIANCE = 1e-6
+#: A cell is projected past its cap, ranked last in its band and listed as a
+#: `cell-projected-past-cap` work item, only from this many pairs: the
+#: gate's learned bet prior weighs PRIOR_PSEUDO_RUNS (3) pairs, so before
+#: that the projection is mostly the prior's, not the cell's.
+PROJECTION_MIN_PAIRS = 3
+#: harness/gates.py's HIGH_STOP_MIN_WITHOUT (pinned equal by a test): a high
+#: cell is stopped `ceiling-unconfirmed` at `max_runs_high_cell` pairs only
+#: with a without arm averaging at least this.
+HIGH_STOP_MIN_WITHOUT = 0.90
+#: `pairs_to_verdict`'s `blocked` when a crossed remove test still waits for
+#: a second CLI version (`min_cli_versions`): more pairs on today's version
+#: cannot decide it, so the projection is unknown, not zero.
+BLOCKED_CLI_VERSIONS = "cli-versions"
+#: The cell classes still open (`partly_decided`); a subject has settled any
+#: other class but PARKED_CLASSES, which are neither. A provisional keep is
+#: open.
+OPEN_CELL_CLASSES = ("missing", "insufficient")
+
+
+def _real(value) -> bool:
+    """A finite number of either sign, not a bool (`_number` is >= 0)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) \
+        and math.isfinite(value)
+
+
+def d_variance(gate_cell: dict | None) -> float | None:
+    """The variance of a cell's paired difference D = with - without, from
+    its gates arm summaries' run means (the window the tests bet over): the
+    sum of the two arms' sample variances, since the arms are separate
+    sessions. None with fewer than two run means on either arm."""
+    total = 0.0
+    for role in ("with", "without"):
+        arm = (gate_cell or {}).get(role)
+        means = [m for m in (arm.get("run_means") or []) if _real(m)] \
+            if isinstance(arm, dict) else []
+        if len(means) < 2:
+            return None
+        total += statistics.variance(means)
+    return total
+
+
+def _growth(mu: float, var: float, worst: float) -> float:
+    """The expected log-wealth gain per pair of a betting test whose payoff
+    has mean `mu` and variance `var` and loses at most `worst`, at the bet
+    aGRAPA sizes from those moments (mu / (var + mu^2), capped at BET_CAP /
+    worst): lambda mu - lambda^2 (var + mu^2) / 2, the second-order
+    expansion of E[log(1 + lambda y)]. 0 when mu <= 0: that test never
+    rejects."""
+    if mu <= 0:
+        return 0.0
+    second = var + mu * mu
+    bet = min(mu / second, BET_CAP / worst)
+    return max(0.0, bet * mu - bet * bet * second / 2)
+
+
+def _to_cross(have: float, need: float, growth: float) -> float:
+    """Pairs until a log wealth of `have` grows to `need` at `growth` per pair."""
+    if have >= need:
+        return 0.0
+    return (need - have) / growth if growth > 0 else math.inf
+
+
+def _start(peak: float, current, need: float) -> float:
+    """A test's log wealth to project from: its CURRENT log wealth
+    (`current`, gates' `*_log_wealth`), since a test rejects only when its
+    running wealth crosses and betting wealth can fall after a peak; its
+    PEAK (`peak`, log 1/p) when the current one is absent (an older verdict
+    document) or when the peak already crossed `need` (a rejection is
+    final, `first_crossing`)."""
+    if peak >= need or not _real(current):
+        return peak
+    return current
+
+
+def pairs_to_verdict(cell: dict, ctx: dict) -> dict | None:
+    """The projected extra pairs before `cell`'s keep or remove test rejects,
+    or None when the cell has no measured D yet (no `objective` block).
+    Returns {pairs, keep, remove, remaining, past_cap, blocked}.
+
+    Each test is a betting confidence sequence (harness/gates.py) that
+    rejects when its log wealth reaches log(1/alpha): keep at alpha =
+    (1 - benefit_confidence) / keep_family, remove at 1 - retire_confidence.
+    A pooled in-situ cell's two keep routes each run at half that alpha, but
+    gates reports each route's p doubled, so a reported p reaches the full
+    alpha exactly when its route rejects. The wealth so far
+    is each test's CURRENT log wealth (`_start`: gates' `log_wealth` of each
+    keep route, the objective's `keep_log_wealth` and `no_help_log_wealth`,
+    a pooled cell's `remove_evidence_log_wealth`), since wealth can fall
+    after its peak and only a running crossing rejects; an older verdict
+    document without them falls back to the level each test reached (log
+    1/p: the smallest keep p, the remove test's no-help confidence, a pooled
+    cell's removal evidence), which is the peak.
+    The rest grows at `_growth` per pair with D's mean and variance as the
+    gate's next bet sees them: the cell's observed mean D and `d_variance`
+    pooled with its bet prior's (mean, variance, pseudo-pairs), exactly how
+    aGRAPA starts each test. The keep test bets on D, the remove test on
+    margin - D. A pooled removal also waits for the current rest's
+    `rest_guard_min_pairs`. `pairs` is the nearer of the two, `remaining`
+    the pairs left under `max_runs_per_cell` (the current rest's, pooled),
+    and `past_cap` whether `pairs` exceeds it with at least
+    PROJECTION_MIN_PAIRS pairs measured.
+
+    Only a route that can still decide counts (the over-fires of
+    2026-11-08, where a crossed test projected 0 pairs and led every plan):
+      * A PROVISIONAL KEEP (gates' THE STALE KEEP) is final only when the
+        current rest's own keep test rejects, so its keep is that route
+        alone; the pooled crossing is already spent. A removal on the
+        current rest's evidence still overrides it, so both routes bet with
+        the current rest's moments (`current_objective`). Its
+        lapse at the cap is no route to a keep, so when neither route
+        decides under the cap it is past it, ranked last like any other.
+      * A HIGH CELL (its without arm above 1 - margin, or the ceiling test
+        rejected; harness/gates.py rule 6) is never decided by the remove
+        test, crossed or not: its route is the `ceiling-unconfirmed` stop at
+        `max_runs_high_cell` pairs, when the without arm averages at least
+        HIGH_STOP_MIN_WITHOUT and the no-harm test has rejected or can
+        (mean D above -margin); otherwise only the cap, past which it is.
+      * A crossed remove test on an open cell that is neither waits for a
+        second CLI version (`min_cli_versions`), which no number of pairs
+        on today's version supplies: `blocked` is BLOCKED_CLI_VERSIONS and
+        the remove route unknown (inf), never past the cap on that alone."""
+    objective = cell.get("objective")
+    if not isinstance(objective, dict) or not _real(objective.get("delta")):
+        return None
+    guidance = bool(cell.get("section"))
+    policy = (ctx.get("guidance_policy") if guidance else None) or ctx.get("policy") or {}
+    margin = policy.get("objective_margin", 0.15)
+    benefit = policy.get("benefit_confidence") or DEFAULT_BENEFIT_CONFIDENCE
+    retire = policy.get("retire_confidence") or DEFAULT_RETIRE_CONFIDENCE
+    pooled = isinstance(cell.get("rest_guard"), dict)
+    provisional = bool(cell.get("provisional_keep"))
+    family = cell.get("keep_family") if isinstance(cell.get("keep_family"), int) \
+        and cell["keep_family"] >= 1 else 1
+    keep_alpha = (1 - benefit) / family
+    n = objective.get("pairs") if isinstance(objective.get("pairs"), int) else 0
+    prior = cell.get("bet_prior")
+    m0, v0, n0 = ((prior["mean"], prior["variance"], prior["n"])
+                  if isinstance(prior, dict) and _real(prior.get("mean"))
+                  and all(_number(prior.get(k)) for k in ("variance", "n"))
+                  else NEUTRAL_BET_PRIOR)
+    var_d = cell.get("d_variance") if _number(cell.get("d_variance")) else v0
+
+    def moments(delta: float, count: int) -> tuple:
+        weight = n0 + count
+        mu = (m0 * n0 + delta * count) / weight if weight else 0.0
+        second = ((v0 + m0 * m0) * n0 + (var_d + delta * delta) * count) / weight \
+            if weight else v0
+        return mu, max(second - mu * mu, MIN_BET_VARIANCE)
+
+    mu, var = moments(objective["delta"], n)
+    own = (cell["rest_guard"].get("current_objective") if pooled else None) or {}
+    if provisional and _real(own.get("delta")) and isinstance(own.get("pairs"), int):
+        # Both of its routes read the current rest alone: its own keep test,
+        # and the removal that overrides the pooled keep.
+        mu, var = moments(own["delta"], own["pairs"])
+    routes = [(t["p"], t.get("log_wealth")) for t in (cell.get("keep_tests") or [])
+              if isinstance(t, dict) and _number(t.get("p")) and t["p"] > 0
+              and not (provisional and t.get("route") == "objective")]
+    if not routes:
+        # The gate's own objective p, not doubled: a pooled route's alpha.
+        routes = [(objective["keep_p"], objective.get("keep_log_wealth"))
+                  if _number(objective.get("keep_p")) and objective["keep_p"] > 0
+                  else (1.0, None)]
+        keep_alpha /= 2 if pooled else 1
+    keep_need = -math.log(keep_alpha)
+    keep_have = max(_start(-math.log(min(p, 1.0)), current, keep_need)
+                    for p, current in routes)
+    if pooled:
+        no_help = _level(cell["rest_guard"], "remove_evidence_confidence")
+        no_help_now = cell["rest_guard"].get("remove_evidence_log_wealth")
+    else:
+        no_help = _level(objective, "no_help_confidence")
+        no_help_now = objective.get("no_help_log_wealth")
+    remove_need = -math.log(1 - retire)
+    keep = _to_cross(keep_have, keep_need, _growth(mu, var, 1.0))
+    remove = _to_cross(_start(-math.log(max(1 - no_help, 1e-12)), no_help_now, remove_need),
+                       remove_need, _growth(margin - mu, var, 1 - margin))
+    current = cell.get("current_rest_pairs") if pooled \
+        and isinstance(cell.get("current_rest_pairs"), int) else None
+    floor = (policy.get("rest_guard_min_pairs") or 0) if pooled and current is not None else 0
+    held = current if current is not None else (cell.get("pairs") or n)
+    blocked = None
+    without = cell.get("without_mean")
+    high = (_real(without) and without > 1 - margin) or cell.get("ceiling_at") is not None
+    if high:
+        stop = policy.get("max_runs_high_cell")
+        can_stop = isinstance(stop, int) and _real(without) \
+            and without >= HIGH_STOP_MIN_WITHOUT \
+            and (cell.get("noharm_at") is not None or mu > -margin)
+        remove = max(0, stop - held) if can_stop else math.inf
+    else:
+        if current is not None:
+            remove = max(remove, floor - current)
+        if remove == 0 and (cell.get("class") in OPEN_CELL_CLASSES or provisional):
+            blocked, remove = BLOCKED_CLI_VERSIONS, math.inf
+    pairs = min(keep, remove)
+    cap = gate_cap(ctx, "guidance" if guidance else "skill")
+    remaining = None if cap is None else max(0, cap - held)
+    return {"pairs": pairs, "keep": keep, "remove": remove, "remaining": remaining,
+            "past_cap": remaining is not None and n >= PROJECTION_MIN_PAIRS
+            and pairs > remaining and not (blocked and math.isinf(pairs)),
+            "blocked": blocked}
+
+
+def past_cap_subject(cells: list, ctx: dict) -> bool:
+    """Whether a subject cannot reach a verdict before its caps on the
+    current evidence: every cell of `cells` that would plan a fire
+    (`_produces_item`) and has a projection is projected past its cap, and
+    at least one has one. A subject with an unprojected open cell (no
+    measured D yet) is not."""
+    projections = [pairs_to_verdict(c, ctx) for c in cells if _produces_item(c)]
+    if any(p is None for p in projections) or not projections:
+        return False
+    return all(p["past_cap"] for p in projections)
+
+
+def _subject_of(cell: dict) -> tuple:
+    return ("guidance", cell["section"]) if cell.get("section") else ("skill", cell["skill"])
+
+
+def partly_decided(cells: list) -> set:
+    """The subjects (`_subject_of`) with at least one settled cell (a class
+    outside OPEN_CELL_CLASSES and PARKED_CLASSES that is not a provisional
+    keep), at least one still open, and no BLOCKING cell (`_blocking`: then
+    more runs cannot finish it toward removal, so it is not a subject to
+    finish first): the ones DEEP BEFORE WIDE finishes first. A parked cell
+    is neither settled nor open: it does not vote on removal
+    (harness/gates.py, THE VERDICT), so it has earned its subject no
+    depth, and no fire moves it."""
+    settled, still_open, blocked = set(), set(), set()
+    for cell in cells:
+        if _blocking(cell):
+            blocked.add(_subject_of(cell))
+        if cell["class"] in PARKED_CLASSES:
+            continue
+        if cell["class"] in OPEN_CELL_CLASSES or cell.get("provisional_keep"):
+            still_open.add(_subject_of(cell))
+        else:
+            settled.add(_subject_of(cell))
+    return (settled & still_open) - blocked
+
+
+def depth_order(cell: dict, ctx: dict, cost: float, started: set) -> tuple:
+    """The DEEP BEFORE WIDE key of a verdict-seeking cell, before each band's
+    own order as its tie-break: (projected past its cap, not of a partly
+    decided subject, projected points to a verdict per use). The last is
+    `pairs_to_verdict` x the cell's fire cost / (1 + its subject's use): a
+    skill's usage weight (`neutral_weights`), a guidance section's session
+    rate (ctx["guidance_use"], one value for every section); math.inf when
+    the projection is unknown or infinite, so those keep the band's old
+    order behind every known one."""
+    projection = pairs_to_verdict(cell, ctx)
+    if cell.get("section"):
+        use = ctx.get("guidance_use") or 0.0
+    else:
+        use = neutral_weights(ctx.get("skill_weights") or {}).get(cell["skill"], 0.0) \
+            if ctx.get("skill_weights") else 0.0
+    points = math.inf if projection is None or math.isinf(projection["pairs"]) \
+        else projection["pairs"] * cost / (1 + max(use, 0.0))
+    return (bool(projection and projection["past_cap"]),
+            _subject_of(cell) not in started, points)
+
+
+def guidance_skipped(guidance_dir: Path | None) -> frozenset | None:
+    """The ids of _agent-guidance's agents-md/eval-coverage.yml rows whose
+    status is `skipped` (out of scope: no real sessions, or enforced
+    elsewhere), or None when the file cannot be read."""
+    import yaml  # noqa: PLC0415
+    if guidance_dir is None:
+        return None
+    path = Path(guidance_dir) / BATCH_GUIDANCE_HISTORY
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return None
+    if not isinstance(doc, list):
+        return None
+    return frozenset(str(row["id"]) for row in doc
+                     if isinstance(row, dict) and row.get("status") == "skipped"
+                     and isinstance(row.get("id"), str))
+
+
+#: The hold reason of a cell whose guidance section is out of scope.
+HOLD_SCOPE = "out of scope: its eval-coverage.yml row is skipped"
+
+
+def scope_holds(ctx: dict) -> dict:
+    """ctx with every cell of a section in ctx["guidance_skipped"] held
+    (`schedulable` False, HOLD_SCOPE), so no band, probe or batch funds it.
+    It stays in the list for the cost statistics, as any held cell does."""
+    skipped = ctx.get("guidance_skipped") or ()
+    if not skipped:
+        return ctx
+    cells = [{**c, "schedulable": False, "hold_reason": HOLD_SCOPE}
+             if c.get("section") in skipped else c for c in ctx["cells"]]
+    return {**ctx, "cells": cells}
 
 
 def neutral_weights(raw: dict) -> dict:
@@ -2303,13 +2916,100 @@ def probe_items(bands: dict, ctx: dict) -> list | None:
     return [item for _, item in ranked]
 
 
+def pair_fires(chosen: list, roster: list | None) -> list:
+    """PAIR FIRES: `chosen` with each two eval fires that share a fixture and
+    `arms` on two distinct models of `roster` made one fire, placed where
+    the first of them was. Its `model` is "m1,m2" in roster order, its
+    `cost` their sum, its `band` and `order` the first's, and its `cells`
+    each model's band and cost. A group of more than two pairs its first
+    two by roster order and leaves the rest single; any other fire, and
+    every fire when `roster` is None, is kept as it is."""
+    if not roster:
+        return list(chosen)
+    rank = {model: index for index, model in enumerate(roster)}
+    groups: dict = {}  # (fixture, arms) -> positions in `chosen`, in order
+    for position, item in enumerate(chosen):
+        if item["mode"] == "eval" and item["model"] in rank \
+                and PAIR_MODEL_RE.fullmatch(item["model"]):
+            groups.setdefault((item["fixture"], item["arms"]), []).append(position)
+    out = list(chosen)
+    for positions in groups.values():
+        pair = sorted(positions, key=lambda p: rank[chosen[p]["model"]])[:2]
+        if len(pair) < 2 or chosen[pair[0]]["model"] == chosen[pair[1]]["model"]:
+            continue
+        cells = [chosen[p] for p in pair]
+        first = min(pair)
+        out[first] = {**chosen[first], "model": ",".join(c["model"] for c in cells),
+                      "cost": sum(c["cost"] for c in cells),
+                      "cells": [{"model": c["model"], "band": c["band"], "cost": c["cost"]}
+                                for c in cells]}
+        out[max(pair)] = None
+    return [item for item in out if item is not None]
+
+
+#: Until the 2026-11-09 17:00 UTC reset only (the owner, 2026-11-07: use the
+#: week's remaining allowance under the routine's fire limit): every single
+#: `both`-arms eval fire on a skill fixture also runs the fixture's other
+#: roster model (`pair_every_fire`), whether or not that cell is due.
+#: False since 2026-11-07 17:51 UTC: the owner asked to slow evals down, and the
+#: added cells were the lowest-value spend (not due, not planned).
+PAIR_EVERY_FIRE = False
+
+
+def settled_or_held(cell: dict | None) -> bool:
+    """Whether no fire may carry this cell, even as a pair fire's added
+    model (PAIR_EVERY_FIRE): unknown, decided (any class but
+    OPEN_CELL_CLASSES, unless a provisional keep), of a kept subject (more
+    runs cannot change a keep), or held by a rule no band lifts: not
+    schedulable, stakes `none`, parked, at its cap, or fixture-broken.
+    A pending or not-yet-due open cell is not: adding one is the switch's
+    purpose (the owner, 2026-11-07)."""
+    if cell is None:
+        return True
+    open_cell = cell["class"] in OPEN_CELL_CLASSES or bool(cell.get("provisional_keep"))
+    return not open_cell or not cell.get("schedulable", True) \
+        or cell.get("stakes", "normal") == "none" or cell["class"] in PARKED_CLASSES \
+        or cell.get("at_cap") is True or cell.get("empty_fires", 0) >= BROKEN_AFTER_FIRES \
+        or (cell.get("verdict") == "keep" and not cell.get("provisional_keep"))
+
+
+def pair_every_fire(legs: list, roster: list | None, cells: dict | None = None) -> list:
+    """PAIR_EVERY_FIRE: each single `both`-arms eval leg on a skill fixture
+    (not under evals/guidance/) whose model is on `roster` made a pair fire
+    on the roster's first two models, in roster order. Its cost is
+    unchanged: the added cell was not planned, so nothing reserved it, and
+    the per-fire guard and the account stop still bound what it spends.
+    With `cells` ({(fixture, model): cell}, as `build_plan` passes them),
+    a leg whose other model's cell is `settled_or_held` stays single: a
+    fire never carries a decided or held cell. Every other leg, and every
+    leg when `roster` has fewer than two models, is kept as it is."""
+    if not roster or len(roster) < 2:
+        return list(legs)
+    pair = list(roster[:2])
+    out = []
+    for leg in legs:
+        other = next((m for m in pair if m != leg["model"]), None)
+        if (leg["mode"] == "eval" and leg.get("arms") == "both"
+                and leg["model"] in pair and "," not in leg["model"]
+                and leg.get("fixture") and not leg["fixture"].startswith("evals/guidance/")
+                and all(PAIR_MODEL_RE.fullmatch(m) for m in pair)
+                and (cells is None or not settled_or_held(cells.get((leg["fixture"], other))))):
+            leg = {**leg, "model": ",".join(pair),
+                   "cells": [{"model": leg["model"], "band": leg["band"], "cost": leg["cost"]}]}
+        out.append(leg)
+    return out
+
+
 def build_plan(ctx: dict, now: datetime, max_fires: int = 30) -> dict:
     """The plan for `ctx` (see `gather`), as of `now`. Pure. While
     ctx["routine_down"] (#583) it holds improve and bare fires and plans at
     most one probe (`probe_items`): the first candidate that fits the room,
     else, with the guard's refresh, one that fits a reservation; none while
     `probe_blocked`. With no schedulable eval cell at all it plans normally
-    (`probe_only` False)."""
+    (`probe_only` False). A cell of a guidance section whose eval-coverage.yml
+    row is `skipped` is held first (`scope_holds`): no band, probe or batch
+    funds it."""
+    ctx = scope_holds(ctx)
     batch = batch_state(ctx, now)
     outside = 0
     if batch is not None:
@@ -2327,6 +3027,8 @@ def build_plan(ctx: dict, now: datetime, max_fires: int = 30) -> dict:
     for name in trim_skills & {i["skill"] for i in improve if i["mode"] == "improve"}:
         status[name]["deferred"] = "a description trim is planned for it"
     improve = [i for i in improve if not (i["mode"] == "improve" and i["skill"] in trim_skills)]
+    if GUIDANCE_IMPROVE_HELD:
+        improve = [i for i in improve if i["mode"] != "guidance-improve"]
     # Trigger-only and trim fires join the improve band before the cap, so
     # they count against it exactly as the guard counts them (improve mode).
     trigger_fires, triggers, hooks, trigger_status = trigger_items(
@@ -2372,8 +3074,14 @@ def build_plan(ctx: dict, now: datetime, max_fires: int = 30) -> dict:
             bands[item["band"]].remove(item)
     # Improve fires last: a long improve run in flight never holds up evals.
     chosen.sort(key=lambda i: i["mode"] in IMPROVE_MODES)
+    # PAIR FIRES: one fire for a fixture's two model cells.
+    legs = pair_fires(chosen, ctx.get("roster_models"))
+    if PAIR_EVERY_FIRE:
+        legs = pair_every_fire(legs, ctx.get("roster_models"),
+                               {(c["fixture"], c["model"]): c for c in ctx["cells"]})
     fires = [{"slot": slot, "band": i["band"], "mode": i["mode"], "arms": i["arms"],
               "fixture": i["fixture"],
+              # Per fixture, never per model: a pair's two cells share it.
               "eval_key": i["fixture"][len("evals/"):] if i["fixture"] else "",
               "model": i["model"], "skill": i["skill"], "section": i.get("section") or "",
               "holdout": i["holdout"],
@@ -2381,8 +3089,9 @@ def build_plan(ctx: dict, now: datetime, max_fires: int = 30) -> dict:
               "trigger_only": "true" if i.get("trigger_only") else "false",
               "trim_description": "true" if i.get("trim_description") else "false",
               "change_type": i["change_type"] or "measure", "cost": i["cost"],
-              "value": i.get("value")}
-             for slot, i in enumerate(chosen)]
+              "value": i.get("value"),
+              **({"cells": i["cells"]} if "cells" in i else {})}
+             for slot, i in enumerate(legs)]
     return {"schema_version": 1, "generated_at": _iso(now), "room": ctx["room"],
             "reservation": ctx["reservation"], "improve_charge": ctx["improve_charge"],
             # The circuit breaker's state, for the step summary (#583):
@@ -2669,6 +3378,15 @@ def judge_empty_fires(fires: list, since: datetime) -> list:
     return verdicts
 
 
+def provisional_keep(gate_cell: dict | None) -> bool:
+    """Whether a gates cell keeps on a pooled keep alone, which is not final
+    (harness/gates.py, THE STALE KEEP): `eval_items` fires it until the
+    current rest's own keep crosses or its window is full."""
+    gate_cell = gate_cell or {}
+    return gate_cell.get("class") == "benefit" \
+        and (gate_cell.get("rest_guard") or {}).get("keep_final") is False
+
+
 def eval_cells_and_outages(evals_dir: Path, gates_doc: dict, fire_runs: list,
                            now: datetime, routine_git: str | None = None) -> tuple:
     """(cells, outages, routine down). One cell per scheduled fixture x
@@ -2737,11 +3455,11 @@ def eval_cells_and_outages(evals_dir: Path, gates_doc: dict, fire_runs: list,
       * `down_fires`: the candidates that are down fires, in neither count
         above.
       * `pending`: a successful or still running non-bare eval fire that
-        started after the bound and less than PENDING_WINDOW ago, so its
-        run may still land. On an unknown cell any such fire is pending:
-        holding a cell for at most PENDING_WINDOW is cheaper than a second
-        fire. Past PENDING_WINDOW the routine has stopped, so the cell is
-        planned again.
+        started after the bound and less than its `pending_window` ago
+        (PENDING_WINDOW, longer for a pair fire), so its run may still
+        land. On an unknown cell any such fire is pending: holding a cell
+        for at most that window is cheaper than a second fire. Past it the
+        routine has stopped, so the cell is planned again.
       * `pending_since`: the start of the newest fire started after the
         bound and less than FIRE_RESULT_WINDOW ago, else None; one younger
         than PROBE_WAIT holds the next probe (`probe_blocked`).
@@ -2763,26 +3481,32 @@ def eval_cells_and_outages(evals_dir: Path, gates_doc: dict, fire_runs: list,
     scheduled = schedule.scheduled_fixtures(evals_dir / "scheduled.yml", committed)
     finished: dict = {}
     young: dict = {}
+    held: dict = {}  # (cell, start): how long that young fire holds the cell
     latest: dict = {}  # each cell's newest successful or running fire, any arms, any age
     for run in fire_runs:
         title = outcomes_mod.parse_title(run.get("display_title"))
         started = outcomes_mod.parse_time(run.get("run_started_at") or run.get("created_at"))
         if not (title and title["mode"] == "eval" and title["model"] and started):
             continue
-        key = (title["target"], title["model"])
         running = run.get("status") not in (None, "completed")
-        if running or run.get("conclusion") == "success":
-            latest[key] = max(latest.get(key, started), started)
-        # A bare fire runs one arm, never the cell's pair: neither empty nor pending.
-        if title["bare"]:
-            continue
-        if now - started < FIRE_RESULT_WINDOW:
+        # A pair fire (PAIR FIRES) is a fire of each of its two cells: each
+        # is young, pending, delivered or empty on its own model's runs.
+        for model in outcomes_mod.title_models(title):
+            key = (title["target"], model)
             if running or run.get("conclusion") == "success":
-                young.setdefault(key, []).append(started)
-        elif run.get("conclusion") == "success" \
-                and now - started <= RETRY_AFTER + OUTAGE_GAP \
-                and started >= EMPTY_FIRES_SINCE:
-            finished.setdefault(key, []).append(started)
+                latest[key] = max(latest.get(key, started), started)
+            # A bare fire runs one arm, never the cell's pair: neither empty nor pending.
+            if title["bare"]:
+                continue
+            if now - started < FIRE_RESULT_WINDOW:
+                if running or run.get("conclusion") == "success":
+                    young.setdefault(key, []).append(started)
+                    held[key, started] = max(held.get((key, started), PENDING_WINDOW),
+                                             pending_window(title))
+            elif run.get("conclusion") == "success" \
+                    and now - started <= RETRY_AFTER + OUTAGE_GAP \
+                    and started >= EMPTY_FIRES_SINCE:
+                finished.setdefault(key, []).append(started)
     table = stakes_mod.load(evals_dir / "stakes.yml", evals_dir)
     cells = []
     fires: list = []  # (start, state, cell index) of every classified fire
@@ -2848,7 +3572,28 @@ def eval_cells_and_outages(evals_dir: Path, gates_doc: dict, fire_runs: list,
                 "in_situ_verdict": verdict.get("in_situ_verdict"),
                 # Gates' pair count and reason (`cheaper_first`, `_blocking`).
                 "pairs": (cell or {}).get("pairs"), "reason": (cell or {}).get("reason"),
+                # A pooled in-situ cell's pairs beside the current rest, the
+                # ones its cap and its removal guard count (`subject_cost`).
+                "current_rest_pairs": (cell or {}).get("current_rest_pairs"),
+                # A pooled keep that is not final (gates' THE STALE KEEP):
+                # it is fired until the current rest's own keep crosses or
+                # its window is full (`eval_items`).
+                "provisional_keep": provisional_keep(cell),
                 "at_cap": (cell or {}).get("at_cap") is True,
+                # DEEP BEFORE WIDE (`pairs_to_verdict`): the gate's own state
+                # the projection reads, the keep and remove tests so far, the
+                # bet prior its next bet starts from, the keep family, and
+                # the variance of D from the arms' run means.
+                "objective": (cell or {}).get("objective"),
+                "keep_tests": (cell or {}).get("keep_tests"),
+                "keep_family": (cell or {}).get("keep_family"),
+                "bet_prior": (cell or {}).get("bet_prior"),
+                "d_variance": d_variance(cell),
+                # A HIGH CELL's state (`pairs_to_verdict`): its remove test
+                # cannot decide it, only the ceiling stop or the cap can.
+                "without_mean": (cell or {}).get("without_mean"),
+                "ceiling_at": (cell or {}).get("ceiling_at"),
+                "noharm_at": (cell or {}).get("noharm_at"),
                 "schedulable": hold is None, "hold_reason": hold,
                 "stakes": stakes_mod.level_of(table, subject, ident),
                 "with_runs": len(runs.get("with", [])),
@@ -2868,13 +3613,15 @@ def eval_cells_and_outages(evals_dir: Path, gates_doc: dict, fire_runs: list,
                 # counts every pooled run, skipped ones included).
                 arms = {role: (cell or {}).get(role) for role in ("with", "without")}
                 cells[-1].update({
-                    "objective": (cell or {}).get("objective"),
+                    # A pooled cell's guard, whose removal evidence is its
+                    # retire progress (`retire_progress`).
+                    "rest_guard": (cell or {}).get("rest_guard"),
                     "judge": (cell or {}).get("judge"),
                     "judge_carried": bool((cell or {}).get("judge_carried")),
                     "reason": (cell or {}).get("reason"),
                     **{f"{role}_counted": (arm.get("runs") or 0) if isinstance(arm, dict) else 0
                        for role, arm in arms.items()}})
-    # A fire past PENDING_WINDOW is lost when the routine has delivered a run
+    # A fire past its pending window is lost when the routine has delivered a run
     # of any cell since it started: the routine is up, so this fire alone
     # failed, and its cell is planned again now. With no delivery since,
     # the routine may be down, so the cell keeps holding for
@@ -2883,7 +3630,8 @@ def eval_cells_and_outages(evals_dir: Path, gates_doc: dict, fire_runs: list,
     landed_any = [r for cell_landed in all_landed for r in cell_landed]
     for cell in cells:
         waiting = cell.pop("waiting")
-        cell["pending"] = any(now - t < PENDING_WINDOW
+        key = (cell["fixture"], cell["model"])
+        cell["pending"] = any(now - t < held[key, t]
                               or not any(r > t for r in landed_any)
                               for t in waiting)
     # Second pass, once every fire is classified: judge each empty fire on
@@ -2987,7 +3735,8 @@ def bare_cells(evals_dir: Path, gates_doc: dict, fire_runs: list) -> list:
         if title and title["bare"] and title["model"] \
                 and (run.get("conclusion") == "success"
                      or run.get("status") not in (None, "completed")):
-            fired.add((title["target"], title["model"]))
+            # A bare pair fire (PAIR FIRES) covers both of its models.
+            fired.update((title["target"], model) for model in outcomes_mod.title_models(title))
     out = []
     for fixture in scheduled:
         subject, skill = _fixture_subject(evals_dir, fixture)
@@ -3051,6 +3800,16 @@ def skill_contexts(evals_dir: Path, tree: Path, as_of: str, registries: dict,
     return out
 
 
+def rest_policy_of(gates_doc: dict) -> str:
+    """The `rest_policy` the verdict document's guidance cells were pooled
+    by (its `guidance_policy`, harness/gates.py REST_POLICIES). A document
+    without one predates the key (2026-11-07), so its cells were pooled by
+    `current`."""
+    policy = gates_doc.get("guidance_policy")
+    value = policy.get("rest_policy") if isinstance(policy, dict) else None
+    return value if value in ("current", "pooled-with-current-guard") else "current"
+
+
 def guidance_contexts(evals_dir: Path, tree: Path, as_of: str, gates_doc: dict,
                       guidance_dir: Path | None, records: list = (), prs: list = (),
                       removals: list = (), on_hold: list = (),
@@ -3092,10 +3851,10 @@ def guidance_contexts(evals_dir: Path, tree: Path, as_of: str, gates_doc: dict,
         names = [Path(f).name for f in found]
         enough = len(names) >= MIN_IMPROVE_FIXTURES
         holdout = names[-1] if enough else ""
-        # Pooled as the gate pools in-situ cells: the current-content runs
-        # beside the rest of the guidance on main (2026-11-03; older rests
-        # are ignored), so the improve evidence counts the same runs the
-        # section's verdict does.
+        # Pooled as the gate pools in-situ cells, by the verdict document's
+        # `rest_policy` (`rest_policy_of`): the current-content runs beside
+        # every rest, or beside the rest on main only, so the improve
+        # evidence counts the same runs the section's verdict does.
         try:
             expected = compute_gates.expected_guidance(evals_dir, section, guidance_dir)
         except ValueError:
@@ -3104,7 +3863,7 @@ def guidance_contexts(evals_dir: Path, tree: Path, as_of: str, gates_doc: dict,
             # skill path does, never a traceback or an opaque error.
             raise PlanError(SCHEDULE_FILES_MALFORMED) from None
         cells = gates.pool_cells(runs, section, gates_doc["roster_models"], expected,
-                                 strata=True)
+                                 strata=True, rest_policy=rest_policy_of(gates_doc))
         try:
             row = proposer.load_row(guidance_dir, section)
         except proposer.Refusal:
@@ -3379,8 +4138,22 @@ def trim_busy(trims: dict | None, records: list, prs: list) -> dict | None:
     return trims
 
 
+def require_guidance_parser(guidance_dir: Path | None) -> None:
+    """GUIDANCE_PARSER_MISSING as a PlanError when `guidance_dir` is given and
+    harness/guidance.py cannot load its markdown parser: compute_gates reads
+    that failure as "no digest", which hides every guidance verdict."""
+    if guidance_dir is None:
+        return
+    import guidance as guidance_mod  # noqa: PLC0415
+    try:
+        guidance_mod._markdown_it()
+    except guidance_mod.GuidanceError:
+        raise PlanError(GUIDANCE_PARSER_MISSING) from None
+
+
 def gather(args, now: datetime) -> dict:
     import compute_gates
+    require_guidance_parser(args.guidance)
     evals_dir = args.evals_dir
     registries = compute_gates.flag_registries(args.registry)
     limits = guard.budget_file.load_budget(args.budget)
@@ -3429,6 +4202,8 @@ def gather(args, now: datetime) -> dict:
             "refresh": guard.fits(state) < 1 and guard.refresh(state),
             "points_per_usd": points_per_usd(args.results_tree, gates_doc, limits),
             "model_weights": model_weights(args.results_tree, gates_doc["roster_models"]),
+            # PAIR FIRES: a pair's models, in this order.
+            "roster_models": list(gates_doc["roster_models"]),
             "removal_prs": removal,
             "gate_verdicts": gate_verdicts(gates_doc),
             # The guidance focus's inputs (`guidance_focus`): its decision
@@ -3447,6 +4222,8 @@ def gather(args, now: datetime) -> dict:
                                           args.guidance, grecords, gprs, gremoval,
                                           evidence.get("guidance_on_hold", []), now),
             "guidance_gaps": guidance_gaps(args.guidance),
+            # Out of scope (`scope_holds`): sections whose row is skipped.
+            "guidance_skipped": guidance_skipped(args.guidance),
             "guidance_use": guidance_use(args.results_tree, now),
             "triggers": triggers,
             "trims": trim_busy(trim_contexts(registries), records, prs),
@@ -3579,7 +4356,8 @@ def summary_lines(plan: dict) -> list:
 
 def validate_fire(env: dict, root: Path = REPO_ROOT) -> None:
     """Refuse a matrix leg that is not a fire this repository would plan:
-    eval mode on a scheduled, committed fixture and a roster arm, its arms
+    eval mode on a scheduled, committed fixture and a roster arm, or a pair
+    of two distinct roster arms "m1,m2" (PAIR FIRES), its arms
     both, in-situ on a guidance fixture (THE ALONE PAIR), or bare on a
     fixture that runs in place; improve mode on a skill
     improve_gate.py fire-check accepts, with a holdout and no arms, or, with
@@ -3620,10 +4398,16 @@ def validate_fire(env: dict, root: Path = REPO_ROOT) -> None:
         scheduled = schedule.scheduled_fixtures(root / "evals" / "scheduled.yml", committed)
         if fixture in committed and fixture not in scheduled:
             raise PlanStale("the eval leg's fixture was unscheduled after the plan")
+        # PAIR FIRES: "m1,m2" is two distinct ids, each in the payload
+        # contract's pattern, and each checked below as a lone model is.
+        models = model.split(",")
+        pair_ok = len(models) == 1 or (len(models) == 2 and models[0] != models[1]
+                                       and all(PAIR_MODEL_RE.fullmatch(m) for m in models))
         if fixture not in scheduled or schedule.validate_fixture(fixture, committed) != key \
-                or skill or holdout or arms not in (*PAIRED_ARMS, "bare") \
-                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", model) \
-                or not roster_arm.is_arm(model, root / "evals" / "roster.yml"):
+                or skill or holdout or arms not in (*PAIRED_ARMS, "bare") or not pair_ok \
+                or not all(MODEL_RE.fullmatch(m)
+                           and roster_arm.is_arm(m, root / "evals" / "roster.yml")
+                           for m in models):
             raise PlanError("the eval leg is not a scheduled fixture on a roster arm")
         if arms == "bare" and not schedule.declares_context(root / fixture):
             raise PlanError("the bare leg's fixture does not run in place")
@@ -3672,7 +4456,10 @@ def validate_fire(env: dict, root: Path = REPO_ROOT) -> None:
 
 
 def in_flight(runs: list, now: datetime) -> int:
-    """Fire runs still running, or started within their mode's flight time."""
+    """Fire runs still running, or started within their mode's flight time.
+    A pair fire (PAIR FIRES) is one run, so it counts once: the cap counts
+    fires, not cells. It runs its models one after the other, so it is in
+    flight for EVAL_FLIGHT per model."""
     count = 0
     for run in runs:
         if not isinstance(run, dict):
@@ -3684,7 +4471,8 @@ def in_flight(runs: list, now: datetime) -> int:
         if started is None or run.get("conclusion") != "success":
             continue
         title = outcomes_mod.parse_title(run.get("display_title"))
-        flight = IMPROVE_FLIGHT if title and title["mode"] in IMPROVE_MODES else EVAL_FLIGHT
+        flight = (IMPROVE_FLIGHT if title and title["mode"] in IMPROVE_MODES
+                  else EVAL_FLIGHT * fire_models(title))
         if now - started < flight:
             count += 1
     return count
@@ -3800,6 +4588,7 @@ def guidance_headroom(section: str, tree: Path, evals_dir: Path, guidance_dir: P
                       as_of: str) -> tuple:
     """(ok, message) for the fire check (module docstring, FIRE CHECK)."""
     import compute_gates
+    require_guidance_parser(guidance_dir)
     gates_doc = compute_gates.compute(tree, evals_dir / "roster.yml",
                                       evals_dir / "gate-policy.yml", evals_dir,
                                       compute_gates.parse_as_of(as_of), {}, guidance_dir)
@@ -3910,8 +4699,8 @@ def main(argv: list | None = None) -> int:
                 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
                     out.write(f"dispatch={'true' if go else 'false'}\n")
             return 0
-        if not 1 <= args.max_fires <= 30:
-            raise PlanError("the fire cap must be 1 to 30")
+        if not 1 <= args.max_fires <= MAX_FIRES_CAP:
+            raise PlanError(f"the fire cap must be 1 to {MAX_FIRES_CAP}")
         now = _utcnow()
         plan = build_plan(gather(args, now), now, args.max_fires)
     except (PlanError, outcomes_mod.EvidenceError, guard.GuardError,

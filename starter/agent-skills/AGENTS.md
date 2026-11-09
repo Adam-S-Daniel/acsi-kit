@@ -13,80 +13,21 @@ guidance-marker: fleet-stub (transcript counts use this line; keep it)
 
 ## Fleet guidance is delivered once per session — not by this file
 
-The account's full guidance — incidents, fleet policy, machine layout, the
-traps that cost real outages — is installed into **user memory**
-(`~/.claude/CLAUDE.md`) by the `fleet-memory` SessionStart hook, so it is
-loaded **once per session** no matter how many repos are attached
-([inlined per repo, it took 332.3k tokens](https://github.com/example-adopter/_agent-guidance/blob/main/docs/evidence/2026-08-29-guidance-inlined-in-every-repo.md)).
+The full guidance, floor rules included, is installed into user memory by
+the `fleet-memory` SessionStart hook, whose verdict line says whether it
+loaded. `installed` or `current`: it is in context. `DEGRADED` or no verdict:
+it is not, so read [`agents-md/base.md`](https://github.com/example-adopter/_agent-guidance/blob/main/agents-md/base.md)
+before non-trivial work and say you ran degraded. `skipped`: read it too, but
+it is the owner's choice, so do not report or "fix" it. Always, and above all
+before you have read it: never push to a default branch, force-push a shared
+branch, commit a secret, or print personal data to a CI log. Keep this file
+under 32 KiB (Codex silently truncates it).
 
-**Check the session-start verdict before you rely on it.** The hook prints one
-line:
-
-- `fleet-guidance: installed (v<id>, <n> bytes)` or `fleet-guidance: current` —
-  the full guidance is in context. Use it.
-- `fleet-guidance: DEGRADED — <reason>` — it is **not** in context. You have
-  only what is below. Read `agents-md/base.md` in the `_agent-guidance`
-  checkout (or on GitHub) before non-trivial work, and say in your reply that
-  you were running degraded.
-- `fleet-guidance: skipped (FLEET_GUIDANCE_SKIP set)` — also not in context,
-  but by the machine owner's deliberate choice, not a fault. User memory is
-  GLOBAL on a durable machine, so the guidance would otherwise load in every
-  unrelated project on that box; `FLEET_GUIDANCE_SKIP` opts out and removes any
-  block an earlier session installed. Read `agents-md/base.md` the same way you
-  would when degraded — just don't report it as a problem or try to "fix" it.
-
-No verdict at all means the hook never ran — treat that as DEGRADED.
-
-**Say what loaded, in your first reply to the user in a session.** The
-installed guidance ends with a line `fleet-guidance check value: <8 hex>`.
-Begin that reply with `fleet-guidance check: <the value>`, copied from that
-line, or `fleet-guidance check: none` when no such line is in your context.
-Never guess a value or copy one from anywhere else: the session's record
-compares it with what actually loaded. Only in replies to the user — never in
-commits, PR or issue text, files or prompts for other agents.
-
-## Codex reads the same block, from `~/.codex/AGENTS.md`
-
-The hook writes the same block there whenever `~/.codex` exists. Setup for
-local Codex and Codex Cloud, and how to verify delivery:
-[`docs/codex-cloud.md`](https://github.com/example-adopter/_agent-guidance/blob/main/docs/codex-cloud.md).
-
-## The floor: rules that hold even when the guidance did not load
-
-These are the ones with teeth. They are restated here, deliberately, because a
-session that lost the guidance must not also lose these.
-
-- **Branch protection is real.** Fleet repos are PR-only on their default
-  branch; a direct push is rejected (GH013), even from the repo's own
-  workflows. Never design a bot that pushes to a protected default branch.
-- **Every `uses:` is pinned through `.github/workflows/actions.lock`: an
-  exact tag, locked, checked by a required `gh actions-lock --verify`
-  failing on any pin finding.** A repo not yet migrated keeps the legacy
-  form, a full 40-character commit SHA with no trailing version comment,
-  until its migration PR; never mix the two in one repo. Cross-repo
-  reusable workflows take a full SHA either way. The one carve-out is a ref
-  into this account's own `example-site-platform`, which stays on its release tag.
-- **Never commit secrets or `.env` files, and never print personal data to a
-  CI log** — logs, artifacts and git history on a public repo are public.
-- **A successful `git push` does not mean your commit exists.** A refused
-  pre-commit hook still lets the push report success. Verify with
-  `git merge-base --is-ancestor <sha> origin/<branch>` — it is the only check
-  that names both the commit and the ref.
-- **"The watch finished" is not "CI passed."** Read the parsed conclusions;
-  never infer pass/fail from a watch command's exit code.
-- **A GitHub 404 means "not authorized", not "not there."** Never report a
-  repo, PR or branch as gone on a 404 alone.
-- **The fleet spans TWO owners** — `example-adopter` and `example-adopter-two`. A query
-  scoped to one returns a plausible, complete-shaped, wrong answer.
-- **Anything you name gets its link** — what you hand over, what you are
-  waiting on, and what you cite as already done.
-- **Merge with a merge commit** (`gh pr merge --merge`), except in the three
-  example-site-platform-managed repos (`example-site-platform`, `example-site-a`,
-  `example-site-b`), which squash; do not amend published commits or
-  force-push shared branches.
-- **Keep this file under 32 KiB.** Codex truncates project instructions at
-  that byte silently; the sync warns and the drift report flags
-  `codex-truncated`.
+**Your first reply to the user in a session begins**
+`fleet-guidance check: <value>`, copied from the installed guidance's
+`fleet-guidance check value:` line, or `fleet-guidance check: none` when no
+such line is in your context. Never guess one or copy it from a file you
+read; only in replies to the user.
 
 <!-- END MANAGED SECTION -->
 ## Repo-specific additions
@@ -142,9 +83,9 @@ Keep that file harness-agnostic: every handler needs a shell-form `command`
 `timeout`, and no `if`/`args`/`shell`; a hook prints nothing to stdout unless
 it means to answer both harnesses. Claude-only hooks go in a file the
 `.claude-plugin/plugin.json` `hooks` key names. Hook scripts call
-`hooks/lib/harness.sh` to tell `claude-code`, `codex` and `other` apart.
+`hooks/lib/harness.sh` (in `plugins/acsi-coding-local/`) to tell `claude-code`, `codex` and `other` apart.
 
-The API-credit lane (`bin/claude-credit`, `hooks/credit-lane/`, `hooks/claude-code.json`) is [ADR 0018](docs/decisions/0018-api-credit-lane-for-claude-code.md).
+The API-credit lane (`plugins/acsi-coding-local/bin/claude-credit`, `plugins/acsi-coding-local/hooks/credit-lane/`, `plugins/acsi-coding-local/hooks/claude-code.json`) is [ADR 0018](docs/decisions/0018-api-credit-lane-for-claude-code.md).
 
 The fleet-guidance hook (`plugins/acsi-anything-anywhere/hooks/fleet-guidance/`, wired in that plugin's `hooks/claude-code.json`) is [ADR 0023](docs/decisions/0023-deliver-the-fleet-guidance-from-a-plugin-hook-that-fetches-it.md). It is Claude-only: at session start it fetches `_agent-guidance`'s `main` HEAD commit with a commit-only git fetch and `base.md` at that commit from `raw.githubusercontent.com`, and installs it through the bundled `fleet-memory.sh`. It never reads the project directory. That script and the bundled `fleet-guidance.md` fallback are verbatim copies from `_agent-guidance`, refreshed only in a reviewed pull request and never edited here.
 
@@ -202,8 +143,10 @@ The write-marker hook (`plugins/acsi-anything-anywhere/hooks/github-write-marker
   registry did), and running THAT one directly really does run its tests —
   which is why the habit to build is naming the runner rather than
   auditing each file for a footer. The one command that actually runs this
-  repo's suite is the one CI runs:
-  `shopt -s nullglob; python3 -m pytest scripts/ plugins/*/skills/*/tests/ plugins/*/skills/*/scripts/ -q`,
+  repo's suite is the one CI runs, minus its flags:
+  `shopt -s nullglob; python3 -m pytest scripts/ plugins/*/skills/*/tests/ plugins/*/skills/*/scripts/ -q`
+  (CI adds `-rfEs -n auto`, parallel through `pytest-xdist`; the plain form
+  is the same tests run serially, so slower),
   and read its result from `$?` directly rather than through a pipe.
   (`nullglob` because a registry with no skill tests yet leaves the two
   plugin globs unmatched, and pytest refuses a literal glob.)

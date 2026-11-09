@@ -454,7 +454,8 @@ class WorkflowShapeTests(unittest.TestCase):
         # pin the gate workflows install; no secret is in this step's reach.
         ids = [s.get("id") for s in self.steps]
         installs = [i for i, s in enumerate(self.steps)
-                    if s.get("run") == "python3 -m pip install pyyaml==6.0.3"]
+                    if s.get("run") == ("python3 -m pip install pyyaml==6.0.3"
+                                        " markdown-it-py==4.2.0")]
         self.assertEqual(len(installs), 1)
         self.assertLess(installs[0], ids.index("validate"))
         self.assertNotIn("env", self.steps[installs[0]])
@@ -477,6 +478,22 @@ def step_script(name: str) -> str:
 
 @unittest.skipUnless(shutil.which("jq") and shutil.which("git"),
                      "needs jq and git on PATH")
+def skills_with_too_few_fixtures() -> list[str]:
+    """Skills under evals/ with one or two nested fixtures, every one naming
+    the skill and the acsi-agentskills registry (the routine's)."""
+    found = []
+    for skill_dir in sorted((REPO_ROOT / "evals").iterdir()):
+        fixtures = sorted(skill_dir.glob("*/fixture.yaml"))
+        if not 0 < len(fixtures) < 3:
+            continue
+        docs = [yaml.safe_load(f.read_text(encoding="utf-8")) for f in fixtures]
+        if all(isinstance(d, dict) and d.get("skill") == skill_dir.name
+               and d.get("registry") == "https://github.com/example-adopter/acsi-agentskills"
+               for d in docs):
+            found.append(skill_dir.name)
+    return found
+
+
 class ValidateStepTests(unittest.TestCase):
 
     def setUp(self):
@@ -687,10 +704,15 @@ class ValidateStepTests(unittest.TestCase):
             # Three nested fixtures, but for acsi-agentskills-private.
             "private_registry_skill": {"skill": "acsi-writing-style"},
         }, expect="is not an acsi-agentskills skill")
-        self._refuse_all(no_holdout, {
-            # Two nested fixtures.
-            "two_fixture_skill": {"skill": "github-actions-repo-settings"},
-        }, expect="fewer than 3 nested fixtures")
+        # Fewer than three nested fixtures. The step reads the real evals/,
+        # where every skill can gain fixtures, so take whichever skill has one
+        # or two today. When none does, test_issue_routine_improve.py's
+        # synthetic test_refuses_too_few_fixtures still covers the refusal.
+        few = skills_with_too_few_fixtures()
+        if few:
+            self._refuse_all(no_holdout, {
+                "too_few_fixtures": {"skill": few[0]},
+            }, expect="fewer than 3 nested fixtures")
         self._refuse_all(good, {
             "holdout_not_a_fixture": {"holdout": "no-such-holdout-xyz"},
             "holdout_of_another_skill": {"holdout": "proposal-bio"},

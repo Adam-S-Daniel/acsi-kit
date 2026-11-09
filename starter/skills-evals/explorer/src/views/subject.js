@@ -9,10 +9,11 @@ import { skillItems, sectionItems, purposeOf } from '../core/items.js';
 import { fixtureQueue } from '../core/fixtures.js';
 import { hashFor } from '../core/route.js';
 import { table, srcLine, navLink, panel, badge } from './bits.js';
-import { verdictLine, nextLine, stakesLine, usageLine, copiesLine } from './cards.js';
+import { verdictLine, nextLine, stakesLine, usageLine, copiesLine, discardedLine } from './cards.js';
 import { modelCharts, legendFor, hasData, hasAlone } from './models.js';
 import { trendChart } from './trend.js';
 import { confidenceView } from './range.js';
+import { utilityView, decisionsView } from './utility.js';
 import { lessonItem, lessonIssue, lessonTitle, lessonStatus, lessonIssueTitle } from './lessons.js';
 
 const share = (x) => (typeof x === 'number' && isFinite(x) ? Math.round(x * 100) + '%' : STRINGS.noValue);
@@ -139,10 +140,14 @@ export function subjectPage(doc, kind, name, ctx) {
       h('h3', null, STRINGS.verdictHeading),
       verdictLine(raw.verdict) || h('p', { class: 'meta' }, STRINGS.verdict.insufficient),
       raw.verdict_reason ? h('p', { class: 'meta' }, clean(raw.verdict_reason)) : null,
+      discardedLine(raw.discarded_runs),
       h('p', { class: 'sent' }, clean(it.sentence)),
       guidance && hasAlone(it.pooled) ? h('p', { class: 'meta' }, STRINGS.aloneShown) : null),
     panel(STRINGS.gainHeading, [confidenceView(raw.confidence, doc.policy, subj),
       hasData(it.pooled) ? h('div', { class: 'cols' }, h('div', null, legendFor(subj, it.pooled), modelCharts(it.pooled, subj)), h('div', null, trendChart(it.trend, refMs))) : null]),
+    Array.isArray(raw.run_utility) && raw.run_utility.length
+      ? panel(STRINGS.utilityHeading, [utilityView([{ label: STRINGS.utilityThis, rows: raw.run_utility }], refMs),
+        decisionsView(raw.decisions, friendlyModel)]) : null,
     panel(STRINGS.runsHeading, runsTable(runs, refMs)),
     panel(STRINGS.bareHeading, bareTable(bare)),
     guidance ? null : panel(STRINGS.useHeading, [usageLine(raw.usage, doc.usage, refMs), ext && ext.subjectUse ? ext.subjectUse(ctx, name) : null]),

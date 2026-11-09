@@ -2,6 +2,8 @@
     readiness: "In-place pair on example-site-platform, unpinned (the committed roster names arm claude-sonnet-5-5 and judge claude-fable-5-1). Has earlier eval runs but was never scheduled; scheduled with the unscheduled-fixture reasons review (the owner, 2026-11-02); context measured through run_eval._in_place_plan, no model call."
   - path: evals/review-bash-ci-reliability/nightly-snapshot
     readiness: "In-place pair on example-site-platform, unpinned (the committed roster names arm claude-sonnet-5-5 and judge claude-fable-5-1). Has earlier eval runs but was never scheduled; scheduled with the unscheduled-fixture reasons review (the owner, 2026-11-02); context measured through run_eval._in_place_plan, no model call."
+  - path: evals/review-bash-ci-reliability/pages-temp-repo-commit
+    readiness: "Promoted automatically on 2026-11-07 by contextualize_fixtures.py: a drafted isolation pair given an in-place context on example-adopter/example-site-platform at caeff57f6501 (ADR 0012), budgets measured with 25% headroom; its isolation pair ran when it was drafted."
   - path: evals/review-bash-ci-reliability/release-pipeline
     readiness: "Isolation pair on pins since removed (agent claude-sonnet-5, judge claude-opus-4-8). Local N=3 judged baseline: objective with 8/11 vs without 5.67/11; judge 6.05 vs 4.95."
   - path: evals/review-bash-ci-reliability/test-runner-assertions

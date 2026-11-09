@@ -1,8 +1,12 @@
 # Routine: fleet worker
 
-**Fires:** hourly, from a claude.ai scheduled task in the owner's account named
+**Fires:** every 3 hours, at 20 minutes past, from
+[`fleet-worker-fire.yml`](../../.github/workflows/fleet-worker-fire.yml), which
+calls the API trigger of a claude.ai scheduled task in the owner's account named
 `Fleet worker` (`trig_EXAMPLE`), which the owner created on
-the Routines page on 2026-10-26. Each fire
+the Routines page on 2026-10-26. It ran hourly from the Routines page until
+2026-11-08; that cost about $150-215 a week, mostly in runs that found
+nothing to do, and the page offers nothing between hourly and daily. Each fire
 starts a fresh cloud session. Why it exists, and why it may merge one narrow
 kind of PR: [ADR 0025](../decisions/0025-a-cloud-fleet-worker-merges-narrow-instruction-fixes.md),
 widened to skill text, fleet guidance and partial fixes by [ADR 0028](../decisions/0028-the-fleet-worker-merges-skill-guidance-and-partial-fixes.md).
@@ -43,7 +47,7 @@ the [memory curation routine](memory-curation.md) and the daily
 scheduled-run health audit file. The audit is the fleet's one detector for
 failing workflow runs: scheduled runs, plus push, dispatch and other runs on
 the default branch. It labels its `ci` tracking issue `agent-ready`, so a
-failure the audit finds reaches a fix PR within the hour. A memory-promotion
+failure the audit finds reaches a fix PR within 3 hours. A memory-promotion
 issue (`Memory promotion <date>: ...`) proposes facts from agent memory for
 the repo's own files. When its target is the repo-specific half of an
 `AGENTS.md`, a `CLAUDE.md`, a `SKILL.md` body or the fleet guidance, its fix
@@ -79,6 +83,11 @@ no merge.
   ([ADR 0027](../decisions/0027-lessons-become-agent-checks-through-the-fleet-worker.md)),
   never push to a default branch, never
   force-push, never rewrite a PR branch's history.
+- **Never merge, or arm auto-merge on, a PR that changes the fleet guidance
+  outside the weekly merge window.** `agents-md/base.md` or any file under
+  `agents-md/sections/` counts, and so does a lesson-check PR that touches
+  them. Run the window check in step 2b; the rule and why are
+  [ADR 0039](../decisions/0039-fleet-guidance-merges-are-batched-into-one-weekly-window.md).
 - **Never approve anything.** Never submit an APPROVE review, and never
   approve a deployment waiting on an environment such as
   `plugin-runtime-review` or `regression-review`, even though the token
@@ -92,8 +101,10 @@ no merge.
 
 ## The trigger
 
-- **Scheduled task settings.** Hourly (the Routines page offers no
-  2-hour option). Fresh session per fire. Environment: `My Whitelist`.
+- **Scheduled task settings.** No schedule on the Routines page: an API
+  trigger only, fired every 3 hours by `fleet-worker-fire.yml`, whose
+  `FLEET_WORKER_FIRE_URL` repository variable and `FLEET_WORKER_FIRE_BEARER`
+  Actions secret come from that API trigger. Fresh session per fire. Environment: `My Whitelist`.
   Model: no override. Push notifications on, email off. "Auto-fix pull
   requests" on. Connectors: none beyond GitHub.
 - **Prompt, exactly:**
@@ -146,7 +157,8 @@ so the PR stays blocked with nothing red to fix (the 2026-10-25 case:
 **The merge rule.** The routine may merge a PR only when every item holds,
 each read fresh:
 
-1. Its head branch is `agent/issue-<n>-<slug>` and its body starts with
+1. Its head branch is `agent/issue-<n>-<slug>` and the first line of its
+   body after the `## TLDR` section is
    `Closes <owner>/<repo>#<n>` or, for a fix that covers only some of the
    issue's findings, `Refs <owner>/<repo>#<n>`, where issue `<n>` in the
    same repo has a title matching `^Prompt-audit sweep \d{4}-\d{2}-\d{2}: `
@@ -250,7 +262,14 @@ findings. At most 5 reviews per run. If the subagent cannot run or gives
 no verdict, post nothing: the PR has no stamp, so it is never merged, and it
 goes to the owner under step 3.
 
-**2b. The merge.** For a PR meeting all seven items, merge it with
+**2b. The merge.** First the window check
+([ADR 0039](../decisions/0039-fleet-guidance-merges-are-batched-into-one-weekly-window.md)):
+save the PR's file list (the one from item 7 serves) and run
+`node scripts/base-md-merge-window.js --now <the current UTC instant, read from the clock now> --files-json <files.json>`.
+Exit 0 means go on. Exit 2 means the PR changes the fleet guidance and the
+window is closed: do not merge it, leave it as it is, and say in the summary
+that it waits for the window (the next start is on stdout). Exit 1 is no
+decision: do not merge, and retry next run. Then, for a PR meeting all seven items, merge it with
 `expected_head_sha` set to the reviewed head: a merge commit, except in the
 three example-site-platform-managed repos (`example-site-platform`, `example-site-a`,
 `example-site-b`), which squash. Then comment `Merged by the fleet worker:

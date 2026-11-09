@@ -38,6 +38,22 @@ more than what it carries:
     `source` are outside that scope). It also holds each `confidence.cells`
     row to exactly CONFIDENCE_CELL_KEYS.
 
+Each skill and section also carries `discarded_runs` (the owner, 2026-11-07):
+the recorded arm runs its current verdict does not count, as
+{"total", "cost_usd", "cost_unknown", "by_reason": {slug: {"runs",
+"cost_usd", "cost_unknown"}}} (harness/gates.py, DISCARDED RUNS, names the
+slugs), null without a verdict; the document's `discarded_runs` sums them
+over the listed skills, sections and `all`. Counts, agent dollars at full
+precision and fixed slugs only: never a path, session or title.
+
+Each skill and section also carries `run_utility` and `decisions` (the owner,
+2026-11-07): every recorded arm run of it summed per (UTC day, arm model,
+utility class, discard reason) with its agent cost, and its cell versions
+with what each decided and when (harness/gates.py, RUN UTILITY); null
+without a verdict. Days, model ids, fixture names, fixed classes and slugs,
+counts and dollars only: never a run id, path, session or title. The
+explorer sums the rows over a period, per subject and for the fleet.
+
 Each skill and section also carries `confidence` (the levels its gate
 bounds reach, and per cell the gain measured so far and the range it likely
 falls in, `subject_confidence`; a cell's `task` is its fixture name, which
@@ -1283,9 +1299,11 @@ def fire_counts(fires: dict | None, index: dict, summaries: dict, scope: dict,
     eval, not bare, a model: a model-less fire is skipped as the planner skips
     it), it concluded `success`, its target is in `scope` (`fire_scope`), it
     started inside the window and at least plan_week.FIRE_RESULT_WINDOW
-    before `now`. Each counted fire is delivered (`_delivered` within the
-    window after its start), rejected (results arrived, `_arrived`, but none
-    validated) or without results. Only times and counts are published;
+    before `now`. A pair fire (`m1,m2`, plan_week's PAIR FIRES) counts once
+    per model, as the planner judges each of its cells. Each counted fire is
+    delivered (`_delivered` within the window after its start), rejected
+    (results arrived, `_arrived`, but none validated) or without results.
+    Only times and counts are published;
     dropped rows are counted to stderr by reason, never by title."""
     if fires is None:
         return None
@@ -1317,7 +1335,9 @@ def fire_counts(fires: dict | None, index: dict, summaries: dict, scope: dict,
             dropped[reason] = dropped.get(reason, 0) + 1
             continue
         seen.add(run["id"])
-        counted.append((start.astimezone(timezone.utc), scope[title["target"]], title["model"]))
+        # A pair fire (plan_week, PAIR FIRES) is a fire of each model's cell.
+        counted += [(start.astimezone(timezone.utc), scope[title["target"]], model)
+                    for model in improve_outcomes.title_models(title)]
     for reason, n in sorted(dropped.items()):
         print(f"explorer_data: fire rows dropped ({reason}): {n}", file=sys.stderr)
     without, rejected = [], 0
@@ -1397,19 +1417,46 @@ def current_text_runs(verdict: dict, alone: bool = True) -> int:
     a with-arm run only when its `tested_digest` equals the subject's digest on
     main, so an edit empties it; a without-arm run pools across text changes and
     says nothing about the current text. A cell with no `with` key counts 0, and
-    a subject with no verdict has 0."""
+    a subject with no verdict has 0.
+
+    For a guidance section the meaning stays "runs on its current text" under
+    either `rest_policy` (harness/gates.py, IN-SITU GUIDANCE CELLS): under
+    `pooled-with-current-guard` an in-situ cell's with arm holds the runs on
+    the section's current text beside EVERY rest of the guidance, so an edit
+    to another section no longer empties it, while an edit to the section
+    itself still does. How many of a cell's pairs are beside the current rest
+    is the cell's own `current_rest_pairs`, not this count."""
     cells = list(verdict.get("cells") or [])
     if alone:
         cells += (verdict.get("alone") or {}).get("cells") or []
     return sum(len((c.get("runs") or {}).get("with") or []) for c in cells)
 
 
+#: The objective keep routes `subject_confidence` reads: the cell's keep
+#: test, and a pooled in-situ cell's keep test over the current rest alone
+#: (harness/gates.py, THE POOLED KEEP; each pooled route's p is already
+#: doubled, so `1 - m x min p` reads the cell's level either way).
+KEEP_ROUTES = ("objective", "objective-current-rest")
+
+
+def no_help_level(cell: dict) -> float:
+    """A cell's no-help level: its objective's `no_help_confidence`, or for a
+    pooled in-situ cell (`rest_guard`) the level its removal evidence
+    reached, which is what decides its removal (the pooled adversarial
+    round 3's m4). 0 when absent."""
+    guard = cell.get("rest_guard")
+    if isinstance(guard, dict):
+        return guard.get("remove_evidence_confidence", 0.0)
+    return (cell.get("objective") or {}).get("no_help_confidence", 0.0)
+
+
 def subject_confidence(verdict: dict) -> dict:
     """How sure the gate is, as levels in [0, 1) of its betting tests
     (harness/gates.py, THE BOUNDS): `helps`, the subject's keep level, 1 - m
-    x the smallest objective keep-test p over its cells (m its keep family,
-    `keep_family`; 1 without one), and `no_help`, the lowest no-help level
-    over its cells with headroom (the cells that vote on removal: neither
+    x the smallest objective keep-test p over its cells and routes
+    (`KEEP_ROUTES`; m its keep family, `keep_family`; 1 without one), and
+    `no_help`, the lowest no-help level (`no_help_level`) over its cells
+    with headroom (the cells that vote on removal: neither
     parked, `gates.PARKED_CLASSES`, nor `cannot-discriminate`; a cell with no objective figure
     gives 0). The judge does not vote, so it is not read. Both None while no
     cell has an objective figure. The keep and remove rules compare these
@@ -1417,7 +1464,9 @@ def subject_confidence(verdict: dict) -> dict:
 
     The page also draws how far each level is from its line, so four more
     keys carry the evidence behind them (each an int, or None when absent):
-    `keep_pairs`, the objective pair count of the cell `helps` comes from (the
+    `keep_pairs`, the objective pair count (a pooled in-situ cell's usable
+    current-rest pairs, `rest_guard.usable_current_rest_pairs`, the count
+    its chart row shows) of the cell `helps` comes from (the
     one with the smallest objective keep p); `no_help_pairs`, the pair count
     of the voting cell `no_help` comes from (the lowest no-help level);
     `max_pairs`, the largest objective pair count over figured cells (progress
@@ -1436,17 +1485,25 @@ def subject_confidence(verdict: dict) -> dict:
         return none
 
     def pairs_of(cell):
-        n = (cell.get("objective") or {}).get("pairs")
+        # A pooled in-situ cell's pace is its current-rest pairs, the ones
+        # its cap and its guard count (the pooled adversarial round 4's
+        # m(b)), not every rest's pairs.
+        if isinstance(cell.get("rest_guard"), dict):
+            # The usable ones (the round 5 review's m4), the same count as
+            # the gain chart's row (`rest_guard.current_objective`).
+            n = cell["rest_guard"].get("usable_current_rest_pairs")
+        else:
+            n = (cell.get("objective") or {}).get("pairs")
         return n if isinstance(n, int) and not isinstance(n, bool) else None
 
     family = verdict.get("keep_family")
     family = family if isinstance(family, int) and family >= 1 else 1
     tests = [(t["p"], c) for c in cells for t in (c.get("keep_tests") or [])
-             if isinstance(t, dict) and t.get("route") == "objective"
+             if isinstance(t, dict) and t.get("route") in KEEP_ROUTES
              and isinstance(t.get("p"), (int, float))]
     voting = [c for c in cells if c.get("class") not in gates.PARKED_CLASSES
               and c.get("class") != "cannot-discriminate"]
-    levels = [((c.get("objective") or {}).get("no_help_confidence", 0.0), c) for c in voting]
+    levels = [(no_help_level(c), c) for c in voting]
     keep_p, keep_cell = min(tests, key=lambda t: t[0]) if tests else (None, None)
     weakest = min(levels, key=lambda t: t[0]) if levels else (None, None)
     all_pairs = [n for n in map(pairs_of, figured) if n is not None]
@@ -1476,8 +1533,15 @@ def confidence_cell(cell: dict) -> dict | None:
     test's lower end, `high` the remove test's upper end, each in percentage
     points of checks passed, clamped to [-100, 100] and rounded to one
     decimal only here; `votes` whether the cell votes on removal (neither
-    parked nor `cannot-discriminate`); `status` from CELL_STATUS."""
+    parked nor `cannot-discriminate`); `status` from CELL_STATUS. A pooled
+    cell (`rest_guard`) charts its current rest's own figures
+    (`rest_guard.current_objective`, None with no current-rest pair), as
+    its pace and confidence do, never the pooled block."""
     objective = cell["objective"]
+    guard = cell.get("rest_guard")
+    if guard is not None:
+        current = guard.get("current_objective") if isinstance(guard, dict) else None
+        objective = current if isinstance(current, dict) else {}
     numbers = [objective.get(k) for k in ("delta", "benefit_lower", "retire_upper")]
     pairs = objective.get("pairs")
     model = cell.get("model")
@@ -1692,6 +1756,81 @@ def skill_copies(name: str, repo: str, digests: dict, history: tuple | None,
             "loaded": loaded, "alert": alert}, alerts
 
 
+def discarded_runs(verdict: dict) -> dict | None:
+    """A subject's `discarded_runs` (harness/gates.py, DISCARDED RUNS): the
+    recorded arm runs its current verdict does not count, by reason, with
+    their agent cost. Counts, dollars and the fixed reason slugs only; None
+    without a verdict (unknown, not zero)."""
+    found = verdict.get("discarded_runs") if isinstance(verdict, dict) else None
+    if not isinstance(found, dict):
+        return None
+    rows = {slug: {k: row[k] for k in ("runs", "cost_usd", "cost_unknown")}
+            for slug, row in (found.get("by_reason") or {}).items()
+            if slug in gates.DISCARD_REASONS}
+    return gates.merge_discards({"by_reason": rows})
+
+
+_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_MODEL = re.compile(r"[a-z0-9][a-z0-9.-]*")
+
+
+def _day(value):
+    return value if isinstance(value, str) and _DAY.fullmatch(value) else None
+
+
+def _model(value):
+    return value if isinstance(value, str) and _MODEL.fullmatch(value) else None
+
+
+def run_utility(verdict: dict) -> list | None:
+    """A subject's `run_utility` (harness/gates.py, RUN UTILITY): its arm
+    runs per (UTC day, arm model, class, reason) with their agent cost. Only
+    days, model ids, the fixed classes and reason slugs, counts and dollars;
+    None without a verdict (unknown, not zero)."""
+    found = verdict.get("run_utility") if isinstance(verdict, dict) else None
+    if not isinstance(found, list):
+        return None
+    rows = [{"date": _day(r.get("date")), "model": _model(r.get("model")),
+             "class": r["class"], "reason": r.get("reason"),
+             "runs": r["runs"], "cost_usd": r["cost_usd"], "cost_unknown": r["cost_unknown"]}
+            for r in found
+            if isinstance(r, dict) and r.get("class") in gates.UTILITY_CLASSES
+            and (r.get("reason") is None or r.get("reason") in gates.DISCARD_REASONS)]
+    return gates.merge_utility(rows)
+
+
+def decisions(verdict: dict) -> list | None:
+    """A subject's `decisions` (harness/gates.py, RUN UTILITY, CELL
+    VERSIONS): per cell version, its fixture name, model, run days, class
+    and decision day. None without a verdict."""
+    found = verdict.get("decisions") if isinstance(verdict, dict) else None
+    if not isinstance(found, list):
+        return None
+    out = []
+    for d in found:
+        if not isinstance(d, dict) or not _model(d.get("model")) \
+                or not isinstance(d.get("class"), str) \
+                or not re.fullmatch(r"[a-z-]+", d["class"]):
+            continue
+        fixture = d.get("fixture")
+        out.append({"fixture": fixture if isinstance(fixture, str) else None,
+                    "model": d["model"], "current": d.get("current") is True,
+                    "from": _day(d.get("from")), "to": _day(d.get("to")),
+                    "class": d["class"], "decided": _day(d.get("decided")),
+                    "pair": d.get("pair") if d.get("pair") in ("in_situ", "alone") else None})
+    return out
+
+
+def fleet_discards(skills: list, sections: list) -> dict:
+    """The document's `discarded_runs`: `discarded_runs` summed over the
+    listed skills, the listed sections, and both (`all`). A subject with
+    none (null) adds nothing."""
+    of_skills = gates.merge_discards(*(s["discarded_runs"] for s in skills))
+    of_sections = gates.merge_discards(*(s["discarded_runs"] for s in sections))
+    return {"all": gates.merge_discards(of_skills, of_sections),
+            "skills": of_skills, "guidance": of_sections}
+
+
 def build(tree: Path, roster_path: Path, policy_path: Path, evals_dir: Path, as_of: str,
           repository_commit: str, results_commit: str, registries: dict | None = None,
           guidance_dir: Path | None = None, manifest: list | None = None,
@@ -1782,6 +1921,9 @@ def build(tree: Path, roster_path: Path, policy_path: Path, evals_dir: Path, as_
                        "usage": None if usage_window is None
                        else {"invocations": counts.get(name, 0)},
                        "copies": copies,
+                       "discarded_runs": discarded_runs(verdict),
+                       "run_utility": run_utility(verdict),
+                       "decisions": decisions(verdict),
                        "runs": by_skill.get(name, [])})
 
     renumber(skills)
@@ -1804,6 +1946,9 @@ def build(tree: Path, roster_path: Path, policy_path: Path, evals_dir: Path, as_
             "confidence": subject_confidence(verdict),
             "next_test": queue.get(("guidance", row["id"]), unqueued),
             "stakes": stakes_of("guidance", row["id"]),
+            "discarded_runs": discarded_runs(verdict),
+            "run_utility": run_utility(verdict),
+            "decisions": decisions(verdict),
             "runs": runs if alone else without_alone(runs)})
 
     renumber(sections)
@@ -1872,6 +2017,7 @@ def build(tree: Path, roster_path: Path, policy_path: Path, evals_dir: Path, as_
                    "max_runs_per_cell": policy.get("max_runs_per_cell")},
         "skills": skills, "removed_skills": removed_skills(registries),
         "guidance": {"sections": sections, "removed": removed_sections(guidance_dir)},
+        "discarded_runs": fleet_discards(skills, sections),
         "coverage": coverage, "alerts": alerts,
         "context_drift_unknown": drift_unknown, "fires_without_results": fires,
         "fixture_queue": fixture_queue, "lessons": lesson_doc, "usage": usage_window,

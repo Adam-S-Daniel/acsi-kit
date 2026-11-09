@@ -20,6 +20,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import urllib.parse
 import urllib.error
 from unittest import mock
 
@@ -169,6 +170,26 @@ class TitleAndOutcomeTests(unittest.TestCase):
         self.assertEqual([r["outcome"] for r in io_mod.outcomes(runs, branch, NOW)],
                          ["accepted", "rejected"])
 
+    def test_a_window_past_the_api_cap_is_split_not_truncated(self):
+        # 2,500 runs, one a minute; like the API, a query returns at most
+        # 1,000 results however many pages it is asked for (2026-11-07).
+        runs = [fire(i, "t", NOW - timedelta(minutes=i)) for i in range(2500)]
+        since = NOW - timedelta(minutes=2499)
+
+        def get(path, token, **kw):
+            query = urllib.parse.parse_qs(path.split("?", 1)[1])
+            created, page = query["created"][0], int(query["page"][0])
+            if created.startswith(">="):
+                lo, hi = io_mod.parse_time(created[2:]), None
+            else:
+                lo, hi = (io_mod.parse_time(x) for x in created.split(".."))
+            hits = [r for r in runs if io_mod.parse_time(r["created_at"]) >= lo
+                    and (hi is None or io_mod.parse_time(r["created_at"]) <= hi)][:1000]
+            return {"workflow_runs": hits[(page - 1) * 100:page * 100]}
+        got = io_mod.fetch_fire_runs("example-adopter/skills-evals", "t", since,
+                                     get=get, until=NOW)
+        self.assertEqual(sorted(r["id"] for r in got), list(range(2500)))
+
     def test_fetchers_page_and_read_branch_summaries_as_data(self):
         pages = {1: [fire(i, "t", NOW) for i in range(100)], 2: [fire(100, "t", NOW)]}
         seen = []
@@ -177,7 +198,7 @@ class TitleAndOutcomeTests(unittest.TestCase):
             seen.append(path)
             return {"workflow_runs": pages[int(path.rsplit("page=", 1)[1])]}
         self.assertEqual(len(io_mod.fetch_fire_runs("example-adopter/skills-evals", "t",
-                                                    NOW, get=get)), 101)
+                                                    NOW, get=get, until=NOW)), 101)
         self.assertIn("event=workflow_dispatch", seen[0])
         with self.assertRaises(io_mod.EvidenceError):
             io_mod.fetch_fire_runs("example-adopter/skills-evals", "t", NOW,
@@ -942,8 +963,8 @@ class DispatchLegTests(unittest.TestCase):
         self.assertEqual(fetched[0], NOW - plan_week.IMPROVE_FLIGHT)
         slept.clear()
         clock[0] = NOW
-        self.assertFalse(plan_week.wait_slot(fetch, 300, lambda: clock[0], sleep))
-        self.assertEqual(slept, [60] * 5)
+        self.assertFalse(plan_week.wait_slot(fetch, 240, lambda: clock[0], sleep))
+        self.assertEqual(slept, [60] * 4)
 
     def full_cap(self):
         """Three improve fires in flight for the next three hours."""
@@ -1334,6 +1355,7 @@ def gsection(fixtures=4, headroom=0.4, verdict="keep"):
                          "targets": []}}
 
 
+@mock.patch.object(plan_week, "GUIDANCE_IMPROVE_HELD", False)
 class ImproveValueTests(unittest.TestCase):
     """The improve candidates, skills and guidance sections, ranked by
     value = use x headroom / cost."""
@@ -1614,11 +1636,15 @@ class ImproveValueTests(unittest.TestCase):
             doc = {"roster_models": ["m"], "guidance": {section: {"verdict": "keep"}}}
             self.assertEqual(plan_week.guidance_contexts(
                 ROOT / "evals", tree, "20261026T120000Z", doc, None), {})
-            # done-summary, handoff, no-url are train; waiting-on-review (last
-            # in name order) is the holdout and must not count.
+            # Every fixture but the last in name order is train; the last is
+            # the holdout and must not count. Read from disk, so a fixture
+            # pull request that adds one needs no edit here.
+            names = sorted(p.parent.name for p in
+                           (ROOT / "evals" / "guidance" / section).glob("*/fixture.yaml"))
+            holdout = names[-1]
             expected = {n: {"fixture_digest": f"fd-{n}", "tested_digest": "t",
                             "rest_digest": "rest"}
-                        for n in ("done-summary", "handoff", "no-url", "waiting-on-review")}
+                        for n in names}
 
             def run(name, role, checks):
                 return {"skill": section, "fixture": name, "model": "m", "role": role,
@@ -1630,8 +1656,8 @@ class ImproveValueTests(unittest.TestCase):
                     run("done-summary", "without", {"a": False, "b": False}),
                     run("handoff", "with", {"a": True, "b": True}),
                     run("handoff", "without", {"a": False, "b": True}),
-                    run("waiting-on-review", "with", {"a": False, "b": False}),
-                    run("waiting-on-review", "without", {"a": False, "b": False})]
+                    run(holdout, "with", {"a": False, "b": False}),
+                    run(holdout, "without", {"a": False, "b": False})]
             index = {"guidance_runs": runs + [{**runs[0], "pair": "alone"}]}
             with mock.patch.object(plan_week_compute_gates, "build_index",
                                    return_value=index), \
@@ -1639,14 +1665,15 @@ class ImproveValueTests(unittest.TestCase):
                                    return_value=expected):
                 got = plan_week.guidance_contexts(ROOT / "evals", tree, "20261026T120000Z",
                                                   doc, tree)
-        self.assertEqual(got[section]["fixtures"], 4)
-        self.assertEqual(got[section]["holdout"], "waiting-on-review")
+        self.assertEqual(got[section]["fixtures"], len(names))
+        self.assertGreaterEqual(len(names), 4)
+        self.assertEqual(got[section]["holdout"], holdout)
         self.assertEqual(got[section]["verdict"], "keep")
         # 3 of 4 train checks passed: headroom 0.25, the holdout's failures left out.
         self.assertAlmostEqual(got[section]["evidence"]["headroom"], 0.25)
         # A section with one fixture keeps no holdout and an unknown verdict.
-        self.assertEqual(got["finding-your-unknowns"]["holdout"], "")
-        self.assertEqual(got["finding-your-unknowns"]["verdict"], "insufficient")
+        self.assertEqual(got["git-practices"]["holdout"], "")
+        self.assertEqual(got["git-practices"]["verdict"], "insufficient")
         self.assertNotIn("_delivery", got)
 
     def test_guidance_contexts_pool_the_current_rest_as_the_gate_does(self):
@@ -1932,6 +1959,10 @@ class WatchdogTests(unittest.TestCase):
 
     ANCHOR = datetime(2026, 11, 1, 16, 11, tzinfo=timezone.utc)
 
+    def held_until(self, ends):
+        """The start of a fire whose guard hold ends at `ends`."""
+        return ends - guard.PENDING_FULL_HOLD
+
     @staticmethod
     def fire(started, conclusion="success"):
         return {"status": "completed", "conclusion": conclusion,
@@ -1944,7 +1975,9 @@ class WatchdogTests(unittest.TestCase):
                 "updated_at": stamp(ended or created)}
 
     def test_the_stalled_fire_re_plans_two_minutes_after_its_hold(self):
-        fires = [self.fire(datetime(2026, 11, 1, 15, 55, tzinfo=timezone.utc))]
+        # The 2026-11-01 fire's hold ended at 16:40 (it started at 15:55,
+        # under the 45-minute hold of the time).
+        fires = [self.fire(self.held_until(datetime(2026, 11, 1, 16, 40, tzinfo=timezone.utc)))]
         due = plan_week.watchdog_due(self.ANCHOR, fires)
         self.assertEqual(due, datetime(2026, 11, 1, 16, 42, tzinfo=timezone.utc))
         self.assertEqual(plan_week.watchdog_decide([], fires, due, self.ANCHOR),
@@ -1953,15 +1986,15 @@ class WatchdogTests(unittest.TestCase):
                                                    self.ANCHOR), ("wait", due))
 
     def test_ended_failed_and_unparsable_fires_fall_back_to_the_idle_limit(self):
-        fires = [self.fire(self.ANCHOR - timedelta(minutes=45)),
+        fires = [self.fire(self.held_until(self.ANCHOR)),
                  self.fire(self.ANCHOR - timedelta(minutes=5), conclusion="failure"),
                  {"conclusion": "success", "run_started_at": "not a time"}, "junk"]
         self.assertEqual(plan_week.watchdog_due(self.ANCHOR, fires),
                          self.ANCHOR + timedelta(minutes=50))
 
     def test_the_earliest_hold_wins(self):
-        fires = [self.fire(self.ANCHOR - timedelta(minutes=10)),
-                 self.fire(self.ANCHOR - timedelta(minutes=30))]
+        fires = [self.fire(self.held_until(self.ANCHOR + timedelta(minutes=35))),
+                 self.fire(self.held_until(self.ANCHOR + timedelta(minutes=15)))]
         self.assertEqual(plan_week.watchdog_due(self.ANCHOR, fires),
                          self.ANCHOR + timedelta(minutes=17))
 
@@ -1988,7 +2021,7 @@ class WatchdogTests(unittest.TestCase):
         def sleep(seconds):
             slept.append(seconds)
             clock[0] += timedelta(seconds=seconds)
-        fires = [self.fire(self.ANCHOR - timedelta(minutes=16))]
+        fires = [self.fire(self.held_until(self.ANCHOR + timedelta(minutes=29)))]
         go, reason = plan_week.watchdog("wait", lambda since: [], lambda since: fires,
                                         lambda: self.fail("wait mode reads no timers"),
                                         3300, lambda: clock[0], sleep)
@@ -2091,6 +2124,7 @@ class WatchdogTests(unittest.TestCase):
             self.assertEqual(out_file.read_text(), "dispatch=true\n")
 
 
+@mock.patch.object(plan_week, "GUIDANCE_IMPROVE_HELD", False)
 class ImproveCapPlanTests(unittest.TestCase):
     """#572, 2026-11-02: the planner applies the guard's improve cap
     (`allowance_guard.improve_cap`) to the improve band before allocation,
@@ -2168,15 +2202,15 @@ class DocsTests(unittest.TestCase):
                       "self-improvement", text)
 
     def test_agents_md_table_names_the_planner(self):
-        text = (ROOT / "AGENTS.md").read_text()
+        text = (ROOT / "docs" / "workflows.md").read_text()
         row = next(line for line in text.splitlines()
-                   if line.startswith("  | `routine-eval-weekly.yml`"))
+                   if line.startswith("| `routine-eval-weekly.yml`"))
         self.assertIn("plan_week.py", row)
 
     def test_agents_md_table_names_the_watchdog(self):
-        text = (ROOT / "AGENTS.md").read_text()
+        text = (ROOT / "docs" / "workflows.md").read_text()
         row = next(line for line in text.splitlines()
-                   if line.startswith("  | `routine-eval-watchdog.yml`"))
+                   if line.startswith("| `routine-eval-watchdog.yml`"))
         self.assertIn("plan_week.py watchdog", row)
 
 class SchedulabilityTests(unittest.TestCase):

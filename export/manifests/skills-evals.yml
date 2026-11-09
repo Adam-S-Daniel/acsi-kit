@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: f3196c3fcfafb2f801e860bf1c700fe2bacc8cc3
+source_sha: 508181f9da3b28e38c8a912c9a5c0a48503f24fc
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -368,57 +368,11 @@ edits:
           def test_only_workflow_dispatch(self):
     why: C7. Locks the environment the bearer and trigger id are read from.
   # ---- C6: the allowance budget at the standing defaults
-  - path: evals/budget.yml
-    old: |
-      # 100 points for the allowance week ending Mon 2026-11-09 17:00 UTC only
-      # (Adam, 2026-11-02, finish-week push). Restore to 0.25 after that reset
-      # (Adam's steady-state goal, 2026-11-02). Normally: all automated evals
-      # together, in each allowance week of the account (Monday 17:00 UTC to the
-      # next; Adam, 2026-10-26), so a sanctioned push in one week is not charged to
-      # the next.
-      weekly_cap: 1.00
-    new: |
-      # 30 points: all automated evals together, in each allowance week of the
-      # account (Monday 17:00 UTC to the next; Adam, 2026-10-26), so a sanctioned
-      # push in one week is not charged to the next.
-      weekly_cap: 0.30
-    why: >-
-      C6. The standing default (30 points a week, the header's standing
-      decision); the dropped text recorded one week's temporary raise and a
-      planned steady-state change, spending decisions of the source owner's.
-  - path: evals/budget.yml
-    old: |
-      # limit"). 95 points for the allowance week ending 2026-11-09 17:00 UTC only
-      # (Adam, 2026-11-02); restore to 0.80 after that reset.
-      stop_when_account_above: 0.95
-    new: |
-      # limit").
-      stop_when_account_above: 0.80
-    why: C6. The standing default (80 points); the dropped clause recorded one week's temporary raise.
+  # (C6, the committed budget: export/patches/skills-evals/standing_budget.py)
   # ---- C12: account-specific App ids are not the kit's (a substitution rule,
   # above, finds the roster App's id by its context, so this file spells none)
 
 
-  - path: test/issues/test_issue_68_allowance_guard.py
-    stage: output
-    old: |2
-              # 100 points a week and a 95% account stop for the allowance week
-              # ending 2026-11-09 17:00 UTC only (the owner, 2026-11-02, finish-week
-              # push); after that reset, 25 points and 80%. 2026-11-01 (permanent):
-              # the per-run cap is 1 point, the overrun the p95 of a run's largest
-              # call.
-              self.assertEqual(budget.load_budget(),
-                               {**LIMITS, "weekly_cap": 1.00,
-                                "stop_when_account_above": 0.95,
-                                "per_run_cap": 0.01, "per_run_overrun": 0.0018,
-                                "points_per_usd": 0.00214})
-    new: |2
-              # C6: the kit ships the standing weekly cap and account stop; the
-              # source's permanent per-run values (2026-11-01) are kept.
-              self.assertEqual(budget.load_budget(),
-                               {**LIMITS, "per_run_cap": 0.01, "per_run_overrun": 0.0018,
-                                "points_per_usd": 0.00214})
-    why: C6. The committed budget is the standing default weekly cap and stop, not the source's one-week raise.
   # ---- X9: machinery that must accept an empty starting state
   - path: scripts/plan_scheduled_evals.py
     stage: output
@@ -617,6 +571,12 @@ patches:
       X9 and Content tiers. evals/scheduled.yml keeps the rows of the core items' fixtures and
       evals/non-coverage.yml keeps its header and key with an empty list;
       the dropped rows named fixtures and skills the kit does not ship.
+  - file: standing_budget.py
+    why: >-
+      C6. evals/budget.yml ships the standing 30-point weekly cap and 80%
+      account stop, set by key rather than by matching the source's
+      comments, which change most weeks; the committed-budget test checks
+      those two values against its LIMITS.
   - file: cold_start_registries.py
     why: >-
       Cold start (DECISIONS "Cold-start fixes"). A registry entry may declare

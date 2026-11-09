@@ -1909,13 +1909,16 @@ yet" must stay distinguishable.)
 
 | Skill | Decision | Reason |
 |---|---|---|
-| `test-canary` | no A/B | internal canary; no propagation arm loads it, so its delivery probe is not built and no open issue tracks it (closed [#17](https://github.com/Adam-S-Daniel/skills-evals/issues/17) built the acsi-agentskills arms only) |
+| `test-canary` | no A/B (rechecked 2026-11-07) | internal canary; no propagation arm loads it, so its delivery probe is not built and no open issue tracks it (closed [#17](https://github.com/Adam-S-Daniel/skills-evals/issues/17) built the acsi-agentskills arms only) |
 | `wj-next-break` | skip | wall-clock/calendar-bound; low value to freeze |
-| `sync-skills`, `sync-cc-settings-between-wsl-and-windows`, `migrate-claude-memory`, `compare-pdfpairs`, `ocr-pdfs` | defer | machine-bound (WSL/WPF/browser surfaces); faking the surface costs more than the churn justifies today |
+| `sync-skills` | defer | machine-bound (WSL/WPF/browser surfaces); faking the surface costs more than the churn justifies today |
+| `ocr-pdfs` | defer (rechecked 2026-11-06) | no recorded local use since 2026-09-14; the machine-bound reason no longer fits (since acsi-agentskills [#26](https://github.com/Adam-S-Daniel/adam-agentskills/issues/26) the skill calls the OCRmyPDF CLI directly, which a container can run), so reopen it if it is used |
+| `sync-cc-settings-between-wsl-and-windows` | defer (rechecked 2026-11-05) | no recorded local use since 2026-09-14, and it needs Windows PowerShell 7 and the WSL UNC share, which a fixture cannot fake cheaply |
+| `migrate-claude-memory`, `compare-pdfpairs` | defer (rechecked 2026-11-05) | at most one recorded local use since 2026-09-14; the machine-bound reason no longer fits (a fake HOME, or PowerShell 7 and poppler in a container, can stand in for the surface), so reopen either one if it is used |
 | `launch-top-level-claude-session` | gap (call reversed 2026-11-03) | the defer row is withdrawn: it is the most-used skill in the local census (13 uses in the weeks of 2026-09-28 and 2026-10-05), and `windows-elevation-from-wsl` shows its surface is cheap to fake with logging `wt.exe`/`wsl.exe` shims on `PATH`, so a fixture can score the launch command; it needs one |
 | `windows-elevation-from-wsl` | Class B, covered | the one machine-bound skill whose surface is cheap to fake: `evals/windows-elevation-from-wsl/seed/bin/powershell.exe` answers reads, denies writes, refuses dodges, and logs; the fixture's `env:` block puts it on the arm's `PATH` |
-| `fastmail` bundle | defer | credentialed live service; a fixture may not carry real accounts, and a faked Fastmail is a harness project of its own |
-| `aws-bootstrap`, `preview-environments` | freshness lint | staleness is the failure mode, not procedure quality |
+| `fastmail` bundle | defer (rechecked 2026-11-06) | credentialed live service; a fixture may not carry real accounts, and a faked Fastmail is a harness project of its own. `fastmail` itself has one recorded local use since 2026-09-14 (week of 2026-09-14) |
+| `aws-bootstrap`, `preview-environments` | freshness lint (rechecked 2026-11-07) | staleness is the failure mode, not procedure quality; the lint now exists (example-site-platform's `e2e/skill-references-fresh.test.js` and acsi-agentskills' scheduled `scripts/check_skill_freshness.py`), and neither skill has recorded use |
 | `admin-config-render`, `browser-testing`, `code-quality`, `editorial-label-audit` | freshness lint | reference for one repo's internals; staleness is the failure mode, so a freshness lint replaces the eval (scope decision 2026-11-03) |
 | `finding-unknowns`, `acsi-writing-style` | owner review | process/taste skill; owner review replaces the eval (scope decision 2026-11-03) |
 
@@ -2391,7 +2394,7 @@ MCP connectors (mail, drive, GitHub) and wrote a transcript under
 | Spawn | Flags beyond its own |
 |---|---|
 | arm (`run_eval.run_agent`) | `--setting-sources project` (guidance: `user,project`), `--settings <sandbox, read-deny and agent-config-deny JSON>`, `--disallowedTools WebFetch,WebSearch` and `--no-chrome` (`run_eval.arm_isolation_flags`, every turn), `--strict-mcp-config`; `--no-session-persistence` only with no `followups:` |
-| judge (`judge._run_judge_cli`), proposal (`propose_skill_edit`), eval.yml preflight | `--setting-sources ""`, `--strict-mcp-config`, `--no-session-persistence` |
+| judge (`judge._run_judge_cli`), proposal (`propose_skill_edit`), eval.yml preflight | `--setting-sources ""`, `--strict-mcp-config`, `--no-session-persistence`, `--tools ""` (`judge.JUDGE_ISOLATION_FLAGS`) |
 | canary/guard leg (`run_canary.run_leg`) | `--strict-mcp-config`; `--no-session-persistence` unless the leg has its own scratch `CLAUDE_CONFIG_DIR` |
 | anything through local_eval's guard launcher | `--strict-mcp-config`, and `--setting-sources project` when argv names none |
 
@@ -2404,6 +2407,12 @@ arm, one past the CLI's 200-character truncation, and one inside a guidance
 arm's own scratch are never touched. The judge's empty setting source means
 the CI judge no longer loads this checkout's `CLAUDE.md`/`AGENTS.md` or the
 fleet-memory SessionStart hook: that is the isolation, not a regression.
+The judge reads text the agent under test wrote, so it also gets no tool
+(`--tools ""`; CLI 2.1.318's init event then lists `tools: []`) and an
+environment without GitHub, cloud-provider or SSH-agent credentials
+(`judge.drop_foreign_credentials`; ANTHROPIC_*, CLAUDE_*, proxy and CA
+variables stay, since it logs in through them): an injection in an arm's
+output finds no tool to act through and no GitHub or cloud token to spend.
 What none of this stops: managed settings, the CLI's bundled skills and
 writes to `~/.claude.json`. An arm's own reads of the real HOME are fenced
 in separately (below).
@@ -2651,12 +2660,17 @@ machinery (paired fires, a betting confidence sequence checked after every
 pair, the same classes) twice per section: the in-situ pair (`full` vs
 `full-minus-section`) and the alone pair (`section` vs `none`), classified by
 each arm's `mode`, never its name. A run pools when its `section` digest is
-the section's extent on main and its fixture digest matches. In situ, only
-runs beside the current rest of the guidance (the `rest` digest on main)
-count. From #546 and #557 to 2026-11-03, runs beside older rests were
+the section's extent on main and its fixture digest matches. In situ, from
+#546 and #557 to 2026-11-03, runs beside older rests of the guidance were
 weighted in as strata; that day's statistics review found the weighting
-favored removal, so older strata are ignored and an edit elsewhere in the
-guidance starts a section's evidence over. The in-situ verdict decides. The one change: a
+favored removal, so from then only runs beside the current rest (the `rest`
+digest on main) counted, and an edit elsewhere in the guidance started a
+section's evidence over. Since 2026-11-07 the guidance block's `rest_policy`
+(`pooled-with-current-guard`) pools every rest's pairs at equal weight, and
+every removal needs the current rest's own evidence, which also overrides a
+keep made on the pooled pairs alone (`current` restores the
+2026-11-03 rule; ADR 0014, "Pooled-rest addendum (2026-11-07)"). The in-situ
+verdict decides. The one change: a
 section whose in-situ verdict is `retire` but which shows `benefit` alone in
 any cell gets **`shorten-or-merge`**, since the rest of the guidance covers
 what it teaches. That verdict never removes anything. Because the alone pair

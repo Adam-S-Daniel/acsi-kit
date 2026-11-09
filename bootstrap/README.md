@@ -86,6 +86,10 @@ fail naming it. The four below are needed only with a site; with
   that routine's bearer, shown once when you create it. Set it with
   `gh secret set SITE_FRESHNESS_FIRE_BEARER --repo <you>/skills-evals` and
   type the value at its prompt.
+- `SITE_PREVIEW_URL`: a repository variable on `<you>/skills-evals`, the
+  preview page's URL with `{pr}` where the site pull request's number goes,
+  which `site-preview.yml` comments on a pull request. Set it the same way as
+  `SITE_PAGE_URL`.
 
 The prompt-audit sweep's fire values live on `_agent-guidance`, where
 `prompt-audit-fire.yml` fires the sweep for each trigger issue the changelog
@@ -102,6 +106,31 @@ start the sweep by hand.
   create its API trigger. Set it with
   `gh secret set PROMPT_AUDIT_SWEEP_FIRE_BEARER --repo <you>/_agent-guidance`
   and type the value at its prompt.
+
+The fleet worker is fired every 3 hours by `_agent-guidance`'s
+`fleet-worker-fire.yml` ([routines](../docs/routines.md#fleet-worker)). The
+workflow has no default for either value: unset, each scheduled run fails
+naming the missing one.
+
+- `FLEET_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
+  the fleet worker routine's fire URL. Set it like
+  `PROMPT_AUDIT_SWEEP_FIRE_URL`.
+- `FLEET_WORKER_FIRE_BEARER`: a repository secret on `<you>/_agent-guidance`,
+  that routine's bearer. Set it like `PROMPT_AUDIT_SWEEP_FIRE_BEARER`.
+
+`_agent-guidance`'s `article-watch.yml` polls a feed of Anthropic
+engineering articles hourly and fires an article-lift routine
+(`docs/routines/article-lift.md` there) for each new one about agents. It is
+optional, and the kit does not set it up: unset, each hourly run fails
+naming the missing value, so either set the three below or disable the
+workflow (`gh workflow disable article-watch.yml --repo <you>/_agent-guidance`).
+
+- `ARTICLE_WATCH_FEED_URL`: a repository variable on `<you>/_agent-guidance`,
+  the feed's URL.
+- `ARTICLE_WATCH_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
+  the article-lift routine's fire URL.
+- `ARTICLE_WATCH_FIRE_BEARER`: a repository secret on `<you>/_agent-guidance`,
+  that routine's bearer.
 
 ## Security
 
