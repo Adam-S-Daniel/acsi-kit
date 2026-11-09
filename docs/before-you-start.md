@@ -4,7 +4,7 @@
 
 | Need | Why |
 |---|---|
-| Claude Max, ideally Max 20x | Cloud sessions and routines (scheduled and API-triggered cloud runs) work on Pro too, but the eval budget is a share of your plan's weekly allowance. On Max 20x, one eval fire reserves 3.5% of the week under the 30% cap. Pro's allowance is roughly a twentieth of that, so one fire would cost more than a week; Max 5x fits about two fires a week and never an improve fire. These figures are scaled from the owner's Max 20x, not measured on smaller plans; nothing here was tested on a Team plan. |
+| Claude Max, ideally Max 20x | Cloud sessions and routines (scheduled and API-triggered cloud runs) work on Pro too, but the routines and the eval budget draw on your plan's weekly allowance, and the kit's numbers are sized for Max 20x. See [which plan](#which-plan) before you start on Pro or Max 5x. Nothing here was tested on a Team plan. |
 | Claude Code, current release | Hooks, plugins, skills. The eval harness pins nothing about the CLI and breaks loudly when a release changes behavior. |
 | A GitHub account, and optionally a second | The exports name two owners throughout ([one owner or two](#one-owner-or-two)). |
 | A GitHub plan you know | **Rulesets, required checks and environments are enforced on private repos only on a paid GitHub plan** (Pro for a personal account, Team for an organization). See [free or paid](#free-or-paid-github-plan). |
@@ -39,13 +39,13 @@ session.
   browser steps (creating and installing six GitHub Apps, saving six
   routines) and reviewing six starter pull requests take most of it.
 - **Calendar time:** most of the rest is waiting on the eval budget, not
-  work. `skills-evals`' `evals/budget.yml` gives all automated evals 30% of
-  the weekly allowance (`weekly_cap: 0.30`), and reserves 0.035 for one eval
-  fire (`per_run_cap` plus `per_run_overrun`) until it is measured. An
-  improve fire is charged twelve eval fires at their measured mean, or
-  twelve full reservations (0.42, more than the whole cap) while nothing is
-  measured, so **no improve fire can go until eval runs have been
-  measured**. The weekly planner runs on Tuesdays at 07:00 UTC, after the
+  work. `skills-evals`' `evals/budget.yml` gives all automated evals 25% of
+  the weekly allowance (`weekly_cap: 0.25`), and reserves 0.0105 for one
+  eval fire (`per_run_cap` plus `per_run_overrun`) until it is measured. An
+  improve fire is charged eight eval fires at their measured mean, or eight
+  full reservations (0.084) while nothing is measured, so an improve fire
+  can go in the first week, one of each kind a week at least. The weekly
+  planner runs on Tuesdays at 07:00 UTC, after the
   allowance week turns over (Monday 17:00 UTC). An improve fire needs four
   fixtures for its skill, and a fixture the loop adds stays off the schedule
   until it has two clean runs. The kit's core skills ship with their fixtures
@@ -53,10 +53,54 @@ session.
   an improve fire for your own skills needs your own first. Expect the first improvement merged or
   rejected one to two weeks after the first eval runs.
 - **Running it:** evals run as routines on your plan, so they draw down the
-  weekly allowance like any session, within the 30% cap and with a hard stop
+  weekly allowance like any session, within the 25% cap and with a hard stop
   when the account meter reads 80% (`stop_when_account_above`). Set your
-  own numbers in `evals/budget.yml` before the planner first runs. The fire
+  own numbers in `evals/budget.yml` before the planner first runs, above
+  all `points_per_usd` ([which plan](#which-plan)). The fire
   API allows 30 fires an hour per routine and 100 an hour per account.
+
+## Which plan
+
+The budget charges each eval run its own dollar cost (the CLI's API-equivalent
+figure) times `points_per_usd`. The shipped `0.0005` is $20 per point of the
+weekly meter, measured on the owner's Max 20x account (about $24, range $20
+to $35). A smaller plan has a smaller week, so the same dollars are more
+points. Keep the shipped value on a smaller plan and the guard undercounts
+evals 4 or 20 times: the 25% cap never binds, and only the 80% account stop
+holds them.
+
+These figures are a model, not a measurement on smaller plans. They assume
+Max 5x is a quarter of Max 20x's weekly allowance and Pro a twentieth (the
+plan multipliers; Anthropic does not publish the weekly ratios), the owner's
+measured routine costs, and an adopter whose own work fills 30% of the week.
+
+| | Pro ($20) | Max 5x ($100) | Max 20x ($200) |
+|---|---|---|---|
+| `points_per_usd` to set | `0.01` | `0.002` | `0.0005` (shipped) |
+| Base routines, share of the week | ~55% (the fleet worker alone ~35%) | ~11% | ~3% |
+| Optional dashboard refresh, extra | ~44% | ~12% | ~3% |
+| Evals of the core fixtures, `points_per_usd` set for the plan | ~20%, and the 80% stop is reached by Friday | ~16% | ~6% |
+| Evals, shipped `points_per_usd` | ~60%: the 80% stop is reached by Tuesday evening | ~23% | ~6% |
+| Fable judge | not in the plan: billed as usage credits from the first call | inside the plan's Fable share | inside the plan's Fable share |
+
+- **Max 20x:** everything as shipped.
+- **Max 5x:** set `points_per_usd: 0.002`. The full kit then uses about a
+  quarter to a third of the week, and the rest is yours. Leave the dashboard
+  refresh off unless you use it.
+- **Pro:** the base alone uses about half the week, mostly the fleet worker,
+  which fires every 3 hours. Run it once or twice a day instead (edit the
+  cron in `_agent-guidance`'s `fleet-worker-fire.yml`), run the
+  centralization audit weekly, and leave the dashboard refresh off. Evals on
+  Pro need usage credits turned on for the Fable judge, or a non-Fable judge
+  ([skills-evals#920](https://github.com/Adam-S-Daniel/skills-evals/issues/920)),
+  and `points_per_usd: 0.01`; most Pro adopters are better served by the base
+  alone.
+
+The guard reads the weekly meter only, not the 5-hour window, so on a small
+plan one sweep can use up a 5-hour window
+([skills-evals#921](https://github.com/Adam-S-Daniel/skills-evals/issues/921)).
+Tracked in [acsi-kit#28](https://github.com/Adam-S-Daniel/acsi-kit/issues/28)
+and [acsi-kit#29](https://github.com/Adam-S-Daniel/acsi-kit/issues/29).
 
 ## The config file
 
