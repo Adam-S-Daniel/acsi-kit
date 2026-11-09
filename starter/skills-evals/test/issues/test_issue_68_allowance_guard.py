@@ -3,7 +3,8 @@
 
 The owner's standing decision (2026-10-10,
 https://github.com/Adam-S-Daniel/skills-evals/issues/68#issuecomment-6097945979):
-all automated evals stay within 30% of the weekly subscription allowance.
+all automated evals stay within a share of the weekly subscription allowance
+(30% then; 25% since 2026-11-02).
 Three layers enforce it, all reading `evals/budget.yml`:
 
   * the budget file itself: exactly four keys, each above 0 and at most 1,
@@ -538,6 +539,10 @@ class IngestBudgetStopTests(unittest.TestCase):
     def test_the_ingesters_reasons_are_the_harness_reasons(self):
         found = {run_eval.budget_stop_reading(readings, LIMITS)["reason"]
                  for readings in ([(0.1, 1), (0.2, 1)], [(0.9, 1)])}
+        # The optional 5-hour stop (#921) is the third reason.
+        found.add(run_eval.budget_stop_reading(
+            [(0.1, 1)], {**LIMITS, "stop_when_session_above": 0.9},
+            session=0.95)["reason"])
         self.assertEqual(found, set(ingest.BUDGET_STOP_REASONS))
         self.assertEqual(set(run_eval.budget_stop_reading([(0.9, 1)], LIMITS)),
                          set(ingest.BUDGET_STOP_KEYS))

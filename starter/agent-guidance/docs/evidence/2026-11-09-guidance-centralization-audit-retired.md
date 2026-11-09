@@ -1,3 +1,23 @@
+> **Retired 2026-11-09.** This was the spec of the daily "Guidance
+> centralization audit" Routine. The owner disabled the Routine on
+> 2026-11-03 because it could not do its job (issue 424 in this repo: a
+> stale stored prompt naming retired registries, and no tool to list repos
+> or tasks, so every run reported it could not check anything). Its work
+> now lives in two places:
+>
+> - **Mechanical:** the nightly drift report's "Repo-specific guidance
+>   overlap" section ([`scripts/guidance-overlap.js`](../../scripts/guidance-overlap.js),
+>   run by [`drift-report.yml`](../../.github/workflows/drift-report.yml))
+>   lists text repeated across repos, local copies of `base.md` or a section
+>   file, and sections requested for a language a repo does not use.
+>   Unclassified repos were already the drift report's (ADR 0011).
+> - **Judgment:** item 8 of the weekly
+>   [Fleet health audit](../routines/fleet-health-audit.md) decides what each
+>   overlap entry should become.
+>
+> The text below is kept unchanged as evidence: the measured traps and the
+> dated run log from 2026-08-28 to 2026-09-28. Nothing runs it.
+
 # Routine: guidance centralization audit
 
 **Fires:** daily, 08:00 UTC, in a fresh session.
@@ -7,12 +27,6 @@ this repo. See "Why a Routine" below before proposing to move it.
 This file is the spec. The Routine's prompt is deliberately short and points
 here, so the procedure is reviewable, version-controlled, and correctable by a
 pull request rather than by editing a trigger nobody can diff.
-
-**In the adoption kit:** the dates, counts and repository names in this file's
-"Measured" passages, and everything under a heading marked
-"(source system history)", were measured on the system the kit was exported
-from. They are history, kept for the lessons. Your fleet has its own repos,
-forks and counts: compute them every run, as the procedure says.
 
 ---
 
@@ -67,8 +81,7 @@ duplicate one:
 
 What is left is the one question a script cannot answer: **is this paragraph
 fleet-general or repo-specific?** That is a judgement about meaning, made
-against ~1,500 lines of repo-specific prose spread over the fleet's repos
-(nineteen in the source system). It
+against ~1,500 lines of repo-specific prose spread over nineteen repos. It
 needs a reader, and it needs one on a schedule, because the content it audits
 accumulates a paragraph at a time and no single commit ever looks wrong.
 
@@ -104,7 +117,7 @@ what you checked with.
 
 Discovery reaches non-fork, non-archived repos in the two owners. Three classes
 are excluded structurally rather than by policy, and none of them appears in
-`exclude:` — forks (whichever the enumeration lists), archived repos, and
+`exclude:` — forks (`SonosAmpJuicePi`, `OctopusDeploy-Api`), archived repos, and
 this repo (`SYNC_SELF_REPO`, which self-hosts its `AGENTS.md` instead). Do not
 "fix" their absence.
 
@@ -113,8 +126,8 @@ this repo (`SYNC_SELF_REPO`, which self-hosts its `AGENTS.md` instead). Do not
 The operator asked for one thing explicitly: *"notifying me when a new repo has
 been added since the last run so I can go in and add it to the allow list on the
 routine."* This section is that, and it runs **before** the audits because its
-answer changes what the audits are auditing. A pass over the repos this
-Routine is attached to is not a fleet audit if the account holds more.
+answer changes what the audits are auditing. A pass over the nineteen repos this
+Routine is attached to is not a fleet audit if the account holds twenty-two.
 
 It is also the section most likely to be quietly wrong, so most of what follows
 is about proving it is not.
@@ -135,8 +148,8 @@ a registry that had already been corrected. Read `repos.yml` from `main`
 plausible, complete-shaped, wrong result set, and it labels that result
 `incomplete_results: false` while doing it.
 
-Measured in the source system against the org connector `github-mcp` on
-2026-08-28, in two sessions several hours apart:
+Measured against the org connector `github-mcp` on 2026-08-28, in two sessions
+several hours apart:
 
 | Query | Session A | Session B |
 |---|---|---|
@@ -227,8 +240,8 @@ circular by construction.
 
 ### Step 1 — enumerate, authoritatively
 
-`mcp__Claude_Code_Remote__list_repos {limit: 200}`. In the source system,
-measured 2026-08-28 at 20:33Z: 22 repos, `has_more: false`, including all five private repos and both
+`mcp__Claude_Code_Remote__list_repos {limit: 200}`. Measured 2026-08-28 at
+20:33Z: 22 repos, `has_more: false`, including all five private repos and both
 forks, and including `example-third/example-third` — a third owner outside
 `SYNC_OWNERS` that no owner-scoped query would ever surface.
 
@@ -256,9 +269,9 @@ second draw.
 
 Two field shapes will silently break a filter written the obvious way:
 
-- **`fork` is ABSENT on a non-fork, not `false`.** Only forks carry the
-  key. Measured in the source system on 2026-08-28: `!r.fork` matched **20 of
-  22**; `r.fork === false` matched **0 of 22** and empties the set permanently. Treat `can_push` with the
+- **`fork` is ABSENT on a non-fork, not `false`.** Only the two forks carry the
+  key. Measured 2026-08-28: `!r.fork` matches **20 of 22**; `r.fork === false`
+  matches **0 of 22** and empties the set permanently. Treat `can_push` with the
   same suspicion — absent is not false.
 - **`visibility` is present (`public` / `private`); `archived` and `created_at`
   are not.** Archived state cannot be determined from this source, and creation
@@ -266,9 +279,8 @@ Two field shapes will silently break a filter written the obvious way:
 
 **Give the fork filter a negative control with teeth, and run it every time.**
 After filtering, assert two things: the non-fork set retains a plausible count,
-**and** it excludes exactly the forks the enumeration lists (the entries that
-carry `fork: true`), by name. If it retains `0`, or retains everything while a
-fork is listed, the filter is broken —
+**and** it excludes exactly the two known forks by name (`OctopusDeploy-Api`,
+`SonosAmpJuicePi`). If it retains `0`, or retains all 22, the filter is broken —
 report set (b) **BLOCKED**, never empty. A filter that silently matches nothing
 reports a clean pass forever and can never be caught by observation.
 
@@ -280,11 +292,11 @@ set, not an error. So before trusting it, show the enumeration finds what we
 already know it should.
 
 **The check:** the enumerated set must contain every repo already written down
-in `repos.yml` — `cron_coverage.fleet` plus `cron_coverage.out_of_scope`,
-which is the union that file's own header calls the human-curated inventory,
-plus `skills_bootstrap.repos` (all of them already in that union) and
-`exclude:`. Compute that union on `main` every run (in the source system on
-2026-08-28 it was 22 distinct names, matching the enumeration name for name).
+in `repos.yml` — `cron_coverage.fleet` (13) plus `cron_coverage.out_of_scope`
+(9), which is the union that file's own header calls the human-curated
+inventory, plus `skills_bootstrap.repos` (10, all of them already in that union)
+and `exclude:` (empty since PR #84). Measured on `main` 2026-08-28 that union is
+**22 distinct names**, and it matches the enumeration name for name.
 
 Run it — and every comparison in Step 3 — on the **resolved lowercased
 `owner/name`** produced by the owner rule below, never on the bare short name. A
@@ -336,12 +348,13 @@ blind, and it reads this account's private repos (verified 2026-08-28 against
 no owner for any entry, and the only owner-bearing source is the enumeration —
 which by construction does not hold the name you are probing. So probe the name
 under **every owner in `SYNC_OWNERS`, plus every owner that appears anywhere in
-the enumeration** (in the source system on 2026-08-28, its two owners and a third), and conclude "resolves nowhere" only when **every** probe
+the enumeration** (on 2026-08-28 that is `example-adopter`, `example-adopter-two` and
+`example-third`), and conclude "resolves nowhere" only when **every** probe
 returns a definite not-found. List the owner/URL pairs you actually tried, in
 the line. Guessing one owner is not a probe:
-`git ls-remote https://github.com/<first owner>/<name>` returns
-`repository not found` for a repo the second owner holds, while
-`<second owner>/<name>` resolves, so a wrong-owner guess on a healthy repo lands it in set (c) — whose action is a pull
+`git ls-remote https://github.com/example-adopter/squarespacetemp` returns
+`repository not found` while `example-adopter-two/squarespacetemp` resolves, so a
+wrong-owner guess on a healthy repo lands it in set (c) — whose action is a pull
 request deleting it from the registry. The wrong branch is the destructive one.
 
 **The probe has three outcomes, not two.** Run it as
@@ -362,10 +375,10 @@ exit 128:
 
 **A resolve is not yet an identity.** `git ls-remote` follows GitHub's rename
 and transfer redirects, so it answers "does something respond at this path", not
-"does `<owner>/<name>` exist". Measured in the source system on 2026-08-28:
-`git ls-remote https://github.com/<first owner>/<name>` returned the same head
-sha as `<second owner>/<name>` for a transferred repo, and the connector follows
-the redirect too. So once a probe resolves, read the repo's own canonical
+"does `<owner>/<name>` exist". Measured 2026-08-28:
+`git ls-remote https://github.com/example-adopter/scratch-claude-002` returns the
+same head sha as `example-adopter-two/scratch-claude-002`, and the connector follows the
+redirect too. So once a probe resolves, read the repo's own canonical
 `full_name` — `mcp__github-mcp__list_branches` or `get_commit` against it, or an
 API call that surfaces the 301 — and compare it to the name you probed:
 
@@ -397,8 +410,8 @@ Compare on lowercased **`owner/name`** end to end. The three sources use three
 different shapes — `repos.yml` holds bare short names, `list_repos` returns
 `full_name`, and the Routine's `sources` hold full URLs — and matching on the
 short name alone is a live hazard in a two-owner account: create
-`example-adopter-two/<name>` and a bare-name match classifies it as an
-already-known `example-adopter/<name>` and drops it from every set. Resolve
+`example-adopter-two/retired-agentskills` and a bare-name match classifies it as the
+already-known `example-adopter/retired-agentskills` and drops it from every set. Resolve
 each `repos.yml` short name to an owner explicitly, and if one resolves to more
 than one owner in the enumeration, **that ambiguity is itself a finding** — say
 so rather than breaking the tie silently.
@@ -455,8 +468,8 @@ attaching them would widen a Routine that can merge into repos the fleet
 deliberately keeps out. The second — `cron_coverage.fleet` minus `sources` —
 fixes that by borrowing `fleet:` as the durable "yes", but it answers the wrong
 question: `fleet:` is a promise about **cron watching**, and
-a repo in `out_of_scope:` (in the source system, one of the second owner's)
-still receives the AGENTS.md sync every run. Under that definition the one repo this Routine most
+`example-adopter-two/squarespacetemp` sits in `out_of_scope:` while still receiving the
+AGENTS.md sync every run. Under that definition the one repo this Routine most
 recently could not see would never have been reported.
 
 Scoping to `exclude:` gets both: it is the version-controlled record of "this
@@ -516,8 +529,8 @@ writes the decision down.
 
 ### Step 4 — read the allowlist from the Routine, not from the session
 
-`mcp__Claude_Code_Remote__list_triggers`, find this Routine's own trigger
-("Guidance centralization audit"; note its `trig_` id), and read
+`mcp__Claude_Code_Remote__list_triggers`, find `trig_EXAMPLE`
+("Guidance centralization audit"), and read
 `job_config.ccr.session_context.sources[].git_repository.url`. That is the
 stored list the operator edits, and it is the only thing set (b) may be computed
 against.
@@ -744,10 +757,10 @@ attachment list: it is edited where Routines are managed on claude.ai, and no
 deep link to it could be established from inside a session — `list_triggers`
 returns the trigger id, name, schedule, notifications and full `job_config`, and
 no URL field anywhere. So name the Routine by its display name **and** its
-trigger id (its `trig_` id, from `list_triggers`) and say the link could not be
+trigger id (`trig_EXAMPLE`) and say the link could not be
 verified. An honest gap beats a confident wrong link; do not invent one.
 
-### Where this stood on 2026-08-28 (source system history)
+### Where this stood on 2026-08-28
 
 Measured after the operator attached repositories to the Routine at 19:25:45Z,
 and re-measured against `main` at 20:33Z after PR #84 merged:
@@ -940,7 +953,7 @@ those four sections for anyone, re-check the exclusions above first.
 It previously recorded that a Routine created through `create_trigger` stores no
 MCP connectors, that the fired session had an empty authorized repository set,
 and that REPORT mode was "the honest ceiling". The operator has since edited the
-Routine directly: it now carries an MCP connector and its attached
+Routine directly: it now carries an MCP connector and nineteen attached
 repositories, and the operator has separately instructed this Routine that it
 may merge pull requests within the scope §3 draws. Any run still reasoning from
 the old paragraph is reasoning from a world that ended.
@@ -968,7 +981,7 @@ So a run that finds the stored prompt contradicting this file has found the
 expected state, not a defect: **this file is newer and wins**, say in the report
 that the disagreement is still there, and hand the fix back as the operator's
 move — the Routine is "Guidance centralization audit", trigger
-id from `list_triggers`, edited where Routines are managed on claude.ai,
+`trig_EXAMPLE`, edited where Routines are managed on claude.ai,
 and no deep link to it could be established from inside a session. Until the
 stored prompt is updated, treat the merge grant as the operator's instruction
 recorded above, and say so in the report on any run that exercises it.
@@ -1087,7 +1100,7 @@ name it and say what you tried, per §0. Do not let it silently shrink the audit
 
 ### What is still unmeasured about writing
 
-The attached repos settle *reach*; they do not settle *writes*, and no
+The nineteen attached repos settle *reach*; they do not settle *writes*, and no
 fired session has yet been observed writing anything.
 
 Two fires on 2026-08-28 were each asked to push a throwaway branch to this repo;
@@ -1171,7 +1184,7 @@ flat prohibition.
 
 **This Routine MUST NOT merge, and must leave for a human:**
 
-- **`agents-md/base.md` or anything under `agents-md/sections/`** — the fleet-wide
+- **`agents-md/base.md` or anything under `agents-md/sections/`** — the ~20-repo
   fan-out above. This is the original rule, unchanged.
 - **`repos.yml`** — including the entries §0.5 Step 7 proposes. Choosing
   `fleet:` over `out_of_scope:`, or removing a name that has become unreadable,
@@ -1317,7 +1330,7 @@ S PRs opened, T PRs merged, propagation: OK|N/A|FAILED (<reason>)
 
 **`N` is the number of repos whose `AGENTS.md` this run actually read. `M` is
 set (b)'s universe** — enumerated, under `SYNC_OWNERS`, non-fork, not in
-`exclude:` — 19 in the source system on 2026-08-28. Compute both; neither is a figure to
+`exclude:` — which was 19 on 2026-08-28. Compute both; neither is a figure to
 carry forward from this file.
 
 **Any of `A`, `B`, `C` may read `n/a (<tool> unavailable)`, and `A` may read
@@ -1427,10 +1440,7 @@ and no fired run has yet reported the answer. A run that finds it answering may
 refresh the snapshot and open a pull request for the diff; a run that does not
 should say so rather than leave the file's currency implied.
 
-## Baseline as of 2026-08-28 (source system history)
-
-Everything from here to the end of the file was measured on the system the kit
-was exported from. It is history, not a figure your runs should match.
+## Baseline as of 2026-08-28
 
 So a later run can tell fresh drift from the state that was already understood.
 **Everything in the first block below was measured after the operator's

@@ -102,8 +102,9 @@ delivery guard runs on the fixture's own model.
 
 ## 3. When it runs, and what it costs to run
 
-`.github/workflows/eval.yml` runs every Tuesday at 07:00 UTC and on manual
-dispatch (`gh workflow run eval.yml --ref main`, optional input `fixture=`).
+`.github/workflows/eval.yml` runs on manual dispatch only (`gh workflow run
+eval.yml --ref main`, optional input `fixture=`); its Tuesday schedule was
+retired on 2026-10-06, and the weekly sweep is `routine-eval-weekly.yml`.
 It runs isolation pairs only: its `plan` job refuses every in-place fixture
 (a top-level `context:` mapping) before any credential is minted and lists it
 in the step summary, because only the cloud routine hosts in-place delivery
@@ -126,18 +127,19 @@ blocking decision 5.
 Since 2026-10-06 the scheduled evals run as Claude Code routines on the
 subscription, so they spend the weekly allowance. The owner's standing decision
 ([#68, 2026-10-10](https://github.com/Adam-S-Daniel/skills-evals/issues/68#issuecomment-6097945979))
-is that all automated evals together stay within **30% of the weekly
-allowance**. The numbers live in [`evals/budget.yml`](../evals/budget.yml),
+is that all automated evals together stay within **25% of the weekly
+allowance** (30% until his 2026-11-02 steady-state goal). The numbers live in [`evals/budget.yml`](../evals/budget.yml),
 as fractions of the allowance (0.01 is one point, and points = percent of the
 weekly allowance):
 
 | Key | Value | Meaning |
 |---|---|---|
-| `weekly_cap` | 0.30 | all automated evals, in each allowance week of the account (from Monday 17:00 UTC) |
+| `weekly_cap` | 0.25 | all automated evals, in each allowance week of the account (from Monday 17:00 UTC) |
 | `per_run_cap` | 0.01 | one run stops starting new work after this much (the owner, 2026-11-01; was 0.03) |
 | `per_run_overrun` | 0.0005 | added to every run: the routine session's own cost (about $0.67 per fire) and the run's last call, which no reading includes (was 0.005, then 0.002, then 0.0018; 2026-11-06) |
 | `points_per_usd` | 0.0005 | the allowance one dollar of the CLI's reported call cost uses: $20 per point, the low end of the rate measured on 2026-11-04 (about $24, range $20 to $35), so charges err high. `per_run_cap` and the weekly total both charge a run its own spend at this rate (was 0.00214, fitted to the account meter's movement, which other use inflated; 2026-11-06) |
 | `stop_when_account_above` | 0.80 | a run stops, and no fire starts, once the account's weekly meter reads this |
+| `stop_when_session_above` | not set | optional: a run stops, and no fire starts, once the CLI's 5-hour window reads this (`unifiedWindows.five_hour`), for a smaller plan whose sweep could use up a whole window; absent, the 5-hour window is not read (#921) |
 
 Three layers enforce it:
 
@@ -1124,7 +1126,14 @@ Other unattributed failures stay records with no proposal, and the subject
    The record says why the lesson was not a hook (`triage`).
 4. **Gate** (`routine-draft-skill-gate.yml`). The routine always pushes
    `claude/draft-skill-<run id>`; the gate validates it from the default
-   branch without running it. Accepted: a draft pull request in
+   branch without running it. Before any pull request, its `names` job
+   checks the drafted name against every registry: acsi-agentskills,
+   acsi-agentskills-private (read with the read-only registry App token)
+   and every repository their marketplaces federate, each with its full
+   history, plus the reserved name `synced` and Anthropic's skills. A name
+   any of them holds or ever shipped is refused, because the bootstrap hook
+   installs neither copy of a name two locks give different digests
+   (#918). Accepted: a draft pull request in
    acsi-agentskills with the skill, then a draft pull request here with
    only `evals/<subject>/` and its README layout line (merge the skill
    first). In `improve_merge_mode: auto` both are ready instead. The
@@ -1145,9 +1154,9 @@ Other unattributed failures stay records with no proposal, and the subject
 **The decline path.** When the agent-checks lane finds a hook proposal
 cannot be checked at commit time, it closes the issue as not planned. The
 picker then re-admits that subject with `hook_declined`, and the routine
-skips triage and drafts a skill. The routine's saved prompt for this mode
-is in [`routine-prompt-draft-mode.md`](routine-prompt-draft-mode.md); the owner
-approves changes to it.
+skips triage and drafts a skill. The routine's instructions for this mode
+are [`routine/modes/draft.md`](routine/modes/draft.md), read from
+`origin/main` on each fire, so a change to them is a pull request.
 
 ### Fixture requests (2026-11-03)
 
