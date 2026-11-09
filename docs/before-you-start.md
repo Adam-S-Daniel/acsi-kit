@@ -89,8 +89,8 @@ measured routine costs, and an adopter whose own work fills 30% of the week.
   refresh off unless you use it.
 - **Pro:** the base alone uses about half the week, mostly the fleet worker,
   which fires every 3 hours. Run it once or twice a day instead (edit the
-  cron in `_agent-guidance`'s `fleet-worker-fire.yml`), run the
-  centralization audit weekly, and leave the dashboard refresh off. Evals on
+  cron in `_agent-guidance`'s `fleet-worker-fire.yml`) and leave the
+  dashboard refresh off. Evals on
   Pro need usage credits turned on for the Fable judge, or a non-Fable judge
   ([skills-evals#920](https://github.com/Adam-S-Daniel/skills-evals/issues/920)),
   and `points_per_usd: 0.01`; most Pro adopters are better served by the base
