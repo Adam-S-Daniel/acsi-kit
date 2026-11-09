@@ -124,7 +124,7 @@ kit_tree() {
 
 # ------------------------------------------------------------------ config
 CONFIG_KEYS=(
-  OWNER OWNER_TWO OWNER_TYPE PLAN REVIEWER OWNER_NAME
+  OWNER OWNER_TWO OWNER_TYPE PLAN CLAUDE_PLAN REVIEWER OWNER_NAME
   VISIBILITY_AGENT_GUIDANCE VISIBILITY_SKILLS_EVALS VISIBILITY_WSL_AUTOMATION
   APP_NAME_PREFIX REPOS_DIR
   GUIDANCE_SYNC_APP_ID SETTINGS_ADMIN_APP_ID SETTINGS_READ_APP_ID
@@ -141,6 +141,7 @@ _valid_value() { # key value
     OWNER|OWNER_TWO|REVIEWER) [[ $v =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ ]] ;;
     OWNER_TYPE) [[ $v == user || $v == org ]] ;;
     PLAN) [[ $v == free || $v == paid ]] ;;
+    CLAUDE_PLAN) [[ $v == pro || $v == max5x || $v == max20x ]] ;;
     # No apostrophe: the name lands inside single-quoted shell and PowerShell strings.
     OWNER_NAME) [[ $v =~ ^[A-Za-z0-9\ .-]{0,80}$ ]] ;;
     VISIBILITY_*) [[ $v == public || $v == private ]] ;;
@@ -178,6 +179,7 @@ load_config() { # path
   done < "$path"
   [ -n "$CFG_OWNER" ] || die "$path: OWNER is required"
   [ -n "$CFG_PLAN" ] || die "$path: PLAN is required (free or paid)"
+  [ -n "$CFG_CLAUDE_PLAN" ] || die "$path: CLAUDE_PLAN is required (pro, max5x or max20x): it sizes the eval budget and the fleet worker's schedule; docs/before-you-start.md#which-plan"
   : "${CFG_OWNER_TYPE:=user}" "${CFG_REVIEWER:=$CFG_OWNER}"
   # <your name> and "Example Adopter" land in public repos: default to the
   # public handle, never a legal name.
@@ -530,7 +532,21 @@ REPO_VARIABLES=(
   "skills-evals|ANTHROPIC_SERVICE_ACCOUNT_ID|cfg:ANTHROPIC_SERVICE_ACCOUNT_ID|federation"
   "skills-evals|ANTHROPIC_WORKSPACE_ID|cfg:ANTHROPIC_WORKSPACE_ID|federation"
   "skills-evals|SITE_REPO|cfg:SITE_REPO|variables"
+  "_agent-guidance|FLEET_WORKER_EVERY_HOURS|plan:fleet-worker-hours|variables"
 )
+
+# fleet_worker_hours <claude plan>: how often fleet-worker-fire.yml fires the
+# fleet worker (its FLEET_WORKER_EVERY_HOURS). About 56 cloud sessions a week
+# at 3 hours cost ~3% of a Max 20x week but ~35% of a Pro week
+# (docs/before-you-start.md#which-plan).
+fleet_worker_hours() {
+  case $1 in
+    pro) echo 24 ;;
+    max5x) echo 6 ;;
+    max20x) echo 3 ;;
+    *) die "unknown CLAUDE_PLAN: $1" ;;
+  esac
+}
 
 # variable_empty_hint <name> <group>: what to do about an empty fleet.env key.
 variable_empty_hint() {
@@ -543,6 +559,7 @@ variable_empty_hint() {
 repo_variable_value() {
   case $1 in
     cfg:*) local k="CFG_${1#cfg:}"; printf '%s' "${!k}" ;;
+    plan:fleet-worker-hours) fleet_worker_hours "$CFG_CLAUDE_PLAN" ;;
     *) die "bad REPO_VARIABLES source: $1" ;;
   esac
 }

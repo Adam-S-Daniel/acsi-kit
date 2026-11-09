@@ -82,7 +82,7 @@ using the shipped items as worked examples.
   in `acsi-agentskills` and `_agent-guidance` with its Apps
   ([evals and the loop](evals-and-loop.md)).
 - **Routines.** Five standing claude.ai routines do the rest: the
-  fleet worker (every 3 hours), the changelog watcher and the prompt-audit sweep it fires,
+  fleet worker (every 3 to 24 hours, by plan), the changelog watcher and the prompt-audit sweep it fires,
   memory curation, and the guidance centralization audit
   ([routines](routines.md)).
 - **Your machine.** `wsl-automation` schedules the jobs that must run where

@@ -148,7 +148,7 @@ and the error type only, never the response body.
 
 ## The budget
 
-`evals/budget.yml` caps all automated evals at 25% of the weekly allowance,
+`evals/budget.yml` caps all automated evals at 30% of the weekly allowance,
 one run at 0.01 plus a 0.0005 overrun, and stops a run when the account
 meter reads 80%. Each run is charged its own dollar cost times
 `points_per_usd`, which ships sized for Max 20x: set it for your plan first
