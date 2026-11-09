@@ -24,6 +24,12 @@ and says so; one set without the others, or a malformed value, still fails.
 The eval job's mint keeps failing on an unset variable: an eval leg cannot
 run without the token.
 
+skill-coverage.yml's "Mint the Anthropic bearer for the adversarial review"
+step (skills-evals#917) named the same four ids. It reads the same four
+variables and checks them by shape the same way; the step is under
+continue-on-error, so an unset or malformed variable only means the review
+has no bearer and auto removal is not allowed that run.
+
 The ids are matched here by their lexical shape (a prefix and an id
 token), so this file spells none of them. Runs on the substituted tree.
 """
@@ -173,7 +179,62 @@ def apply(root: Path, ctx) -> None:
         "        id: federation\n") + ENV + "        run: |\n" + ROSTER_SKIP, 1, "roster mint step")
     text = _sub(text, ROSTER_DONE_OLD, ROSTER_DONE_NEW, 1, "roster mint end")
     text = _sub(text, REFRESH_OLD, REFRESH_NEW, 1, "roster refresh step head")
+    _no_ids_left(text, REL)
+    path.write_text(text, encoding="utf-8")
+    _review_bearer(root)
+
+
+def _no_ids_left(text: str, rel: str) -> None:
     for prefix in ("fdrl_", "svac_", "wrkspc_"):
         if re.search(rf"\b{prefix}(?!EXAMPLE)[A-Za-z0-9]{{8,}}", text):
-            raise RuntimeError(f"{REL}: a {prefix} id is left")
+            raise RuntimeError(f"{rel}: a {prefix} id is left")
+    if re.search(r'organization_id: "[0-9a-f-]{36}"', text):
+        raise RuntimeError(f"{rel}: an organization id is left")
+
+
+REVIEW_REL = ".github/workflows/skill-coverage.yml"
+REVIEW_HEAD = ("      - name: Mint the Anthropic bearer for the adversarial review\n"
+               "        id: review-bearer\n")
+REVIEW_RUN = ("        continue-on-error: true\n"
+              "        run: |\n"
+              "          set -euo pipefail\n")
+REVIEW_BODY_OLD = re.compile(
+    r"          body=\$\(jq -n --arg jwt \"\$jwt\" '\{\n"
+    r'            grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",\n'
+    r"            assertion: \$jwt,\n"
+    r'            federation_rule_id: "fdrl_[A-Za-z0-9]+",\n'
+    r'            organization_id: "[0-9a-f-]{36}",\n'
+    r'            service_account_id: "svac_[A-Za-z0-9]+",\n'
+    r'            workspace_id: "wrkspc_[A-Za-z0-9]+"\n'
+    r"          \}'\)\n")
+REVIEW_BODY_NEW = (
+    '          body=$(jq -n --arg jwt "$jwt" \\\n'
+    '            --arg rule "$FEDERATION_RULE_ID" --arg org "$ORGANIZATION_ID" \\\n'
+    '            --arg svac "$SERVICE_ACCOUNT_ID" --arg wrkspc "$WORKSPACE_ID" \'{\n'
+    '            grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",\n'
+    '            assertion: $jwt,\n'
+    '            federation_rule_id: $rule,\n'
+    '            organization_id: $org,\n'
+    '            service_account_id: $svac,\n'
+    '            workspace_id: $wrkspc\n'
+    "          }')\n")
+
+
+def _review_bearer(root: Path) -> None:
+    path = root / REVIEW_REL
+    text = path.read_text(encoding="utf-8")
+    i = text.find(REVIEW_HEAD)
+    if i < 0 or text.count(REVIEW_HEAD) != 1:
+        raise RuntimeError(f"{REVIEW_REL}: expected 1 review bearer step")
+    # The step's own run block: the next one after its head, before the
+    # step's `if:` line ends and its body starts.
+    j = text.find(REVIEW_RUN, i)
+    if j < 0 or text.find("      - name:", i + len(REVIEW_HEAD)) < j:
+        raise RuntimeError(f"{REVIEW_REL}: expected 1 review bearer run block")
+    text = text[:j] + "        continue-on-error: true\n" + ENV + "        run: |\n" \
+        + "          set -euo pipefail\n" + CHECKS + text[j + len(REVIEW_RUN):]
+    text, n = REVIEW_BODY_OLD.subn(lambda _m: REVIEW_BODY_NEW, text)
+    if n != 1:
+        raise RuntimeError(f"{REVIEW_REL}: expected 1 review exchange body, found {n}")
+    _no_ids_left(text, REVIEW_REL)
     path.write_text(text, encoding="utf-8")

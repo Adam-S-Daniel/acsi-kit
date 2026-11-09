@@ -82,6 +82,7 @@ OWNER=${3:-$O}
 OWNER_TWO=${3:-$O}-two
 OWNER_TYPE=user
 PLAN=$2
+CLAUDE_PLAN=max20x
 OWNER_NAME=Acme Example
 REPOS_DIR=$T/home/repos
 EOF
@@ -102,7 +103,7 @@ for s in "${SCRIPTS[@]}"; do
   assert "$s uses set -euo pipefail" grep -qx 'set -euo pipefail' "$B/$s"
   assert "$s --help prints its usage" bash -c '"$1" "$2" --help | grep -qF "$3"' _ bash "$B/$s" "$s ["
 done
-for p in lib/substitute.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
+for p in lib/substitute.py lib/plan_sizing.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
          tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
@@ -138,6 +139,48 @@ printf 'OWNER=acme-example\nPLAN=free\nSITE_REPO=example.net\n' > "$T/bad6.env"
 assert_not "a SITE_REPO that is neither none nor owner/name is refused" bash "$B/create-repos.sh" --config "$T/bad6.env" --dry-run
 assert_eq "fleet.env.example says no website explicitly" "$(grep -c '^SITE_REPO=none$' "$B/fleet.env.example")" 1
 assert_not "a missing config is refused" bash "$B/create-repos.sh" --config "$T/none.env" --dry-run
+grep -v '^CLAUDE_PLAN=' "$CFG" > "$T/noplan.env"
+run bash "$B/create-repos.sh" --config "$T/noplan.env" --dry-run; rc=$?
+assert_eq "a config without CLAUDE_PLAN is refused" "$rc" 1
+assert "the refusal names CLAUDE_PLAN" has "$ERR" "CLAUDE_PLAN is required"
+sed 's/^CLAUDE_PLAN=.*/CLAUDE_PLAN=max/' "$CFG" > "$T/badplan.env"
+assert_not "an invalid CLAUDE_PLAN is refused" bash "$B/create-repos.sh" --config "$T/badplan.env" --dry-run
+assert_eq "fleet.env.example leaves CLAUDE_PLAN for the adopter" "$(grep -c '^CLAUDE_PLAN=$' "$B/fleet.env.example")" 1
+for plan in pro max5x max20x; do
+  assert_eq "fleet_worker_hours $plan" "$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
+    "$(case $plan in pro) echo 24;; max5x) echo 6;; max20x) echo 3;; esac)"
+done
+
+# ======================================================== plan sizing (acsi-kit#28)
+# The real exported budget and roster policy, sized for each plan and read back with the YAML parser.
+sized() { # plan key file: the key's value in the sized file, as JSON
+  rm -rf "$T/size" && mkdir -p "$T/size/evals"
+  cp "$B/../starter/skills-evals/evals/budget.yml" "$B/../starter/skills-evals/evals/roster-policy.yml" "$T/size/evals/"
+  python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan "$1" >/dev/null || return 1
+  python3 -I -c 'import json, sys, yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1]))[sys.argv[2]] if sys.argv[2] in yaml.safe_load(open(sys.argv[1])) else None))' \
+    "$T/size/evals/$3" "$2"
+}
+assert_eq "Pro: points_per_usd 0.01" "$(sized pro points_per_usd budget.yml)" 0.01
+assert_eq "Pro: a 5-hour stop at 0.9" "$(sized pro stop_when_session_above budget.yml)" 0.9
+assert_eq "Pro: no Fable judge" "$(sized pro judge_exclude_tiers roster-policy.yml)" '["fable", "mythos"]'
+assert_eq "Max 5x: points_per_usd 0.002" "$(sized max5x points_per_usd budget.yml)" 0.002
+assert_eq "Max 5x: a 5-hour stop at 0.9" "$(sized max5x stop_when_session_above budget.yml)" 0.9
+assert_eq "Max 5x: the judge is left alone" "$(sized max5x judge_exclude_tiers roster-policy.yml)" null
+assert_eq "Max 20x: the exported rate stays" "$(sized max20x points_per_usd budget.yml)" \
+  "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["points_per_usd"])' "$B/../starter/skills-evals/evals/budget.yml")"
+assert_eq "Max 20x: no 5-hour stop" "$(sized max20x stop_when_session_above budget.yml)" null
+for plan in pro max5x max20x; do
+  assert_eq "$plan: the weekly cap stays" "$(sized $plan weekly_cap budget.yml)" \
+    "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["weekly_cap"])' "$B/../starter/skills-evals/evals/budget.yml")"
+  assert_eq "$plan: the account stop stays" "$(sized $plan stop_when_account_above budget.yml)" \
+    "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["stop_when_account_above"])' "$B/../starter/skills-evals/evals/budget.yml")"
+done
+sized pro points_per_usd budget.yml >/dev/null
+python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan pro >/dev/null 2>&1; rc=$?
+assert_eq "sizing an already sized tree is refused" "$rc" 2
+rm -rf "$T/size" && mkdir -p "$T/size"
+python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan pro >/dev/null; rc=$?
+assert_eq "a tree without evals/budget.yml is left alone" "$rc" 0
 assert_not "an unknown repo name is refused" bash "$B/create-repos.sh" --config "$CFG" --dry-run agent-skills
 
 # ======================================================== create-repos.sh

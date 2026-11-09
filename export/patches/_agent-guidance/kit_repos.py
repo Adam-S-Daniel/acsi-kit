@@ -71,6 +71,14 @@ REPOS_YML_LINES = [
      "#     session. Its agent-checks workflow and .githooks/ are copied by hand\n"
      "#     instead, as for verify-actions-lock.\n"
      "exclude:\n  - acsi-kit\n", "exclude: []\n"),
+    # cron_coverage.fleet audits the kit's own daily re-sync in the source
+    # fleet (re-pin 2026-11-09). An adopter's fleet has no copy of the kit.
+    ("    # The public adoption kit. It is excluded from the AGENTS.md sync above,\n"
+     "    # but its resync.yml runs daily, and it failed every day from 2026-11-04\n"
+     "    # to 2026-11-09 with no fleet watcher seeing it. It carries its own\n"
+     "    # scheduled-run-health.yml caller (acsi-kit#31), so it is audited like\n"
+     "    # any other repo here (_agent-guidance#492).\n"
+     "    - acsi-kit\n", ""),
 ]
 
 

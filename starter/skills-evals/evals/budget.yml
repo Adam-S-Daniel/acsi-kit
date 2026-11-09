@@ -1,8 +1,9 @@
 # The weekly allowance budget for every automated eval (#68).
 #
-# The owner's standing decision (2026-10-10,
+# The owner's standing decision (25% since 2026-11-02, his steady-state goal; 30%
+# from 2026-10-10,
 # https://github.com/Adam-S-Daniel/skills-evals/issues/68#issuecomment-6097945979):
-# all automated evals together stay within 30% of the Claude subscription's
+# all automated evals together stay within 25% of the Claude subscription's
 # weekly allowance. Every value below is a fraction of that allowance, as the
 # CLI's meter reports it (`unifiedWindows.seven_day.utilization`, 0 to 1), so
 # 0.01 is one point, and points = percent of the weekly allowance.
@@ -43,7 +44,8 @@ per_run_cap: 0.01
 # about 0.0003 at the rate below. It also covers each run's last call (agent
 # or judge), which the meter delta never includes: 0.180 points at p95 over
 # 258 metered runs (the owner, 2026-11-01: "Use p95 now and in the future";
-# 0.311 at most). Was 0.5 points, then 0.2, then 0.18.
+# 0.311 at most). Was 0.5 points, then 0.2, then 0.18; 0.05 since
+# 2026-11-06 (docs/how-it-works.md, "The weekly allowance guard").
 per_run_overrun: 0.0005
 
 # The allowance one dollar of API-equivalent spend uses: $20 per point, the

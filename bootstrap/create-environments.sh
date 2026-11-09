@@ -19,7 +19,8 @@
 # GUIDANCE_SYNC_APP_ID and ROSTER_WRITER_APP_ID, the App ids fleet.yml names
 # as ruleset bypass actors (export/DECISIONS.md C12), and skills-evals' four
 # ANTHROPIC_* federation ids eval.yml's token exchange reads, and its
-# SITE_REPO, which the site workflows require (none: no website). A key that is
+# SITE_REPO, which the site workflows require (none: no website), and
+# _agent-guidance's FLEET_WORKER_EVERY_HOURS, from CLAUDE_PLAN (24, 6 or 3). A key that is
 # still empty in fleet.env is left alone, so run this again after
 # create-apps.sh, and after filling in the federation ids.
 #

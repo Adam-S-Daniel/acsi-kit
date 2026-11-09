@@ -2,7 +2,7 @@
 
 | When | What happens | What you do |
 |---|---|---|
-| Every 3 hours | The fleet worker | Read its list of pull requests that need you |
+| Every 3 to 24 hours, by plan | The fleet worker | Read its list of pull requests that need you |
 | Daily | Fixture supply, the draft lane, retirement verdicts, the changelog watcher, the drift report (including its guidance overlap section), and on your machine the session miner and usage census | Nothing, unless an issue or pull request is waiting on you |
 | Weekly | The roster refresh, the planned sweep (Tuesdays 07:00 UTC), memory curation (Mondays) | Skim the results on `persistent/eval-results` |
 | On demand | A `plugin-runtime-review` deployment, a routine prompt change, a leaked key | Only you can do these |

@@ -39,8 +39,8 @@ session.
   browser steps (creating and installing six GitHub Apps, saving six
   routines) and reviewing six starter pull requests take most of it.
 - **Calendar time:** most of the rest is waiting on the eval budget, not
-  work. `skills-evals`' `evals/budget.yml` gives all automated evals 25% of
-  the weekly allowance (`weekly_cap: 0.25`), and reserves 0.0105 for one
+  work. `skills-evals`' `evals/budget.yml` gives all automated evals 30% of
+  the weekly allowance (`weekly_cap: 0.30`), and reserves 0.0105 for one
   eval fire (`per_run_cap` plus `per_run_overrun`) until it is measured. An
   improve fire is charged eight eval fires at their measured mean, or eight
   full reservations (0.084) while nothing is measured, so an improve fire
@@ -53,7 +53,7 @@ session.
   an improve fire for your own skills needs your own first. Expect the first improvement merged or
   rejected one to two weeks after the first eval runs.
 - **Running it:** evals run as routines on your plan, so they draw down the
-  weekly allowance like any session, within the 25% cap and with a hard stop
+  weekly allowance like any session, within the 30% cap and with a hard stop
   when the account meter reads 80% (`stop_when_account_above`). Set your
   own numbers in `evals/budget.yml` before the planner first runs, above
   all `points_per_usd` ([which plan](#which-plan)). The fire
@@ -61,46 +61,46 @@ session.
 
 ## Which plan
 
-The budget charges each eval run its own dollar cost (the CLI's API-equivalent
-figure) times `points_per_usd`. The shipped `0.0005` is $20 per point of the
-weekly meter, measured on the owner's Max 20x account (about $24, range $20
-to $35). A smaller plan has a smaller week, so the same dollars are more
-points. Keep the shipped value on a smaller plan and the guard undercounts
-evals 4 or 20 times: the 25% cap never binds, and only the 80% account stop
-holds them.
+Set `CLAUDE_PLAN` in `fleet.env` to `pro`, `max5x` or `max20x`. It is
+required, because the kit's numbers come from the owner's Max 20x account and
+a smaller plan has a smaller week. From it, `copy-starter.sh` sizes the
+`skills-evals` tree it copies (`bootstrap/lib/plan_sizing.py`) and
+`create-environments.sh` sets how often the fleet worker fires:
 
-These figures are a model, not a measurement on smaller plans. They assume
-Max 5x is a quarter of Max 20x's weekly allowance and Pro a twentieth (the
-plan multipliers; Anthropic does not publish the weekly ratios), the owner's
-measured routine costs, and an adopter whose own work fills 30% of the week.
-
-| | Pro ($20) | Max 5x ($100) | Max 20x ($200) |
+| `CLAUDE_PLAN` | `pro` ($20) | `max5x` ($100) | `max20x` ($200) |
 |---|---|---|---|
-| `points_per_usd` to set | `0.01` | `0.002` | `0.0005` (shipped) |
-| Base routines, share of the week | ~55% (the fleet worker alone ~35%) | ~11% | ~3% |
-| Optional dashboard refresh, extra | ~44% | ~12% | ~3% |
-| Evals of the core fixtures, `points_per_usd` set for the plan | ~20%, and the 80% stop is reached by Friday | ~16% | ~6% |
-| Evals, shipped `points_per_usd` | ~60%: the 80% stop is reached by Tuesday evening | ~23% | ~6% |
-| Fable judge | not in the plan: billed as usage credits from the first call | inside the plan's Fable share | inside the plan's Fable share |
+| `points_per_usd` in `evals/budget.yml` | `0.01` | `0.002` | `0.0005` (as exported) |
+| `stop_when_session_above` (5-hour window) | `0.90` | `0.90` | not set |
+| `judge_exclude_tiers` in `evals/roster-policy.yml` | `[fable, mythos]` | not set | not set |
+| Fleet worker (`FLEET_WORKER_EVERY_HOURS` on `_agent-guidance`) | every 24 hours | every 6 hours | every 3 hours |
+| Base routines, share of the week (model) | ~25% | ~8% | ~3% |
+| Evals of the core fixtures, share of the week (model) | ~20%, and the 80% stop is reached most weeks | ~16% | ~6% |
 
-- **Max 20x:** everything as shipped.
-- **Max 5x:** set `points_per_usd: 0.002`. The full kit then uses about a
-  quarter to a third of the week, and the rest is yours. Leave the dashboard
-  refresh off unless you use it.
-- **Pro:** the base alone uses about half the week, mostly the fleet worker,
-  which fires every 3 hours. Run it once or twice a day instead (edit the
-  cron in `_agent-guidance`'s `fleet-worker-fire.yml`) and leave the
-  dashboard refresh off. Evals on
-  Pro need usage credits turned on for the Fable judge, or a non-Fable judge
-  ([skills-evals#920](https://github.com/Adam-S-Daniel/skills-evals/issues/920)),
-  and `points_per_usd: 0.01`; most Pro adopters are better served by the base
-  alone.
+The weekly cap (30%) and the 80% account stop stay as exported on every plan.
 
-The guard reads the weekly meter only, not the 5-hour window, so on a small
-plan one sweep can use up a 5-hour window
-([skills-evals#921](https://github.com/Adam-S-Daniel/skills-evals/issues/921)).
-Tracked in [acsi-kit#28](https://github.com/Adam-S-Daniel/acsi-kit/issues/28)
-and [acsi-kit#29](https://github.com/Adam-S-Daniel/acsi-kit/issues/29).
+Why each one:
+
+- **`points_per_usd`.** The budget charges each eval run its own dollar cost
+  (the CLI's API-equivalent figure) times this rate. The exported `0.0005` is
+  $20 per point of the weekly meter, measured on Max 20x (about $24, range
+  $20 to $35). Left unchanged on a smaller plan, the guard would undercount
+  evals 4 or 20 times, and only the 80% account stop would hold them.
+- **The 5-hour stop.** A sweep fires many runs in a few hours. On a smaller
+  plan that can use up the whole 5-hour window, so a run stops starting work,
+  and no fire starts, once the window reads 90%.
+- **The judge.** Pro bills Fable as usage credits from the first call, so the
+  roster picks the judge from another tier.
+- **The fleet worker.** It fires about 56 times a week at every 3 hours,
+  about 35% of a Pro week on its own.
+
+The shares are a model, not a measurement on smaller plans. They assume Max
+5x is a quarter of Max 20x's weekly allowance and Pro a twentieth (the plan
+multipliers; Anthropic does not publish the weekly ratios), the owner's
+measured routine costs, and an adopter whose own work fills 30% of the week.
+On Pro the daily changelog watcher is most of what is left of the base's
+cost; leave the optional dashboard refresh off on
+Pro and Max 5x (it adds about 44% and 12%). Most Pro adopters are better
+served by the base alone.
 
 ## The config file
 
@@ -117,6 +117,7 @@ cp bootstrap/fleet.env.example fleet.env
 | `OWNER_TWO` | The second owner the exports name, or the same as `OWNER` ([one owner or two](#one-owner-or-two)). |
 | `OWNER_TYPE` | `user` or `org` (default `user`). An org creates Apps under `organizations/<OWNER>/settings/apps`. |
 | `PLAN` | `free` or `paid`. Required. |
+| `CLAUDE_PLAN` | `pro`, `max5x` or `max20x`: your Claude plan. Required. Sizes the eval budget and the fleet worker's schedule ([which plan](#which-plan)). |
 | `REVIEWER` | Who approves `fleet-apply` and `plugin-runtime-review` (default `OWNER`). |
 | `OWNER_NAME` | Fills `Example Adopter` and `<your name>` in public plugin manifests and notices (default `OWNER`). Letters, digits, spaces, `.` and `-` only (no apostrophe). Use a public handle, never your legal name: the privacy check would trip on it. |
 | `VISIBILITY_AGENT_GUIDANCE`, `VISIBILITY_SKILLS_EVALS`, `VISIBILITY_WSL_AUTOMATION` | Paid plan only: `public` (default) or `private`. |

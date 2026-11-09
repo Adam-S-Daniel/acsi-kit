@@ -2286,3 +2286,35 @@ Two sources moved between round 5's pin and the first re-sync after it:
   `scheduled.yml` rows, because both sections ship.
 
 Reverse: restore round 5's pins and the old `owner_links.py` edit.
+
+## Re-pin round 7 (2026-11-09)
+
+The daily re-sync failed at "Regenerate starter/"
+([acsi-kit#34](https://github.com/Adam-S-Daniel/acsi-kit/issues/34)):
+`_agent-guidance`'s `repos.yml` now lists `acsi-kit` in
+`cron_coverage.fleet`, so the source fleet's health audit watches the kit's
+own re-sync (`_agent-guidance#492`). An adopter's fleet holds no copy of the
+kit, so `kit_repos.py` cuts that entry with its comment, as it already cuts the
+sync's `exclude` entry for the kit (C11).
+
+| Source | Round 6 | Round 7 |
+|---|---|---|
+| _agent-guidance | `4e3f70c7a88f` | `1e72504f1fd5` |
+| acsi-agentskills | `bf7aa5a022a6` | `24f7a7b63b47` |
+| skills-evals | `c77f08cdedec` | `3482456d9f26` |
+
+The skills-evals pin brings `judge_exclude_tiers` and
+`stop_when_session_above` (skills-evals#920, #921), and the _agent-guidance pin
+brings `FLEET_WORKER_EVERY_HOURS` (_agent-guidance#494), which
+`bootstrap/lib/plan_sizing.py` and `create-environments.sh` set from
+`CLAUDE_PLAN`.
+
+- skills-evals' `skill-coverage.yml` gained a token exchange for the
+  removal review (skills-evals#917) that names the source's own federation
+  rule, organization, service account and workspace ids. `federation_vars.py`
+  (C12) now gives it the same four repository variables and shape checks as
+  `eval.yml`; the step is under `continue-on-error`, so an adopter without
+  federation gets no review bearer and no auto removal, as before.
+
+Reverse: restore round 6's pins and drop the `cron_coverage.fleet` cut and
+the `skill-coverage.yml` part of `federation_vars.py`.
