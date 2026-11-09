@@ -148,21 +148,22 @@ and the error type only, never the response body.
 
 ## The budget
 
-`evals/budget.yml` caps all automated evals at 30% of the weekly allowance,
-one run at 0.03 plus a 0.005 overrun, and stops a run when the account
-meter reads 80%. Three layers enforce it: the in-run stop in the harness,
-the pre-fire check (`scripts/allowance_guard.py`, which refuses a fire that
-would not fit and refuses when the GitHub API cannot be read), and the
-weekly plan, which spends only the room left.
+`evals/budget.yml` caps all automated evals at 25% of the weekly allowance,
+one run at 0.01 plus a 0.0005 overrun, and stops a run when the account
+meter reads 80%. Each run is charged its own dollar cost times
+`points_per_usd`, which ships sized for Max 20x: set it for your plan first
+([which plan](before-you-start.md#which-plan)). Three layers enforce it: the
+in-run stop in the harness, the pre-fire check (`scripts/allowance_guard.py`,
+which refuses a fire that would not fit and refuses when the GitHub API cannot
+be read), and the weekly plan, which spends only the room left.
 [What it costs](before-you-start.md#what-it-costs) turns these into calendar
 time.
 
-Expect improve fires to be refused at first. The guard reserves an improve fire
-at 12 times the average cost of an ingested run, and on day one, with no run
-ingested, each run counts at the 3.5-point cap (0.03 plus the 0.005 overrun),
-so that reserve is 42 allowance points against the 30-point weekly cap. It
-clears once the ingested runs average at most 2.5 points, which takes a few
-weekly eval runs; until then a refused improve fire is expected, not a fault.
+An improve fire is charged eight eval fires at their measured mean, or eight
+full reservations (0.084) before any run is measured, and the improve cap
+allows at least one fire of each kind a week. So an improve fire can go in
+the first week; a refused one later in a week usually means the cap's share
+is used.
 
 ## The loop
 
