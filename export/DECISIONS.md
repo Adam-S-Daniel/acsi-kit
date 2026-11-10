@@ -2318,3 +2318,42 @@ brings `FLEET_WORKER_EVERY_HOURS` (_agent-guidance#494), which
 
 Reverse: restore round 6's pins and drop the `cron_coverage.fleet` cut and
 the `skill-coverage.yml` part of `federation_vars.py`.
+
+## The guidance overlap judgment (2026-11-10)
+
+`_agent-guidance#495` added a warn-only "Repo-specific guidance overlap"
+section to the nightly drift report and gave the judgment on each entry
+(make it a check, a skill or a `base.md` section, or delete the local copy)
+to item 8 of the source owner's weekly Fleet health audit. The kit excludes
+that audit (Re-pin 2026-11-03), so round 7 shipped the detector with a dead
+README link and nothing in an adopter's setup that acted on its entries.
+
+- Five `edits` in `_agent-guidance.yml` move item 8's rules into the
+  README's "Repeated guidance across repos", worded for the adopter, and
+  point the workflow comment, the script's header and report line, and the
+  retirement note there.
+- `docs/week-to-week.md` gives the weekly review a row.
+- `export/tests/test_no_links_to_excluded.py` fails when an exported
+  Markdown file links to a file its manifest excludes, so the next excluded
+  target of a live link is caught at re-sync, not by an adopter.
+
+Reverse: drop the five edits, the row and the test.
+
+## The shipped-names ledger (2026-11-10)
+
+adam-agentskills#133 added `scripts/shipped_names.json`, the append-only
+record of every name that has shipped, and two checks read it as retired:
+`check_one_way_doors.py` fails a pull request that adds a listed skill
+basename, and skills-evals' `draft_new_skill.py` refuses a drafted skill with
+a listed name. The kit shipped the source's ledger, which names about twenty
+skills the adopter's registry never had, the five library skills among them.
+Adding a library skill with `add-content.sh` once the repos existed would fail
+the required `pytest` check, and the draft lane could not use those names.
+
+- `export/patches/agentskills/shipped_ledger.py` keeps the skills on disk,
+  the removals the exported `docs/skill-impact.md` records (the starter's own
+  test requires them), the marketplace's plugins and its name.
+- `export/tests/test_shipped_ledger.py` fails when the ledger lists a library
+  skill, or misses a skill the registry ships.
+
+Reverse: drop the patch, its manifest entry and the test.

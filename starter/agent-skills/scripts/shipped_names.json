@@ -10,31 +10,10 @@
     "example-site-platform"
   ],
   "skills": [
-    "acsi-anything-anywhere/finding-unknowns",
-    "acsi-anything-anywhere/writing-adrs",
-    "acsi-coding-anywhere/ci-job-performance",
-    "acsi-coding-anywhere/debug-github-workflows",
-    "acsi-coding-anywhere/disarm-inherited-reach",
-    "acsi-coding-anywhere/fan-out-triage",
     "acsi-coding-anywhere/github-actions-repo-settings",
-    "acsi-coding-anywhere/red-ci-example-site-a-ai",
-    "acsi-coding-anywhere/review-bash-ci-reliability",
     "acsi-coding-anywhere/skills-doctor",
     "acsi-coding-anywhere/vendor-release-impact-issues",
     "acsi-coding-anywhere/workflow-path-audit",
-    "acsi-coding-local/launch-top-level-claude-session",
-    "acsi-coding-local/launch-wsl-claude-session",
-    "acsi-coding-local/migrate-claude-memory",
-    "acsi-coding-local/sync-cc-settings-between-wsl-and-windows",
-    "acsi-coding-local/sync-skills",
-    "acsi-coding-local/tool-powershell",
-    "acsi-coding-local/windows-elevation-from-wsl",
-    "acsi-non-coding-local/add-from-address",
-    "acsi-non-coding-local/add-received-from-addresses",
-    "acsi-non-coding-local/compare-pdfpairs",
-    "acsi-non-coding-local/fastmail",
-    "acsi-non-coding-local/ocr-pdfs",
-    "acsi-non-coding-local/pdf-ocr-audit",
-    "acsi-non-coding-local/rename-pdfs"
+    "acsi-coding-local/sync-skills"
   ]
 }

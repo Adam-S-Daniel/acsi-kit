@@ -11,9 +11,9 @@
 >   lists text repeated across repos, local copies of `base.md` or a section
 >   file, and sections requested for a language a repo does not use.
 >   Unclassified repos were already the drift report's (ADR 0011).
-> - **Judgment:** item 8 of the weekly
->   [Fleet health audit](../routines/fleet-health-audit.md) decides what each
->   overlap entry should become.
+> - **Judgment:** a weekly review by the rules in the README's
+>   [Repeated guidance across repos](../../README.md#repeated-guidance-across-repos)
+>   decides what each overlap entry should become.
 >
 > The text below is kept unchanged as evidence: the measured traps and the
 > dated run log from 2026-08-28 to 2026-09-28. Nothing runs it.

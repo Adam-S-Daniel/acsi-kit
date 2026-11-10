@@ -305,6 +305,12 @@ patches:
       C11. The freshness lint's config (new in the source) drops the platform
       and site registries that skills_registries.yml no longer declares, their
       waivers, and the source owner's personal tool repo.
+  - file: shipped_ledger.py
+    why: >-
+      Shipped-names ledger. The source's ledger names every skill the source
+      owner shipped, so an adopter adding a library skill later failed the
+      one-way-door check and the draft lane refused those names; it keeps
+      the skills this registry ships and the removals its impact log records.
 
 # P3 and the files the sync delivers.
 regenerate:

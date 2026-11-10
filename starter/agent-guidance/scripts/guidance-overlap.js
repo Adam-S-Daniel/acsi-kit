@@ -10,8 +10,8 @@
  * (_agent-guidance#424). The mechanical half of that job, finding text that
  * repeats, is a check, so it runs here, nightly, inside drift-report.yml. The
  * judgment half (should a repeated paragraph move into base.md, a skill or an
- * agent-check, or simply be deleted) is the weekly Fleet health audit's, which
- * reads this section of the drift report (docs/routines/fleet-health-audit.md).
+ * agent-check, or simply be deleted) is made weekly by the rules in the
+ * README's "Repeated guidance across repos" section.
  *
  * WHAT IT FINDS.
  *   1. A block (paragraph, top-level list item, table, fenced code) under one
@@ -248,7 +248,7 @@ function render(result, meta) {
   out.push('## Repo-specific guidance overlap (warn-only)');
   out.push('');
   out.push(`Compared ${result.units} blocks from the \`${MARKER}\` part of ${meta.repos} repos. ` +
-    'Nothing here fails the run. Each entry is input for the weekly Fleet health audit, which decides ' +
+    'Nothing here fails the run. Each entry is input for the weekly review in the README ("Repeated guidance across repos"), which decides ' +
     'whether to promote it to base.md, a skill or an agent-check, or delete the local copy. ' +
     'Repo text is not quoted because this report is public and some repos are private.');
   if (!meta.baseRead) out.push('', '**base.md could not be read, so local copies of shared guidance were not checked.**');

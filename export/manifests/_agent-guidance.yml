@@ -295,6 +295,72 @@ edits:
                 # checkouts are" in this file rather than two that can drift.
     why: Cold start. The comment described the dropped federated checkout.
 
+  # ---- The guidance overlap judgment: the source's judge is excluded
+  - path: README.md
+    old: |
+      sections requested for a language a repo does not use. It names repos and
+      line ranges only, because the report is public and some repos are private.
+      Nothing in it fails the run. The weekly
+      [Fleet health audit](docs/routines/fleet-health-audit.md) (item 8) makes the
+      judgment on each entry.
+    new: |
+      sections requested for a language a repo does not use. It names repos and
+      line ranges only, because the report is public and some repos are private.
+      Nothing in it fails the run, so someone has to act on it: once a week, read
+      the section in `drift-report.md` on the `persistent/drift-report` branch,
+      open each line range, and decide each entry by these rules (or ask an
+      agent session to, with this section as its brief).
+
+      - **Text repeated across repos.** Ask whether an agent in an unrelated
+        repo would act differently for having read it. `base.md` carries only
+        what is specific to this account and learned the hard way, so most
+        repo-specific text correctly stays put. Prefer, in this order: a check,
+        when a commit could show the rule broken (fleet-wide in
+        `templates/agent-checks/agent-checks`, one repo's in its
+        `.agent-checks/local.sh`); a skill in the registry, when it is a
+        reusable procedure; a `base.md` section, when it is fleet-general and
+        neither of those. "Nothing to promote this week" is the normal result.
+      - **A local copy of shared guidance.** Delete it from that repo's
+        `## Repo-specific additions`, unless the local text adds a
+        repo-specific fact the shared rule lacks.
+      - **A section requested for a language the repo does not use.** Remove
+        the opt-in. Never add a section because GitHub reports a language: the
+        sections are opt-in, and byte counts include generated output.
+
+      If the section is missing or says "Not computed", the overlap step
+      failed; read the drift report's run log.
+    why: >-
+      Overlap judgment. The source gives the judgment to item 8 of its weekly
+      Fleet health audit, which the kit excludes (Re-pin 2026-11-03), so the
+      link was dead and nothing in an adopter's setup acted on the entries.
+      The rules of item 8 move here, worded for the adopter.
+  - path: .github/workflows/drift-report.yml
+    old: |2
+            # report from publishing, so it says so in the report and moves on. The
+            # weekly Fleet health audit reads this section and makes the judgment.
+    new: |2
+            # report from publishing, so it says so in the report and moves on. The
+            # README's "Repeated guidance across repos" says who acts on each entry.
+    why: Overlap judgment. The comment named the excluded Fleet health audit.
+  - path: scripts/guidance-overlap.js
+    old: " * agent-check, or simply be deleted) is the weekly Fleet health audit's, which\n * reads this section of the drift report (docs/routines/fleet-health-audit.md).\n"
+    new: " * agent-check, or simply be deleted) is made weekly by the rules in the\n * README's \"Repeated guidance across repos\" section.\n"
+    why: Overlap judgment. The comment named the excluded Fleet health audit and its file.
+  - path: scripts/guidance-overlap.js
+    old: "'Nothing here fails the run. Each entry is input for the weekly Fleet health audit, which decides ' +"
+    new: "'Nothing here fails the run. Each entry is input for the weekly review in the README (\"Repeated guidance across repos\"), which decides ' +"
+    why: Overlap judgment. The report sent the reader to the excluded Fleet health audit.
+  - path: docs/evidence/2026-11-09-guidance-centralization-audit-retired.md
+    old: |
+      > - **Judgment:** item 8 of the weekly
+      >   [Fleet health audit](../routines/fleet-health-audit.md) decides what each
+      >   overlap entry should become.
+    new: |
+      > - **Judgment:** a weekly review by the rules in the README's
+      >   [Repeated guidance across repos](../../README.md#repeated-guidance-across-repos)
+      >   decides what each overlap entry should become.
+    why: Overlap judgment. The note linked the excluded Fleet health audit.
+
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).
 patches:
