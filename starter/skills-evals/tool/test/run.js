@@ -826,8 +826,9 @@ test('regression alerts become one Trending toward removal row per subject, mode
   eq(rows[0].urls.length, 1, 'one issue link');
   const t = sp(P.textOf(P.buildPage(trendDoc(), 'skills', {})));
   ok(t.includes(P.STRINGS.trendingHeading) && t.includes('Expected'), 'section and its one-line note');
-  ok(t.includes('On fixture fx-one, the skill\'s advantage fell from +0.17 to 0.00 (score with the skill minus score without it).'), t);
-  ok(t.includes('On fixture fx-two, the judge\'s average score fell by 1.50 (alert threshold 1.00, typical noise 0.47).'), t);
+  ok(t.includes('On fixture fx-one, the skill\'s lead over running without it (the share of checks passed with it minus without it) fell from 17 to 0 percentage points.'), t);
+  ok(t.includes('On fixture fx-two, judge score (out of 10) fell from 8.00 to 6.50, a drop of 1.50. An alert needs a drop of at least 1.00 that is also bigger than the usual run-to-run variation (0.47).'), t);
+  ok(!t.includes('Checks passed:'), 'no counts, no counts sentence');
   ok(!/\d\.\d{3,}/.test(t), 'every displayed number is rounded to 2 decimals');
   ok(!t.includes('Getting worse') && !t.includes('with minus without'), 'old wording gone');
   ok(/Issue #846/.test(t), 'details link');
@@ -838,7 +839,36 @@ test('an older regression alert that words itself still has its decimals rounded
   const d = Object.assign({}, fixture, { alerts: [{ kind: 'regression', subject: 'skill', name: 'example-skill-alpha',
     text: 'example-skill-alpha regressed: the judge mean fell by 1.5000000000000009 (threshold 1.0, noise 0.472189541352795).' }] });
   const t = P.textOf(P.buildPage(d, 'skills', {}));
-  ok(sp(t).includes('The judge\'s average score fell by 1.50 (alert threshold 1.00, typical noise 0.47).'), 'legacy text is read back into the same plain sentence');
+  ok(sp(t).includes('Judge score (out of 10) fell by 1.50. An alert needs a drop of at least 1.00 that is also bigger than the usual run-to-run variation (0.47).'), 'legacy text is read back into the same plain sentence');
+});
+const win = (passed, total, judge, runs) => ({ runs: runs || 4, trials: 12, checks_passed: passed, checks_total: total, judge_mean: judge === undefined ? null : judge });
+const countsDoc = (alert) => Object.assign({}, fixture, { alerts: [Object.assign({ kind: 'regression', subject: 'skill', name: 'example-skill-alpha', model: 'example-large-2-0', verdict: 'regressed', text: 'x', url: null }, alert)] });
+const trendText = (alert) => sp(P.textOf(P.buildPage(countsDoc(alert), 'skills', {})));
+test('a judge row says from, to, the 0 to 10 scale and checks passed out of checks run per window', () => {
+  const t = trendText({ measure: 'judge', previous: 7.0666666, current: 5.5666666, drop: 1.5, threshold: 1, noise: 0.472,
+    counts: { with: { previous: win(40, 48, 7.0666666), current: win(38, 48, 5.5666666) }, without: null } });
+  ok(t.includes('Judge score (out of 10) fell from 7.07 to 5.57, a drop of 1.50. An alert needs a drop of at least 1.00 that is also bigger than the usual run-to-run variation (0.47). Checks passed: 40 of 48 in the earlier 4 runs, 38 of 48 in the latest 4.'), t);
+});
+test('an objective row gives the share and the checks behind it, plus the judge scores when present', () => {
+  const t = trendText({ measure: 'objective', previous: 0.75, current: 0.25, drop: 0.5, threshold: 0.15, noise: 0.05,
+    counts: { with: { previous: win(36, 48, 7.5), current: win(12, 48, 6) }, without: null } });
+  ok(t.includes('Checks passed fell from 75% (36 of 48) in the earlier 4 runs to 25% (12 of 48) in the latest 4. An alert needs a drop of at least 15 percentage points that is also bigger than the usual run-to-run variation (5 points). Judge score (out of 10): 7.50 earlier, 6.00 lately.'), t);
+  const bare = trendText({ measure: 'objective', previous: 0.75, current: 0.25, drop: 0.5, threshold: 0.15, noise: 0.05 });
+  ok(trendText({ fixture: 'fx-one', measure: 'objective', previous: 0.75, current: 0.25, drop: 0.5, threshold: 0.15, noise: 0.05 }).includes('On fixture fx-one, checks passed fell from 75% to 25%.'), 'lowercase after a fixture');
+  ok(bare.includes('Checks passed fell from 75% to 25%.') && !bare.includes('36 of 48'), bare);
+});
+test('an advantage row gives checks passed with and without the subject and the lead in percentage points', () => {
+  const t = trendText({ verdict: 'lost-delta', measure: 'advantage', previous: 1 / 6, current: 0,
+    counts: { with: { previous: win(30, 36, 8, 3), current: win(24, 36, 7, 3) }, without: { previous: win(24, 36, null, 3), current: win(24, 36, null, 3) } } });
+  ok(t.includes('With the skill, 30 of 36 checks passed (83%) earlier and 24 of 36 (67%) lately; without it, 24 of 36 (67%) and 24 of 36 (67%). The skill\'s lead fell from 17 to 0 percentage points. Judge score (out of 10) with the skill: 8.00 earlier, 7.00 lately.'), t);
+});
+test('the trending terms are tappable definitions', () => {
+  const kids = [];
+  (function walk(n) { if (n && typeof n === 'object') { kids.push(n); (n.children || []).forEach(walk); } })(P.buildPage(countsDoc({ measure: 'advantage', previous: 0.2, current: 0,
+    counts: { with: { previous: win(30, 36, 8, 3), current: win(24, 36, 7, 3) }, without: null } }), 'skills', {}));
+  const labels = kids.filter((n) => n.tag === 'button' && n.attrs && n.attrs['data-def']).map((n) => n.attrs['data-def-title']);
+  for (const k of ['Judge score', 'Check', 'Percentage point']) ok(labels.includes(k), k + ' is a term');
+  for (const k of ['judgeScore', 'percentagePoint']) ok(P.defn(k).tag === 'button', k);
 });
 test('number display rounds to 2 decimals and keeps the sign', () => {
   eq(P.fmt2(1.5000000000000009), '1.50'); eq(P.fmt2(-0.001), '0.00'); eq(P.fmtSigned2(0.1666), '+0.17'); eq(P.fmtSigned2(-0.25), '\u22120.25'); eq(P.fmtSigned2(0), '0.00');
@@ -891,6 +921,33 @@ test('this week\'s blocked count sits beside last week\'s, since the data holds 
   const b = P.blockedThisWeek(d);
   eq(b.local, 1); eq(b.prev.week, '2026-11-02'); eq(b.prev.local, 4); eq(b.prev.ci, 2);
   ok(P.STRINGS.tileStoppedNote(1, 0, '2026-11-09', 4, 2, '2026-11-02').includes('Last week (2026-11-02): 4 and 2'), 'note');
+});
+
+// --- git hook table: runs, blocks and verdict words ---------------------------------------
+function hooksDoc() {
+  const use = (surface, runs, blocked) => [{ week: '2026-11-02', surface, repo: 'example-adopter/example', invocations: runs, blocked, overridden: null }];
+  const chk = (name, uses, totals, verdict, reason) => ({ name, where: 'fleet', repo: null, source_url: null, use: uses, window_totals: totals, verdict, verdict_reason: reason, overrides_measured: false });
+  return Object.assign({}, fixture, { hooks: { window: { weeks: 8, from: '2026-09-14', to: '2026-11-09' }, policy: { max_override_rate: 0.2, min_private_repos: 3 }, unlisted: 0, private_repos_shown: false, totals: null, checks: [
+    chk('pr-tldr', use('ci', null, 4), { invocations: null, invocations_counted: 0, blocked: 4, overridden: null, override_rate: null }, 'earning', 'blocked in 8 weeks; no source counts its overrides'),
+    chk('dated-phrasing', use('local', 40, 0), { invocations: 40, invocations_counted: 40, blocked: 0, overridden: null, override_rate: null }, 'never-blocked', 'ran 40 times in 8 weeks, blocked none'),
+    chk('counted-block', use('local', 30, 4), { invocations: 30, invocations_counted: 30, blocked: 4, overridden: null, override_rate: null }, 'earning', 'blocked in 8 weeks; no source counts its overrides'),
+    chk('agents-md-size', [], { invocations: 0, invocations_counted: 0, blocked: 0, overridden: null, override_rate: null }, 'never-ran', 'no recorded runs in 8 weeks')
+  ] } });
+}
+test('the git hook table never shows a run count below its block count, and says what is not counted', () => {
+  const t = sp(P.textOf(P.renderRoute(hooksDoc(), { name: 'hooks', id: null }, {})));
+  ok(t.includes('Runs, 8 weeks'), 'the header names the window');
+  ok(t.includes('4 of 30 runs'), 'blocked of runs where runs are counted: ' + t);
+  ok(t.includes('not counted'), 'unknown runs are said to be not counted');
+  ok(!/pr-tldr\s*Fleet template\s*0\b/.test(t), 'pr-tldr is not shown with 0 runs');
+  ok(t.includes('hook telemetry'), 'the note says where local runs come from');
+});
+test('the git hook verdicts say never blocked and never ran, not never fires', () => {
+  const t = sp(P.textOf(P.renderRoute(hooksDoc(), { name: 'hooks', id: null }, {})));
+  ok(t.includes('Never blocked') && t.includes('Never ran'), t);
+  ok(!t.includes('Never fires'), 'the old words are gone');
+  const page = sp(P.textOf(P.renderRoute(hooksDoc(), { name: 'hooks', id: 'dated-phrasing' }, {})));
+  ok(page.includes('ran 40 times in 8 weeks, blocked none'), page);
 });
 
 // --- size -----------------------------------------------------------------------------
