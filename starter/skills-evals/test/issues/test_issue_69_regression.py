@@ -135,6 +135,29 @@ class VerdictTests(unittest.TestCase):
                          {"measure": "advantage", "previous": 0.16666666666666663, "current": 0.0})
         self.assertIsNone(regression.bad_detail({"verdict": "stable", "numbers": {}}, POLICY))
 
+    def test_rows_count_the_checks_behind_each_window(self):
+        row = verdict_of(series("a", [4] * 6, [2, 2, 2, 4, 4, 4], judge=[8, 8, 8, 6, 6, 6]))
+        counts = row["numbers"]["counts"]
+        window = lambda passed, judge, runs=3: {"runs": runs, "trials": runs, "checks_passed": passed,
+                                                "checks_total": runs * 4, "judge_mean": judge}
+        self.assertEqual(counts["with"], {"previous": window(12, 8.0), "current": window(12, 6.0)})
+        self.assertEqual(counts["without"], {"previous": window(6, None), "current": window(12, None)})
+
+    def test_counts_are_null_without_a_delta_or_enough_runs(self):
+        row = verdict_of(series("a", [4] * 6))
+        self.assertIsNone(row["numbers"]["counts"]["without"])
+        self.assertEqual(row["numbers"]["counts"]["with"]["current"]["checks_total"], 12)
+        self.assertIsNone(verdict_of(series("a", [4, 4]))["numbers"]["counts"])
+
+    def test_bad_detail_carries_the_counts(self):
+        row = verdict_of(series("a", [4, 4, 4, 2, 2, 2]))
+        detail = regression.bad_detail(row, POLICY)
+        self.assertEqual(detail["counts"], row["numbers"]["counts"])
+        row = verdict_of(series("a", [4] * 6, [2, 2, 2, 4, 4, 4]))
+        self.assertEqual(regression.bad_detail(row, POLICY)["counts"]["without"]["current"]["checks_passed"], 12)
+        old = {"verdict": "lost-delta", "numbers": {"delta": {"previous": 0.5, "current": 0.0}}}
+        self.assertNotIn("counts", regression.bad_detail(old, POLICY))
+
     def test_reasons_round_float_noise_but_numbers_keep_it(self):
         # The dashboard showed "went from 0.16666666666666663 to 0.0" and
         # "fell by 1.5000000000000009 (threshold 1.0, noise 0.472189541352795)".
@@ -329,6 +352,51 @@ class SuspectTests(unittest.TestCase):
 
     def test_no_difference_no_suspects(self):
         self.assertEqual(verdict_of(series("a", [4, 4, 4, 2, 2, 2]))["suspects"], [])
+
+
+class JudgeChangeTests(unittest.TestCase):
+    """A judge change (the roster's judge moving from claude-fable-5-1 to
+    claude-fable-5-2) is not a change in the work: the judge figure is not
+    compared across it, and it is named as a suspect."""
+
+    OLD, NEW = "claude-fable-5-1", "claude-fable-5-2"
+
+    def judged(self, judges, scores, passed=(4,) * 6):
+        runs = series("a", list(passed), judge=list(scores))
+        for r, model in zip(runs, judges):
+            r["judge_models"] = [model]
+        return runs
+
+    def test_a_judge_drop_across_a_judge_change_is_not_a_regression(self):
+        row = verdict_of(self.judged([self.OLD] * 3 + [self.NEW] * 3, [8, 8, 8, 6, 6, 6]))
+        self.assertEqual(row["verdict"], "stable")
+        self.assertIsNone(row["numbers"]["judge"])
+        self.assertEqual(row["suspects"], ["judge model changed"])
+
+    def test_the_objective_is_still_compared_across_a_judge_change(self):
+        row = verdict_of(self.judged([self.OLD] * 3 + [self.NEW] * 3, [8] * 6,
+                                     passed=(4, 4, 4, 2, 2, 2)))
+        self.assertEqual(row["verdict"], "regressed")
+        self.assertIn("objective", row["reason"])
+
+    def test_the_same_judge_still_regresses_on_the_judge(self):
+        row = verdict_of(self.judged([self.NEW] * 6, [8, 8, 8, 6, 6, 6]))
+        self.assertEqual(row["verdict"], "regressed")
+        self.assertEqual(row["suspects"], [])
+
+    def test_runs_that_name_no_judge_compare_as_before(self):
+        runs = self.judged([self.OLD] * 6, [8, 8, 8, 6, 6, 6])
+        for r in runs[:3]:
+            del r["judge_models"]
+        row = verdict_of(runs)
+        self.assertEqual(row["verdict"], "regressed")
+        self.assertEqual(row["suspects"], [])
+
+    def test_the_index_records_each_runs_judge_models(self):
+        self.assertEqual(compute_gates._judge_models(
+            ({"judge_models_used": [self.NEW]}, {"judge_models_used": [self.OLD, self.NEW]},
+             {"judge_models_used": None}, {})), [self.OLD, self.NEW])
+        self.assertEqual(compute_gates._judge_models(({},)), [])
 
 
 class CommitFieldTests(unittest.TestCase):
