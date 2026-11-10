@@ -2338,3 +2338,22 @@ README link and nothing in an adopter's setup that acted on its entries.
   target of a live link is caught at re-sync, not by an adopter.
 
 Reverse: drop the five edits, the row and the test.
+
+## The shipped-names ledger (2026-11-10)
+
+adam-agentskills#133 added `scripts/shipped_names.json`, the append-only
+record of every name that has shipped, and two checks read it as retired:
+`check_one_way_doors.py` fails a pull request that adds a listed skill
+basename, and skills-evals' `draft_new_skill.py` refuses a drafted skill with
+a listed name. The kit shipped the source's ledger, which names about twenty
+skills the adopter's registry never had, the five library skills among them.
+Adding a library skill with `add-content.sh` once the repos existed would fail
+the required `pytest` check, and the draft lane could not use those names.
+
+- `export/patches/agentskills/shipped_ledger.py` keeps the skills on disk,
+  the removals the exported `docs/skill-impact.md` records (the starter's own
+  test requires them), the marketplace's plugins and its name.
+- `export/tests/test_shipped_ledger.py` fails when the ledger lists a library
+  skill, or misses a skill the registry ships.
+
+Reverse: drop the patch, its manifest entry and the test.
