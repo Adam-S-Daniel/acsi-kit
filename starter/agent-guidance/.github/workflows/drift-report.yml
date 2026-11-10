@@ -97,7 +97,7 @@ jobs:
       # (_agent-guidance#424): repo-specific text that repeats across repos or
       # copies shared guidance. Warn-only: a failure here must never stop the
       # report from publishing, so it says so in the report and moves on. The
-      # weekly Fleet health audit reads this section and makes the judgment.
+      # README's "Repeated guidance across repos" says who acts on each entry.
       - name: Setup Node
         uses: actions/setup-node@v7.1.0
         with:

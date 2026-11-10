@@ -803,9 +803,29 @@ mechanical, though, so the nightly drift report does it: its
 repeated across repos, local copies of `base.md` or a section file, and
 sections requested for a language a repo does not use. It names repos and
 line ranges only, because the report is public and some repos are private.
-Nothing in it fails the run. The weekly
-[Fleet health audit](docs/routines/fleet-health-audit.md) (item 8) makes the
-judgment on each entry.
+Nothing in it fails the run, so someone has to act on it: once a week, read
+the section in `drift-report.md` on the `persistent/drift-report` branch,
+open each line range, and decide each entry by these rules (or ask an
+agent session to, with this section as its brief).
+
+- **Text repeated across repos.** Ask whether an agent in an unrelated
+  repo would act differently for having read it. `base.md` carries only
+  what is specific to this account and learned the hard way, so most
+  repo-specific text correctly stays put. Prefer, in this order: a check,
+  when a commit could show the rule broken (fleet-wide in
+  `templates/agent-checks/agent-checks`, one repo's in its
+  `.agent-checks/local.sh`); a skill in the registry, when it is a
+  reusable procedure; a `base.md` section, when it is fleet-general and
+  neither of those. "Nothing to promote this week" is the normal result.
+- **A local copy of shared guidance.** Delete it from that repo's
+  `## Repo-specific additions`, unless the local text adds a
+  repo-specific fact the shared rule lacks.
+- **A section requested for a language the repo does not use.** Remove
+  the opt-in. Never add a section because GitHub reports a language: the
+  sections are opt-in, and byte counts include generated output.
+
+If the section is missing or says "Not computed", the overlap step
+failed; read the drift report's run log.
 
 This replaced the daily "Guidance centralization audit" Routine, retired on
 2026-11-09; its spec and run log are kept as
