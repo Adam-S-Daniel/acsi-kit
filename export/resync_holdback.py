@@ -89,9 +89,12 @@ class GitRunner:
         return self._run(["git", *args])
 
     def reset(self) -> None:
-        self._git("reset", "-q", "--", "starter", "export/manifests")
-        self._git("checkout", "--", "starter")
-        self._git("clean", "-fdq", "--", "starter")
+        for args in (("reset", "-q", "--", "starter", "export/manifests"),
+                     ("checkout", "--", "starter"),
+                     ("clean", "-fdq", "--", "starter")):
+            done = self._git(*args)
+            if done.returncode != 0:
+                raise HoldbackError(f"git {args[0]} failed: {done.stderr.strip()}")
 
     def _npm_at_pin(self, manifest: str, folder: str) -> None:
         text = (self.manifests / manifest).read_text(encoding="utf-8")
@@ -210,7 +213,9 @@ def holdback(manifests: Path, old_texts: dict, runner) -> Result:
         apply(set(passing))
         ok, out = runner.run()
         if not ok:
-            held = {source: out for source in moved}
+            # The sources that failed alone keep their own output; the ones
+            # that passed alone get the combination's.
+            held = {source: held.get(source, out) for source in moved}
             passing = []
             interaction = True
         else:
@@ -235,8 +240,8 @@ def held_markdown(owner: str, result: Result) -> str:
         return ""
     lines = ["", "## Held back", ""]
     if result.interaction:
-        lines += ["Each moved source passed alone, but the new heads together break the export or "
-                  "its tests, so every one of them stayed at its old pin.", ""]
+        lines += ["The sources whose new head passed alone still broke the export or its tests "
+                  "together, so every moved source stayed at its old pin.", ""]
     else:
         lines += ["These sources stayed at their old pins because their new head broke the export or "
                   "its tests; the others moved.", ""]
@@ -248,7 +253,9 @@ def held_markdown(owner: str, result: Result) -> str:
     lines += ["", "The fix routine or a maintainer must follow each held source: change the `edits` entry or "
               "patch in `export/manifests/` that its change broke, record the departure in "
               "`export/DECISIONS.md`, and re-pin it. The daily re-sync tries the head again on every run. "
-              "The failing output is not copied here (this repository is public); it is read from the run.", ""]
+              "The failing output is not copied here or into the run log (this repository is public): "
+              "the fix routine receives it, and a maintainer reproduces it by running the export locally "
+              "at the head shown (MAINTAINING.md, Re-pin).", ""]
     return "\n".join(lines)
 
 

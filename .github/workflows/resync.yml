@@ -149,7 +149,7 @@ jobs:
           git switch -c "$branch"
           git add -A -- export/manifests starter
           git commit -q -m "Re-sync the kit from its source repos" \
-            -m "Moves each manifest's source_sha to its source's default-branch head and regenerates starter/ (export/resync.py)."
+            -m "Moves each manifest's source_sha to its source's default-branch head and regenerates starter/ (export/resync.py), except any source the run held back (export/resync_holdback.py)."
           echo "commit: $(git rev-parse HEAD)"
           # The job owns this branch, so it may overwrite it, but only from the
           # commit it saw: a lease on the remote's current sha (empty when the
@@ -161,7 +161,7 @@ jobs:
             cat <<'EOF'
           ## TLDR
 
-          Moves the kit's pinned source commits to each source repo's current head and regenerates `starter/` from them. Review the changes before merging.
+          Moves the kit's pinned source commits to each source repo's current head and regenerates `starter/` from them. A source listed under "Held back" below stays at its old pin, whatever the table says. Review the changes before merging.
 
           EOF
             cat "$RUNNER_TEMP/resync-summary.md"
@@ -204,10 +204,10 @@ jobs:
             if [ "$ALL_HELD" = true ]; then
               printf 'Every moved source was held back, so no pull request was opened.\n\n'
             else
-              printf 'The other sources moved, in the open re-sync pull request.\n\n'
+              printf 'The other sources moved, in the re-sync pull request if the App opened one (see the run).\n\n'
             fi
             printf 'Run: %s\n\n' "$RUN_URL"
-            printf 'The run summary has a "Held back" section with the old and new pins. A held source needs an `edits` entry or a patch in `export/manifests/` to follow its change, recorded in `export/DECISIONS.md` (MAINTAINING.md, Re-pin); the fix routine or a maintainer must do that. The failing output is in the run, not here. The next run with nothing held back closes this issue.\n'
+            printf 'The run summary has a "Held back" section with the old and new pins. A held source needs an `edits` entry or a patch in `export/manifests/` to follow its change, recorded in `export/DECISIONS.md` (MAINTAINING.md, Re-pin); the fix routine or a maintainer must do that. The failing output is kept out of this public issue and the run log: the fix routine receives it, and a maintainer reproduces it by running the export locally. The next run with nothing held back closes this issue.\n'
           } > "$body"
           # A failed list must not open a duplicate, so it stops here.
           number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \

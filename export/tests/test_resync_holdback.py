@@ -140,6 +140,9 @@ def test_a_combination_failing_only_after_the_culprit_is_dropped_holds_everythin
     result = hb.holdback(manifests, OLD_TEXTS, runner)
     assert result.interaction and result.all_held
     assert on_disk(manifests) == OLD_TEXTS
+    # c keeps its own failure; a and b get the combination's.
+    assert "FAILED anchor in c" in result.held["src-c"]
+    assert result.held["src-a"] == result.held["src-b"] == "combination failed SECRET-LOG-TEXT"
 
 
 def test_every_source_failing_alone_holds_all_without_an_interaction(manifests):
@@ -193,7 +196,7 @@ def test_main_all_held_sets_the_output_and_names_the_interaction(manifests, tmp_
     rc, out, md = run_main(manifests, tmp_path, monkeypatch, FakeRunner(manifests, bad_combos=[{"a", "b"}]))
     assert rc == 0
     assert out.splitlines() == ["held_back=src-a src-b src-c", "all_held=true"]
-    assert "passed alone, but the new heads together break" in md
+    assert "passed alone still broke the export or its tests together" in md
     assert "SECRET-LOG-TEXT" not in md and (tmp_path / "tails.txt").exists()
 
 
@@ -210,3 +213,11 @@ def test_main_rejects_a_bad_owner(manifests, tmp_path):
 def test_the_tail_keeps_the_last_forty_lines():
     text = "\n".join(str(i) for i in range(100))
     assert hb.tail(text).splitlines() == [str(i) for i in range(60, 100)]
+
+
+def test_a_failed_git_reset_stops_the_run_instead_of_testing_a_dirty_tree(tmp_path, monkeypatch):
+    import subprocess as sp
+    runner = hb.GitRunner(tmp_path, tmp_path, tmp_path)
+    monkeypatch.setattr(runner, "_git", lambda *a: sp.CompletedProcess(a, 1, "", "index.lock exists"))
+    with pytest.raises(hb.HoldbackError, match="git reset failed: index.lock exists"):
+        runner.reset()
