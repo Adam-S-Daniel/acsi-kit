@@ -154,10 +154,10 @@ def _job():
     return doc, doc["jobs"]["resync"]
 
 
-def test_the_workflow_reads_at_workflow_level_and_the_job_adds_issues_write_only():
+def test_the_workflow_reads_at_workflow_level_and_the_job_adds_issues_write_and_pull_request_read_only():
     doc, job = _job()
     assert doc["permissions"] == {"contents": "read"}
-    assert job["permissions"] == {"contents": "read", "issues": "write"}
+    assert job["permissions"] == {"contents": "read", "issues": "write", "pull-requests": "read"}
 
 
 def test_no_run_block_interpolates_an_expression():
@@ -190,7 +190,7 @@ def test_a_failure_opens_or_updates_one_issue_and_a_clean_success_closes_it():
     assert run.index("printf '## TLDR") < run.index("printf 'The daily")
     assert "--add-label agent-authored > /dev/null \\\n" in run and "|| echo \"::warning::" in run
     # It names the failed step from the step outcomes, never the log.
-    named = {"resync", "holdback", "push"}
+    named = {"resync", "holdback", "push", "fire"}
     assert {k.removeprefix("OUTCOME_").lower() for k in report["env"] if k.startswith("OUTCOME_")} == named
     assert named <= {s.get("id") for s in job["steps"]}
     assert "gh run view" not in run and "--log" not in run
@@ -237,3 +237,33 @@ def test_a_held_back_source_opens_the_issue_without_failing_the_job():
     # It sits before the failure steps, after the pull request is pushed.
     order = [s.get("name") for s in job["steps"]]
     assert order.index("Push resync/auto and open or update the pull request") < order.index(held["name"]) < order.index("Open or update the failure issue")
+
+
+def test_a_held_back_source_fires_the_fix_routine_at_most_once_a_day():
+    _, job = _job()
+    fire = _step(job, "Fire the fix routine")
+    assert fire["id"] == "fire"
+    assert fire["if"] == "success() && steps.holdback.outputs.held_back != ''"
+    env = fire["env"]
+    # One place each, no default: a variable and a secret.
+    assert env["FIRE_URL"] == "${{ vars.RESYNC_FIXER_FIRE_URL }}"
+    assert env["FIRE_BEARER"] == "${{ secrets.RESYNC_FIXER_FIRE_BEARER }}"
+    assert env["ISSUE_NUMBER"] == "${{ steps.heldissue.outputs.number }}"
+    run = fire["run"]
+    assert "variable RESYNC_FIXER_FIRE_URL" in run and "secret RESYNC_FIXER_FIRE_BEARER" in run
+    # Skips while a fix pull request is open, and after today's marker.
+    assert 'startswith("resync-fix/")' in run
+    assert "resync-fixer-fired $(date -u +%F)" in run and "grep -qF --" in run
+    # The bearer goes on stdin, the request from a file; neither is printed.
+    assert "--config -" in run and '--data-binary "@$request"' in run
+    assert 'echo "$FIRE_BEARER' not in run and 'cat "$request' not in run
+    assert "holdback-tails.txt" in run
+    order = [s.get("name") for s in job["steps"]]
+    assert order.index("Open or update the held-back issue") < order.index("Fire the fix routine") < order.index("Open or update the failure issue")
+    assert _step(job, "Open or update the held-back issue")["id"] == "heldissue"
+    assert "OUTCOME_FIRE" in _step(job, "Open or update the failure issue")["env"]
+
+
+def test_the_fix_routine_guide_names_the_branch_prefix_the_workflow_watches():
+    guide = (EXPORT_DIR / "FIX-ROUTINE.md").read_text(encoding="utf-8")
+    assert "resync-fix/" in guide

@@ -22,7 +22,16 @@ For the kit's owner and the agents working on it; adopters can skip this.
   sources and the run, without failing. The failing output's tail goes to a
   file on the runner for the fix routine, never into the issue or pull
   request (public repo). A held source needs an `edits` entry or patch that
-  follows its change, then it re-pins on the next run. A failed run opens or
+  follows its change, then it re-pins on the next run. **Fix routine:** a
+  held source also fires a Claude cloud routine that follows it
+  (`export/FIX-ROUTINE.md` is its guide) and opens a pull request from a
+  `resync-fix/` branch, at most once a UTC day and never while such a pull
+  request is open; review and merge it like any other. The fire needs the
+  repository variable `RESYNC_FIXER_FIRE_URL` and the Actions secret
+  `RESYNC_FIXER_FIRE_BEARER`, both from the routine's API trigger on
+  claude.ai; without them the step fails naming the missing one. The routine
+  cannot run PowerShell, so a fix that touches a shipped `.ps1` asks for a
+  Pester run on Windows. A failed run opens or
   updates one open issue, "Re-sync from sources is failing", with the run's
   link and the failed step's name; only a run with nothing held back closes
   it: watch for that issue rather than the Actions tab. The fleet's daily
