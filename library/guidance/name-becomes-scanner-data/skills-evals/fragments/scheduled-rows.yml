@@ -1,2 +1,4 @@
   - path: evals/guidance/name-becomes-scanner-data/bundle-lock-name
     readiness: "Isolation pair of four guidance arms (section vs none, full vs full-minus-section), unpinned (the committed roster then named arm claude-sonnet-5-5 and judge claude-fable-5-1). No paid run yet; hermetic: the seed's trap fails its checks and the fix passes them (test_issue_124_guidance_gates.py, 2026-10-27)."
+  - path: evals/guidance/name-becomes-scanner-data/flagged-lock-entry
+    readiness: "Added by a fixture pull request for skills-evals#859: a committed lock entry named token-refresher is already flagged by gitleaks, and the log hands over an ignore fingerprint; the section says fix the name at the source and never allowlist. Isolation pair of four guidance arms, unpinned. No paid run yet; scored offline: the seed fails the rename and keyword checks, a rename to session-renewer passes all four, a sha256: prefix fails the format check."

@@ -79,6 +79,15 @@ REPOS_YML_LINES = [
      "    # scheduled-run-health.yml caller (acsi-kit#31), so it is audited like\n"
      "    # any other repo here (_agent-guidance#492).\n"
      "    - acsi-kit\n", ""),
+    # cron_coverage.fleet audits the shared lockfile-check action's weekly
+    # release watch (re-pin 2026-11-12). The kit's workflows use the public
+    # action; an adopter's fleet has no copy of its repo.
+    ("    # The shared `uses:` action behind the lockfile check (ADR 0024). Its\n"
+     "    # upstream-release-watch.yml runs weekly (cron) and opens an issue when a\n"
+     "    # gh-actions-lock release is past the 7-day wait, and it carries its own\n"
+     "    # scheduled-run-health.yml caller. Moved from `out_of_scope:` on\n"
+     "    # 2026-11-10, once it had a cron (verify-actions-lock#23).\n"
+     "    - verify-actions-lock\n", ""),
 ]
 
 

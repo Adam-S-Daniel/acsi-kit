@@ -1,2 +1,4 @@
+  - path: evals/guidance/github-404-means-not-authorized/branch-merged-by-git
+    readiness: "Added by a fixture pull request for skills-evals#858: the API answers 404 for everything about a private repository; the section says git is a separate credential path, so ls-remote and merge-base --is-ancestor settle whether a branch was merged. Isolation pair of four guidance arms, unpinned. No paid run yet; scored offline: a reply that calls the repository gone or unanswerable fails, one that runs both git commands and names the token's visibility passes."
   - path: evals/guidance/github-404-means-not-authorized/private-repo-404
     readiness: "Isolation pair of four guidance arms (section vs none, full vs full-minus-section), unpinned (the committed roster then named arm claude-sonnet-5-5 and judge claude-fable-5-1). No paid run yet; hermetic: the seed's trap fails its checks and the fix passes them (test_issue_124_guidance_gates.py, 2026-10-27)."

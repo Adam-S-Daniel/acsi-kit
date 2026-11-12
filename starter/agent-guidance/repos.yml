@@ -66,7 +66,9 @@ skills_bootstrap:
   # is not forbidden, just redundant and easy to get half-right — a ref moved
   # without its digest is a fleet with delivery disabled until someone notices.
   # It stops at proposing: merging is what fans a new hook into every repo
-  # below, so no bot does that. See docs/decisions/0010.
+  # below. The fleet worker merges the bump after checking its bytes and an
+  # independent review (docs/decisions/0041, which supersedes that part of
+  # docs/decisions/0010).
   #
   # 2026-09-24: moved by hand from the retiring example-adopter/retired-agentskills to
   # its successor example-adopter/acsi-agentskills (that repo's ADR 0013). The
@@ -74,13 +76,13 @@ skills_bootstrap:
   # one move was hand-made; `sha256` was recomputed from the bytes at `ref`.
   registry: example-adopter/acsi-agentskills
   path: .claude/hooks/skills-bootstrap.sh
-  ref: d1d3108aa2f3b73ae9c867f9f89955e91f82a6d3
+  ref: 42f39bd8c810cfde9bab5f344b38d17fe0c5e046
   # sha256 of the file at `ref`. The ref is already content-addressed, so this
   # is belt-and-braces — but the artifact executes instruction text at session
   # start with no approval prompt, so "the bytes we deliver are the bytes that
   # were reviewed" is worth making mechanical rather than assumed. A mismatch
   # disables delivery for the whole run and fails it.
-  sha256: 4c838631bdf00454c10aec769f8f7e95a68af271e568f3c380aaef591ef4d976
+  sha256: 7f962f0ab93ad4765e873d7c1abedf570f4910ee542c48460bafc506d2ebfcd8
   # The allowlist. Short repo names, matched the same way `exclude` is.
   #
   # Widened from two repos to ten on 2026-08-19 (ADR 0004). The two-repo start
@@ -196,20 +198,28 @@ skills_bootstrap:
 
 # ── Dependabot auto-merge workflow delivery ──────────────────────────────
 #
-# Every repo that runs Dependabot needs its own merge path: the
-# `dependabot-auto-merge.yml` workflow whose daily sweep merges a Dependabot
-# PR once every check on its head is green. Nothing added that file to a new
-# repo, so acsi-agentskills ran Dependabot without one and its green PRs
-# waited days for a hand merge (adam-agentskills#68).
+# Every synced repo needs a Dependabot merge path: fleet.yml turns Dependabot
+# security updates on everywhere (repo-settings), so a repo with no
+# `dependabot.yml` still gets Dependabot PRs. The `dependabot-auto-merge.yml`
+# workflow's daily sweep merges one once every check on its head is green.
+# Nothing added that file to a new repo, so acsi-agentskills ran Dependabot
+# without one and its green PRs waited days for a hand merge
+# (adam-agentskills#68).
 #
-# With `deliver: true`, sync.sh copies templates/dependabot-auto-merge/ into
-# any synced repo that has `.github/dependabot.yml` (or `.yaml`) and no
-# workflow named `dependabot-auto-merge.yml` / `self-dependabot-auto-merge.yml`.
-# It only ever ADDS the files: an existing workflow (or an existing
-# `.github/scripts/workflow-overlap.sh`) is never overwritten. A repo with
-# `.github/workflows/actions.lock` is skipped with a warning, because its
-# `uses:` lines must name tags locked by `gh actions-lock`, which the sync
-# cannot run.
+# With `deliver: true`, sync.sh delivers templates/dependabot-auto-merge/ to
+# EVERY synced repo. The file is MANAGED, like the agent-checks runner: written
+# when missing and overwritten whenever it drifts from the template. Repos
+# with `.github/workflows/actions.lock` take it too: the template is pure
+# gh/jq with no `uses:` lines, so there is nothing for `gh actions-lock` to
+# lock. It is never written, and a log line says why, for:
+#   - example-site-platform itself, which has its own self-dependabot-auto-merge.yml;
+#   - a repo whose workflow already calls example-site-platform's reusable one
+#     (`uses: example-adopter/example-site-platform/...`: example-site-a, example-site-b);
+#   - a repo with its own self-dependabot-auto-merge.yml;
+#   - a repo with only the `.yaml` spelling (a `.yml` would be a second
+#     workflow; the sync warns instead), or whose path is gitignored.
+# A helper `.github/scripts/workflow-overlap.sh` left by an earlier version is
+# not touched.
 #
 # Needs the agents-md-sync App to hold "Workflows: Read and write" on both
 # installations: without it GitHub refuses any push that adds a workflow file,

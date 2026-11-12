@@ -2319,6 +2319,50 @@ brings `FLEET_WORKER_EVERY_HOURS` (_agent-guidance#494), which
 Reverse: restore round 6's pins and drop the `cron_coverage.fleet` cut and
 the `skill-coverage.yml` part of `federation_vars.py`.
 
+## Re-pin round 8 (2026-11-12)
+
+The daily re-sync failed at "Regenerate starter/" from 2026-11-10
+([acsi-kit#41](https://github.com/Adam-S-Daniel/acsi-kit/issues/41)). Three
+source changes needed the kit to follow them:
+
+- `_agent-guidance`'s `repos.yml` moved `verify-actions-lock` from
+  `cron_coverage.out_of_scope` into `cron_coverage.fleet` once it had a
+  weekly cron. The kit's workflows use the public action, and an adopter's
+  fleet holds no copy of its repo, so `kit_repos.py` cuts that entry with its
+  comment, as it cuts the kit's own (C11).
+- `_agent-guidance`'s `test/run-tests.sh` now matches the dated-phrasing run
+  log with `grep -qE` and lets lesson check ids sit between `skill-shell` and
+  `dated-phrasing`. `machinery_tests.py` drops `rules-dir` from the new
+  pattern, and the rules-dir library item's op puts it back, as before.
+- skills-evals' `evals/budget.yml` ships `points_per_usd: 0.0015` (about
+  $6.70 per point, measured 2026-11-10) in place of 0.0005. The plan table in
+  `docs/before-you-start.md` quotes it, and `bootstrap/lib/plan_sizing.py`
+  scales the Pro and Max 5x rates by the same plan multipliers (0.03 and
+  0.006). The table's weekly shares were modeled at the old rate and are
+  flagged for re-modeling
+  ([acsi-kit#43](https://github.com/Adam-S-Daniel/acsi-kit/issues/43)).
+
+| Source | Before (`4e6aaeb`) | Round 8 |
+|---|---|---|
+| _agent-guidance | `9f42f9e69b1b` | `6026fa78be2c` |
+| acsi-agentskills | `e4a64b9f0bb9` | `60d805ca926c` |
+| repo-settings | `c3574f28da69` | `a890dbc58797` |
+| skills-evals | `5e50a24020ab` | `a50f114e26b9` |
+| wsl-automation | `0a438429236f` | `460f6c77fe5e` |
+
+`agentskills-private` keeps its pin; its starter and `library/` were
+re-exported by hand (MAINTAINING.md, Re-pin). acsi-agentskills is pinned at
+`60d805ca926c`, past `84aa6ef`, which removed
+`scripts/test_dependabot_auto_merge.py`: at `42a971565b30` (the sync of the
+shared Dependabot merge workflow) that test still read the old two-copy
+allowlist and failed in the starter. Later
+wsl-automation commits (two new scheduled tasks, the WSL memory log and the
+Claude settings sync) break `tasks_installer.py`'s keeper check, so
+wsl-automation stays at `460f6c77fe5e` here and follows in the next round.
+
+Reverse: restore the previous pins, the two patch edits and the three plan
+rates.
+
 ## The guidance overlap judgment (2026-11-10)
 
 `_agent-guidance#495` added a warn-only "Repo-specific guidance overlap"

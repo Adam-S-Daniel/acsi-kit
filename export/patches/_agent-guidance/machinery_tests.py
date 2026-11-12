@@ -132,15 +132,15 @@ test_agent_checks_persistent_delete() {
     fi
 ''', ''),    # The dated-phrasing pass's run-log assertion lists the checks that ran;
     # the kit's runner has no rules-dir (its library item puts it back).
-    ('''grep -qF '"checks":["rules-dir","secret-file","skill-shell","dated-phrasing"],"failed":[]' ''',
-     '''grep -qF '"checks":["secret-file","skill-shell","dated-phrasing"],"failed":[]' '''),
+    ('''grep -qE '"checks":\\["rules-dir","secret-file","skill-shell"(,"lesson-[a-z0-9-]+")*,"dated-phrasing"\\],"failed":\\[\\]' ''',
+     '''grep -qE '"checks":\\["secret-file","skill-shell"(,"lesson-[a-z0-9-]+")*,"dated-phrasing"\\],"failed":\\[\\]' '''),
 ]
 
 # What the rules-dir library item puts back in test/run-tests.sh.
 RUN_TESTS_RULES_DIR_OPS = [
     {"op": "replace", "file": "test/run-tests.sh",
-     "old": '''grep -qF '"checks":["secret-file","skill-shell","dated-phrasing"],"failed":[]' ''',
-     "new": '''grep -qF '"checks":["rules-dir","secret-file","skill-shell","dated-phrasing"],"failed":[]' '''},
+     "old": '''grep -qE '"checks":\\["secret-file","skill-shell"(,"lesson-[a-z0-9-]+")*,"dated-phrasing"\\],"failed":\\[\\]' ''',
+     "new": '''grep -qE '"checks":\\["rules-dir","secret-file","skill-shell"(,"lesson-[a-z0-9-]+")*,"dated-phrasing"\\],"failed":\\[\\]' '''},
 ]
 
 

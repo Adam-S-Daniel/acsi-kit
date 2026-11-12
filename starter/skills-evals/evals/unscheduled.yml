@@ -15,7 +15,7 @@
 # the fixture.
 fixtures:
   - path: evals/workflow-path-audit/required-check-routing
-    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-10, holds: fails criterion 4 (the fixture is unchanged since 2026-11-03 03:28 UTC, and both runs after that, 20261103T124306Z-892f4f and 20261103T134218Z-d68eee, have the without arm at 8/8 checks)."
   - path: evals/skills-doctor/one-row-rejects-the-lock
     reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
   - path: evals/skills-doctor/ssh-remote-is-durable

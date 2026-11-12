@@ -69,7 +69,7 @@ a smaller plan has a smaller week. From it, `copy-starter.sh` sizes the
 
 | `CLAUDE_PLAN` | `pro` ($20) | `max5x` ($100) | `max20x` ($200) |
 |---|---|---|---|
-| `points_per_usd` in `evals/budget.yml` | `0.01` | `0.002` | `0.0005` (as exported) |
+| `points_per_usd` in `evals/budget.yml` | `0.03` | `0.006` | `0.0015` (as exported) |
 | `stop_when_session_above` (5-hour window) | `0.90` | `0.90` | not set |
 | `judge_exclude_tiers` in `evals/roster-policy.yml` | `[fable, mythos]` | not set | not set |
 | Fleet worker (`FLEET_WORKER_EVERY_HOURS` on `_agent-guidance`) | every 24 hours | every 6 hours | every 3 hours |
@@ -81,10 +81,11 @@ The weekly cap (30%) and the 80% account stop stay as exported on every plan.
 Why each one:
 
 - **`points_per_usd`.** The budget charges each eval run its own dollar cost
-  (the CLI's API-equivalent figure) times this rate. The exported `0.0005` is
-  $20 per point of the weekly meter, measured on Max 20x (about $24, range
-  $20 to $35). Left unchanged on a smaller plan, the guard would undercount
-  evals 4 or 20 times, and only the 80% account stop would hold them.
+  (the CLI's API-equivalent figure) times this rate. The exported `0.0015` is
+  about $6.70 per point of the weekly meter, measured on Max 20x on
+  2026-11-10 in quiet overnight windows when evals were the only use ($6 to
+  $7.30). Left unchanged on a smaller plan, the guard would undercount evals
+  4 or 20 times, and only the 80% account stop would hold them.
 - **The 5-hour stop.** A sweep fires many runs in a few hours. On a smaller
   plan that can use up the whole 5-hour window, so a run stops starting work,
   and no fire starts, once the window reads 90%.
@@ -92,6 +93,12 @@ Why each one:
   roster picks the judge from another tier.
 - **The fleet worker.** It fires about 56 times a week at every 3 hours,
   about 35% of a Pro week on its own.
+
+The shares were modeled at the earlier rate of $20 per point. At the
+2026-11-10 rate of about $6.70 the base routines' shares, and the fleet
+worker's 35% of a Pro week, may be up to three times as high until they are
+re-modeled ([acsi-kit#43](https://github.com/Adam-S-Daniel/acsi-kit/issues/43)).
+Evals stay within the 30% cap, which the guard now charges at the new rate.
 
 The shares are a model, not a measurement on smaller plans. They assume Max
 5x is a quarter of Max 20x's weekly allowance and Pro a twentieth (the plan
