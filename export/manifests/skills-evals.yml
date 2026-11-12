@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: b345ff7506c379112fb3ab9a3156e1090d51d21c
+source_sha: 194edfb4bf0f4d3eeff5a47dfde81c8e0667bd59
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -144,6 +144,27 @@ edits:
       builds from the registry's own name, so it must follow the C1 renames;
       as one literal after github.com/ it read as a citation (P2) and kept the
       source owner's name, failing the test in the kit.
+  - path: explorer/test/run.js
+    old: "url: 'https://github.com/Adam-S-Daniel/adam-agentskills/pull/142' };\n"
+    new: "url: 'https://github.com/' + 'Adam-S-Daniel/adam-agentskills/pull/142' };\n"
+    why: >-
+      Round 11. The test compares this live pull request URL with the one the
+      document lists for the same pull request, so it must follow the C1
+      renames; as one literal after github.com/ it read as a citation (P2) and
+      kept the source owner's name, so the two rows were not recognized as one.
+  - path: explorer/test/run.js
+    old: "url: 'https://github.com/Adam-S-Daniel/adam-agentskills/pull/160' };\n"
+    new: "url: 'https://github.com/' + 'Adam-S-Daniel/adam-agentskills/pull/160' };\n"
+    why: Round 11. The same split for the second live pull request in that test.
+  - path: tool/test/run.js
+    stage: output
+    old: "  ok(!/the owner/.test(t), 'names no person');\n"
+    new: "  ok(!/Example Adopter/.test(t), 'names no person');\n"
+    why: >-
+      Substitution side effect, as for test_issue_dashboard_build.py. The source
+      checks that the Summary page never names its owner; C10 turns that name
+      into "the owner", which the page says on purpose, so the check looks for
+      the kit's invented person instead.
   # ---- Review fixes (2026-10-29): owner issue links in live output
   - path: harness/run_eval.py
     old: |2
@@ -484,47 +505,24 @@ edits:
       main() exited ("threads: empty dataset; give it a placeholder row"). It
       gets one placeholder row, key field `id` = "none", like the datasets
       that already have one.
-  - path: dashboard/build.py
-    stage: output
-    old: "    return stages, cfg[\"grid\"], lanes, gaps\n"
-    new: |2
-          return stages, cfg["grid"], lanes, gaps or [
-              {"gap": PLACEHOLDER_ID, "title": "No loop gaps yet", "status": "", "owner": "", "link": None}]
-    why: >-
-      Cold start. A loop with no gaps yet wrote an empty `loop_gaps` and
-      main() exited. One placeholder row, key field `gap` = "none"; the
-      placeholder is added after the stages are derived, so no stage sees it.
-  - path: dashboard/build.py
-    stage: output
-    old: "         out[\"loop_gaps\"]) = loop(load(loop_cfg), inp(\"loop_status.json\"), site)\n"
-    new: "         out[\"loop_gaps\"]) = loop(load(loop_cfg), inp(\"loop_status.json\", {\"gaps\": []}), site)\n"
-    why: >-
-      Cold start. `loop_status.json` is the loop thread's own gap list, which
-      an adopter has no source for yet; build() exited "missing input". An
-      absent file builds as no gaps, like the other optional dumps.
   - path: explorer/src/private/datasets.js
     stage: output
     old: "  cost_benefit_weeks: 'week', half_built_issues: 'key'\n};\n"
-    new: "  cost_benefit_weeks: 'week', half_built_issues: 'key', threads: 'id', loop_gaps: 'gap'\n};\n"
+    new: "  cost_benefit_weeks: 'week', half_built_issues: 'key', threads: 'id'\n};\n"
     why: >-
-      Cold start. The two new placeholder rows are hidden the way the other
-      key-field placeholders are, so the loop gap counts stay 0 of 0 and the
-      tables stay empty rather than showing a "none" row. The private page
+      Cold start. The thread placeholder row is hidden the way the other
+      key-field placeholders are, so the table stays empty rather than
+      showing a "none" row. The private page
       (dashboard/page/index.html) is built from this file; the regenerate
       step below rebuilds it.
-  - path: dashboard/README.md
-    stage: output
-    old: "| `loop_status.json` | The loop's gap list (`gaps[]`: `gap`, `title`, `status`, `owner`, `pr`), kept by the loop thread |\n"
-    new: "| `loop_status.json` | Optional. The loop's gap list (`gaps[]`: `gap`, `title`, `status`, `owner`, `pr`), kept by the loop thread; without it the loop has no gaps |\n"
-    why: Cold start. Says the dump is optional now.
   - path: test/issues/test_issue_dashboard_build.py
     stage: output
     old: "    def test_the_page_names_no_owner(self):\n"
     new: |2
           def test_builds_from_fully_empty_inputs(self):
-              # Cold start: a new adopter has no thread list, no dumps and no
-              # loop_status.json. The example config builds anyway, and the two
-              # datasets that would be empty carry one placeholder row.
+              # Cold start: a new adopter has no thread list and no dumps. The
+              # example config builds anyway, and the empty thread dataset
+              # carries one placeholder row.
               empty_results, empty_inputs, out = self.tmp / "r0", self.tmp / "i0", self.tmp / "ds0"
               empty_results.mkdir()
               empty_inputs.mkdir()
@@ -534,14 +532,12 @@ edits:
               build.main(["--results", str(empty_results), "--inputs", str(empty_inputs),
                           "--config", str(DASH / "config.example"), "--out", str(out), "--now", NOW.isoformat()])
               threads = json.loads((out / "threads.json").read_text())
-              gaps = json.loads((out / "loop_gaps.json").read_text())
               self.assertEqual([r["id"] for r in threads], ["none"])
-              self.assertEqual([r["gap"] for r in gaps], ["none"])
               for name in {p.stem for p in out.glob("*.json")}:
                   self.assertTrue(json.loads((out / f"{name}.json").read_text()), name)
-              # The page (built from explorer/src) hides both placeholders.
+              # The page (built from explorer/src) hides the placeholder.
               keys = (REPO / "explorer" / "src" / "private" / "datasets.js").read_text()
-              self.assertIn("threads: 'id', loop_gaps: 'gap'", keys)
+              self.assertIn("threads: 'id'", keys)
 
           def test_the_page_names_no_owner(self):
     why: Cold start. Regression test that build.py succeeds on fully empty inputs.

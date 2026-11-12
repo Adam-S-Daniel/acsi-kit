@@ -3,7 +3,7 @@
    each subject's `run_utility` (harness/gates.py, RUN UTILITY): runs and
    list-price cost per UTC day, model, class and discard reason. */
 import { STRINGS } from '../core/strings.js';
-import { clean, fmtCount } from '../core/format.js';
+import { clean, fmtCount, fmtUsd } from '../core/format.js';
 import { h, toDom } from '../core/h.js';
 import { legend, chartTitle } from '../core/charts.js';
 import { term } from '../core/terms.js';
@@ -70,7 +70,7 @@ export function utilityTotals(rows, period, refMs) {
   return out;
 }
 
-const usd = (x) => '$' + x.toFixed(2);
+const usd = (x) => fmtUsd(x);
 const money = (t) => usd(t.cost) + (t.unknown ? STRINGS.utilityUnknownCost(t.unknown) : '');
 
 /* Per-day stacked columns of runs by class, oldest day on the left. */
@@ -106,6 +106,17 @@ export function dayChart(days) {
     }
   });
   return h('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'chart weeks', role: 'img', 'aria-label': STRINGS.utilityChartAria(days.length) }, kids);
+}
+
+/* The last 30 days' share of test dollars that bought nothing, and the two
+   biggest causes by dollars: { share, noUse, total, top: [[reason, cost]] }, or
+   null when no run in the period has a known cost. Dollars at full precision. */
+export function noUseShare(doc, refMs) {
+  const t = utilityTotals(fleetGroups(doc)[0].rows, DEFAULT_PERIOD, refMs);
+  if (!(t.total.cost > 0)) return null;
+  const top = Object.entries(t.reasons).filter(([, v]) => v.cost > 0).sort((a, b) => b[1].cost - a[1].cost || (a[0] < b[0] ? -1 : 1)).slice(0, 2)
+    .map(([k, v]) => [reasonName(k), v.cost]);
+  return { share: t.noUse.cost / t.total.cost, noUse: t.noUse.cost, total: t.total.cost, top };
 }
 
 const reasonName = (k) => (Object.prototype.hasOwnProperty.call(STRINGS.discardedReasons, k) ? STRINGS.discardedReasons[k] : clean(k));

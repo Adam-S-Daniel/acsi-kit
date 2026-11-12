@@ -365,6 +365,15 @@ def readme(text: str, where: str) -> str:
         where,
     )
 
+    # The census now dispatches the Evals Explorer data workflow after a real
+    # publish (Re-pin round 11); the kit ships that workflow, but not Task Health.
+    text = T.sub_once(
+        text,
+        "  failure keeps its own code), so Task Health shows it. Needs `gh` logged in with a token that can\n",
+        "  failure keeps its own code), so the task's last result shows it. Needs `gh` logged in with a token that can\n",
+        where,
+    )
+
     text = T.sub_once(
         text,
         "Every task action that runs a repo script (backup, keeper, ccstatusline sync,\n"
