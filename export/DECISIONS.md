@@ -2491,10 +2491,10 @@ The export then failed in two places, and the kit follows the source in both:
 
 - **skills-evals removed the dashboard's Loop tab.** `dashboard/build.py` no
   longer has `loop()`, `loop_gaps` or the `loop_status.json` input (the loop's
-  gap list, and the stages, grid and lanes built from it), so the three cold-start
-  edits that gave those a placeholder row or an optional input had nothing to
-  anchor on, and the README row for `loop_status.json` is gone from the source.
-  All four edits are dropped with the feature. What stays: the thread
+  gap list, and the stages, grid and lanes built from it), so the two `build.py`
+  cold-start edits that gave those a placeholder row or an optional input had
+  nothing to anchor on, and the README row for `loop_status.json` is gone from
+  the source. Those three edits are dropped with the feature. What stays: the thread
   placeholder row (`threads()` still returns an empty list for a project with no
   threads), so the `datasets.js` edit now adds only `threads: 'id'` and the
   empty-inputs regression test checks the thread row alone. The source also
@@ -2531,8 +2531,8 @@ The export then failed in two places, and the kit follows the source in both:
 | skills-evals | `b345ff7506c3` | `194edfb4bf0f` |
 | wsl-automation | `aa78623ef6e9` | `6987040ddf99` |
 
-Reverse: restore the previous pins, put back the three loop cold-start edits
-and the `loop_status.json` README edit, the `loop_gaps` key in the
+Reverse: restore the previous pins, put back the two loop cold-start edits in
+`build.py` and the `loop_status.json` README edit, the `loop_gaps` key in the
 `datasets.js` edit and the gap lines of the empty-inputs test, and drop the
 census README patch step, the script header edit and the three test edits
 above.
