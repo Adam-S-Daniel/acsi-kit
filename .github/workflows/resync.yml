@@ -3,8 +3,9 @@
 # runs the export's tests, and opens or updates one pull request from
 # `resync/auto`. If one source's new head breaks the export or its tests, that
 # source is held back at its old pin (export/resync_holdback.py) and the others
-# still move; see the held-back issue below. A human still reviews and merges it: new skills or guidance
-# sections need tiering, and departures need recording in DECISIONS.md.
+# still move; see the held-back issue below. A human still reviews and merges
+# the pull request: new skills or guidance sections need tiering, and
+# departures need recording in DECISIONS.md.
 #
 # The private registry (agentskills-private) is left out: its source cannot be
 # read without a credential, so it is re-pinned by hand (MAINTAINING.md).
@@ -269,8 +270,8 @@ jobs:
           gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label agent-authored > /dev/null \
             || echo "::warning::could not add the agent-authored label"
 
-      # A green run with nothing held back closes the failure issue, if one is open. It never fails
-      # the job: the re-sync itself succeeded.
+      # A green run with nothing held back closes the failure issue, if one is
+      # open. It never fails the job: the re-sync itself succeeded.
       - name: Close the failure issue
         if: success() && steps.holdback.outputs.held_back == ''
         env:
