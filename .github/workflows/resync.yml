@@ -1,7 +1,9 @@
 # Keeps the kit in step with its source repos (issue #2): moves every
 # manifest's pinned commit to its source's current head, regenerates starter/,
 # runs the export's tests, and opens or updates one pull request from
-# `resync/auto`. A human still reviews and merges it: new skills or guidance
+# `resync/auto`. If one source's new head breaks the export or its tests, that
+# source is held back at its old pin (export/resync_holdback.py) and the others
+# still move; see the held-back issue below. A human still reviews and merges it: new skills or guidance
 # sections need tiering, and departures need recording in DECISIONS.md.
 #
 # The private registry (agentskills-private) is left out: its source cannot be
@@ -16,7 +18,11 @@
 #
 # A scheduled failure is otherwise silent, so a failed run opens or updates ONE
 # open issue, "Re-sync from sources is failing", with the run's link and the
-# failed step's name (never its log), and the next successful run closes it.
+# failed step's name (never its log), and the next successful run closes it. A
+# run that held a source back opens or updates the same issue, naming the held
+# sources and the run (never a log), without failing the job; only a run with
+# nothing held back closes it. If every source is held back there is no pull
+# request.
 # Those two steps use GITHUB_TOKEN, which is why the job alone holds
 # issues: write.
 name: Re-sync from sources
@@ -63,51 +69,20 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # The same fetch and npm install as ci.yml's test job: the _agent-guidance
-      # export runs that repo's Node scripts, and a fetched source has no work
-      # tree. No `--check` here: this rewrites starter/ from the new pins.
-      - name: Regenerate starter/
-        id: regenerate
-        if: steps.resync.outputs.changed == 'true'
-        env:
-          SOURCE_OWNER: ${{ github.repository_owner }}
-          PYTHONDONTWRITEBYTECODE: "1"
-        run: |
-          set -euo pipefail
-          sources="$RUNNER_TEMP/kit-sources"
-          python3 export/fetch_sources.py --owner "$SOURCE_OWNER" --dest "$sources" --skip agentskills-private
-          # Two exports run a source's own Node code (their manifests'
-          # regenerate steps), and a fetched source has no work tree: the
-          # _agent-guidance export runs that repo's scripts with NODE_PATH at
-          # its node_modules, and the skills-evals export builds its three
-          # explorer pages with esbuild from explorer/node_modules. Install
-          # each from its own lockfile at the manifest's pinned commit.
-          npm_at_pin() {  # npm_at_pin <manifest> <source checkout> <folder in it, or "" for its root>
-            local sha npm_dir pre=${3:+$3/}
-            sha=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["source_sha"])' "$1")
-            [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::$1 has no full source_sha"; exit 1; }
-            npm_dir=$(mktemp -d "$RUNNER_TEMP/npm-XXXXXX")
-            git -C "$2" show "$sha:${pre}package.json" > "$npm_dir/package.json"
-            git -C "$2" show "$sha:${pre}package-lock.json" > "$npm_dir/package-lock.json"
-            npm ci --prefix "$npm_dir" --ignore-scripts --no-audit --no-fund --silent
-            mkdir -p "$2/$pre"
-            mv "$npm_dir/node_modules" "$2/${pre}node_modules"
-          }
-          npm_at_pin export/manifests/_agent-guidance.yml "$sources"/_agent-guidance ""
-          npm_at_pin export/manifests/skills-evals.yml "$sources"/skills-evals explorer
-          python3 export/export.py --sources "$sources" --skip agentskills-private
-          # Stage new starter files now: export/tests checks every kit file is
-          # tracked by git, and a file a source just added is not yet.
-          git add -A -- export/manifests starter
-          echo "files changed: $(git status --porcelain | wc -l)"
-
       # A leak scan that checked nothing must not read as green, so a missing
       # or empty denylist fails here, as in ci.yml (this job never runs for
       # Dependabot, so ci.yml's exception does not apply).
-      - name: Export tests
-        id: tests
+      #
+      # The same fetch and npm install as ci.yml's test job, but with the old
+      # pins fetched too: export/resync_holdback.py regenerates starter/ and
+      # runs export/tests, and when the new pins break either it holds the
+      # broken source back at its old pin so the others still move. It exits 0
+      # even if every source is held back, and reports through its outputs.
+      - name: Regenerate starter/, holding back a source that breaks it
+        id: holdback
         if: steps.resync.outputs.changed == 'true'
         env:
+          SOURCE_OWNER: ${{ github.repository_owner }}
           PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
@@ -116,17 +91,26 @@ jobs:
             echo "::error::the PRIVACY_DENYLIST repository secret is unset or empty, so the kit's leak scan cannot run: set the secret (one regular expression per line), then re-run"
             exit 1
           fi
-          python3 -m pytest export/tests -q -p no:cacheprovider
+          sources="$RUNNER_TEMP/kit-sources"
+          python3 export/fetch_sources.py --owner "$SOURCE_OWNER" --dest "$sources" --skip agentskills-private --also-pins-at HEAD
+          # The failing output's tails go to a file for a fixer to read; they
+          # are never printed here or copied into the pull request or issue.
+          python3 export/resync_holdback.py --owner "$SOURCE_OWNER" --sources "$sources" \
+            --summary "$RUNNER_TEMP/resync-summary.md" --tails "$RUNNER_TEMP/holdback-tails.txt"
+          echo "files changed: $(git status --porcelain | wc -l)"
+
+      - name: Show the summary
+        if: steps.resync.outputs.changed == 'true'
+        run: cat "$RUNNER_TEMP/resync-summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check for the App
         id: app
-        if: steps.resync.outputs.changed == 'true'
+        if: steps.resync.outputs.changed == 'true' && steps.holdback.outputs.all_held != 'true'
         env:
           APP_CLIENT_ID: ${{ vars.RESYNC_APP_CLIENT_ID }}
           HAS_PEM: ${{ secrets.RESYNC_APP_PEM != '' }}
         run: |
           set -euo pipefail
-          cat "$RUNNER_TEMP/resync-summary.md" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$APP_CLIENT_ID" ] && [ "$HAS_PEM" = "true" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
@@ -197,6 +181,50 @@ jobs:
           fi
           gh pr edit "$number" --add-label agent-authored > /dev/null || echo "::warning::could not add the agent-authored label"
 
+      # A held-back source is not a failed run: the others moved and the pull
+      # request is open. It is still a source the kit cannot follow, so it
+      # opens or updates the same issue as a failure, naming the sources and
+      # the run, never a log. HELD_BACK holds only manifest repo names the
+      # script validated.
+      - name: Open or update the held-back issue
+        if: success() && steps.holdback.outputs.held_back != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: Re-sync from sources is failing
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HELD_BACK: ${{ steps.holdback.outputs.held_back }}
+          ALL_HELD: ${{ steps.holdback.outputs.all_held }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/resync-issue.md"
+          {
+            printf '## TLDR\n\n'
+            printf 'The daily re-sync of the kit held back a source whose new head breaks the export or its tests, so `starter/` is not following it: %s.\n\n' "$HELD_BACK"
+            if [ "$ALL_HELD" = true ]; then
+              printf 'Every moved source was held back, so no pull request was opened.\n\n'
+            else
+              printf 'The other sources moved, in the open re-sync pull request.\n\n'
+            fi
+            printf 'Run: %s\n\n' "$RUN_URL"
+            printf 'The run summary has a "Held back" section with the old and new pins. A held source needs an `edits` entry or a patch in `export/manifests/` to follow its change, recorded in `export/DECISIONS.md` (MAINTAINING.md, Re-pin); the fix routine or a maintainer must do that. The failing output is in the run, not here. The next run with nothing held back closes this issue.\n'
+          } > "$body"
+          # A failed list must not open a duplicate, so it stops here.
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --json number,title --jq 'map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty') \
+            || { echo "::error::could not list open issues; no issue opened or updated"; exit 1; }
+          if [[ "$number" =~ ^[0-9]+$ ]]; then
+            gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$body" > /dev/null
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" \
+              --body "Still held back: $HELD_BACK. $RUN_URL" > /dev/null
+            echo "updated issue #$number"
+          else
+            url=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body-file "$body")
+            number="${url##*/}"
+            echo "opened issue #$number"
+          fi
+          gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label agent-authored > /dev/null \
+            || echo "::warning::could not add the agent-authored label"
+
       # Everything arrives through env:, and the only expressions are the
       # run's own coordinates and step outcomes, so nothing a source or a step
       # printed is evaluated as shell. The body names the failed step and links
@@ -208,15 +236,13 @@ jobs:
           ISSUE_TITLE: Re-sync from sources is failing
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           OUTCOME_RESYNC: ${{ steps.resync.outcome }}
-          OUTCOME_REGENERATE: ${{ steps.regenerate.outcome }}
-          OUTCOME_TESTS: ${{ steps.tests.outcome }}
+          OUTCOME_HOLDBACK: ${{ steps.holdback.outcome }}
           OUTCOME_PUSH: ${{ steps.push.outcome }}
         run: |
           set -euo pipefail
           failed=""
           [ "$OUTCOME_RESYNC" = failure ] && failed="${failed}${failed:+, }Move the pins to each source's head"
-          [ "$OUTCOME_REGENERATE" = failure ] && failed="${failed}${failed:+, }Regenerate starter/"
-          [ "$OUTCOME_TESTS" = failure ] && failed="${failed}${failed:+, }Export tests"
+          [ "$OUTCOME_HOLDBACK" = failure ] && failed="${failed}${failed:+, }Regenerate starter/, holding back a source that breaks it"
           [ "$OUTCOME_PUSH" = failure ] && failed="${failed}${failed:+, }Push resync/auto and open or update the pull request"
           [ -n "$failed" ] || failed="another step (see the run)"
           body="$RUNNER_TEMP/resync-issue.md"
@@ -243,10 +269,10 @@ jobs:
           gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label agent-authored > /dev/null \
             || echo "::warning::could not add the agent-authored label"
 
-      # A green run closes the failure issue, if one is open. It never fails
+      # A green run with nothing held back closes the failure issue, if one is open. It never fails
       # the job: the re-sync itself succeeded.
       - name: Close the failure issue
-        if: success()
+        if: success() && steps.holdback.outputs.held_back == ''
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_TITLE: Re-sync from sources is failing

@@ -55,3 +55,15 @@ def test_export_skip_refuses_a_repo_another_one_needs():
     assert wanted == {"base"} and order == ["base"]
     with pytest.raises(export.ExportError, match="another exported repo needs it"):
         export.order_manifests(manifests, None, ["base"])
+
+
+def test_manifests_at_reads_the_committed_manifests_and_the_union_plan_has_both_pins():
+    files = {
+        "export/manifests/_common.yml": "protect: []\n",
+        "export/manifests/one.yml": f"repo: one\nsource: src-one\nsource_sha: {SHA_A}\n",
+    }
+    old = fetch_sources.manifests_at("HEAD", show=lambda rev, path: files[path], names=lambda rev: sorted(files))
+    assert list(old) == ["one"]
+    new = {"one": {"repo": "one", "source": "src-one", "source_sha": SHA_B}}
+    merged = fetch_sources.merge_plans(fetch_sources.plan(new), fetch_sources.plan(old))
+    assert merged == {"src-one": [SHA_A, SHA_B]}

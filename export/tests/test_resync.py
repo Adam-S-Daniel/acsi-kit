@@ -166,10 +166,17 @@ def test_no_run_block_interpolates_an_expression():
         assert "${{" not in step.get("run", ""), step.get("name")
 
 
-def test_a_failure_opens_or_updates_one_issue_and_a_success_closes_it():
+def _step(job, name):
+    return next(s for s in job["steps"] if s.get("name") == name)
+
+
+def test_a_failure_opens_or_updates_one_issue_and_a_clean_success_closes_it():
     _, job = _job()
-    report, close = job["steps"][-2], job["steps"][-1]
-    assert report["if"] == "failure()" and close["if"] == "success()"
+    report = _step(job, "Open or update the failure issue")
+    close = _step(job, "Close the failure issue")
+    assert job["steps"][-2:] == [report, close]
+    assert report["if"] == "failure()"
+    assert close["if"] == "success() && steps.holdback.outputs.held_back == ''"
     for step in (report, close):
         assert "uses" not in step
         assert step["env"]["ISSUE_TITLE"] == ISSUE_TITLE
@@ -183,8 +190,50 @@ def test_a_failure_opens_or_updates_one_issue_and_a_success_closes_it():
     assert run.index("printf '## TLDR") < run.index("printf 'The daily")
     assert "--add-label agent-authored > /dev/null \\\n" in run and "|| echo \"::warning::" in run
     # It names the failed step from the step outcomes, never the log.
-    named = {"resync", "regenerate", "tests", "push"}
+    named = {"resync", "holdback", "push"}
     assert {k.removeprefix("OUTCOME_").lower() for k in report["env"] if k.startswith("OUTCOME_")} == named
     assert named <= {s.get("id") for s in job["steps"]}
     assert "gh run view" not in run and "--log" not in run
     assert "gh issue close" in close["run"]
+
+
+def test_one_step_regenerates_with_the_holdback_and_keeps_the_denylist_guard():
+    _, job = _job()
+    names = [s.get("name") for s in job["steps"]]
+    assert "Export tests" not in names and "Regenerate starter/" not in names
+    step = _step(job, "Regenerate starter/, holding back a source that breaks it")
+    assert step["id"] == "holdback" and step["if"] == "steps.resync.outputs.changed == 'true'"
+    assert step["env"]["PRIVACY_DENYLIST"] == "${{ secrets.PRIVACY_DENYLIST }}"
+    run = step["run"]
+    assert 'PRIVACY_DENYLIST//[[:space:]]/' in run and "exit 1" in run
+    # Old pins are fetched too, and the script is the only thing that runs the tests.
+    assert "export/fetch_sources.py" in run and "--also-pins-at HEAD" in run
+    assert "export/resync_holdback.py" in run and "--tails" in run
+    assert "pytest" not in run and "npm" not in run
+    # The tails file is never printed or uploaded.
+    assert "cat " not in run and not any("upload-artifact" in str(s.get("uses", "")) for s in job["steps"])
+
+
+def test_all_held_means_no_pull_request():
+    _, job = _job()
+    for name in ("Check for the App",):
+        assert "steps.holdback.outputs.all_held != 'true'" in _step(job, name)["if"]
+    for name in ("Mint the App token", "Push resync/auto and open or update the pull request"):
+        assert _step(job, name)["if"].startswith("steps.app.outputs.configured")
+
+
+def test_a_held_back_source_opens_the_issue_without_failing_the_job():
+    _, job = _job()
+    held = _step(job, "Open or update the held-back issue")
+    assert held["if"] == "success() && steps.holdback.outputs.held_back != ''"
+    assert held["env"]["ISSUE_TITLE"] == ISSUE_TITLE
+    assert held["env"]["HELD_BACK"] == "${{ steps.holdback.outputs.held_back }}"
+    assert held["env"]["RUN_URL"].endswith("/actions/runs/${{ github.run_id }}")
+    run = held["run"]
+    assert "gh issue create" in run and "gh issue edit" in run and "gh issue comment" in run
+    assert "$HELD_BACK" in run and "$RUN_URL" in run
+    # Never a log: no run view, and the tails file is not read.
+    assert "gh run view" not in run and "--log" not in run and "holdback-tails" not in run
+    # It sits before the failure steps, after the pull request is pushed.
+    order = [s.get("name") for s in job["steps"]]
+    assert order.index("Push resync/auto and open or update the pull request") < order.index(held["name"]) < order.index("Open or update the failure issue")

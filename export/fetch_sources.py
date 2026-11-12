@@ -2,7 +2,7 @@
 """fetch_sources.py: fetch the source checkouts export.py reads, at their pinned commits.
 
 Usage:
-  python3 fetch_sources.py --owner OWNER --dest DIR [--skip REPO ...]
+  python3 fetch_sources.py --owner OWNER --dest DIR [--skip REPO ...] [--also-pins-at REV]
 
 For CI (the kit's repo runs `export.py --check` on a runner that has only
 its own checkout). Every manifest's `source` at its `source_sha`, and
@@ -14,6 +14,11 @@ manifest repos to leave out, the same names `export.py --skip` takes, for a
 source the runner cannot read. No credential is used: every fetched source
 must be public.
 
+--also-pins-at REV additionally fetches the commits the manifests pinned at
+git revision REV (read with `git show REV:export/manifests/<file>`), for the
+daily re-sync: after its pins move, resync_holdback.py needs both the new
+pins and the old ones, to hold a broken source back at its old commit.
+
 Prints one line per source, never a URL with a credential (there is none).
 """
 
@@ -24,6 +29,8 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+import yaml
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -55,6 +62,39 @@ def plan(manifests: dict, skip=()) -> dict[str, list[str]]:
     return {repo: sorted(shas) for repo, shas in sorted(out.items())}
 
 
+def merge_plans(*plans: dict) -> dict[str, list[str]]:
+    """The union of several plans, each source's shas sorted and de-duplicated."""
+    out: dict[str, set] = {}
+    for p in plans:
+        for repo, shas in p.items():
+            out.setdefault(repo, set()).update(shas)
+    return {repo: sorted(shas) for repo, shas in sorted(out.items())}
+
+
+def git_show(rev: str, path: str) -> str:
+    return subprocess.run(["git", "-C", str(HERE.parent), "show", f"{rev}:{path}"],
+                          check=True, capture_output=True, text=True).stdout
+
+
+def git_manifest_names(rev: str) -> list[str]:
+    out = subprocess.run(["git", "-C", str(HERE.parent), "ls-tree", "--name-only", rev, "export/manifests/"],
+                         check=True, capture_output=True, text=True).stdout
+    return [line for line in out.splitlines() if line.endswith(".yml")]
+
+
+def manifests_at(rev: str, show=git_show, names=git_manifest_names) -> dict:
+    """The manifests as committed at REV, keyed by their `repo:` like export.load_manifests."""
+    out = {}
+    for path in names(rev):
+        if path.rsplit("/", 1)[-1] == "_common.yml":
+            continue
+        doc = yaml.safe_load(show(rev, path))
+        if not doc or "repo" not in doc:
+            raise export.ExportError(f"{path} at {rev}: no `repo:` key")
+        out[doc["repo"]] = doc
+    return out
+
+
 def git(*args: str) -> None:
     subprocess.run(["git", *args], check=True, stdout=subprocess.DEVNULL)
 
@@ -64,13 +104,17 @@ def main(argv=None) -> int:
     ap.add_argument("--owner", required=True, help="the GitHub owner the sources are fetched from")
     ap.add_argument("--dest", required=True, type=Path, help="the folder to fetch into (export.py --sources)")
     ap.add_argument("--skip", nargs="*", default=[], help="manifest repo names to leave out")
+    ap.add_argument("--also-pins-at", metavar="REV",
+                    help="also fetch the commits the manifests pinned at this git revision (e.g. HEAD)")
     args = ap.parse_args(argv)
     if not OWNER.fullmatch(args.owner):
         print(f"fetch_sources.py: not a GitHub owner: {args.owner!r}", file=sys.stderr)
         return 2
     try:
         wanted = plan(export.load_manifests(), args.skip)
-    except export.ExportError as exc:
+        if args.also_pins_at:
+            wanted = merge_plans(wanted, plan(manifests_at(args.also_pins_at), args.skip))
+    except (export.ExportError, subprocess.CalledProcessError) as exc:
         print(f"fetch_sources.py: {exc}", file=sys.stderr)
         return 2
     args.dest.mkdir(parents=True, exist_ok=True)
