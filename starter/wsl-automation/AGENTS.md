@@ -70,7 +70,7 @@ Re-open this only if Microsoft ships a WSL event provider.
 `Usage Census Publish` and `Session Miner` set `StartWhenAvailable` (plus
 `RestartCount 3`, `RestartInterval 10 min`); a laptop asleep at their minute
 otherwise skipped the day (result 2147946720, `0x800710E0`). The PowerShell
-tasks stay off it (above) because a catch-up at wake lands in the post-wake
+tasks stay off it (below) because a catch-up at wake lands in the post-wake
 window; these scripts only need a working `wsl.exe`, and the restart interval
 clears that window if a catch-up lands in it. Memory Curation and the other tasks
 are unchanged.
@@ -91,7 +91,7 @@ from the WSLService service".
 - **This is why the PowerShell tasks here do not use `-StartWhenAvailable`:** a
   catch-up at wake would land in that window. A missed run stays missed. The two
   daily `wsl.exe` publish tasks do catch up, with restarts that outlast the
-  window (next section). Any work that adds a boot- or resume-adjacent trigger
+  window (previous section). Any work that adds a boot- or resume-adjacent trigger
   owes the same delay. (Native Linux has no such window, so the systemd timers
   there are `Persistent=true`.)
 

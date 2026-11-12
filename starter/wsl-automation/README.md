@@ -39,9 +39,9 @@ instead (see "Linux and macOS" below).
    C:\Users\<you>\repos\wsl-automation
    ```
 
-2. **Background-task prerequisites (once per machine).** Every task runs as a
-   background (S4U, session 0) task, so a run never flashes a window on the
-   desktop. That imposes two one-time requirements:
+2. **Background-task prerequisites (once per machine).** Every task but the
+   Docker watchdog runs as a background (S4U, session 0) task, so a run never
+   flashes a window on the desktop. That imposes two one-time requirements:
 
    - **PowerShell 7 installed via MSI** (not the Microsoft Store build). A
      Store-packaged pwsh cannot be activated in session 0, so the pwsh-based
@@ -335,9 +335,8 @@ up the new PATH.
   `gh auth git-credential` with a file-stored token, which works in an S4U
   logon.
 - Allowed on battery, 15 minute execution limit, ignores a second overlapping
-  instance. There is no `-StartWhenAvailable`: a missed day stays missed (the
-  census's 14-day freshness window and 6-day re-publish absorb it), and a
-  catch-up at wake would land in WSL's post-wake transition window. 12:37 keeps
+  instance. A missed day catches up (`-StartWhenAvailable`, with three
+  restarts 10 minutes apart that outlast WSL's post-wake transition window). 12:37 keeps
   it off the hour.
 - Appends one line per run (UTC time, exit code, totals-only summary) to
   `~/.cache/usage-census.log` inside the distro.

@@ -2405,10 +2405,20 @@ added two scheduled tasks and some supporting changes:
   changed, which stays excluded.
 - **The Docker watchdog task is registered again.** `tasks_installer.py`'s
   block removal for the task health publish ran on to the archive anchor and
-  took the Docker watchdog's task block with it (and its help, its summary
-  line and the wrapper's call), while the module, the parameters, the README
-  and the Pester tests kept it. The removal now stops at the watchdog's block,
-  and the help, summary and wrapper call keep it.
+  took the Docker watchdog's task block with it (its help and the wrapper's
+  call too). Its summary line stayed and read the unassigned
+  `$dockerWatchdogArguments`, so under the module's strict mode the installer
+  most likely threw at the summary, after registering the other tasks. The
+  removal now stops at the watchdog's block, and the help, summary and wrapper
+  call keep it.
+- **`Private/Get-LastWakeTime.ps1` ships.** X10 left it out with the backups,
+  but the watchdog's wake guard calls it, so the shipped watchdog threw
+  `CommandNotFoundException` and 34 of its Pester tests failed. One `edits`
+  entry rewords its help, which named only the backup.
+- Pester 5.7.1 on Windows (pwsh 7.6), run on the generated starter: 307
+  tests, 300 passed, 7 skipped (the Linux-only trust cases, as in the source)
+  once the wake guard shipped. Before that fix, the 34 watchdog failures above
+  were the only ones.
 
 | Source | Before | After |
 |---|---|---|
@@ -2418,8 +2428,9 @@ The Pester suite needs pwsh 7.6, which the cloud container lacks, so the
 patched `Tasks.Tests.ps1` counts (seven S4U principals, eight script actions,
 the shared settings) were derived by reading the patched installer, not run.
 
-Reverse: restore the previous pin, drop the four exclusions and the two
-export edits, and revert the three patches.
+Reverse: restore the previous pin, drop the four exclusions and the three
+export edits, exclude `Get-LastWakeTime.ps1` again, and revert the three
+patches.
 
 ## The guidance overlap judgment (2026-11-10)
 

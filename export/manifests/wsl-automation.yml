@@ -64,7 +64,6 @@ exclude:
   - {path: tests/InvokeWslBackup.Tests.ps1, why: X10 (tests Invoke-WslBackup).}
   - {path: src/WslAutomation/Public/Test-WslActivity.ps1, why: X10 (activity gate whose only caller is Invoke-WslBackup).}
   - {path: tests/WslActivity.Tests.ps1, why: X10 (tests Test-WslActivity).}
-  - {path: src/WslAutomation/Private/Get-LastWakeTime.ps1, why: X10 (wake guard whose only callers are the two backups; the lesson stays in AGENTS.md).}
   # ---- X10, re-pin 2026-11-03: new code whose only caller or subject is left out
   - {path: src/WslAutomation/Private/Test-ClaudeStubGitDir.ps1, why: X10 (stub .git guard whose only caller is the keeper).}
   - {path: tests/ClaudeStubGitDir.Tests.ps1, why: X10 (tests Test-ClaudeStubGitDir).}
@@ -90,6 +89,13 @@ substitutions:
     to: 'C:'
 
 edits:
+  - path: src/WslAutomation/Private/Get-LastWakeTime.ps1
+    old: "        Invoke-WslBackup uses this to defer an export attempted too soon after either: 'wsl\n        --export' can fail outright (exit -1) while WSL is still transitioning after a boot or a\n        resume, up to roughly 270 seconds afterward (see AGENTS.md's \"wsl --export fails on a\n        transitioning WSL\" section).\n"
+    new: "        Invoke-DockerWslIntegrationWatchdog uses this to defer a repair attempted too soon after\n        either, while WSL and Docker Desktop are still transitioning after a boot or a resume.\n"
+    why: >-
+      Round 9. The Docker watchdog calls it for its wake guard, so it ships
+      (X10 had left it out with the backups, which broke the watchdog). Its
+      help named only the left-out backup.
   # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
     old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"

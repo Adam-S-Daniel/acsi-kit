@@ -249,8 +249,8 @@ function Set-WslAutomationScheduledTasks {
     $PwshPath = $PwshPath.TrimEnd('\')
 
     # A Store-packaged pwsh (per-user WindowsApps alias or version-pinned WindowsApps package
-    # path) cannot be activated in the session 0 the S4U pwsh tasks (ccstatusline sync, Codex
-    # Cloud sync) run in - the task fails with access denied every interval, silently. Warn
+    # path) cannot be activated in the session 0 the S4U pwsh tasks (ccstatusline sync, WSL
+    # memory log, Codex Cloud sync) run in - the task fails with access denied every interval, silently. Warn
     # loudly so the operator installs PowerShell 7 via MSI (see the README and
     # scripts/grant-keeper-batch-logon.ps1) instead.
     $windowsAppsRoots = @(

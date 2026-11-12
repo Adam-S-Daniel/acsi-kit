@@ -125,9 +125,9 @@ README_INSTALL = """## Install
    C:\\Users\\<you>\\repos\\wsl-automation
    ```
 
-2. **Background-task prerequisites (once per machine).** Every task runs as a
-   background (S4U, session 0) task, so a run never flashes a window on the
-   desktop. That imposes two one-time requirements:
+2. **Background-task prerequisites (once per machine).** Every task but the
+   Docker watchdog runs as a background (S4U, session 0) task, so a run never
+   flashes a window on the desktop. That imposes two one-time requirements:
 
    - **PowerShell 7 installed via MSI** (not the Microsoft Store build). A
      Store-packaged pwsh cannot be activated in session 0, so the pwsh-based
@@ -353,6 +353,17 @@ installer, `tests/run-session-miner.test.sh` the session miner wrapper, and
 def readme(text: str, where: str) -> str:
     text = T.replace_between(text, "# wsl-automation\n", "## Install\n", README_TOP, where)
     text = replace_section(text, "## Install", README_INSTALL, where)
+    # The census catches up now (StartWhenAvailable plus restarts, as AGENTS.md
+    # says); the source's README section still says it does not.
+    text = T.sub_once(
+        text,
+        "  instance. There is no `-StartWhenAvailable`: a missed day stays missed (the\n"
+        "  census's 14-day freshness window and 6-day re-publish absorb it), and a\n"
+        "  catch-up at wake would land in WSL's post-wake transition window.",
+        "  instance. A missed day catches up (`-StartWhenAvailable`, with three\n"
+        "  restarts 10 minutes apart that outlast WSL's post-wake transition window).",
+        where,
+    )
 
     text = T.sub_once(
         text,
@@ -496,7 +507,7 @@ from the WSLService service".
 - **This is why the PowerShell tasks here do not use `-StartWhenAvailable`:** a
   catch-up at wake would land in that window. A missed run stays missed. The two
   daily `wsl.exe` publish tasks do catch up, with restarts that outlast the
-  window (next section). Any work that adds a boot- or resume-adjacent trigger
+  window (previous section). Any work that adds a boot- or resume-adjacent trigger
   owes the same delay. (Native Linux has no such window, so the systemd timers
   there are `Persistent=true`.)
 
@@ -507,7 +518,7 @@ AGENTS_CATCH_UP = """### The daily publish tasks catch up a missed run, with res
 `Usage Census Publish` and `Session Miner` set `StartWhenAvailable` (plus
 `RestartCount 3`, `RestartInterval 10 min`); a laptop asleep at their minute
 otherwise skipped the day (result 2147946720, `0x800710E0`). The PowerShell
-tasks stay off it (above) because a catch-up at wake lands in the post-wake
+tasks stay off it (below) because a catch-up at wake lands in the post-wake
 window; these scripts only need a working `wsl.exe`, and the restart interval
 clears that window if a catch-up lands in it. Memory Curation and the other tasks
 are unchanged.

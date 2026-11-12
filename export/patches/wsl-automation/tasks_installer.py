@@ -222,8 +222,8 @@ TRIM_NEW = """    # A trailing separator is a common way to type or tab-complete
 REMOVED_START = "    # --- Backup task: action + daily trigger repeating over the following day ---------------\n"
 REMOVED_END = "    # --- ccstatusline task: background config sync -------------------------\n"
 STORE_WARNING = """    # A Store-packaged pwsh (per-user WindowsApps alias or version-pinned WindowsApps package
-    # path) cannot be activated in the session 0 the S4U pwsh tasks (ccstatusline sync, Codex
-    # Cloud sync) run in - the task fails with access denied every interval, silently. Warn
+    # path) cannot be activated in the session 0 the S4U pwsh tasks (ccstatusline sync, WSL
+    # memory log, Codex Cloud sync) run in - the task fails with access denied every interval, silently. Warn
     # loudly so the operator installs PowerShell 7 via MSI (see the README and
     # scripts/grant-keeper-batch-logon.ps1) instead.
     $windowsAppsRoots = @(

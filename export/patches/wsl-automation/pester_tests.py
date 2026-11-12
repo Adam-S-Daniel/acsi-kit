@@ -273,7 +273,7 @@ CODEX_CONTEXT = r"""    Context 'The Codex Cloud sync is disabled unless -Enable
 
         It 'registers the Codex Cloud sync and then disables it by default' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
-                -PwshPath 'C:ake\pwsh.exe' -Confirm:$false
+                -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
 
             Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 1 -Exactly -ParameterFilter { $TaskName -eq 'Codex Cloud Environment Sync' }
             Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly
@@ -285,7 +285,7 @@ CODEX_CONTEXT = r"""    Context 'The Codex Cloud sync is disabled unless -Enable
 
         It 'enables the Codex Cloud sync with -EnableCodexTasks' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
-                -PwshPath 'C:ake\pwsh.exe' -EnableCodexTasks -Confirm:$false
+                -PwshPath 'C:\fake\pwsh.exe' -EnableCodexTasks -Confirm:$false
 
             Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly
             Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly -ParameterFilter {
@@ -295,7 +295,7 @@ CODEX_CONTEXT = r"""    Context 'The Codex Cloud sync is disabled unless -Enable
 
         It 'honors -CodexCloudEnvironmentSyncTaskName when switching' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
-                -PwshPath 'C:ake\pwsh.exe' -CodexCloudEnvironmentSyncTaskName 'My Codex Sync' -Confirm:$false
+                -PwshPath 'C:\fake\pwsh.exe' -CodexCloudEnvironmentSyncTaskName 'My Codex Sync' -Confirm:$false
 
             Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly -ParameterFilter {
                 $TaskName -eq 'My Codex Sync' -and $Enabled -eq $false
@@ -311,7 +311,7 @@ CODEX_CONTEXT = r"""    Context 'The Codex Cloud sync is disabled unless -Enable
             }
 
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
-                -PwshPath 'C:ake\pwsh.exe' -Confirm:$false
+                -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
 
             Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 0 -Exactly -ParameterFilter { $TaskName -like 'Codex*' }
             Should -Invoke -ModuleName WslAutomation Set-WslScheduledTask -Times 1 -Exactly -ParameterFilter { $TaskName -eq 'Codex Cloud Environment Sync' }
@@ -328,7 +328,7 @@ CODEX_CONTEXT = r"""    Context 'The Codex Cloud sync is disabled unless -Enable
             }
 
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
-                -PwshPath 'C:ake\pwsh.exe' -EnableCodexTasks -Confirm:$false
+                -PwshPath 'C:\fake\pwsh.exe' -EnableCodexTasks -Confirm:$false
 
             Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly -ParameterFilter { $Enabled -eq $true }
             Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 0 -Exactly -ParameterFilter { $Enabled -eq $false }
@@ -336,18 +336,18 @@ CODEX_CONTEXT = r"""    Context 'The Codex Cloud sync is disabled unless -Enable
 
         It 'neither disables nor enables anything under -WhatIf' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
-                -PwshPath 'C:ake\pwsh.exe' -WhatIf | Out-Null
+                -PwshPath 'C:\fake\pwsh.exe' -WhatIf | Out-Null
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
-                -PwshPath 'C:ake\pwsh.exe' -EnableCodexTasks -WhatIf | Out-Null
+                -PwshPath 'C:\fake\pwsh.exe' -EnableCodexTasks -WhatIf | Out-Null
 
             Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 0 -Exactly
         }
 
         It 'says in the summary whether the Codex Cloud sync is enabled or disabled' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
-                -PwshPath 'C:ake\pwsh.exe' -Confirm:$false -InformationVariable disabledInfo | Out-Null
+                -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false -InformationVariable disabledInfo | Out-Null
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
-                -PwshPath 'C:ake\pwsh.exe' -EnableCodexTasks -Confirm:$false -InformationVariable enabledInfo | Out-Null
+                -PwshPath 'C:\fake\pwsh.exe' -EnableCodexTasks -Confirm:$false -InformationVariable enabledInfo | Out-Null
 
             $disabledCodexLines = @($disabledInfo | ForEach-Object { "$_" } | Where-Object { $_ -match '^Codex Cloud task' })
             $disabledCodexLines.Count | Should -Be 1
