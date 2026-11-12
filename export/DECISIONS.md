@@ -2432,6 +2432,58 @@ Reverse: restore the previous pin, drop the four exclusions and the three
 export edits, exclude `Get-LastWakeTime.ps1` again, and revert the three
 patches.
 
+## Re-pin round 10 (2026-11-12)
+
+`export/resync.py` moved all five public pins to their sources' current heads.
+The export then failed, and the kit follows the source in each case:
+
+- **`debug-github-workflows` leaves the library.** The owner retired the skill
+  in the agentskills registry (PR #147, `3795a5e`), so `library_skills.py` could not
+  find `plugins/acsi-coding-anywhere/skills/debug-github-workflows/SKILL.md`.
+  skills-evals keeps the skill's fixtures under `evals/debug-github-workflows/`
+  (the owner's policy keeps fixtures on removal), but the kit ships no fixture
+  for a skill it does not ship (X9), as for `ci-job-performance`. So the item
+  goes whole: its `OPTIONAL` row in `library_skills.py` and its `ITEMS` row in
+  `library_fixtures.py`; its catalog entry in `bootstrap/content-catalog.json`
+  (the recommended tier is now eight items: two skills, four safety sections
+  and two habits sections, and `test-bootstrap.sh` expects eight and greps the
+  dry run for `would install disarm-inherited-reach`); the manifest comments
+  and `docs/skills.md`. The manifest now excludes `evals/debug-github-workflows/`
+  and the four `test/issues/test_issue_76*.py` modules that only lock those
+  fixtures. The retarget that skipped the `wrong-branch` fixture in the
+  `.git/` scan test is gone with its reason (the note in Content tiers
+  stays as history). The `REVIEWED` list in `retargets.txt` still names the
+  four fixtures, because it is the source text that patch anchors on, and the
+  kit replaces the whole list.
+- **The source removes unused skills.** `retire_skill.py`'s `plan()` now
+  calls `unused_plan()` when no skill has a `retire` verdict, which removes a
+  skill that `removal_policy.unused_removal` calls unused, except those in
+  `evals/usage-unknown.yml`. The retirement-exempt patch's anchor moved with
+  the new `if skill is None:` branch (updated, same guard). The kit's rule is
+  that the automatic retirement never removes a core item, so the patch also
+  adds the core skills to the exempt set `unused_inputs()` returns, which
+  covers `unused_plan()` and `unused_checker()` alike. A test in
+  `test_issue_retirement_exempt.py` locks it. The unused removal itself
+  ships as the source has it.
+- skills-evals' new `test_issue_unused_removal.py` compares the removal's pull
+  request URL with a literal `https://github.com/<owner>/<registry>/pull/999`.
+  As one literal after `github.com/` it was protected as a citation (P2) and
+  kept the source owner's name, so the test failed in the kit. A manifest
+  edit splits the literal so the C1 renames reach it.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `6026fa78be2c` | `458b958ad310` |
+| acsi-agentskills | `60d805ca926c` | `3795a5e5eef8` |
+| repo-settings | `a890dbc58797` | `0ae5a7ed1d3b` |
+| skills-evals | `a50f114e26b9` | `b345ff7506c3` |
+| wsl-automation | `155123c1fbde` | `aa78623ef6e9` |
+
+Reverse: restore the previous pins, the `debug-github-workflows` rows,
+catalog entry, test expectations and docs wording, drop the two manifest
+exclusions, put back the `.git/` scan exception, and revert the two
+retirement-exempt edits, the new test and the URL edit.
+
 ## The guidance overlap judgment (2026-11-10)
 
 `_agent-guidance#495` added a warn-only "Repo-specific guidance overlap"

@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: a50f114e26b943d7f11d5d3848d0e7a652a29f52
+source_sha: b345ff7506c379112fb3ab9a3156e1090d51d21c
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -92,6 +92,8 @@ exclude:
     why: X4 and X9 (a platform-only skill's fixtures).
   - path: evals/consumer-repo-provisioning/
     why: X4 and X9 (a platform-only skill's fixtures).
+  - path: evals/debug-github-workflows/
+    why: X9 and Content tiers (the fixtures of a skill the kit does not ship; re-pin round 10, the owner retired the skill and kept its fixtures).
   - path: evals/editorial-label-audit/
     why: X4 and X9 (a platform-only skill's fixtures).
   - path: evals/embeddable-tool-pages/
@@ -124,8 +126,24 @@ exclude:
     why: X9. Every test in it locks the platform's consumer-bump fixture, which the kit does not ship.
   - path: test/issues/test_issue_ci_job_performance_browser_cache.py
     why: X9. Every test in it locks the ci-job-performance fixture, which the kit does not ship.
+  - path: test/issues/test_issue_76.py
+    why: X9. Every test in it locks the debug-github-workflows fixture, which the kit does not ship.
+  - path: test/issues/test_issue_76_git_identity.py
+    why: X9. Every test in it locks the debug-github-workflows fixture, which the kit does not ship.
+  - path: test/issues/test_issue_76_secret_name.py
+    why: X9. Every test in it locks the debug-github-workflows fixture, which the kit does not ship.
+  - path: test/issues/test_issue_76_swallowed_failure.py
+    why: X9. Every test in it locks the debug-github-workflows fixture, which the kit does not ship.
 
 edits:
+  - path: test/issues/test_issue_unused_removal.py
+    old: "        url = \"https://github.com/Adam-S-Daniel/adam-agentskills/pull/999\"\n"
+    new: "        url = \"https://github.com/\" + \"Adam-S-Daniel/adam-agentskills/pull/999\"\n"
+    why: >-
+      Round 10. The test compares this with the pull request URL the removal
+      builds from the registry's own name, so it must follow the C1 renames;
+      as one literal after github.com/ it read as a citation (P2) and kept the
+      source owner's name, failing the test in the kit.
   # ---- Review fixes (2026-10-29): owner issue links in live output
   - path: harness/run_eval.py
     old: |2

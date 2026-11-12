@@ -38,6 +38,7 @@ export function boot(source, opts) {
     // keep the template's loading line until the first render
     content.appendChild(root.firstChild);
   }
+  if (root.classList) root.classList.add('shell');
   root.appendChild(top);
   root.appendChild(content);
   const searchBox = top.querySelector('input.search');
@@ -53,6 +54,9 @@ export function boot(source, opts) {
       if (a.id === 'tab-' + g) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
   }
+  // True for the next render only: a new route or the first document, so a
+  // view rises in once and never on a keystroke, a sort or a data refresh.
+  let entering = true;
   function mount(node) {
     while (content.firstChild) content.removeChild(content.firstChild);
     content.appendChild(toDom(node, document));
@@ -72,6 +76,9 @@ export function boot(source, opts) {
     markNav();
     if (!state.doc) return;
     try {
+      const enter = entering;
+      entering = false;
+      content.classList.toggle('enter', enter);
       mount(renderRoute(state.doc, state.route, { sortBy: state.sortBy, url: state.url, notice: state.notice,
         ext: o.ext ? o.ext(state) : null, search: state.search,
         onFilter: (k, v) => { state.search[k] = v; renderContent(); }, onClear: clearSearch,
@@ -86,6 +93,7 @@ export function boot(source, opts) {
     searchBox.value = '';
     toggleMenu(false);
     if (o.onRoute) { try { o.onRoute(location.hash); } catch (e) { /* host without deep links */ } }
+    entering = true;
     renderContent();
     try { window.scrollTo(0, 0); } catch (e) { /* no window scroll */ }
   });

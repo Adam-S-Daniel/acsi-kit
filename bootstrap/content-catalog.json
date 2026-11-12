@@ -43,15 +43,6 @@
       "source_link": "library/skills/review-bash-ci-reliability/agent-skills/files/plugins/acsi-coding-anywhere/skills/review-bash-ci-reliability/SKILL.md"
     },
     {
-      "id": "debug-github-workflows",
-      "kind": "skill",
-      "tier": "recommended",
-      "title": "debug-github-workflows",
-      "short": "Reads failing GitHub Actions runs and their logs and works out why they failed.",
-      "library_path": "library/skills/debug-github-workflows",
-      "source_link": "library/skills/debug-github-workflows/agent-skills/files/plugins/acsi-coding-anywhere/skills/debug-github-workflows/SKILL.md"
-    },
-    {
       "id": "disarm-inherited-reach",
       "kind": "skill",
       "tier": "recommended",

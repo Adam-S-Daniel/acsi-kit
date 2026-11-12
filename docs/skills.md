@@ -50,10 +50,9 @@ three tiers, listed in
 - **Core**: what the rest of the system depends on. It is always in
   `starter/`, and the automatic retirement never removes it
   ([evals](evals-and-loop.md#the-loop)).
-- **Recommended**: skills and guidance most adopters want: three skills
-  (`review-bash-ci-reliability`, `debug-github-workflows`,
-  `disarm-inherited-reach`), four safety sections and two sections of
-  everyday working and git habits.
+- **Recommended**: skills and guidance most adopters want: two skills
+  (`review-bash-ci-reliability`, `disarm-inherited-reach`), four safety
+  sections and two sections of everyday working and git habits.
 - **Opinionated**: one way of working that may not match yours: two skills
   (`writing-adrs`, `finding-unknowns`), four guidance sections and the
   `rules-dir` git hook. Each has a `details` text that says what it does and

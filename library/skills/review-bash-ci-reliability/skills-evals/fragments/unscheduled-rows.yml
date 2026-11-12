@@ -1,2 +1,2 @@
   - path: evals/review-bash-ci-reliability/empty-repo-discovery
-    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-12, holds: fails criterion 4 (the fixture is unchanged since 2026-11-02, and both runs after that, 20261103T051307Z-9a6eba on Sonnet 5.5 and 20261103T093214Z-20145d on Opus 5.5, have the without arm at 7/7 checks)."

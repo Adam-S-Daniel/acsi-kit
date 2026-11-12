@@ -20187,11 +20187,8 @@ class TestIssue84Round5(Issue84Fixture, unittest.TestCase):
         """
         import glob as globlib
         checked = 0
-        for path in sorted([p for p in globlib.glob(str(REPO_ROOT / "evals" / "**" / "fixture.yaml"),
-                                                    recursive=True)
-                            # The source scans evals/*/fixture.yaml only, which never reaches
-                            # debug-github-workflows/wrong-branch: it reads .git/trace.log by design.
-                            if "/debug-github-workflows/wrong-branch/" not in p]
+        for path in sorted(globlib.glob(str(REPO_ROOT / "evals" / "**" / "fixture.yaml"),
+                                        recursive=True)
                            + globlib.glob(str(REPO_ROOT / "test" / "fixtures" / "**" /
                                               "fixture.yaml"), recursive=True)):
             fixture = run_eval.load_fixture(Path(path).parent)

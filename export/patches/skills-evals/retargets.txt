@@ -715,11 +715,8 @@ ADRS_BOOTSTRAP_DIR = FIXTURE_EVALS / "writing-adrs" / "bootstrap"
         for path in sorted(globlib.glob(str(REPO_ROOT / "evals" / "*" /
                                             "fixture.yaml"))):
 @@@ new
-        for path in sorted([p for p in globlib.glob(str(REPO_ROOT / "evals" / "**" / "fixture.yaml"),
-                                                    recursive=True)
-                            # The source scans evals/*/fixture.yaml only, which never reaches
-                            # debug-github-workflows/wrong-branch: it reads .git/trace.log by design.
-                            if "/debug-github-workflows/wrong-branch/" not in p]
+        for path in sorted(globlib.glob(str(REPO_ROOT / "evals" / "**" / "fixture.yaml"),
+                                        recursive=True)
                            + globlib.glob(str(REPO_ROOT / "test" / "fixtures" / "**" /
                                               "fixture.yaml"), recursive=True)):
 @@@ end

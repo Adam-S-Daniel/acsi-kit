@@ -5,80 +5,82 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evals Explorer</title>
 <style>
+/*__CSS__*/
 :root {
   color-scheme: light;
-  /* example-site-a's tool palette, matched to the Claude Memory Map page:
-     warm paper, soft ink, muted earth accents. */
-  --page: #FDFBF7;
+  /* Cold white poster stock, jet ink and three spot inks (cobalt, magenta,
+     teal) that are also the chart series. */
+  --page: #E8ECF1;
   --surface: #FFFFFF;
-  --ink: #3D3A34;
-  --ink-2: #5A564E;
-  --muted: #6B675E;
-  --axis: #8A8478;
-  --grid: #EDE8DD;
-  --base: #E4DFD4;
-  --ring: #E4DFD4;
-  --s1: #4A6B8F;
-  --s2: #B06A4F;
-  --s3: #54805C;
-  --good: #54805C;
-  --good-ink: #3F6646;
-  --warning: #9A6F33;
-  --critical: #B06A4F;
-  --link: #4A6B8F;
-  --chip-bg: #F3EFE6;
-  --hover: #F7F4EC;
+  --ink: #0A0C12;
+  --ink-2: #2F3644;
+  --muted: #535B6A;
+  --axis: #737B8C;
+  --grid: #D3D9E1;
+  --base: #B4BCC8;
+  --ring: #0A0C12;
+  --s1: #1F3AE0;
+  --s2: #B80F78;
+  --s3: #006E7A;
+  --good: #17702A;
+  --good-ink: #125C22;
+  --warning: #8A4F00;
+  --critical: #C4160F;
+  --link: #1A30C4;
+  --chip-bg: #DCE2EA;
+  --hover: #DDE4FA;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --page: #1E1C19;
-    --surface: #272420;
-    --ink: #EDE8DD;
-    --ink-2: #CFC8BA;
-    --muted: #A9A294;
-    --axis: #8A8478;
-    --grid: #36322C;
-    --base: #45403A;
-    --ring: #3A362F;
-    --s1: #7F9FC2;
-    --s2: #D08B70;
-    --s3: #7FAA86;
-    --good: #7FAA86;
-    --good-ink: #9CC4A2;
-    --warning: #C99B5C;
-    --critical: #D08B70;
-    --link: #9DB8D6;
-    --chip-bg: #322E28;
-    --hover: #2E2A25;
+    /* The same poster under blacklight: the inks glow on blue-black. */
+    --page: #090A10;
+    --surface: #12141D;
+    --ink: #F1F3F8;
+    --ink-2: #C2C7D4;
+    --muted: #9299AB;
+    --axis: #6D7488;
+    --grid: #232736;
+    --base: #343A4D;
+    --ring: #434A60;
+    --s1: #7090FF;
+    --s2: #FF5FB6;
+    --s3: #2ED3CC;
+    --good: #72DC62;
+    --good-ink: #8BE87C;
+    --warning: #FFC044;
+    --critical: #FF6A55;
+    --link: #93AAFF;
+    --chip-bg: #1A1D29;
+    --hover: #191D30;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page: #1E1C19;
-  --surface: #272420;
-  --ink: #EDE8DD;
-  --ink-2: #CFC8BA;
-  --muted: #A9A294;
-  --axis: #8A8478;
-  --grid: #36322C;
-  --base: #45403A;
-  --ring: #3A362F;
-  --s1: #7F9FC2;
-  --s2: #D08B70;
-  --s3: #7FAA86;
-  --good: #7FAA86;
-  --good-ink: #9CC4A2;
-  --warning: #C99B5C;
-  --critical: #D08B70;
-  --link: #9DB8D6;
-  --chip-bg: #322E28;
-  --hover: #2E2A25;
+  --page: #090A10;
+  --surface: #12141D;
+  --ink: #F1F3F8;
+  --ink-2: #C2C7D4;
+  --muted: #9299AB;
+  --axis: #6D7488;
+  --grid: #232736;
+  --base: #343A4D;
+  --ring: #434A60;
+  --s1: #7090FF;
+  --s2: #FF5FB6;
+  --s3: #2ED3CC;
+  --good: #72DC62;
+  --good-ink: #8BE87C;
+  --warning: #FFC044;
+  --critical: #FF6A55;
+  --link: #93AAFF;
+  --chip-bg: #1A1D29;
+  --hover: #191D30;
 }
-/* The page color fills the whole window, outside the column and below short pages. */
+/* The page color fills the whole window, outside the column and below short
+   pages. Flat: nothing sits behind the charts. */
 html { -webkit-text-size-adjust: 100%; background: var(--page); min-height: 100%; }
 body { margin: 0; background: var(--page); color: var(--ink); min-height: 100vh; }
-/*__CSS__*/
 </style>
 </head>
 <body>

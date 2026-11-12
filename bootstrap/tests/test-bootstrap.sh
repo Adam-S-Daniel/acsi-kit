@@ -535,14 +535,14 @@ run env ADOPT_STATE_FILE="$T/state5/x.json" bash "$T/ownclone/bootstrap/add-cont
 assert_eq "add-content runs in the kit's own clone" "$rc" 0
 run env ADOPT_STATE_FILE="$T/state2/x.json" bash "$KC/bootstrap/add-content.sh" --config "$CFGP" --items recommended --dry-run; rc=$?
 assert_eq "add-content --dry-run exits 0" "$rc" 0
-assert "the dry run lists what it would add" has "$OUT" "would install debug-github-workflows"
+assert "the dry run lists what it would add" has "$OUT" "would install disarm-inherited-reach"
 assert "the dry run names a file it would add" has "$OUT" "add: agent-skills/plugins/acsi-coding-anywhere/skills/review-bash-ci-reliability/SKILL.md"
 assert_eq "the dry run changes nothing in starter/" "$(fp "$KC/starter")" "$start_fp"
 assert_not "the dry run records nothing" test -e "$T/state2/x.content-choices.json"
 run env ADOPT_STATE_FILE="$T/state2/x.json" bash "$KC/bootstrap/add-content.sh" --config "$CFGP" --items recommended; rc=$?
 assert_eq "add-content recommended exits 0" "$rc" 0
 [ "$rc" = 0 ] || sed 's/^/    add-content: /' "$ERR"
-assert_eq "it records the nine recommended items" "$(jq -c '.installed | length' "$T/state2/x.content-choices.json")" 9
+assert_eq "it records the eight recommended items" "$(jq -c '.installed | length' "$T/state2/x.content-choices.json")" 8
 assert_eq "the skill is in the registry's layout" \
   "$(jq -c '.plugins["acsi-coding-anywhere"].skills | index("review-bash-ci-reliability") != null' "$KC/starter/agent-skills/scripts/plugin_layout.json")" true
 assert "the skill is in the registry's lock" grep -qF '"acsi-coding-anywhere/review-bash-ci-reliability": "sha256:' "$KC/starter/agent-skills/skills.lock"
@@ -564,7 +564,7 @@ assert_eq "add-content adds opinionated items next to the others" "$rc" 0
 assert "a core id is named as already there" has "$OUT" "note: workflow-path-audit is a core item, already in starter/"
 assert "the joint test module arrives with its second item" test -f "$KC/starter/skills-evals/test/issues/test_issue_71_trigger_set.py"
 assert "the git hook check is in the runner, and in every repo's copy" bash -c 'grep -q "rules-dir" "$1/agent-guidance/templates/agent-checks/agent-checks" && for t in "$1"/*/.githooks/agent-checks; do cmp -s "$t" "$1/agent-guidance/templates/agent-checks/agent-checks" || exit 1; done' _ "$KC/starter"
-assert_eq "the record keeps the earlier items" "$(jq -c '.installed | length' "$T/state2/x.content-choices.json")" 11
+assert_eq "the record keeps the earlier items" "$(jq -c '.installed | length' "$T/state2/x.content-choices.json")" 10
 assert "the added Python test classes parse" python3 -I -c 'import ast, sys; [ast.parse(open(p, encoding="utf-8").read()) for p in sys.argv[1:]]' \
   "$KC/starter/skills-evals/test/run_tests.py" "$KC/starter/skills-evals/test/issues/test_issue_124_guidance_gates.py"
 # verify.sh's content group reads the record and the default branches.

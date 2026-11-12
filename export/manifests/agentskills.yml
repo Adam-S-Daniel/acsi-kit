@@ -4,15 +4,15 @@
 repo: agentskills
 kit_name: agent-skills
 source: adam-agentskills
-source_sha: 60d805ca926cc47acbfb5abc763b546649465108
+source_sha: 3795a5e5eef825c49ee491ae07ce46843f2ed7a1
 after: [_agent-guidance]
 
 exclude:
   # Content tiers (2026-10-29): the core skills (skills-doctor,
   # github-actions-repo-settings, vendor-release-impact-issues,
   # workflow-path-audit) stay; the recommended and opinionated ones
-  # (review-bash-ci-reliability, debug-github-workflows,
-  # disarm-inherited-reach, writing-adrs, finding-unknowns) are exported and
+  # (review-bash-ci-reliability, disarm-inherited-reach, writing-adrs,
+  # finding-unknowns) are exported and
   # then moved to the library by patches/agentskills/library_skills.py; the
   # rest are not shipped.
   - path: plugins/adam-coding-anywhere/skills/ci-job-performance/
