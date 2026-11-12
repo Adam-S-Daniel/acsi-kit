@@ -95,10 +95,10 @@ Why each one:
   about 35% of a Pro week on its own.
 
 The shares were modeled at the earlier rate of $20 per point. At the
-2026-11-10 rate of about $6.70 each share is roughly three times as high
-until they are re-modeled
-([acsi-kit#43](https://github.com/Adam-S-Daniel/acsi-kit/issues/43)), which
-makes the base alone a large part of a Pro or Max 5x week.
+2026-11-10 rate of about $6.70 the base routines' shares, and the fleet
+worker's 35% of a Pro week, may be up to three times as high until they are
+re-modeled ([acsi-kit#43](https://github.com/Adam-S-Daniel/acsi-kit/issues/43)).
+Evals stay within the 30% cap, which the guard now charges at the new rate.
 
 The shares are a model, not a measurement on smaller plans. They assume Max
 5x is a quarter of Max 20x's weekly allowance and Pro a twentieth (the plan

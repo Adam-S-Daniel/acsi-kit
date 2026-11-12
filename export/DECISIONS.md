@@ -2342,7 +2342,7 @@ source changes needed the kit to follow them:
   flagged for re-modeling
   ([acsi-kit#43](https://github.com/Adam-S-Daniel/acsi-kit/issues/43)).
 
-| Source | Round 7 (last merged) | Round 8 |
+| Source | Before (`4e6aaeb`) | Round 8 |
 |---|---|---|
 | _agent-guidance | `9f42f9e69b1b` | `6026fa78be2c` |
 | acsi-agentskills | `e4a64b9f0bb9` | `60d805ca926c` |
