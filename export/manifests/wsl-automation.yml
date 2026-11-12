@@ -6,7 +6,8 @@
 # wake-time helper and the activity gate). Everything else is kept: the
 # checkout updater, the task installer, the usage census, the waiting-on-you
 # feed, the ccstatusline sync, the Codex Cloud sync, the agent-trust scripts
-# and pull-repo.ps1 (notes Q1, kept on the owner's instruction).
+# and pull-repo.ps1 (notes Q1, kept on the owner's instruction). The WSL memory
+# log ships (generic); the Claude settings sync is left out (X9/X10, below).
 #
 # Added by the kit (overlay/wsl-automation/, DECISIONS "Export record:
 # wsl-automation"): a scheduled session-miner wrapper and its Task Scheduler
@@ -15,7 +16,7 @@
 repo: wsl-automation
 kit_name: wsl-automation
 source: wsl-automation
-source_sha: 460f6c77fe5e0a61a724d3b02fefdaffcfb2695b
+source_sha: 155123c1fbdeb0492397c34cf54d5d93d086eb67
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror,
 # the agent-checks runner) are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -63,12 +64,18 @@ exclude:
   - {path: tests/InvokeWslBackup.Tests.ps1, why: X10 (tests Invoke-WslBackup).}
   - {path: src/WslAutomation/Public/Test-WslActivity.ps1, why: X10 (activity gate whose only caller is Invoke-WslBackup).}
   - {path: tests/WslActivity.Tests.ps1, why: X10 (tests Test-WslActivity).}
-  - {path: src/WslAutomation/Private/Get-LastWakeTime.ps1, why: X10 (wake guard whose only callers are the two backups; the lesson stays in AGENTS.md).}
   # ---- X10, re-pin 2026-11-03: new code whose only caller or subject is left out
   - {path: src/WslAutomation/Private/Test-ClaudeStubGitDir.ps1, why: X10 (stub .git guard whose only caller is the keeper).}
   - {path: tests/ClaudeStubGitDir.Tests.ps1, why: X10 (tests Test-ClaudeStubGitDir).}
   - {path: scripts/publish-task-health.sh, why: "X10 and DECISIONS \"Re-pin (2026-11-03)\" (reads the restic repository and keeper log, and feeds the source account's fleet health audit)."}
   - {path: tests/publish-task-health.test.sh, why: X10 (tests publish-task-health.sh).}
+  # ---- X9/X10, re-pin round 9: the Claude settings sync runs the
+  # `sync-cc-settings-between-wsl-and-windows` skill from the owner's
+  # registry, which the kit leaves out (X9), so the task has nothing to run.
+  - {path: scripts/sync-claude-settings.ps1, why: X9 (entry point of the Claude settings sync, which runs a skill of the owner's registry the kit leaves out).}
+  - {path: src/WslAutomation/Public/Invoke-ClaudeSettingsSync.ps1, why: X9 (the Claude settings sync; its skill is left out).}
+  - {path: src/WslAutomation/Private/Invoke-ClaudeSettingsSyncScript.ps1, why: X9 (only caller is Invoke-ClaudeSettingsSync).}
+  - {path: tests/ClaudeSettingsSync.Tests.ps1, why: X9 (tests Invoke-ClaudeSettingsSync).}
 
 substitutions:
   - name: psd1 author
@@ -82,6 +89,13 @@ substitutions:
     to: 'C:'
 
 edits:
+  - path: src/WslAutomation/Private/Get-LastWakeTime.ps1
+    old: "        Invoke-WslBackup uses this to defer an export attempted too soon after either: 'wsl\n        --export' can fail outright (exit -1) while WSL is still transitioning after a boot or a\n        resume, up to roughly 270 seconds afterward (see AGENTS.md's \"wsl --export fails on a\n        transitioning WSL\" section).\n"
+    new: "        Invoke-DockerWslIntegrationWatchdog uses this to defer a repair attempted too soon after\n        either, while WSL and Docker Desktop are still transitioning after a boot or a resume.\n"
+    why: >-
+      Round 9. The Docker watchdog calls it for its wake guard, so it ships
+      (X10 had left it out with the backups, which broke the watchdog). Its
+      help named only the left-out backup.
   # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
     old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"
@@ -144,7 +158,7 @@ edits:
       default is a fallback root, and a missing one is skipped.
   - path: scripts/grant-keeper-batch-logon.ps1
     old: "    Grants a user the \"Log on as a batch job\" right (SeBatchLogonRight), required by the\n    background Claude Code Session Keeper scheduled task.\n"
-    new: "    Grants a user the \"Log on as a batch job\" right (SeBatchLogonRight), required by the\n    background scheduled tasks (usage census, waiting feed, session miner, ccstatusline sync,\n    Codex Cloud sync).\n"
+    new: "    Grants a user the \"Log on as a batch job\" right (SeBatchLogonRight), required by the\n    background scheduled tasks (usage census, waiting feed, session miner, ccstatusline sync,\n    WSL memory log, Codex Cloud sync).\n"
     why: >-
       X10. The keeper is gone, but every remaining task is S4U and needs the
       right. The file keeps its name because README, AGENTS.md and
@@ -155,7 +169,7 @@ edits:
     why: X10. Same reason; the text named only the keeper.
   - path: src/WslAutomation/WslAutomation.psd1
     old: "    Description       = 'WSL backup automation, Claude Code session keeper, Codex Cloud environment sync, and scheduled task registration.'\n"
-    new: "    Description       = 'Scheduled-task automation for WSL: checkout updater, usage census, waiting feed, session miner, ccstatusline sync, Codex Cloud environment sync.'\n"
+    new: "    Description       = 'Scheduled-task automation for WSL: checkout updater, usage census, waiting feed, session miner, ccstatusline sync, WSL memory log, Codex Cloud environment sync.'\n"
     why: X10. The module no longer holds a backup or a keeper.
   - path: src/WslAutomation/WslAutomation.psd1
     old: "        'New-WslBackupLock',\n        'Test-WslBackupLock',\n        'Remove-WslBackupLock',\n        'Get-WslDistroState',\n        'Invoke-WslBackup',\n        'Invoke-WslResticBackup',\n        'Test-WslActivity',\n        'Test-ClaudeSession',\n        'Test-CodexRemoteControl',\n        'Start-ClaudeSession',\n        'Invoke-ClaudeSessionKeeper',\n"
@@ -169,6 +183,14 @@ edits:
     old: "    'New-WslBackupLock',\n    'Test-WslBackupLock',\n    'Remove-WslBackupLock',\n    'Get-WslDistroState',\n    'Invoke-WslBackup',\n    'Invoke-WslResticBackup',\n    'Test-WslActivity',\n    'Test-ClaudeSession',\n    'Test-CodexRemoteControl',\n    'Start-ClaudeSession',\n    'Invoke-ClaudeSessionKeeper',\n"
     new: "    'Get-WslDistroState',\n"
     why: X10. Same list as the manifest.
+  - path: src/WslAutomation/WslAutomation.psd1
+    old: "        'Invoke-ClaudeSettingsSync',\n"
+    new: ""
+    why: X9. The Claude settings sync is left out, so exporting it would fail the manifest check.
+  - path: src/WslAutomation/WslAutomation.psm1
+    old: "    'Invoke-ClaudeSettingsSync',\n"
+    new: ""
+    why: X9. Same list as the manifest.
 
   # ---- the waiting-on-you feed (X10, owner 2026-10-29: kept and renamed)
   - path: scripts/publish-waiting-feed.sh

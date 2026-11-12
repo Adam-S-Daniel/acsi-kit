@@ -5,13 +5,14 @@
     Author            = 'Example Adopter'
     CompanyName       = 'Unknown'
     Copyright         = '(c) 2026 Example Adopter. All rights reserved.'
-    Description       = 'Scheduled-task automation for WSL: checkout updater, usage census, waiting feed, session miner, ccstatusline sync, Codex Cloud environment sync.'
+    Description       = 'Scheduled-task automation for WSL: checkout updater, usage census, waiting feed, session miner, ccstatusline sync, WSL memory log, Codex Cloud environment sync.'
     PowerShellVersion = '7.6'
 
     FunctionsToExport = @(
         'Get-WslDistroState',
         'Set-WslAutomationScheduledTasks',
         'Update-CcstatuslineConfig',
+        'Write-WslMemorySample',
         'Set-CcstatuslineStatusLine',
         'Invoke-CodexCloudEnvironmentSync',
         'Invoke-DockerWslIntegrationWatchdog',

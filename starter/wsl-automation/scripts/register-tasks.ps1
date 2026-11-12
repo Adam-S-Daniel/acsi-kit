@@ -3,8 +3,9 @@
 <#
 .SYNOPSIS
     Wrapper script for Set-WslAutomationScheduledTasks; installs or updates the ccstatusline
-    config sync, Codex Cloud environment sync, usage census publish, session miner, memory
-    curation and waiting feed publish scheduled tasks.
+    config sync, WSL memory log, Codex Cloud environment sync, usage census publish, session
+    miner, memory curation and waiting feed publish scheduled tasks, and the Docker Desktop WSL
+    integration watchdog.
 
 .DESCRIPTION
     Thin wrapper that imports the WslAutomation module and calls
@@ -14,7 +15,8 @@
     during a dry run.
 
 .PARAMETER ScriptsDir
-    Directory containing sync-ccstatusline-config.ps1, sync-codex-cloud-environments.ps1,
+    Directory containing sync-ccstatusline-config.ps1, log-wsl-memory.ps1,
+    sync-codex-cloud-environments.ps1, ensure-docker-wsl-integration.ps1,
     publish-usage-census.sh, run-session-miner.sh, run-memory-curation.sh and
     publish-waiting-feed.sh. Defaults to the directory this script lives in.
 
@@ -28,9 +30,25 @@
 .PARAMETER CcstatuslineIntervalMinutes
     How often, in minutes, the ccstatusline config sync task repeats indefinitely. Defaults to 5.
 
+.PARAMETER MemoryLogTaskName
+    Name of the scheduled task that logs WSL and Windows memory statistics. Defaults to
+    'WSL Memory Log'.
+
+.PARAMETER MemoryLogIntervalMinutes
+    How often, in minutes, the memory log task repeats indefinitely. Defaults to 5.
+
+.PARAMETER MemoryLogDir
+    Directory the memory log task writes samples.csv to. Defaults to
+    %LOCALAPPDATA%\WslMemoryLog.
+
 .PARAMETER CodexCloudEnvironmentSyncTaskName
     Name of the scheduled task that reconciles Codex Cloud environments at midnight and noon.
     Defaults to 'Codex Cloud Environment Sync'.
+
+.PARAMETER EnableCodexTasks
+    Enables the Codex Cloud environment sync task. Off by default: it is still registered or
+    updated, then disabled. With this switch it is enabled (even if currently disabled).
+    Re-running without it disables it again.
 
 .PARAMETER UsageCensusTaskName
     Name of the scheduled task that publishes the daily usage census from WSL. Defaults to
@@ -54,6 +72,16 @@
     Time of day (HH:mm) the memory curation task's weekly (Monday) trigger fires. Defaults to
     '13:47'.
 
+.PARAMETER DockerWatchdogTaskName
+    Name of the scheduled task that runs the Docker Desktop WSL integration watchdog. Defaults to
+    'Docker WSL Integration Watchdog'.
+
+.PARAMETER DockerWatchdogIntervalMinutes
+    How often, in minutes, the watchdog task repeats indefinitely. Defaults to 30.
+
+.PARAMETER DockerWatchdogLogonDelayMinutes
+    Delay, in minutes, after logon before the watchdog's at-logon trigger fires. Defaults to 12.
+
 .PARAMETER WaitingFeedTaskName
     Name of the scheduled task that publishes the waiting feed every minute. Defaults to
     'Claude Waiting Feed Publish'.
@@ -69,9 +97,9 @@
 .PARAMETER PwshPath
     Path to pwsh.exe used as the action executable for the pwsh-based tasks. Defaults to an MSI
     install of PowerShell 7 (C:\Program Files\PowerShell\7\pwsh.exe) when present - required for
-    the S4U background ccstatusline and Codex Cloud tasks, which run in session 0 where a
-    Store-packaged pwsh cannot launch - then the per-user WindowsApps alias, then the pwsh.exe
-    found on PATH.
+    the S4U background ccstatusline, memory log and Codex Cloud tasks, which run in session 0
+    where a Store-packaged pwsh cannot launch - then the per-user WindowsApps alias, then the
+    pwsh.exe found on PATH.
 
 .PARAMETER LegacyScriptsToArchive
     Paths to legacy scripts that should be renamed out of the way because this module
@@ -92,7 +120,8 @@
     ./register-tasks.ps1
 
     Registers (or updates) all the scheduled tasks from an elevated prompt, using default names,
-    times, and intervals.
+    times, and intervals. The Codex Cloud environment sync is left disabled; add
+    -EnableCodexTasks to enable it.
 
 .EXAMPLE
     ./register-tasks.ps1 -WhatIf
@@ -109,7 +138,15 @@ param(
 
     [int]$CcstatuslineIntervalMinutes = 5,
 
+    [string]$MemoryLogTaskName = 'WSL Memory Log',
+
+    [int]$MemoryLogIntervalMinutes = 5,
+
+    [string]$MemoryLogDir = (Join-Path $env:LOCALAPPDATA 'WslMemoryLog'),
+
     [string]$CodexCloudEnvironmentSyncTaskName = 'Codex Cloud Environment Sync',
+
+    [switch]$EnableCodexTasks,
 
     [string]$UsageCensusTaskName = 'Usage Census Publish',
 
@@ -176,11 +213,15 @@ Import-Module (Join-Path $PSScriptRoot '..' 'src' 'WslAutomation') -Force
 try {
     Set-WslAutomationScheduledTasks -ScriptsDir $ScriptsDir -DistroName $DistroName `
         -CcstatuslineTaskName $CcstatuslineTaskName -CcstatuslineIntervalMinutes $CcstatuslineIntervalMinutes `
-        -PwshPath $PwshPath -CodexCloudEnvironmentSyncTaskName $CodexCloudEnvironmentSyncTaskName `
+        -PwshPath $PwshPath -MemoryLogTaskName $MemoryLogTaskName `
+        -MemoryLogIntervalMinutes $MemoryLogIntervalMinutes -MemoryLogDir $MemoryLogDir `
+        -CodexCloudEnvironmentSyncTaskName $CodexCloudEnvironmentSyncTaskName -EnableCodexTasks:$EnableCodexTasks `
         -UsageCensusTaskName $UsageCensusTaskName -UsageCensusTime $UsageCensusTime `
         -SessionMinerTaskName $SessionMinerTaskName -SessionMinerTime $SessionMinerTime `
         -MemoryCurationTaskName $MemoryCurationTaskName -MemoryCurationTime $MemoryCurationTime `
-        -WaitingFeedTaskName $WaitingFeedTaskName -WslExePath $WslExePath `
+        -WaitingFeedTaskName $WaitingFeedTaskName `
+        -DockerWatchdogTaskName $DockerWatchdogTaskName -DockerWatchdogIntervalMinutes $DockerWatchdogIntervalMinutes `
+        -DockerWatchdogLogonDelayMinutes $DockerWatchdogLogonDelayMinutes -WslExePath $WslExePath -ConhostPath $ConhostPath `
         -LegacyScriptsToArchive $LegacyScriptsToArchive -SkipTaskHistory:$SkipTaskHistory -WhatIf:$WhatIfPreference
 
     exit 0

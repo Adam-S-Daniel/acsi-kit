@@ -18,6 +18,7 @@ Export-ModuleMember -Function @(
     'Get-WslDistroState',
     'Set-WslAutomationScheduledTasks',
     'Update-CcstatuslineConfig',
+    'Write-WslMemorySample',
     'Set-CcstatuslineStatusLine',
     'Invoke-CodexCloudEnvironmentSync',
     'Invoke-DockerWslIntegrationWatchdog',

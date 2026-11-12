@@ -65,6 +65,16 @@ daily time is the answer.
 
 Re-open this only if Microsoft ships a WSL event provider.
 
+### The daily publish tasks catch up a missed run, with restarts
+
+`Usage Census Publish` and `Session Miner` set `StartWhenAvailable` (plus
+`RestartCount 3`, `RestartInterval 10 min`); a laptop asleep at their minute
+otherwise skipped the day (result 2147946720, `0x800710E0`). The PowerShell
+tasks stay off it (below) because a catch-up at wake lands in the post-wake
+window; these scripts only need a working `wsl.exe`, and the restart interval
+clears that window if a catch-up lands in it. Memory Curation and the other tasks
+are unchanged.
+
 ### Don't trigger work inside WSL's post-wake transition window
 
 WSL is fragile for a few minutes after a boot or a resume. Both observed
@@ -78,10 +88,12 @@ from the WSLService service".
 - **The WSL-init window runs up to roughly 270 seconds after boot.** Anything
   triggered off boot or logon therefore needs a delay of ten minutes, not five;
   five would have cleared the observed worst case by about a minute.
-- **This is why no Windows task here uses `-StartWhenAvailable`:** a catch-up
-  at wake would land in that window. A missed run stays missed. Any work that
-  adds a boot- or resume-adjacent trigger owes the same delay. (Native Linux
-  has no such window, so the systemd timers there are `Persistent=true`.)
+- **This is why the PowerShell tasks here do not use `-StartWhenAvailable`:** a
+  catch-up at wake would land in that window. A missed run stays missed. The two
+  daily `wsl.exe` publish tasks do catch up, with restarts that outlast the
+  window (previous section). Any work that adds a boot- or resume-adjacent trigger
+  owes the same delay. (Native Linux has no such window, so the systemd timers
+  there are `Persistent=true`.)
 
 ### Never leave an interactive prompt in a scheduled-task code path
 

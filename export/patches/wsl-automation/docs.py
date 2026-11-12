@@ -21,6 +21,13 @@ and the CI shape, plus the memory curation and local trigger time notes.
 The sections that only explain the backup, the keeper (the stub `.git`
 guard runs only in the keeper) or the task health publish go. A short section on the Linux and macOS schedule is added.
 
+Re-pin round 9 (DECISIONS "Re-pin round 9"): the WSL memory log ships, in both
+files. The Claude settings sync is left out (X9: it runs a skill of the owner's
+registry), so its README section and the lines naming it go. The source's new
+AGENTS.md section on the daily publish tasks' catch-up is reworded for the
+tasks the kit ships, the post-wake window bullet says which tasks catch up, and
+the Codex Cloud sync's "disabled by default" line is kept without the keeper.
+
 This patch runs on the substituted tree, so its anchors are the exported
 text. Every anchor must occur exactly once.
 """
@@ -88,7 +95,12 @@ scheduled jobs available natively on Linux and macOS:
 - A weekly memory curation run that tidies Claude Code's private memory notes
   in both Claude homes on this machine (see "Memory curation task" below).
 - A sync of the WSL ccstatusline layout to Windows, and a twice-daily sync of
-  Codex Cloud environments.
+  Codex Cloud environments (registered disabled; see Install step 3).
+- A memory log: every 5 minutes, one CSV row of Windows and WSL memory
+  statistics, to show whether `.wslconfig`'s `memory=` limit is right (see
+  "WSL memory log task" below).
+- A watchdog that repairs Docker Desktop's WSL integration when it breaks after a
+  reboot, and alerts you when it cannot.
 - A scheduled-task installer that wires all of the above into Windows Task
   Scheduler, and scripts that pre-trust your workspaces for Claude Code and
   Codex.
@@ -113,9 +125,9 @@ README_INSTALL = """## Install
    C:\\Users\\<you>\\repos\\wsl-automation
    ```
 
-2. **Background-task prerequisites (once per machine).** Every task runs as a
-   background (S4U, session 0) task, so a run never flashes a window on the
-   desktop. That imposes two one-time requirements:
+2. **Background-task prerequisites (once per machine).** Every task but the
+   Docker watchdog runs as a background (S4U, session 0) task, so a run never
+   flashes a window on the desktop. That imposes two one-time requirements:
 
    - **PowerShell 7 installed via MSI** (not the Microsoft Store build). A
      Store-packaged pwsh cannot be activated in session 0, so the pwsh-based
@@ -144,6 +156,10 @@ README_INSTALL = """## Install
    This creates/updates the scheduled tasks described below. Re-running it is
    safe and idempotent - it will update the existing tasks in place rather
    than duplicating them. `-WhatIf` shows what it would change.
+
+   The Codex Cloud environment sync is registered but **disabled by default**.
+   Add `-EnableCodexTasks` to enable it; re-running without it disables it
+   again.
 
 4. **Windows ccstatusline runtime (once per machine).** Run
    `.\\scripts\\install-ccstatusline.ps1` from a normal PowerShell 7 prompt; see
@@ -184,8 +200,9 @@ README_MINER = """### Session miner task (default name: `Session Miner`)
 
 - Runs as a background S4U task for the current Windows user (session 0).
   Allowed on battery, 30 minute execution limit, ignores a second overlapping
-  instance, no `-StartWhenAvailable` (a missed day stays missed; the next run
-  reads what it missed).
+  instance. `-StartWhenAvailable` is on, with three restarts ten minutes apart:
+  a day missed while the machine slept is caught up on wake, and a catch-up that
+  lands in WSL's post-wake window is retried.
 - **One-time setup, in the distro.** Until a dry run has succeeded, a
   scheduled run exits 3 ("not set up yet") and mines nothing.
   1. A privacy denylist, one pattern per line, kept **outside every
@@ -336,26 +353,37 @@ installer, `tests/run-session-miner.test.sh` the session miner wrapper, and
 def readme(text: str, where: str) -> str:
     text = T.replace_between(text, "# wsl-automation\n", "## Install\n", README_TOP, where)
     text = replace_section(text, "## Install", README_INSTALL, where)
+    # The census catches up now (StartWhenAvailable plus restarts, as AGENTS.md
+    # says); the source's README section still says it does not.
+    text = T.sub_once(
+        text,
+        "  instance. There is no `-StartWhenAvailable`: a missed day stays missed (the\n"
+        "  census's 14-day freshness window and 6-day re-publish absorb it), and a\n"
+        "  catch-up at wake would land in WSL's post-wake transition window.",
+        "  instance. A missed day catches up (`-StartWhenAvailable`, with three\n"
+        "  restarts 10 minutes apart that outlast WSL's post-wake transition window).",
+        where,
+    )
 
     text = T.sub_once(
         text,
         "Every task action that runs a repo script (backup, keeper, ccstatusline sync,\n"
-        "Codex Cloud sync, usage census, session miner, memory curation, waiting feed, task health, and the Docker watchdog) first updates",
-        "Every task action runs a repo script (ccstatusline sync, Codex Cloud sync,\n"
-        "usage census, session miner, memory curation, waiting feed, and the Docker watchdog), and first updates",
+        "memory log, Claude settings sync, Codex Cloud sync, usage census, session miner, memory curation, waiting feed, task health, and the Docker watchdog) first updates",
+        "Every task action runs a repo script (ccstatusline sync, memory log, Codex Cloud\n"
+        "sync, usage census, session miner, memory curation, waiting feed, and the Docker watchdog), and first updates",
         where,
     )
     text = T.sub_once(
         text,
         "task code. The two on-demand launcher actions invoke their CLIs directly and have\n"
         "no repo script to update. All six run from",
-        "task code. All six run from",
+        "task code. They all run from",
         where,
     )
     text = T.sub_once(
         text,
-        "| PowerShell (backup, keeper, ccstatusline, Codex Cloud, Docker watchdog) |",
-        "| PowerShell (ccstatusline, Codex Cloud, Docker watchdog) |",
+        "| PowerShell (backup, keeper, ccstatusline, memory log, Claude settings sync, Codex Cloud, Docker watchdog) |",
+        "| PowerShell (ccstatusline, memory log, Codex Cloud, Docker watchdog) |",
         where,
     )
     text = T.sub_once(
@@ -373,6 +401,7 @@ def readme(text: str, where: str) -> str:
         "### Codex remote control launcher task (default name: `Codex Remote Control Launcher`)",
         "## Keeper semantics",
         "### Task health publish task (default name: `Task Health Publish`)",
+        "### Claude settings sync task (default name: `Claude Settings Sync`)",
     ):
         text = drop_section(text, heading, where)
 
@@ -382,6 +411,12 @@ def readme(text: str, where: str) -> str:
         "  prerequisites as the keeper).",
         "S4U task for the current Windows user (the MSI PowerShell and batch-logon\n"
         "  prerequisites of Install step 2).",
+        where,
+    )
+    text = T.sub_once(
+        text,
+        "Windows user (same MSI PowerShell and batch-logon prerequisites as the\n  keeper). It exists",
+        "Windows user (the MSI PowerShell and batch-logon prerequisites of Install\n  step 2). It exists",
         where,
     )
     text = T.sub_once(
@@ -469,10 +504,24 @@ from the WSLService service".
 - **The WSL-init window runs up to roughly 270 seconds after boot.** Anything
   triggered off boot or logon therefore needs a delay of ten minutes, not five;
   five would have cleared the observed worst case by about a minute.
-- **This is why no Windows task here uses `-StartWhenAvailable`:** a catch-up
-  at wake would land in that window. A missed run stays missed. Any work that
-  adds a boot- or resume-adjacent trigger owes the same delay. (Native Linux
-  has no such window, so the systemd timers there are `Persistent=true`.)
+- **This is why the PowerShell tasks here do not use `-StartWhenAvailable`:** a
+  catch-up at wake would land in that window. A missed run stays missed. The two
+  daily `wsl.exe` publish tasks do catch up, with restarts that outlast the
+  window (previous section). Any work that adds a boot- or resume-adjacent trigger
+  owes the same delay. (Native Linux has no such window, so the systemd timers
+  there are `Persistent=true`.)
+
+"""
+
+AGENTS_CATCH_UP = """### The daily publish tasks catch up a missed run, with restarts
+
+`Usage Census Publish` and `Session Miner` set `StartWhenAvailable` (plus
+`RestartCount 3`, `RestartInterval 10 min`); a laptop asleep at their minute
+otherwise skipped the day (result 2147946720, `0x800710E0`). The PowerShell
+tasks stay off it (below) because a catch-up at wake lands in the post-wake
+window; these scripts only need a working `wsl.exe`, and the restart interval
+clears that window if a catch-up lands in it. Memory Curation and the other tasks
+are unchanged.
 
 """
 
@@ -515,6 +564,9 @@ def agents(text: str, where: str) -> str:
         "  hibernate and surface as `0x1`, never `0x0`.\n\nRe-open this only",
         "  hibernate and surface as `0x1`, never `0x0`.\n" + AGENTS_AT_LOGON + "Re-open this only",
         where,
+    )
+    text = replace_section(
+        text, "### The three daily publish tasks catch up a missed run, with restarts", AGENTS_CATCH_UP, where
     )
     for heading in (
         "### Why the backup is a daily timer and not an at-logon trigger",
@@ -607,6 +659,8 @@ def apply(root: Path, ctx) -> None:
         text = (root / rel).read_text(encoding="utf-8")
         for gone in ("restic", "Keeper", "keeper task", "the keeper", "backup.lock", "Invoke-WslBackup",
                      "wt.exe", "-BackupDir", "Test-WslActivity", "Repair-WslUserRuntime",
-                     "task-health", "Task Health", "task health", "TASK_HEALTH", "Test-ClaudeStubGitDir"):
+                     "task-health", "Task Health", "task health", "TASK_HEALTH", "Test-ClaudeStubGitDir",
+                     "ClaudeSettingsSync", "sync-claude-settings", "Claude settings", "Claude Settings",
+                     "NoCodexRemoteControl"):
             if gone in text:
                 raise T.PatchError(f"{rel}: still mentions {gone!r}")

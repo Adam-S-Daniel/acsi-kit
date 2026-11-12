@@ -3,7 +3,7 @@
 .SYNOPSIS
     Grants a user the "Log on as a batch job" right (SeBatchLogonRight), required by the
     background scheduled tasks (usage census, waiting feed, session miner, ccstatusline sync,
-    Codex Cloud sync).
+    WSL memory log, Codex Cloud sync).
 
 .DESCRIPTION
     Set-WslAutomationScheduledTasks registers every task as S4U ("run whether the user is
