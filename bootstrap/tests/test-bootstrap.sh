@@ -160,10 +160,10 @@ sized() { # plan key file: the key's value in the sized file, as JSON
   python3 -I -c 'import json, sys, yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1]))[sys.argv[2]] if sys.argv[2] in yaml.safe_load(open(sys.argv[1])) else None))' \
     "$T/size/evals/$3" "$2"
 }
-assert_eq "Pro: points_per_usd 0.01" "$(sized pro points_per_usd budget.yml)" 0.01
+assert_eq "Pro: points_per_usd 0.03" "$(sized pro points_per_usd budget.yml)" 0.03
 assert_eq "Pro: a 5-hour stop at 0.9" "$(sized pro stop_when_session_above budget.yml)" 0.9
 assert_eq "Pro: no Fable judge" "$(sized pro judge_exclude_tiers roster-policy.yml)" '["fable", "mythos"]'
-assert_eq "Max 5x: points_per_usd 0.002" "$(sized max5x points_per_usd budget.yml)" 0.002
+assert_eq "Max 5x: points_per_usd 0.006" "$(sized max5x points_per_usd budget.yml)" 0.006
 assert_eq "Max 5x: a 5-hour stop at 0.9" "$(sized max5x stop_when_session_above budget.yml)" 0.9
 assert_eq "Max 5x: the judge is left alone" "$(sized max5x judge_exclude_tiers roster-policy.yml)" null
 assert_eq "Max 20x: the exported rate stays" "$(sized max20x points_per_usd budget.yml)" \

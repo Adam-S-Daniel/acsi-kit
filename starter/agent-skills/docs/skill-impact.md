@@ -54,6 +54,34 @@ no backfill is planned; the file adds the fields git does not capture.
 
 ---
 
+## 2026-11-12 — acsi-coding-local/sync-cc-settings-between-wsl-and-windows — edit
+
+- Motivation: the two settings files had drifted and the old merge could not run unattended: deletions came back, the newer file decided keys it never changed, `enabledPlugins` was copied whole (which would have turned `acsi-non-coding-local` off in Windows).
+- Change: three-way merge against a last-synced snapshot, recursive object merge, per-OS `acsi-non-coding-local` plugin entries, `-Unattended` / `-SnapshotPath` / `-ReportPath` / `-KeepBackups`, write only on change, refuse to write over a mid-run edit; bundle `acsi-coding-local` 2.2.5 -> 2.2.6 (PR pending).
+- Eval: exempt (skills-evals `evals/non-coverage.yml`); the skill's own pytest suite covers it (20 tests; the 10 new ones fail against the old script)
+- Outcome: pending
+
+## 2026-11-10 — acsi-coding-anywhere/workflow-path-audit — edit
+
+- Motivation: skills-evals description trim run `20261110T140514Z-a5cfb2`: the description was over the 400-character listing cap, waived until the improve lane trimmed it ([skills-evals#687](https://github.com/Adam-S-Daniel/skills-evals/issues/687)).
+- Change: SKILL.md description shortened from 425 to 392 characters by the trim loop, body unchanged; its `length-limit` waiver removed from `scripts/skills_waivers.yml`; bundle `acsi-coding-anywhere` 1.3.10 -> 1.3.11, by skills-evals' `routine-improve-gate.yml`.
+- Eval: run `20261110T140514Z-a5cfb2`, objective checks passed on every fixture, baseline -> candidate, 3 trial(s) per fixture in the eval routine (a local exhibit, not badge input): companion-skip-pair 24/24 -> 24/24; moved-test-dir 30/30 -> 30/30; required-by-unseen-ruleset 33/33 -> 33/33; required-check-routing 24/24 -> 24/24; required-gate-salience 35/36 -> 36/36; workflow-doc-in-step 30/30 -> 30/30; all fixtures 176/177 -> 177/177.
+- Outcome: auto-merges once required checks pass, with no human review (ADR 0021, the owner's 2026-10-26 decision).
+
+## 2026-11-10 — acsi-coding-anywhere/vendor-release-impact-issues — edit
+
+- Motivation: skills-evals description trim run `20261110T081040Z-55cbf3`: the description was over the 400-character listing cap, waived until the improve lane trimmed it ([skills-evals#687](https://github.com/Adam-S-Daniel/skills-evals/issues/687)).
+- Change: SKILL.md description shortened from 617 to 367 characters by the trim loop, body unchanged; its `length-limit` waiver removed from `scripts/skills_waivers.yml`; bundle `acsi-coding-anywhere` 1.3.9 -> 1.3.10, by skills-evals' `routine-improve-gate.yml`.
+- Eval: run `20261110T081040Z-55cbf3`, objective checks passed on every fixture, baseline -> candidate, 3 trial(s) per fixture in the eval routine (a local exhibit, not badge input): closed-duplicate 15/18 -> 15/18; closing-keywords 18/18 -> 18/18; issue-hygiene 21/21 -> 21/21; stamps-skip-quotes 12/15 -> 14/15; all fixtures 66/72 -> 68/72.
+- Outcome: auto-merges once required checks pass, with no human review (ADR 0021, the owner's 2026-10-26 decision).
+
+## 2026-11-10 — acsi-coding-anywhere/skills-doctor — edit
+
+- Motivation: [adam-agentskills#116](https://github.com/Adam-S-Daniel/adam-agentskills/issues/116): the bootstrap hook now leaves a locked skill to a synced account plugin that already loads it (ADR 0024), and the doctor would have called that skill missing in every cloud session.
+- Change: `scripts/check_provenance.py` reports such a skill as the note `delivered-by-an-account-plugin`, reading `~/.claude/plugins/synced` the way the hook does; SKILL.md unchanged; bundle `acsi-coding-anywhere` 1.3.8 -> 1.3.9 (PR pending).
+- Eval: none — script-only change, SKILL.md untouched; the doctor's own suite covers the new note
+- Outcome: pending
+
 ## 2026-11-09 — acsi-non-coding-local/pdf-ocr-audit — edit
 
 - Motivation: prompt-audit sweep finding in [adam-agentskills#128](https://github.com/Adam-S-Daniel/adam-agentskills/issues/128): the large-folder bullet listed `YYYYMMDD_*_iOS.pdf` among files that need OCR, while the filename table says No (already searchable).

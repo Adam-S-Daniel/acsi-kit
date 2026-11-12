@@ -1,6 +1,6 @@
 {
   "name": "acsi-coding-local",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "description": "Machine-bound coding skills and hooks for Claude Code on your own machines (WSL and Windows homes): clone sync and the API-credit lane.",
   "author": { "name": "<your name>" },
   "hooks": "./hooks/claude-code.json"

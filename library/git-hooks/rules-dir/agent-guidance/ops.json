@@ -45,8 +45,8 @@
     {
       "op": "replace",
       "file": "test/run-tests.sh",
-      "old": "grep -qF '\"checks\":[\"secret-file\",\"skill-shell\",\"dated-phrasing\"],\"failed\":[]' ",
-      "new": "grep -qF '\"checks\":[\"rules-dir\",\"secret-file\",\"skill-shell\",\"dated-phrasing\"],\"failed\":[]' "
+      "old": "grep -qE '\"checks\":\\[\"secret-file\",\"skill-shell\"(,\"lesson-[a-z0-9-]+\")*,\"dated-phrasing\"\\],\"failed\":\\[\\]' ",
+      "new": "grep -qE '\"checks\":\\[\"rules-dir\",\"secret-file\",\"skill-shell\"(,\"lesson-[a-z0-9-]+\")*,\"dated-phrasing\"\\],\"failed\":\\[\\]' "
     }
   ]
 }

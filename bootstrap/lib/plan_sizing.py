@@ -29,10 +29,11 @@ from pathlib import Path
 
 import yaml
 
-#: Allowance fraction per dollar of API-equivalent spend: the owner's measured
-#: ~$20-24 per point on Max 20x, scaled by the plan multipliers (Max 5x a
-#: quarter of Max 20x, Pro a twentieth). docs/before-you-start.md#which-plan.
-POINTS_PER_USD = {"pro": 0.01, "max5x": 0.002, "max20x": None}
+#: Allowance fraction per dollar of API-equivalent spend: the exported Max 20x
+#: rate (0.0015, about $6.70 per point, measured 2026-11-10), scaled by the
+#: plan multipliers (Max 5x a quarter of Max 20x, Pro a twentieth).
+#: docs/before-you-start.md#which-plan.
+POINTS_PER_USD = {"pro": 0.03, "max5x": 0.006, "max20x": None}
 SESSION_STOP = {"pro": 0.90, "max5x": 0.90, "max20x": None}
 JUDGE_EXCLUDE = {"pro": ["fable", "mythos"], "max5x": None, "max20x": None}
 PPU_LINE = re.compile(r"^points_per_usd:[ \t]*[0-9.eE+-]+[ \t]*$", re.MULTILINE)
