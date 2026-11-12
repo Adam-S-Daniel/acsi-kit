@@ -16,7 +16,7 @@
 repo: wsl-automation
 kit_name: wsl-automation
 source: wsl-automation
-source_sha: aa78623ef6e958fdb0a47ad8d6e06b19e97e617b
+source_sha: 6987040ddf99b358a2373980bbf33e30453d0797
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror,
 # the agent-checks runner) are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -219,6 +219,13 @@ edits:
       The kit's session miner keeps its settings in this one file (DECISIONS
       "One machine config file (2026-11-04)"); these are the miner's keys,
       which the overlay used to keep in a file of its own.
+  - path: scripts/publish-usage-census.sh
+    old: "# publisher already failed, whose code is kept), so Task Health shows it.\n"
+    new: "# publisher already failed, whose code is kept), so the task's last result shows it.\n"
+    why: >-
+      X10. The task health publish is left out (DECISIONS "Re-pin (2026-11-03)"),
+      so the census's new explorer dispatch failure is shown by the task's own
+      last result.
   - path: config/settings.env.example
     old: "# Used by the 'Task Health Publish' task (scripts/publish-task-health.sh): the\n# repository it pushes task-health.json to.\nTASK_HEALTH_URL=https://github.com/example-owner/waiting-feed.git\n\n"
     new: ""

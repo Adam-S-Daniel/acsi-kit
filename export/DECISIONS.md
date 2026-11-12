@@ -2484,6 +2484,59 @@ catalog entry, test expectations and docs wording, drop the two manifest
 exclusions, put back the `.git/` scan exception, and revert the two
 retirement-exempt edits, the new test and the URL edit.
 
+## Re-pin round 11 (2026-11-12)
+
+`export/resync.py` moved all five public pins to their sources' current heads.
+The export then failed in two places, and the kit follows the source in both:
+
+- **skills-evals removed the dashboard's Loop tab.** `dashboard/build.py` no
+  longer has `loop()`, `loop_gaps` or the `loop_status.json` input (the loop's
+  gap list, and the stages, grid and lanes built from it), so the two `build.py`
+  cold-start edits that gave those a placeholder row or an optional input had
+  nothing to anchor on, and the README row for `loop_status.json` is gone from
+  the source. Those three edits are dropped with the feature. What stays: the thread
+  placeholder row (`threads()` still returns an empty list for a project with no
+  threads), so the `datasets.js` edit now adds only `threads: 'id'` and the
+  empty-inputs regression test checks the thread row alone. The source also
+  dropped `ci_red_runs`, the cleanup, gate and decisions datasets and the
+  decisions column in the cost weeks, and added `refresh` and the
+  "since reset" allowance figures; none of that touches a kit edit.
+- **The usage census now dispatches the Evals Explorer data workflow.**
+  wsl-automation's `publish-usage-census.sh` runs `gh workflow run
+  explorer-data.yml` in its clone after a real publish, so the explorer
+  rebuilds the same day. The kit ships that workflow (the Evals fragment), so
+  the dispatch ships as the source has it. Its README paragraph and the script
+  header said a failed dispatch "shows in Task Health", which the kit leaves
+  out (X10), so the README patch and a manifest edit on the script say "the
+  task's last result shows it" instead. The patch's guard against the words
+  "Task Health" is unchanged and now passes.
+- **Two test literals follow the renames.** skills-evals' explorer test builds
+  live pull request URLs as one `https://github.com/<owner>/<registry>/pull/N`
+  literal, which kept the source owner's name (P2) while the document's row was
+  renamed, so the "once each" test saw two rows. A manifest edit splits each
+  literal, as in round 10. The Summary page's "names no person" check in
+  `tool/test/run.js` looked for "the owner", which C10 puts on the page on
+  purpose; it now looks for the kit's invented person, as the dashboard build
+  test already does.
+- The other three sources changed without a break.
+  `fleet-memory.sh` gains the hosted-session git hooks and
+  `guidance-load-record.sh` grows (both ship unchanged, in every starter that
+  carries them).
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `458b958ad310` | `5c6b3aebb001` |
+| acsi-agentskills | `3795a5e5eef8` | `27994ee9c516` |
+| repo-settings | `0ae5a7ed1d3b` | `970e1c54aa94` |
+| skills-evals | `b345ff7506c3` | `194edfb4bf0f` |
+| wsl-automation | `aa78623ef6e9` | `6987040ddf99` |
+
+Reverse: restore the previous pins, put back the two loop cold-start edits in
+`build.py` and the `loop_status.json` README edit, the `loop_gaps` key in the
+`datasets.js` edit and the gap lines of the empty-inputs test, and drop the
+census README patch step, the script header edit and the three test edits
+above.
+
 ## The guidance overlap judgment (2026-11-10)
 
 `_agent-guidance#495` added a warn-only "Repo-specific guidance overlap"

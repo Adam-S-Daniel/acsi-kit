@@ -6,8 +6,8 @@
    instead of an empty list, because the Dashboard reads [] as "failed to
    load"; the page never shows it. */
 export const PLACEHOLDER_KEY = {
-  usage_rows: 'kind', usage_sources: 'key', ci_red_runs: 'key', run_stream: 'key', checkins: 'id', waiting: 'id',
-  cost_benefit_weeks: 'week', half_built_issues: 'key', threads: 'id', loop_gaps: 'gap'
+  usage_rows: 'kind', usage_sources: 'key', run_stream: 'key', checkins: 'id', waiting: 'id',
+  cost_benefit_weeks: 'week', half_built_issues: 'key', threads: 'id'
 };
 
 /* rows(dash, id): the dataset's rows without placeholders, or null when it
