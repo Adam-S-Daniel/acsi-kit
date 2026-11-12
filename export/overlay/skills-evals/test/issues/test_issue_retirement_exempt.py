@@ -95,6 +95,25 @@ class SkillRetirementTests(r70.Base):
         self.assertIn("core item", plan["reason"])
 
 
+class UnusedRemovalTests(unittest.TestCase):
+    def test_a_core_skill_is_exempt_from_the_unused_removal_too(self):
+        with exempt(skills=["core-skill"]), \
+                mock.patch.object(retire_skill.removal_policy, "load", return_value={"policy": 1}), \
+                mock.patch.object(retire_skill.eval_scope, "usage_unknown",
+                                  return_value=["unknown-use-skill"]):
+            policy, skills = retire_skill.unused_inputs()
+        self.assertEqual(policy, {"policy": 1})
+        self.assertEqual(skills, {"core-skill", "unknown-use-skill"})
+
+    def test_with_no_core_skill_only_the_usage_unknown_list_is_exempt(self):
+        with exempt(), \
+                mock.patch.object(retire_skill.removal_policy, "load", return_value={}), \
+                mock.patch.object(retire_skill.eval_scope, "usage_unknown",
+                                  return_value=["unknown-use-skill"]):
+            _, skills = retire_skill.unused_inputs()
+        self.assertEqual(skills, {"unknown-use-skill"})
+
+
 class GuidanceRetirementTests(unittest.TestCase):
     def test_a_core_section_with_a_retire_verdict_opens_nothing(self):
         fake = g124.FakeGh()

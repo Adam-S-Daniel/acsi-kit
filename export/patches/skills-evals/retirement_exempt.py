@@ -83,14 +83,25 @@ RETIRE_EDITS = [
     ('''    skill = retiring(gates)
     mode = mode_of(gates)
     if skill is None:
+        if unused_loader is not None:
+            return unused_plan(gates, registries, gh, run_url, allowed, usage, date,
+                               unused_loader)
         return {"action": "none", "mode": mode, "reason": "no skill has a retire verdict"}
 ''', '''    skill = retiring(gates)
     mode = mode_of(gates)
     if skill is None:
+        if unused_loader is not None:
+            return unused_plan(gates, registries, gh, run_url, allowed, usage, date,
+                               unused_loader)
         return {"action": "none", "mode": mode, "reason": "no skill has a retire verdict"}
     if skill in compute_gates.load_exempt(REPO_ROOT / "evals")["skills"]:
         return {"action": "none", "mode": mode, "skill": skill,
                 "reason": f"{skill} is a core item (evals/retirement-exempt.yml), never retired automatically"}
+'''),
+    ('''        exempt = set(eval_scope.usage_unknown(REPO_ROOT))
+''', '''        exempt = set(eval_scope.usage_unknown(REPO_ROOT))
+        # A core skill is never removed as unused either (retirement-exempt.yml).
+        exempt |= compute_gates.load_exempt(REPO_ROOT / "evals")["skills"]
 '''),
     ('''    else:
         kind = "retire"

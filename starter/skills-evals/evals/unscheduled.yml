@@ -17,9 +17,9 @@ fixtures:
   - path: evals/workflow-path-audit/required-check-routing
     reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-10, holds: fails criterion 4 (the fixture is unchanged since 2026-11-03 03:28 UTC, and both runs after that, 20261103T124306Z-892f4f and 20261103T134218Z-d68eee, have the without arm at 8/8 checks)."
   - path: evals/skills-doctor/one-row-rejects-the-lock
-    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-12, holds: fails criterion 4 (the fixture is unchanged since 2026-11-02, and both runs after that, 20261103T012234Z-dd66ce on Sonnet 5.5 and 20261103T095129Z-a28e1a on Opus 5.5, have the without arm at 5/5 checks)."
   - path: evals/skills-doctor/ssh-remote-is-durable
-    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-12, holds: fails criterion 4 (the fixture is unchanged since 2026-11-02, and both runs after that, 20261103T024322Z-b8c817 on Sonnet 5.5 and 20261103T095401Z-15b65b on Opus 5.5, have the without arm at 6/6 checks)."
   - path: evals/workflow-path-audit/moved-test-dir
     reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
   - path: evals/red-ci-example-site-a-ai/concurrency-cancel

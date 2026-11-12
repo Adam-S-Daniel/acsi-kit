@@ -18,7 +18,6 @@ from pathlib import Path
 # skill -> (plugin, tier)
 OPTIONAL = {
     "review-bash-ci-reliability": ("acsi-coding-anywhere", "recommended"),
-    "debug-github-workflows": ("acsi-coding-anywhere", "recommended"),
     "disarm-inherited-reach": ("acsi-coding-anywhere", "recommended"),
     "writing-adrs": ("acsi-anything-anywhere", "opinionated"),
     "finding-unknowns": ("acsi-anything-anywhere", "opinionated"),
