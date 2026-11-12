@@ -72,6 +72,8 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
                 ExecutionTimeLimit         = $ExecutionTimeLimit
                 MultipleInstances          = $MultipleInstances
                 WakeToRun                  = [bool]$WakeToRun
+                RestartCount               = $RestartCount
+                RestartInterval            = $RestartInterval
             }
         }
 
@@ -90,8 +92,11 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
         # Scheduler no matter what the implementation calls.
         Mock -ModuleName WslAutomation Register-WslScheduledTask { }
         Mock -ModuleName WslAutomation Set-WslScheduledTask { }
+        Mock -ModuleName WslAutomation Set-WslScheduledTaskEnabled { }
         Mock -ModuleName WslAutomation Register-ScheduledTask { }
         Mock -ModuleName WslAutomation Set-ScheduledTask { }
+        Mock -ModuleName WslAutomation Enable-ScheduledTask { }
+        Mock -ModuleName WslAutomation Disable-ScheduledTask { }
         Mock -ModuleName WslAutomation Unregister-ScheduledTask { }
         Mock -ModuleName WslAutomation Rename-Item { }
 
@@ -130,13 +135,13 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
             $usageCensusTrigger[0].StartBoundary | Should -BeLike '*T12:37:00'
         }
 
-        It 'runs all six background tasks as S4U in session 0, where no desktop window can flash' {
+        It 'runs all seven background tasks as S4U in session 0, where no desktop window can flash' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
                 -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
 
-            # The ccstatusline sync, Codex Cloud sync, usage census, session miner, memory curation
-            # and waiting feed publish are windowless background tasks.
-            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskPrincipal -Times 6 -Exactly -ParameterFilter {
+            # The ccstatusline sync, memory log, Codex Cloud sync, usage census, session miner,
+            # memory curation and waiting feed publish are windowless background tasks.
+            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskPrincipal -Times 7 -Exactly -ParameterFilter {
                 $LogonType -eq 'S4U'
             }
         }
@@ -147,6 +152,8 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
 
             $ccstatuslineAction = $script:capturedActions | Where-Object { $_.Argument -match 'sync-ccstatusline-config\.ps1' }
             $ccstatuslineAction.Argument | Should -Not -Match 'WindowStyle'
+            $memoryLogAction = $script:capturedActions | Where-Object { $_.Argument -match 'log-wsl-memory\.ps1' }
+            $memoryLogAction.Argument | Should -Not -Match 'WindowStyle'
         }
 
         It 'runs only the Docker watchdog interactively; the usage census task is S4U for the current user, never SYSTEM' {
@@ -186,6 +193,82 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
             }
         }
 
+        It 'creates the memory log task with an action that runs log-wsl-memory.ps1 with a quoted -LogDir and DistroName' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:\fake\pwsh.exe' -DistroName 'Debian' -MemoryLogDir 'C:\Logs\Mem Log' -Confirm:$false
+
+            $memoryLogAction = $script:capturedActions | Where-Object { $_.Argument -match 'log-wsl-memory\.ps1' }
+
+            $memoryLogAction | Should -Not -BeNullOrEmpty
+            $memoryLogAction.Execute | Should -Be 'C:\fake\pwsh.exe'
+            $memoryLogAction.Argument | Should -Be "-NoProfile -File `"$(Join-Path $script:scriptsDir 'log-wsl-memory.ps1')`" -LogDir `"C:\Logs\Mem Log`" -DistroName Debian"
+        }
+
+        It 'passes -LogDir resolved from LOCALAPPDATA at install time by default' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
+
+            $memoryLogAction = $script:capturedActions | Where-Object { $_.Argument -match 'log-wsl-memory\.ps1' }
+            $memoryLogAction.Argument | Should -Match ([regex]::Escape("-LogDir `"$(Join-Path $env:LOCALAPPDATA 'WslMemoryLog')`" "))
+        }
+
+        It 'trims a trailing separator from -MemoryLogDir so it cannot escape the closing quote' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:\fake\pwsh.exe' -MemoryLogDir 'C:\Logs\Mem\' -Confirm:$false
+
+            $memoryLogAction = $script:capturedActions | Where-Object { $_.Argument -match 'log-wsl-memory\.ps1' }
+            $memoryLogAction.Argument | Should -Match ([regex]::Escape('-LogDir "C:\Logs\Mem" '))
+        }
+
+        It 'registers the memory log task as S4U with a once/repeating trigger at the configured interval' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
+
+            Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 1 -Exactly -ParameterFilter {
+                $TaskName -eq 'WSL Memory Log' -and
+                $Action.Argument -match 'log-wsl-memory\.ps1' -and
+                $Trigger.IsOnce -eq $true -and
+                $Trigger.Repetition.Interval -eq 'PT5M' -and
+                $Principal.LogonType -eq 'S4U' -and $Principal.UserId -eq "$env:USERDOMAIN\$env:USERNAME"
+            }
+        }
+
+        It 'honors -MemoryLogTaskName and -MemoryLogIntervalMinutes' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false -MemoryLogIntervalMinutes 10 -MemoryLogTaskName 'Custom Memory Log'
+
+            Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 1 -Exactly -ParameterFilter {
+                $TaskName -eq 'Custom Memory Log' -and $Trigger.Repetition.Interval -eq 'PT10M'
+            }
+            Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 0 -Exactly -ParameterFilter {
+                $TaskName -eq 'WSL Memory Log'
+            }
+        }
+
+        It 'gives the memory log task the on-battery, 5 minute limit, one-instance settings' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
+
+            Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 1 -Exactly -ParameterFilter {
+                $TaskName -eq 'WSL Memory Log' -and
+                $Settings.DisallowStartIfOnBatteries -eq $false -and $Settings.StopIfGoingOnBatteries -eq $false -and
+                $Settings.ExecutionTimeLimit.TotalMinutes -eq 5 -and $Settings.MultipleInstances -eq 'IgnoreNew' -and
+                $Settings.StartWhenAvailable -eq $false -and $Settings.WakeToRun -eq $false
+            }
+        }
+
+        It 'registers nothing for the memory log task under -WhatIf' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:\fake\pwsh.exe' -WhatIf | Out-Null
+
+            Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 0 -Exactly -ParameterFilter {
+                $TaskName -eq 'WSL Memory Log'
+            }
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTask -Times 0 -Exactly -ParameterFilter {
+                $TaskName -eq 'WSL Memory Log'
+            }
+        }
+
         It 'registers the Codex Cloud sync task with only midnight and noon triggers and no catch-up setting' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
                 -PwshPath 'C:\fake\pwsh.exe' -DistroName 'Debian' -Confirm:$false
@@ -197,14 +280,21 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
                 $Trigger.Count -eq 2 -and $Trigger[0].IsDaily -and $Trigger[0].At -eq '00:00' -and
                 $Trigger[1].IsDaily -and $Trigger[1].At -eq '12:00'
             }
-            # The Codex Cloud sync and usage census tasks share these settings.
-            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskSettingsSet -Times 2 -Exactly -ParameterFilter {
+            # The Codex Cloud sync alone uses these settings (no catch-up).
+            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskSettingsSet -Times 1 -Exactly -ParameterFilter {
                 $ExecutionTimeLimit.TotalMinutes -eq 15 -and $MultipleInstances -eq 'IgnoreNew' -and
                 $AllowStartIfOnBatteries -and $DontStopIfGoingOnBatteries -and -not $StartWhenAvailable
             }
+            # The usage census alone uses these 15 minute catch-up settings (the session miner
+            # raises the limit to 30 minutes).
+            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskSettingsSet -Times 1 -Exactly -ParameterFilter {
+                $ExecutionTimeLimit.TotalMinutes -eq 15 -and $MultipleInstances -eq 'IgnoreNew' -and
+                $AllowStartIfOnBatteries -and $DontStopIfGoingOnBatteries -and $StartWhenAvailable -and
+                $RestartCount -eq 3 -and $RestartInterval.TotalMinutes -eq 10
+            }
         }
 
-        It 'registers the usage census task as a direct wsl.exe action with one daily trigger, S4U, and no catch-up setting' {
+        It 'registers the usage census task as a direct wsl.exe action with one daily trigger, S4U, and catch-up with restarts' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
                 -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
 
@@ -214,10 +304,17 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
                 @($Trigger).Count -eq 1 -and $Trigger.IsDaily -and $Trigger.At -eq '12:37' -and
                 $Principal.FakePrincipal
             }
-            # The Codex Cloud sync and usage census tasks share these settings.
-            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskSettingsSet -Times 2 -Exactly -ParameterFilter {
+            # The Codex Cloud sync alone uses these settings (no catch-up).
+            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskSettingsSet -Times 1 -Exactly -ParameterFilter {
                 $ExecutionTimeLimit.TotalMinutes -eq 15 -and $MultipleInstances -eq 'IgnoreNew' -and
                 $AllowStartIfOnBatteries -and $DontStopIfGoingOnBatteries -and -not $StartWhenAvailable
+            }
+            # The usage census alone uses these 15 minute catch-up settings (the session miner
+            # raises the limit to 30 minutes).
+            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskSettingsSet -Times 1 -Exactly -ParameterFilter {
+                $ExecutionTimeLimit.TotalMinutes -eq 15 -and $MultipleInstances -eq 'IgnoreNew' -and
+                $AllowStartIfOnBatteries -and $DontStopIfGoingOnBatteries -and $StartWhenAvailable -and
+                $RestartCount -eq 3 -and $RestartInterval.TotalMinutes -eq 10
             }
 
             $censusAction = @($script:capturedActions | Where-Object { $_.Argument -match 'publish-usage-census\.sh' })
@@ -235,7 +332,7 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
             Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 1 -Exactly -ParameterFilter {
                 $TaskName -eq 'Usage Census Publish' -and $Principal.UserId -eq "$env:USERDOMAIN\$env:USERNAME"
             }
-            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskPrincipal -Times 6 -Exactly -ParameterFilter {
+            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskPrincipal -Times 7 -Exactly -ParameterFilter {
                 $LogonType -eq 'S4U' -and $UserId -eq "$env:USERDOMAIN\$env:USERNAME"
             }
         }
@@ -267,7 +364,7 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
             $censusAction.Argument | Should -Not -Match '\\"'
         }
 
-        It 'registers the session miner task as a direct wsl.exe action with one daily trigger, S4U, a 30 minute limit, and no catch-up setting' {
+        It 'registers the session miner task as a direct wsl.exe action with one daily trigger, S4U, a 30 minute limit, and catch-up with restarts' {
             Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
                 -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
 
@@ -279,7 +376,7 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
                 $Principal.UserId -eq "$env:USERDOMAIN\$env:USERNAME" -and
                 $Settings.ExecutionTimeLimit.TotalMinutes -eq 30 -and $Settings.MultipleInstances -eq 'IgnoreNew' -and
                 $Settings.DisallowStartIfOnBatteries -eq $false -and $Settings.StopIfGoingOnBatteries -eq $false -and
-                -not $Settings.StartWhenAvailable
+                $Settings.StartWhenAvailable -and $Settings.RestartCount -eq 3 -and $Settings.RestartInterval.TotalMinutes -eq 10
             }
 
             $minerAction = @($script:capturedActions | Where-Object { $_.Argument -match 'run-session-miner\.sh' })
@@ -297,7 +394,7 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
             Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 1 -Exactly -ParameterFilter {
                 $TaskName -eq 'Session Miner' -and $Principal.UserId -eq "$env:USERDOMAIN\$env:USERNAME"
             }
-            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskPrincipal -Times 6 -Exactly -ParameterFilter {
+            Should -Invoke -ModuleName WslAutomation New-ScheduledTaskPrincipal -Times 7 -Exactly -ParameterFilter {
                 $LogonType -eq 'S4U' -and $UserId -eq "$env:USERDOMAIN\$env:USERNAME"
             }
         }
@@ -538,6 +635,45 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
         }
     }
 
+    Context 'when the memory log task already exists' {
+
+        BeforeEach {
+            $script:existingMemoryLogTask = [pscustomobject]@{
+                TaskName  = 'WSL Memory Log'
+                Settings  = [pscustomobject]@{ ExistingSettings = $true }
+                Principal = [pscustomobject]@{ ExistingPrincipal = $true }
+            }
+
+            Mock -ModuleName WslAutomation Get-ScheduledTask {
+                if ($TaskName -eq 'WSL Memory Log') {
+                    return $script:existingMemoryLogTask
+                }
+                return $null
+            }
+        }
+
+        It 'updates it in place with a rebuilt action, trigger, settings and principal' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
+
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTask -Times 1 -Exactly -ParameterFilter {
+                $TaskName -eq 'WSL Memory Log' -and
+                $Action.Argument -match 'log-wsl-memory\.ps1' -and
+                $Trigger.Repetition.Interval -eq 'PT5M' -and
+                $Settings.FakeSettings -and $Principal.FakePrincipal -and $Principal.LogonType -eq 'S4U'
+            }
+        }
+
+        It 'does not create a second memory log task via Register-WslScheduledTask' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:\fake\pwsh.exe' -Confirm:$false
+
+            Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 0 -Exactly -ParameterFilter {
+                $TaskName -eq 'WSL Memory Log'
+            }
+        }
+    }
+
     Context 'when the Codex Cloud sync task already exists' {
 
         BeforeEach {
@@ -741,6 +877,106 @@ Describe 'Set-WslAutomationScheduledTasks' -Skip:(-not $IsWindows) {
             }
         }
     }
+    Context 'The Codex Cloud sync is disabled unless -EnableCodexTasks is passed' {
+
+        BeforeEach {
+            # Records the order of registrations and enable/disable calls, so the task is shown to
+            # be registered (or updated) first and switched afterward.
+            $script:callOrder = [System.Collections.Generic.List[string]]::new()
+            Mock -ModuleName WslAutomation Register-WslScheduledTask { $script:callOrder.Add("register:$TaskName") }
+            Mock -ModuleName WslAutomation Set-WslScheduledTask { $script:callOrder.Add("update:$TaskName") }
+            Mock -ModuleName WslAutomation Set-WslScheduledTaskEnabled { $script:callOrder.Add("enabled=${Enabled}:$TaskName") }
+            Mock -ModuleName WslAutomation Get-ScheduledTask { $null }
+        }
+
+        It 'registers the Codex Cloud sync and then disables it by default' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:ake\pwsh.exe' -Confirm:$false
+
+            Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 1 -Exactly -ParameterFilter { $TaskName -eq 'Codex Cloud Environment Sync' }
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly -ParameterFilter {
+                $TaskName -eq 'Codex Cloud Environment Sync' -and $Enabled -eq $false
+            }
+            $script:callOrder.IndexOf('register:Codex Cloud Environment Sync') | Should -BeLessThan $script:callOrder.IndexOf('enabled=False:Codex Cloud Environment Sync')
+        }
+
+        It 'enables the Codex Cloud sync with -EnableCodexTasks' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:ake\pwsh.exe' -EnableCodexTasks -Confirm:$false
+
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly -ParameterFilter {
+                $TaskName -eq 'Codex Cloud Environment Sync' -and $Enabled -eq $true
+            }
+        }
+
+        It 'honors -CodexCloudEnvironmentSyncTaskName when switching' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:ake\pwsh.exe' -CodexCloudEnvironmentSyncTaskName 'My Codex Sync' -Confirm:$false
+
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly -ParameterFilter {
+                $TaskName -eq 'My Codex Sync' -and $Enabled -eq $false
+            }
+        }
+
+        It 'updates an already-registered Codex Cloud sync in place and then disables it by default' {
+            Mock -ModuleName WslAutomation Get-ScheduledTask {
+                if ($TaskName -eq 'Codex Cloud Environment Sync') {
+                    return [pscustomobject]@{ TaskName = $TaskName; State = 'Disabled' }
+                }
+                return $null
+            }
+
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:ake\pwsh.exe' -Confirm:$false
+
+            Should -Invoke -ModuleName WslAutomation Register-WslScheduledTask -Times 0 -Exactly -ParameterFilter { $TaskName -like 'Codex*' }
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTask -Times 1 -Exactly -ParameterFilter { $TaskName -eq 'Codex Cloud Environment Sync' }
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly -ParameterFilter { $Enabled -eq $false }
+            $script:callOrder.IndexOf('update:Codex Cloud Environment Sync') | Should -BeLessThan $script:callOrder.IndexOf('enabled=False:Codex Cloud Environment Sync')
+        }
+
+        It 'enables an already-registered, disabled Codex Cloud sync when -EnableCodexTasks is passed' {
+            Mock -ModuleName WslAutomation Get-ScheduledTask {
+                if ($TaskName -eq 'Codex Cloud Environment Sync') {
+                    return [pscustomobject]@{ TaskName = $TaskName; State = 'Disabled' }
+                }
+                return $null
+            }
+
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:ake\pwsh.exe' -EnableCodexTasks -Confirm:$false
+
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 1 -Exactly -ParameterFilter { $Enabled -eq $true }
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 0 -Exactly -ParameterFilter { $Enabled -eq $false }
+        }
+
+        It 'neither disables nor enables anything under -WhatIf' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:ake\pwsh.exe' -WhatIf | Out-Null
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:ake\pwsh.exe' -EnableCodexTasks -WhatIf | Out-Null
+
+            Should -Invoke -ModuleName WslAutomation Set-WslScheduledTaskEnabled -Times 0 -Exactly
+        }
+
+        It 'says in the summary whether the Codex Cloud sync is enabled or disabled' {
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:ake\pwsh.exe' -Confirm:$false -InformationVariable disabledInfo | Out-Null
+            Set-WslAutomationScheduledTasks -ScriptsDir $script:scriptsDir `
+                -PwshPath 'C:ake\pwsh.exe' -EnableCodexTasks -Confirm:$false -InformationVariable enabledInfo | Out-Null
+
+            $disabledCodexLines = @($disabledInfo | ForEach-Object { "$_" } | Where-Object { $_ -match '^Codex Cloud task' })
+            $disabledCodexLines.Count | Should -Be 1
+            $disabledCodexLines | ForEach-Object { $_ | Should -Match '\(.*disabled; pass -EnableCodexTasks to enable' }
+
+            $enabledCodexLines = @($enabledInfo | ForEach-Object { "$_" } | Where-Object { $_ -match '^Codex Cloud task' })
+            $enabledCodexLines.Count | Should -Be 1
+            $enabledCodexLines | ForEach-Object { $_ | Should -Match ', enabled\)' }
+        }
+    }
+
     Context 'legacy script archiving' {
 
         BeforeEach {
@@ -950,11 +1186,11 @@ Describe 'Scheduled task checkout bootstrap coverage (PowerShell AST)' {
         $script:actionCount = $actions.Count
     }
 
-    It 'covers all seven script actions among seven registered task actions' {
-        $script:actionCount | Should -Be 7
-        $script:actionScripts.Count | Should -Be 7
+    It 'covers all eight script actions among eight registered task actions' {
+        $script:actionCount | Should -Be 8
+        $script:actionScripts.Count | Should -Be 8
         @($script:actionScripts | Sort-Object) | Should -Be @(
-            'ensure-docker-wsl-integration.ps1', 'publish-usage-census.sh', 'publish-waiting-feed.sh', 'run-memory-curation.sh', 'run-session-miner.sh',
+            'ensure-docker-wsl-integration.ps1', 'log-wsl-memory.ps1', 'publish-usage-census.sh', 'publish-waiting-feed.sh', 'run-memory-curation.sh', 'run-session-miner.sh',
             'sync-ccstatusline-config.ps1', 'sync-codex-cloud-environments.ps1'
         )
     }
@@ -990,6 +1226,7 @@ Describe 'Scheduled task checkout bootstrap coverage (PowerShell AST)' {
 
     It 'bootstraps <Entry> before importing and invoking task code' -ForEach @(
         @{ Entry = 'ensure-docker-wsl-integration.ps1'; Work = 'Invoke-DockerWslIntegrationWatchdog' },
+        @{ Entry = 'log-wsl-memory.ps1'; Work = 'Write-WslMemorySample' },
         @{ Entry = 'sync-ccstatusline-config.ps1'; Work = 'Update-CcstatuslineConfig' },
         @{ Entry = 'sync-codex-cloud-environments.ps1'; Work = 'Invoke-CodexCloudEnvironmentSync' }
     ) {

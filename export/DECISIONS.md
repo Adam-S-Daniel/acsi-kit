@@ -2363,6 +2363,64 @@ wsl-automation stays at `460f6c77fe5e` here and follows in the next round.
 Reverse: restore the previous pins, the two patch edits and the three plan
 rates.
 
+## Re-pin round 9 (2026-11-12): wsl-automation
+
+Round 8 held `wsl-automation` at `460f6c77fe5e` because its newer commits
+broke `tasks_installer.py`'s keeper check. This round follows them. Upstream
+added two scheduled tasks and some supporting changes:
+
+- **The WSL memory log ships.** `log-wsl-memory.ps1`,
+  `Write-WslMemorySample`, its tests, its task in
+  `Set-WslAutomationScheduledTasks` and `register-tasks.ps1`
+  (`-MemoryLogTaskName`, `-MemoryLogIntervalMinutes`, `-MemoryLogDir`) and its
+  README section are generic, so they stay. The patched help, task counts,
+  the S4U lists and the Pester counts are reworded for the kit's eight tasks
+  (seven S4U, plus the Interactive Docker watchdog), with no mention of the
+  keeper, the backup, the launchers or task health.
+- **The Claude settings sync is left out** (X9, with X10's treatment of the
+  files). It runs the `sync-cc-settings-between-wsl-and-windows` skill from the
+  owner's registry, which the kit already leaves out, so the task would have
+  nothing to run. The manifest excludes `Invoke-ClaudeSettingsSync`, its
+  private helper, `sync-claude-settings.ps1` and its tests, and two `edits`
+  drop its exports from `WslAutomation.psd1` and `.psm1`. The three patches
+  remove its task, its three parameters (`-ClaudeSettingsSyncTaskName`,
+  `-ClaudeSettingsSyncIntervalMinutes`, `-ClaudeSettingsSyncLive`), its help,
+  summary line, Pester tests and README section, and each now fails if
+  `ClaudeSettingsSync` or `sync-claude-settings` reappears.
+- **Catch-up settings ship.** The usage census and the session miner now set
+  `StartWhenAvailable` with `RestartCount 3` and `RestartInterval 10 min`
+  (the source's task health publish, which the kit leaves out, shared them).
+  The kit's miner keeps its 30 minute limit on top of them. `docs.py` rewrites
+  the source's new AGENTS.md section for the two tasks and says in the
+  post-wake window section which tasks catch up.
+- **`-EnableCodexTasks` ships for the Codex Cloud sync alone.** The source
+  registers both Codex tasks disabled unless the switch is given, and
+  `Set-WslScheduledTaskEnabled` is the new private seam. The launcher and the
+  keeper's `-NoCodexRemoteControl` are left out with the keeper (X10), so the
+  patched function disables or enables the Codex Cloud sync only, and the
+  source's Pester Context for it is replaced by a Context written for that one
+  task.
+- **Two small source changes ship unchanged:** `run-memory-curation.sh` adds
+  `~/.local/bin` to `PATH` (with its test), and `publish-task-health.sh`
+  changed, which stays excluded.
+- **The Docker watchdog task is registered again.** `tasks_installer.py`'s
+  block removal for the task health publish ran on to the archive anchor and
+  took the Docker watchdog's task block with it (and its help, its summary
+  line and the wrapper's call), while the module, the parameters, the README
+  and the Pester tests kept it. The removal now stops at the watchdog's block,
+  and the help, summary and wrapper call keep it.
+
+| Source | Before | After |
+|---|---|---|
+| wsl-automation | `460f6c77fe5e` | `155123c1fbde` |
+
+The Pester suite needs pwsh 7.6, which the cloud container lacks, so the
+patched `Tasks.Tests.ps1` counts (seven S4U principals, eight script actions,
+the shared settings) were derived by reading the patched installer, not run.
+
+Reverse: restore the previous pin, drop the four exclusions and the two
+export edits, and revert the three patches.
+
 ## The guidance overlap judgment (2026-11-10)
 
 `_agent-guidance#495` added a warn-only "Repo-specific guidance overlap"
