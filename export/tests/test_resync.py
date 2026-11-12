@@ -252,7 +252,8 @@ def test_a_held_back_source_fires_the_fix_routine_at_most_once_a_day():
     run = fire["run"]
     assert "variable RESYNC_FIXER_FIRE_URL" in run and "secret RESYNC_FIXER_FIRE_BEARER" in run
     # Skips while a fix pull request is open, and after today's marker.
-    assert 'startswith("resync-fix/")' in run
+    assert 'startswith("resync-fix/")' in run and "isCrossRepository | not" in run
+    assert 'select(.user.login == "github-actions[bot]")' in run
     assert "resync-fixer-fired $(date -u +%F)" in run and "grep -qF --" in run
     # The bearer goes on stdin, the request from a file; neither is printed.
     assert "--config -" in run and '--data-binary "@$request"' in run
@@ -267,3 +268,8 @@ def test_a_held_back_source_fires_the_fix_routine_at_most_once_a_day():
 def test_the_fix_routine_guide_names_the_branch_prefix_the_workflow_watches():
     guide = (EXPORT_DIR / "FIX-ROUTINE.md").read_text(encoding="utf-8")
     assert "resync-fix/" in guide
+
+
+def test_runs_queue_so_two_cannot_both_fire_the_routine():
+    doc, _ = _job()
+    assert doc["concurrency"] == {"group": "resync", "cancel-in-progress": False}

@@ -38,6 +38,13 @@ on:
 permissions:
   contents: read
 
+# Two runs at once (a dispatch beside the schedule) would both pass the fix
+# routine's once-a-day check, so runs queue; a queued run is never cancelled.
+# Not a pull request workflow, so this is no required check.
+concurrency:
+  group: resync
+  cancel-in-progress: false
+
 jobs:
   resync:
     runs-on: ubuntu-latest
@@ -264,15 +271,18 @@ jobs:
             exit 1
           fi
           [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::the held-back issue step gave no issue number"; exit 1; }
-          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json headRefName \
-            --jq '[.[] | select(.headRefName | startswith("resync-fix/"))] | length') \
+          # Only this repository's own branches and the job's own comments
+          # count: a fork's pull request or anyone's comment must not stop it.
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json headRefName,isCrossRepository \
+            --jq '[.[] | select((.isCrossRepository | not) and (.headRefName | startswith("resync-fix/")))] | length') \
             || { echo "::error::could not list open pull requests; not firing"; exit 1; }
           if [ "$open" != 0 ]; then
             echo "::notice::a resync-fix pull request is already open; not firing"
             exit 0
           fi
           marker="<!-- resync-fixer-fired $(date -u +%F) -->"
-          seen=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments" --paginate --jq '.[].body') \
+          seen=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | .body') \
             || { echo "::error::could not read the issue's comments; not firing"; exit 1; }
           if grep -qF -- "$marker" <<<"$seen"; then
             echo "::notice::the fix routine already started today; not firing"
@@ -294,7 +304,7 @@ jobs:
               -H "Content-Type: application/json" \
               --data-binary "@$request") || code="curl-error"
           rm -f "$response" "$request"
-          if [[ "$code" != 200 ]]; then
+          if [[ ! "$code" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error::fire failed (HTTP $code)"
             exit 1
           fi
