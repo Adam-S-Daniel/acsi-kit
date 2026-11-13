@@ -7,7 +7,7 @@
   ],
   "skills": {
     "acsi-coding-anywhere/github-actions-repo-settings": "sha256:03668a91242ed78ea24f090c00c8a8caba655034238d00cf8dda0cfb235dace5",
-    "acsi-coding-anywhere/skills-doctor": "sha256:abaf96de48209264b70584918abd3441ec0cdd5e39fe1bcb35a4ea0476fe5bf1",
+    "acsi-coding-anywhere/skills-doctor": "sha256:380b7736d36729d9bc069ffdfcc27064540490f9ca142c6e94794e68a5a0e16d",
     "acsi-coding-anywhere/vendor-release-impact-issues": "sha256:7c29bc5f0dc5f34ce510d9a98381d97eb6aa5528e28d903dbd8c304a12b10af1",
     "acsi-coding-anywhere/workflow-path-audit": "sha256:ee592f8630f9ed7edb91b00ecdff18ccb9dbcbb76c21240b793da799bdfbc1e7"
   },

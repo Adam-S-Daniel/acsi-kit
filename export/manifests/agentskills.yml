@@ -64,6 +64,24 @@ edits:
       Locks the deduplicated owner list above. Read from the script, since
       git's config keeps one entry per includeIf condition however often the
       installer writes it, so the installed config cannot show a duplicate.
+  # ---- Prompt-audit sweep (issue 37): skills-doctor contradicts itself on the account store path
+  - path: plugins/adam-coding-anywhere/skills/skills-doctor/SKILL.md
+    old: "  `synced/manifest.json`, `claude plugin list`), attribute every skill to the\n"
+    new: "  `synced/<bucket>/manifest.json`, `claude plugin list`), attribute every skill to the\n"
+    why: >-
+      The skill's own trap section says current CLIs write
+      `synced/<bucket>/manifest.json` (the flat file is the older layout), and
+      its commands glob the bucket, but its description and channel table named
+      the flat path. Fixed here so adopters get the consistent text; the source
+      registry carries the same wording and needs the same fix upstream.
+  - path: plugins/adam-coding-anywhere/skills/skills-doctor/SKILL.md
+    old: "| `foo` (bare) | account store | `foo` has a record in `synced/manifest.json` |\n"
+    new: "| `foo` (bare) | account store | `foo` has a record in `synced/<bucket>/manifest.json` |\n"
+    why: Same contradiction as above (channel table).
+  - path: plugins/adam-coding-anywhere/skills/skills-doctor/SKILL.md
+    old: "is what separates them. A skill in `synced/manifest.json` came from the\n"
+    new: "is what separates them. A skill in `synced/<bucket>/manifest.json` came from the\n"
+    why: Same contradiction as above (the paragraph under the table).
   # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
     old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"

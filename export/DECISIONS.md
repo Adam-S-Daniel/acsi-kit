@@ -2617,6 +2617,29 @@ the required `pytest` check, and the draft lane could not use those names.
 
 Reverse: drop the patch, its manifest entry and the test.
 
+## Prompt-audit sweep (2026-11-13, issue 37)
+
+The 2026-11-10 prompt audit filed seven findings. One was confirmed and fixed:
+`skills-doctor` named the flat `synced/manifest.json` in its description and
+channel table while its own trap section and commands use
+`synced/<bucket>/manifest.json`. Three manifest `edits` on `agentskills`
+change those lines; the source registry carries the same wording, so fix it
+there too and drop the edits when a re-pin brings it.
+
+Not fixed, with the reason:
+
+- Issue and pull request numbers in the `repo-settings` and `agent-skills`
+  `AGENTS.md` (findings 1, 3, 4) are P2 citations: history kept on purpose, and
+  the export already substitutes owners, not numbers.
+- The "from 2026-11-02" date (finding 5) is not verifiable from the repo.
+- "the backup the adoption kit leaves out" (finding 6) is true of the kit and
+  reads correctly to an adopter (X10).
+- The `debug-github-workflows` skill (finding 7) is not in this kit; the
+  `jodidaniel.com#264` text is in the starter's `skill-impact.md`, an ADR-style
+  record (P2), and the registry skill is not shipped.
+
+Reverse: drop the three edits.
+
 ## Local username rule (2026-11-13, issue 47)
 
 `leak_scan` gains two rules for a local username: one in a home-directory path
