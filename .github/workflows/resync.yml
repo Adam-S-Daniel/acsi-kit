@@ -24,10 +24,13 @@
 # sources and the run (never a log), without failing the job; only a run with
 # nothing held back closes it. If every source is held back there is no pull
 # request.
+# When a later run finds every source already at its pin, it closes a stale
+# open `resync/auto` pull request, since main already has everything.
 # Those steps use GITHUB_TOKEN, which is why the job alone holds
 # issues: write. A held-back source also fires the fix routine
-# (export/FIX-ROUTINE.md), at most once a day, which opens a pull request that
-# follows it.
+# (export/FIX-ROUTINE.md), at most once a day, which pushes a `resync-fix/`
+# branch that follows it; resync-fix-pr.yml opens the pull request, because the
+# routine can push but cannot open pull requests or comment.
 name: Re-sync from sources
 
 on:
@@ -117,7 +120,9 @@ jobs:
 
       - name: Check for the App
         id: app
-        if: steps.resync.outputs.changed == 'true' && steps.holdback.outputs.all_held != 'true'
+        # The holdback step is skipped when nothing changed, so its output is
+        # empty then and the App is still wanted, to close a stale pull request.
+        if: steps.holdback.outputs.all_held != 'true'
         env:
           APP_CLIENT_ID: ${{ vars.RESYNC_APP_CLIENT_ID }}
           HAS_PEM: ${{ secrets.RESYNC_APP_PEM != '' }}
@@ -143,7 +148,7 @@ jobs:
 
       - name: Push resync/auto and open or update the pull request
         id: push
-        if: steps.app.outputs.configured == 'true'
+        if: steps.app.outputs.configured == 'true' && steps.resync.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           APP_SLUG: ${{ steps.token.outputs.app-slug }}
@@ -193,6 +198,29 @@ jobs:
           fi
           gh pr edit "$number" --add-label agent-authored > /dev/null || echo "::warning::could not add the agent-authored label"
 
+      # Every source is already at its pin, so a `resync/auto` pull request
+      # left open by an earlier run has nothing left to move: close it.
+      # Not best effort: a failed list fails the step and so the run.
+      - name: Close a stale re-sync pull request
+        if: steps.app.outputs.configured == 'true' && steps.resync.outputs.changed == 'false'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          branch=resync/auto
+          number=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --base "$BASE_BRANCH" \
+            --json number,headRefName,isCrossRepository \
+            --jq "[.[] | select((.isCrossRepository | not) and .headRefName == \"$branch\")] | .[0].number // empty") \
+            || { echo "::error::could not list open pull requests"; exit 1; }
+          if [[ "$number" =~ ^[0-9]+$ ]]; then
+            gh pr close "$number" --repo "$GITHUB_REPOSITORY" --comment "Every source is already at its pinned commit on $BASE_BRANCH, so this re-sync pull request has nothing left to move. Closed by the daily re-sync.
+
+          <sub>🤖 Written by the daily re-sync on behalf of @$OWNER</sub>" > /dev/null
+            echo "closed stale pull request #$number"
+          fi
+
       # A held-back source is not a failed run: the others moved and the pull
       # request is open. It is still a source the kit cannot follow, so it
       # opens or updates the same issue as a failure, naming the sources and
@@ -240,9 +268,10 @@ jobs:
             || echo "::warning::could not add the agent-authored label"
 
       # Starts the re-sync fix routine (export/FIX-ROUTINE.md), a Claude cloud
-      # routine that follows a held source and opens a pull request from a
-      # `resync-fix/` branch. It fires at most once a UTC day (a marker comment
-      # on the issue) and never while such a pull request is open.
+      # routine that follows a held source and pushes a `resync-fix/` branch
+      # (resync-fix-pr.yml opens the pull request). It fires at most once a UTC
+      # day (a marker comment on the issue) and never while such a pull request
+      # is open.
       # * The routine's fire URL is a repository variable and its bearer an
       #   Actions secret, with no default: a missing one fails the step naming
       #   it.

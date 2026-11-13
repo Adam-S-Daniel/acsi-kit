@@ -1,0 +1,106 @@
+# Opens the pull request for the re-sync fix routine's branch. The routine (a
+# Claude cloud routine, export/FIX-ROUTINE.md) can push a `resync-fix/` branch
+# but cannot open a pull request or comment on an issue (GitHub answers 403),
+# so this workflow does both when the branch arrives: it opens the pull request
+# from the pushed commit's message, labels it, and comments the link on the
+# "Re-sync from sources is failing" issue.
+#
+# Every push to such a branch is salient, so there is no `paths` filter. Not a
+# pull_request workflow, so it is no required check. Needs the same GitHub App
+# as resync.yml (variable RESYNC_APP_CLIENT_ID, secret RESYNC_APP_PEM); without
+# one it reports that and succeeds. The App's token, unlike GITHUB_TOKEN, lets
+# the pull request's own checks run, which the required `test` check needs.
+name: Open the re-sync fix pull request
+
+on:
+  push:
+    branches: ["resync-fix/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    # A job-level block replaces the workflow's, so contents: read is repeated;
+    # issues: write is for the issue comment, made with GITHUB_TOKEN.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check for the App
+        id: app
+        env:
+          APP_CLIENT_ID: ${{ vars.RESYNC_APP_CLIENT_ID }}
+          HAS_PEM: ${{ secrets.RESYNC_APP_PEM != '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$APP_CLIENT_ID" ] && [ "$HAS_PEM" = "true" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            printf '\nno App configured; no pull request opened\n' >> "$GITHUB_STEP_SUMMARY"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint the App token
+        id: token
+        if: steps.app.outputs.configured == 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ vars.RESYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RESYNC_APP_PEM }}
+          # Only what opening and labeling the pull request need.
+          permission-contents: write
+          permission-pull-requests: write
+
+      # The commit message's first line is the title and the rest the body. The
+      # message is never printed.
+      - name: Open the pull request and link it on the issue
+        if: steps.app.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          ISSUE_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          HEAD_SHA: ${{ github.sha }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          ISSUE_TITLE: Re-sync from sources is failing
+        run: |
+          set -euo pipefail
+          branch="$BRANCH"
+          [[ "$branch" =~ ^resync-fix/[0-9A-Za-z._/-]+$ ]] || { echo "::error::unexpected branch name"; exit 1; }
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open --json number,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository | not)] | length') \
+            || { echo "::error::could not list open pull requests"; exit 1; }
+          if [ "$open" != 0 ]; then
+            echo "::notice::a pull request from $branch is already open"
+            exit 0
+          fi
+          message=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA" --jq .commit.message) \
+            || { echo "::error::could not read the head commit"; exit 1; }
+          title=$(head -n 1 <<<"$message")
+          [ -n "$title" ] || title="Follow the held-back source changes"
+          body="$RUNNER_TEMP/pr-body.md"
+          tail -n +2 <<<"$message" | sed '1{/^[[:space:]]*$/d}' > "$body"
+          # A body without the TLDR heading keeps its text under a fallback one.
+          if ! grep -qxF -- '## TLDR' "$body"; then
+            {
+              printf '## TLDR\n\n'
+              printf "The fix routine's commit gave no pull request body with a TLDR, so this is a fallback: it follows the source changes the daily re-sync held back. Review the changes before merging.\n\n"
+              cat "$body"
+            } > "$body.new"
+            mv "$body.new" "$body"
+          fi
+          url=$(gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE_BRANCH" --head "$branch" \
+            --title "$title" --body-file "$body") \
+            || { echo "::error::could not open the pull request"; exit 1; }
+          echo "opened $url"
+          gh pr edit "$url" --add-label agent-authored > /dev/null \
+            || echo "::warning::could not add the agent-authored label"
+          number=$(GH_TOKEN="$ISSUE_TOKEN" gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --json number,title --jq 'map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty') \
+            || { echo "::warning::could not list open issues; no comment left"; exit 0; }
+          if [[ "$number" =~ ^[0-9]+$ ]]; then
+            GH_TOKEN="$ISSUE_TOKEN" gh issue comment "$number" --repo "$GITHUB_REPOSITORY" \
+              --body "Fix routine pull request: $url" > /dev/null \
+              || echo "::warning::could not comment on issue #$number"
+          fi

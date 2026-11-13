@@ -19,9 +19,8 @@ comment on them or open pull requests on them.
 
 1. **Branch.** From `origin/main`, create `resync-fix/<UTC date>`, for
    example `resync-fix/2026-11-13`. If an open pull request already comes
-   from a `resync-fix/` branch, stop: comment on the "Re-sync from sources
-   is failing" issue that a fix is already open, and end. Every comment you
-   write ends with the marker line in step 7.
+   from a `resync-fix/` branch, stop and end with a message saying a fix is
+   already open.
 2. **Move the pins.** Run `python3 export/resync.py --owner <owner>`.
    It moves every public source to its head, not only the held ones, so the
    fix covers whatever else moved since.
@@ -64,23 +63,31 @@ comment on them or open pull requests on them.
    `export/DECISIONS.md`, after the last round: one bullet per source change
    the kit follows (what changed, what the kit now does), the old and new
    pins table, and a "Reverse:" paragraph.
-7. **Pull request.** Commit as the owner's GitHub noreply address
+7. **Commit and push.** Commit as the owner's GitHub noreply address
    (`<id>+<owner>@users.noreply.github.com`, with `<id>` from
-   `gh api users/<owner> --jq .id`), push the branch, verify the push
-   (`git ls-remote origin refs/heads/<branch>` equals `git rev-parse HEAD`),
-   and open one pull request to `main`. Its body starts with `## TLDR` (one
-   to three plain sentences), then the changes, the test commands with their
-   counts and exit codes, and anything you could not verify. End it with
-   `<sub>🤖 Written by Claude Code on behalf of @<owner></sub>`. Label
-   it `agent-authored`.
-8. **Report.** Comment on the "Re-sync from sources is failing" issue with
-   the pull request's link, ending with the marker line from step 7.
+   `gh api users/<owner> --jq .id`). You cannot open a pull request or
+   comment: `.github/workflows/resync-fix-pr.yml` does both when the branch
+   arrives, using the commit message. So the commit message is the pull
+   request. Its first line is the title. After a blank line comes the full
+   body: it starts with `## TLDR` (one to three plain sentences), then the
+   changes, the test commands with their counts and exit codes, and anything
+   you could not verify. End it with
+   `<sub>🤖 Written by Claude Code on behalf of @<owner></sub>`. The
+   workflow opens the pull request from the head commit of the branch's
+   first push and ignores later pushes, so push once, after the last commit,
+   which carries the pull request text. Push the branch and verify the push
+   (`git ls-remote origin refs/heads/<branch>` equals `git rev-parse HEAD`).
+   Do not open a pull request, label it or comment on the issue.
+8. **Confirm.** If you can, look at
+   `https://github.com/<owner>/acsi-kit/pulls` to see that the workflow
+   opened the pull request. If you cannot, end.
 
 ## If you cannot fix it
 
 Do not open a pull request that loosens a guard, skips a test or drops a
-shipped file to get green. Comment on the issue with what broke, what you
-tried and what decision it needs, and end.
+shipped file to get green. You cannot comment on the issue, so end with a
+final message saying what broke, what you tried and what decision it needs;
+the routine's session output reaches the owner.
 
 ## Limits
 

@@ -24,9 +24,13 @@ For the kit's owner and the agents working on it; adopters can skip this.
   request (public repo). A held source needs an `edits` entry or patch that
   follows its change, then it re-pins on the next run. **Fix routine:** a
   held source also fires a Claude cloud routine that follows it
-  (`export/FIX-ROUTINE.md` is its guide) and opens a pull request from a
-  `resync-fix/` branch, at most once a UTC day and never while such a pull
-  request is open; review and merge it like any other. The fire needs the
+  (`export/FIX-ROUTINE.md` is its guide) and pushes a `resync-fix/` branch,
+  at most once a UTC day and never while such a pull request is open. The
+  routine can push but cannot open pull requests or comment, so
+  `.github/workflows/resync-fix-pr.yml` opens the pull request from the last
+  commit's message, labels it and links it on the issue; review and merge it
+  like any other. A run that finds every source at its pin closes a stale
+  `resync/auto` pull request. The fire needs the
   repository variable `RESYNC_FIXER_FIRE_URL` and the Actions secret
   `RESYNC_FIXER_FIRE_BEARER`, both from the routine's API trigger on
   claude.ai; without them the step fails naming the missing one. The routine
