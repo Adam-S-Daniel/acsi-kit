@@ -538,11 +538,12 @@ REPO_VARIABLES=(
 # fleet_worker_hours <claude plan>: how often fleet-worker-fire.yml fires the
 # fleet worker (its FLEET_WORKER_EVERY_HOURS). About 56 cloud sessions a week
 # at 3 hours cost about $104 (one fire measured at $1.85, 2026-11-13): ~13%
-# of a Max 20x week at the middle estimate, but two Pro weeks
+# of a Max 20x week at the middle estimate, but two Pro weeks, so Pro fires
+# weekly (168)
 # (docs/before-you-start.md#which-plan).
 fleet_worker_hours() {
   case $1 in
-    pro) echo 24 ;;
+    pro) echo 168 ;;
     max5x) echo 12 ;;
     max20x) echo 3 ;;
     *) die "unknown CLAUDE_PLAN: $1" ;;
