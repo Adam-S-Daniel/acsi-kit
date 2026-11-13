@@ -4,9 +4,11 @@
 The model behind the "which plan" table in docs/before-you-start.md: what
 the kit's base routines and evals cost in a week of each Claude plan.
 
-The first model (2026-11-09) was kept outside the repo and lost, so the
-table could not be re-run when the eval budget's rate moved (acsi-kit#43).
-This one is arithmetic over the inputs below, and
+The first model (2026-11-09) is a simulation in the owner's project files,
+not in any repo: it drew each fire's cost from an assumed range (the fleet
+worker $0.60 to $1.10) and $20 to $35 a point, so the table could not be
+re-run from the kit when the eval budget's rate moved (acsi-kit#43). This
+one is arithmetic over measured inputs, below, and
 export/tests/test_plan_shares.py fails when the table and the model part.
 
 Read from the kit, so the model follows them:
@@ -54,10 +56,11 @@ USD_PER_EVAL_FIRE = 0.87
 
 #: Fires a week that do not come from the kit's code. The changelog watcher's
 #: schedule is set by hand (docs/routines.md: weekly on Pro); the sweep fires
-#: when the changelog watcher asks, taken as every other week.
+#: when the changelog watcher asks, taken as weekly, as the first model did
+#: (the owner's record held two fires by 2026-11-13).
 CHANGELOG_PER_WEEK = {"pro": 1, "max5x": 7, "max20x": 7}
 MEMORY_PER_WEEK = 1
-SWEEP_PER_WEEK = 0.5
+SWEEP_PER_WEEK = 1
 
 #: Dollars per point of the Max 20x weekly meter. The cautious end is the
 #: exported `points_per_usd`. Middle: eval calls cost $8.80 a point over the
