@@ -45,7 +45,7 @@ when the stub itself changes.
 
 | Setting | Value |
 |---|---|
-| Schedule | none on claude.ai: an API trigger only, fired by `_agent-guidance`'s `fleet-worker-fire.yml` every 3 hours, thinned to every 6 or 24 by the `FLEET_WORKER_EVERY_HOURS` variable `create-environments.sh` sets from `CLAUDE_PLAN` ([which plan](before-you-start.md#which-plan)) (set `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER` there, [bootstrap README](../bootstrap/README.md#variables-and-secrets-set-by-hand)); fresh session per fire |
+| Schedule | none on claude.ai: an API trigger only, fired by `_agent-guidance`'s `fleet-worker-fire.yml` every 3 hours, thinned to every 12 or 24 by the `FLEET_WORKER_EVERY_HOURS` variable `create-environments.sh` sets from `CLAUDE_PLAN` ([which plan](before-you-start.md#which-plan)) (set `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER` there, [bootstrap README](../bootstrap/README.md#variables-and-secrets-set-by-hand)); fresh session per fire |
 | Connector | the GitHub connector |
 | Repos | it attaches the repos in `_agent-guidance`'s `repos.yml` `cron_coverage.fleet` itself |
 | Notifications | push on, "Auto-fix pull requests" on |
@@ -93,7 +93,7 @@ the sweep for it, so the bearer never sits in a routine's environment.
 
 | Setting | Value |
 |---|---|
-| Schedule | daily at 01:03 UTC (`3 1 * * *`) |
+| Schedule | daily at 01:03 UTC (`3 1 * * *`); on Pro, weekly (`3 1 * * 1`) ([which plan](before-you-start.md#which-plan)) |
 | Connector | Claude Docs |
 | Environment | its own (say `Changelog watcher`): the allowlist plus `api.anthropic.com`, with no variables. It holds no secret: every session in an environment can read its variables, so the sweep's fire bearer is an Actions secret instead. |
 | Repos | the spec's "Repos considered", `_agent-guidance`, and `openai/codex` and `anthropics/claude-code` as read-only sources |

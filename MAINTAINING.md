@@ -57,6 +57,13 @@ For the kit's owner and the agents working on it; adopters can skip this.
   `bash run-all-tests.sh` (as root: `unshare --pid --fork --mount-proc --
   bash run-all-tests.sh`), and record every departure in
   `export/DECISIONS.md`.
+- **The plan table.** The modeled rows of the "which plan" table in
+  `docs/before-you-start.md` come from `export/plan_shares.py`, whose inputs
+  (dollars per fire, dollars per meter point, how the plans' weeks compare)
+  sit at its top with where each was measured. After changing an input, the
+  eval budget, the plan sizing or the fleet worker's cadence, run
+  `python3 export/plan_shares.py --rows` and paste the rows;
+  `export/tests/test_plan_shares.py` fails until the table matches.
 - **CI.** `test` (`.github/workflows/ci.yml`) and `agent-checks` are the
   required checks. `test` needs the `PRIVACY_DENYLIST` repository secret
   (one regular expression per line) and fails without it.

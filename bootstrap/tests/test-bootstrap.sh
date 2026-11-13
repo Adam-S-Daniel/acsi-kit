@@ -148,7 +148,7 @@ assert_not "an invalid CLAUDE_PLAN is refused" bash "$B/create-repos.sh" --confi
 assert_eq "fleet.env.example leaves CLAUDE_PLAN for the adopter" "$(grep -c '^CLAUDE_PLAN=$' "$B/fleet.env.example")" 1
 for plan in pro max5x max20x; do
   assert_eq "fleet_worker_hours $plan" "$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
-    "$(case $plan in pro) echo 24;; max5x) echo 6;; max20x) echo 3;; esac)"
+    "$(case $plan in pro) echo 24;; max5x) echo 12;; max20x) echo 3;; esac)"
 done
 
 # ======================================================== plan sizing (acsi-kit#28)
