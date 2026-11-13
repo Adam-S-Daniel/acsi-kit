@@ -75,6 +75,10 @@ SECTIONS = [
     ("Security", "security", "recommended"),
     ("Data exposure in CI and public repos", "data-exposure-in-ci", "core"),
     ("Read before you start", "read-before-you-start", "none"),
+    # New 2026-11-13: a pointer to skills-evals' docs/rules.md (coverage row
+    # status `skipped`); not shipped, like the other pointer sections
+    # (re-pin round 14 in DECISIONS.md).
+    ("Eval rules", "eval-rules", "none"),
     ("Automation vs branch protection", "automation-vs-branch-protection", "core"),
     ("Two GitHub connectors, and which one you are holding", "two-github-connectors", "none"),
     ("Agent-made GitHub contributions carry a marker", "agent-contribution-markers", "core"),

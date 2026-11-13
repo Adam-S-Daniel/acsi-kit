@@ -161,7 +161,7 @@ class ShapeAndMathTests(unittest.TestCase):
         # The public data contract adds evals, hooks, lesson_funnel, activity and
         # spend, keeping schema_version 1
         # (test_issue_public_data_contract.py covers them).
-        self.assertEqual(sorted(d), ["activity", "alerts", "context_drift_unknown",
+        self.assertEqual(sorted(d), ["activity", "alerts", "context_drift_held", "context_drift_unknown",
                                      "coverage", "discarded_runs", "evals", "fires_without_results",
                                      "fixture_queue", "generated_at",
                                      "guidance", "hooks", "lesson_funnel", "lessons",
@@ -177,6 +177,7 @@ class ShapeAndMathTests(unittest.TestCase):
         # No --lessons directory: unknown, not an empty list.
         self.assertIsNone(d["lessons"])
         self.assertEqual(d["context_drift_unknown"], 0)
+        self.assertEqual(d["context_drift_held"], 0)
         self.assertEqual(d["schema_version"], 1)
         self.assertEqual(d["generated_at"], AS_OF)
         self.assertEqual(d["newest_run"], "2026-10-30T10:00:00Z")
@@ -379,6 +380,31 @@ class RemovedSectionsTests(unittest.TestCase):
         self.assertEqual(removed[0]["reverse_url"],
                          "https://github.com/example-adopter/_agent-guidance/pulls"
                          "?q=is%3Apr+head%3Aretire-guidance%2Fbravo")
+
+    def test_removed_skills_read_every_public_registry_and_carry_the_registry(self):
+        def registry(heading, body=""):
+            root = Path(tempfile.mkdtemp(prefix="removed-skills-"))
+            self.addCleanup(shutil.rmtree, root, True)
+            (root / "docs").mkdir()
+            (root / "docs" / "skill-impact.md").write_text(
+                f"# Skill impact\n\n## {heading} — remove\n\n{body}\n", encoding="utf-8")
+            return {"path": root}
+        found = explorer_data.removed_skills({
+            "acsi-agentskills": registry("2026-11-10 — acsi-coding-anywhere/old-one"),
+            "example-site-platform": registry(
+                "2026-11-13 — example-site-platform/consumer-repo-provisioning",
+                "- PR: https://github.com/Adam-S-Daniel/cms-platform/pull/1016\n"),
+            "example-site-a": registry("2026-11-12 — example-site-a-ai/site-skill"),
+            # A private registry is never read: the explorer is public.
+            "acsi-agentskills-private": registry("2026-11-14 — private-plugin/secret-one")})
+        self.assertEqual([(r["name"], r["registry"], r["plugin"]) for r in found],
+                         [("consumer-repo-provisioning", "example-site-platform", "example-site-platform"),
+                          ("site-skill", "example-site-a", "example-site-a-ai"),
+                          ("old-one", "acsi-agentskills", "acsi-coding-anywhere")])
+        self.assertEqual(found[0]["reverse_url"],
+                         "https://github.com/Adam-S-Daniel/cms-platform/pull/1016")
+        self.assertIn("/example-site-a/pulls?q=", found[1]["reverse_url"])
+        self.assertIn("/acsi-agentskills/pulls?q=", found[2]["reverse_url"])
 
     def test_removed_skills_come_from_the_registrys_impact_file(self):
         root = Path(tempfile.mkdtemp(prefix="removed-skills-"))
@@ -632,6 +658,65 @@ class RemovalStateTests(unittest.TestCase):
     def status(self, kind, name, verdict, prs=(), issues=()):
         return explorer_data.removal_of(kind, name, verdict,
                                         self.load({"prs": list(prs), "issues": list(issues)}))
+
+    def test_a_skill_removed_in_its_registry_reads_removed_with_no_next_test(self):
+        queued = {"position": 2, "band": "near", "due": "2026-12-06T00:00:00Z", "scheduled": True}
+        root = Path(tempfile.mkdtemp(prefix="reg-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        (root / "skills" / "kept").mkdir(parents=True)
+        (root / "skills" / "kept" / "SKILL.md").write_text("x\n", encoding="utf-8")
+        removed = [{"name": n, "registry": "example-site-platform", "plugin": "example-site-platform",
+                    "date": "2026-11-13", "reverse_url": f"https://github.com/example-adopter/example-site-platform/pull/{i}"}
+                   for i, n in ((1016, "gone"), (1017, "kept"))]
+
+        def rows():
+            return [{"name": n, "registry": "example-site-platform", "verdict": "insufficient",
+                     "next_test": dict(queued)} for n in ("gone", "kept", "never-removed")]
+        # Absent from the checkout: removed, pull request linked, no test in line.
+        out = rows()
+        explorer_data.mark_removed(out, removed, {"example-site-platform": {"path": root}})
+        explorer_data.without_test(out)
+        self.assertEqual(out[0]["removal"], {"state": "removed", "since": "2026-11-13",
+                                             "url": "https://github.com/Adam-S-Daniel/cms-platform/pull/1016"})
+        self.assertEqual(out[0]["next_test"], {"position": None, "band": None, "due": None,
+                                               "scheduled": False})
+        # Back in the registry, or never listed: untouched.
+        for untouched in out[1:]:
+            self.assertNotIn("removal", untouched)
+            self.assertEqual(untouched["next_test"], queued)
+        # An absent or unreadable checkout is unknown, never "removed".
+        for registries in (None, {}, {"example-site-platform": {"path": root / "missing"}}):
+            out = rows()
+            explorer_data.mark_removed(out, removed, registries)
+            self.assertTrue(all("removal" not in r for r in out), registries)
+        self.assertTrue(plan_week.removal_frozen("insufficient", "removed"))
+
+    def test_build_marks_a_removed_skill_and_validates(self):
+        t = Tree(self)
+        reg = t.root / "reg"
+        (reg / "docs").mkdir(parents=True)
+        (reg / "docs" / "skill-impact.md").write_text(
+            "## 2026-11-13 — pub-plugin/alpha — remove\n\n- PR #7.\n", encoding="utf-8")
+        (reg / "plugins" / "bundle-one" / "skills" / "beta").mkdir(parents=True)
+        (reg / "plugins" / "bundle-one" / "skills" / "beta" / "SKILL.md").write_text(
+            "x\n", encoding="utf-8")
+        gates_doc = {"policy": {"benefit_confidence": 0.85, "retire_confidence": 0.95,
+                                "min_cli_versions": 2, "objective_margin": 0.05},
+                     "skills": {"alpha": {"verdict": "insufficient", "reason": "few"}},
+                     "guidance": {}}
+        public = {"pub": {"repo": "example-adopter/pub-repo", "layout": "plugins/*/skills/*/SKILL.md"}}
+        with mock.patch.object(explorer_data.compute_gates, "compute", return_value=gates_doc), \
+                mock.patch.object(explorer_data, "public_registry_repos", return_value=public):
+            doc = explorer_data.build(t.tree, t.roster, t.policy, t.evals, AS_OF, SHA_A, SHA_B,
+                                      registries={"pub": {"path": reg}}, manifest=MANIFEST)
+        explorer_data.validate(doc)
+        by = {s["name"]: s for s in doc["skills"]}
+        self.assertEqual(by["alpha"]["removal"]["state"], "removed")
+        self.assertEqual(by["alpha"]["removal"]["url"], "https://github.com/Adam-S-Daniel/pub-repo/pull/7")
+        self.assertEqual(by["alpha"]["next_test"],
+                         {"position": None, "band": None, "due": None, "scheduled": False})
+        self.assertEqual([(r["name"], r["registry"]) for r in doc["removed_skills"]],
+                         [("alpha", "pub")])
 
     def test_a_subject_being_removed_has_no_place_in_line_and_no_recheck(self):
         rows = [{"verdict": v, "removal": {"state": st} if st else None,

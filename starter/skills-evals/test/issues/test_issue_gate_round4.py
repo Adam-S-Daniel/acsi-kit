@@ -54,6 +54,12 @@ import test_issue_gate_round3 as round3  # noqa: E402
 from test_issue_gate_round3 import MODELS, classify, expect, pairs  # noqa: E402
 
 
+def shows_ceiling(cell: dict) -> bool:
+    """`gates._shows_ceiling` under the committed skills policy."""
+    return gates._shows_ceiling(cell, gates.load_gate_policy()["skills"])
+
+
+
 def verdict(runs, expected):
     return gates.retirement({"runs": runs}, MODELS, "demo", POLICY, expected)
 
@@ -93,10 +99,9 @@ class PausedHarmTests(unittest.TestCase):
         runs = pairs("a", 40, 99, 99, model=MODELS[0]) \
             + pairs("a", 40, 75, 75, start=1000, model=MODELS[1])
         v = verdict(runs, expect("a", paused="a"))
-        self.assertEqual((v["verdict"], v["removal"]), ("retire", "proposal"), v["reason"])
+        self.assertEqual((v["verdict"], v["removal"]), ("retire", "auto"), v["reason"])
         self.assertEqual([c["class"] for c in v["cells"]], ["paused", "no-benefit"])
         self.assertEqual(v["cells"][0]["class_before_pause"], "ceiling")
-        self.assertFalse(retire_skill.cells_allow_auto(v))
 
     def test_a_section_with_real_headroom_is_not_called_ceiling(self):
         # The real `watch-finished-is-not-ci-passed` shape: one cell at 4
@@ -107,7 +112,7 @@ class PausedHarmTests(unittest.TestCase):
         self.assertEqual(v["verdict"], "insufficient", v["reason"])
         self.assertEqual({c["class"] for c in v["cells"]}, {"paused"})
         for cell in v["cells"]:
-            self.assertFalse(gates._shows_ceiling(cell), cell)
+            self.assertFalse(shows_ceiling(cell), cell)
 
     def test_ceiling_from_a_pause_needs_the_cells_own_evidence(self):
         # 20 pairs at 96/96: each cell was `ceiling-unconfirmed` itself.
@@ -130,7 +135,7 @@ class PausedHarmTests(unittest.TestCase):
                                                        model=MODELS[1]),
                         expect("a", paused="a"))
         self.assertEqual(short["verdict"], "insufficient", short["reason"])
-        # The without arm under HIGH_STOP_MIN_WITHOUT is no ceiling, even
+        # The without arm under `high_stop_min_without` is no ceiling, even
         # where the no-harm test rejected.
         low = verdict(pairs("a", 30, 88, 88) + pairs("a", 30, 88, 88, start=1000,
                                                      model=MODELS[1]),
@@ -228,7 +233,7 @@ class UnmeasuredItemTests(unittest.TestCase):
         self.assertEqual(cell["class"], "paused")
         self.assertIsNotNone(cell["harm_at"])
         self.assertIsNotNone(cell["noharm_at"])
-        self.assertFalse(gates._shows_ceiling(cell))
+        self.assertFalse(shows_ceiling(cell))
 
     def test_a_ceiling_class_before_the_pause_shows_the_ceiling_by_itself(self):
         """Round 5's m3: the `class_before_pause` branch is kept, and named
@@ -237,9 +242,9 @@ class UnmeasuredItemTests(unittest.TestCase):
         the pause was a ceiling class, whatever else the cell records)."""
         base = {"class": "paused", "scope_paused": "ceiling"}
         for before in gates.CEILING_CLASSES:
-            self.assertTrue(gates._shows_ceiling({**base, "class_before_pause": before}))
-        self.assertFalse(gates._shows_ceiling({**base, "class_before_pause": "insufficient"}))
-        self.assertFalse(gates._shows_ceiling({**base, "class_before_pause": "ceiling",
+            self.assertTrue(shows_ceiling({**base, "class_before_pause": before}))
+        self.assertFalse(shows_ceiling({**base, "class_before_pause": "insufficient"}))
+        self.assertFalse(shows_ceiling({**base, "class_before_pause": "ceiling",
                                                "scope_paused": "floor"}))
 
 
@@ -293,11 +298,11 @@ class ComputeScopePauseTests(unittest.TestCase):
         self.assertEqual([(c["class"], c["scope_paused"]) for c in a],
                          [("benefit", "ceiling")] * 2)
 
-    def test_a_pause_before_the_keep_never_frees_an_auto_removal(self):
+    def test_a_pause_before_the_keep_parks_its_cells_beside_an_auto_removal(self):
         got = self.compute(3)
-        self.assertEqual((got["verdict"], got.get("removal")), ("retire", "proposal"),
+        self.assertEqual((got["verdict"], got.get("removal")), ("retire", "auto"),
                          got["reason"])
-        self.assertFalse(retire_skill.cells_allow_auto(got))
+        self.assertIn("parked cell", got["removal_reason"])
         self.assertEqual({c["class"] for c in got["cells"] if c["fixture"] == "a"},
                          {"paused"})
 

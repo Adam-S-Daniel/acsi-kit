@@ -21,7 +21,7 @@ fixtures:
   - path: evals/skills-doctor/ssh-remote-is-durable
     reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-12, holds: fails criterion 4 (the fixture is unchanged since 2026-11-02, and both runs after that, 20261103T024322Z-b8c817 on Sonnet 5.5 and 20261103T095401Z-15b65b on Opus 5.5, have the without arm at 6/6 checks)."
   - path: evals/workflow-path-audit/moved-test-dir
-    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-13, holds: fails criterion 4 (the fixture is unchanged since its in-place context was added 2026-11-03 03:46 UTC, and both runs after that, 20261103T074844Z-09fc9e on Sonnet 5.5 and 20261103T124202Z-593fb8 on Opus 5.5, have the without arm at 10/10 checks)."
   - path: evals/red-ci-example-site-a-ai/concurrency-cancel
     reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
   - path: evals/red-ci-example-site-a-ai/unpinned-action
@@ -40,3 +40,35 @@ fixtures:
     reason: "Isolation pair with no context: its runs cannot pool (ADR 0012); convert with a context before scheduling."
   - path: evals/github-actions-repo-settings/scratch-repo-partial-manage
     reason: "Isolation pair with no context: its runs cannot pool (ADR 0012); convert with a context before scheduling."
+  - path: evals/skills-doctor/bucketed-account-store
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/github-actions-repo-settings/drift-diagnosis
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/skills-doctor/personal-copy-outranks-repo
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/fan-out-triage/keyword-lookalikes
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/fan-out-triage/shifted-draft
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/fan-out-triage/single-file
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/fan-out-triage/three-files
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/red-ci-example-site-a-ai/paths-required
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/red-ci-example-site-a-ai/timeout-wall
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/tool-powershell/robocopy-exit-one
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/fan-out-triage/indirect-surfaces
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/red-ci-example-site-a-ai/release-bump-blocked
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/skills-doctor/laptop-double-delivery
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/tool-powershell/spaced-path-silent-exit
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/tool-powershell/two-strikes-unreachable-host
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
+  - path: evals/tool-powershell/installer-exit-3010
+    reason: "Auto scope (zero-use), 2026-11-13: no recorded use in real work in the last 8 weeks; its evals resume on its first recorded use."
