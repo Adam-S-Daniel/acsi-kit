@@ -2639,3 +2639,51 @@ Not fixed, with the reason:
   record (P2), and the registry skill is not shipped.
 
 Reverse: drop the three edits.
+
+## Local username rule (2026-11-13, issue 47)
+
+`leak_scan` gains two rules for a local username: one in a home-directory path
+(a Linux, macOS, WSL-share or Windows-drive home folder followed by the user component) and one in a
+Claude-encoded project directory (the encoded form of such a path). Neither spells a name:
+each matches the SHAPE and passes only the invented placeholder users the
+starters use (`example`, `user`, `runner`, `fixtureuser*`, `fictional-dev`,
+and a few one-word fixtures). A bare-substring rule would also hit ordinary
+identifiers that contain the name. A new invented user a fixture needs is added
+to the list in both patterns; `test_scanner_flags_a_username_in_a_home_path_but_not_a_placeholder`
+pins both sides. The private `PRIVACY_DENYLIST` stays the place for the exact
+name.
+
+Reverse: drop the two `leak_scan` entries and the test.
+
+## Re-pin round 13 (2026-11-13): follow three source changes
+
+All five public pins move to their heads; `agentskills-private` keeps its pin and its lockfile follows the new public registry. Three source changes needed a follow-up in the `_agent-guidance` patches, and each had held that source back since 2026-11-10:
+
+- `_agent-guidance` rewrote the `acsi-kit` bullet in `repos.yml` (it no longer ends "as for verify-actions-lock") and added a bullet about `verify-actions-lock` before `exclude:`. `patches/_agent-guidance/kit_repos.py` matches the new text and still drops both bullets and the exclusion (the kit is not in an adopter fleet).
+- A case in `test/fixtures/agent-checks-cases.jsonl` carries Unicode whitespace inside a JSON string, so `machinery_tests.py` splitting the file with `str.splitlines()` cut a line in two. It now splits on newline only.
+- ADR 0043 gave every row of `agents-md/eval-coverage.yml` an `audience`. The rows `blank_content.py` writes for empty section files and gap rows say `contributor`, as the source does for its own section files.
+
+The prompt-file count floor in `test_routine_prompts_name_only_kit_repos` drops from 8 to 7: the sources dropped another routine prompt.
+
+After merging main (which brought the prompt-audit sweep), the pins moved again to the heads of 2026-11-13: all five public sources exported at their new heads with no further patch change, so none is held back. The three `skills-doctor` edits from the sweep still apply: the source has not yet fixed the wording.
+
+Reverse: re-pin the old shas and revert the three patch edits.
+
+## Re-pin round 14 (2026-11-13): follow the eval-rules changes
+
+All five public pins move to their heads; `agentskills-private` keeps its pin. The 2026-11-13 re-sync held `skills-evals` back, and `_agent-guidance` broke too once it moved past its new section:
+
+- `_agent-guidance` added the base.md section "Eval rules" (`_agent-guidance#558`), which points at `skills-evals`' generated `docs/rules.md`. `blank_content.py` lists it with tier `none`: only the evals track ships `skills-evals`, so a base-only adopter would get a pointer to a repo it does not have. The kit's `docs/evals-and-loop.md` links the starter copy of `docs/rules.md` instead (acsi-kit#64).
+- `skills-evals` deleted the `debug-github-workflows` fixtures and the four `test_issue_76*` tests that locked them. The manifest drops their five excludes, and `retargets.txt` drops the four fixture paths from `test_issue_scheduled_fixtures.py`'s `REVIEWED` anchor.
+- `_agent-guidance` rewrote the stub's first section (ADR 0043). `starter/agent-skills-private/AGENTS.md` takes the rebuilt managed block, written by hand from `bootstrap/lib/content.py`'s recipe because the private source is not exported here. It also gets `.github/fleet-contributor-rules.md`, which that block names and `sync.sh` delivers to every synced repo: a byte copy of the other starters' copy.
+- `library/` was rewritten from the five public sources (the private registry puts nothing in it): two library items follow `skills-evals`' schedule changes.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `35c62e01891c` | `0ef732fdbd82` |
+| agentskills | `c25ca77a9c8a` | `bc0b75555d52` |
+| repo-settings | `e64fc208cdce` | `bcd342771667` |
+| skills-evals | `8b578f31ce49` | `b93d1d9a79f6` |
+| wsl-automation | `19c8232e6d67` | `4aa4768aadb6` |
+
+Reverse: re-pin the old shas, put back the five excludes and the four `REVIEWED` lines, and drop the "Eval rules" row from `blank_content.py`.

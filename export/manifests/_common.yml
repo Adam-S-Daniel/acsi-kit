@@ -138,6 +138,16 @@ leak_scan:
   - {name: Anthropic federation id, regex: '\b(?:fdrl|svac|wrkspc)_(?!EXAMPLE)[A-Za-z0-9]{8,}'}
   - {name: numeric noreply id, regex: '(?<![0-9$])(?!0\+)[0-9]+\+[A-Za-z0-9-]+@users\.noreply\.github\.com'}
   - {name: cms-platform, regex: '(?i)cms-platform'}
+  # A local username in a home-directory path. The name itself is never spelled
+  # here (a bare-substring rule would also hit ordinary identifiers): the rule
+  # matches the SHAPE, a home path whose user component is not one of the
+  # invented placeholders below, so any real name fails. A fixture that needs a
+  # new invented user adds it to the list in both patterns, and the matching
+  # test in test_no_leaks.py.
+  - name: local username in a home-directory path
+    regex: '(?i)(?:/home/|/Users/|\\+(?:Users|home)\\+|/mnt/[a-z]/Users/)(?!(?:example|user|you|x|u|me|dev|agent|someone|root|builder|sam|probe|private|ab|aXbbc|runner|runneradmin|repos|Ubuntu|nobody|fictional-dev|fixtureuser[A-Za-z0-9_-]*)(?=[\\/''\"\s`)\]:,;}]|$))[A-Za-z][A-Za-z0-9_-]*(?=[\\/''\"\s`)\]:,;}]|$)'
+  - name: local username in an encoded project directory (-home-NAME-...)
+    regex: '(?i)(?<![A-Za-z0-9])-(?:home|Users|mnt-[a-z]-Users)-(?!(?:example|user|u|x|me|hook|many|full|named|boundary|fixtureuser|fictional|audit)(?![A-Za-z0-9_]))[A-Za-z][A-Za-z0-9_]*(?:-|\b)'
   - name: email
     regex: '[A-Za-z0-9._%+-]+@(?!(?:[A-Za-z0-9-]+\.)*(?:example\.(?:com|net|org)|users\.noreply\.github\.com|github\.com|anthropic\.com|openai\.com)\b)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b'
 

@@ -1,6 +1,7 @@
 - id: subagent-delegation
   heading: Subagent delegation (model routing)
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/subagent-delegation/
   bytes: 2644

@@ -75,6 +75,9 @@ SECTIONS = [
     ("Security", "security", "recommended"),
     ("Data exposure in CI and public repos", "data-exposure-in-ci", "core"),
     ("Read before you start", "read-before-you-start", "none"),
+    # New 2026-11-13 (_agent-guidance#558): points at skills-evals' generated
+    # docs/rules.md, which only the evals track ships (re-pin round 14).
+    ("Eval rules", "eval-rules", "none"),
     ("Automation vs branch protection", "automation-vs-branch-protection", "core"),
     ("Two GitHub connectors, and which one you are holding", "two-github-connectors", "none"),
     ("Agent-made GitHub contributions carry a marker", "agent-contribution-markers", "core"),
@@ -162,6 +165,7 @@ naming the section in its `.agents-sync.yml`.
 SECTION_ROW = """- id: {id}
   heading: {heading}
   file: {file}
+  audience: contributor
   status: gap
   bytes: 0
 """
@@ -169,6 +173,7 @@ SECTION_ROW = """- id: {id}
 GAP_ROW = """- id: {id}
   heading: {heading}
   file: agents-md/base.md
+  audience: contributor
   status: gap
   bytes: 0
 """

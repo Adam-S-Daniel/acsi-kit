@@ -16,7 +16,7 @@
 repo: wsl-automation
 kit_name: wsl-automation
 source: wsl-automation
-source_sha: 599ac4ec18f81bc222663a2112115c3a9330102d
+source_sha: 4aa4768aadb6232da5bc827c8d1b3d67dc9a5c37
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror,
 # the agent-checks runner) are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]

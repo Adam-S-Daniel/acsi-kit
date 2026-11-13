@@ -2,11 +2,6 @@
   "ops": [
     {
       "op": "append-lines",
-      "file": "evals/scheduled.yml",
-      "fragment": "scheduled-rows.yml"
-    },
-    {
-      "op": "append-lines",
       "file": "evals/unscheduled.yml",
       "fragment": "unscheduled-rows.yml"
     },

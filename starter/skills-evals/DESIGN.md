@@ -1499,33 +1499,11 @@ Not every skill takes the same eval, and some take none. Classify first:
   reasoning quality only. `cms-stuck-pr-triage` graduated out of this list:
   covered by `evals/cms-stuck-pr-triage/` (issue #84), which is also where
   the shared `harness/fakes/gh` every other Class B fixture reuses came
-  from. `debug-github-workflows` has four covered slices. The first is
-  [`evals/debug-github-workflows/wrong-branch/`](evals/debug-github-workflows/wrong-branch/)
-  (issue [#76](https://github.com/Adam-S-Daniel/skills-evals/issues/76)). Main
-  invokes a missing test module while an unmerged branch already fixes its
-  workflow. The investigation-only prompt asks the agent to explain the cause
-  and next step without editing files. A fixture-owned setup builds an offline
-  origin with fetchable main and fix refs. Seven checks require an actual log
-  read, a comparison read through gh or through a git diff, show, or patch log
-  of the fix branch (git commands are recorded under `.git/`), exact
-  branch/action/error tokens in the reply, and preservation of
-  project/instrument files. The independent judge assesses
-  whether those tokens express the correct cause and merge direction; token
-  coverage alone is not semantic correctness. No A/B calibration or measured
-  improvement is claimed. Three more slices cover the skill's other failure
-  patterns, each with a test module under `test/issues/test_issue_76_*.py`:
-  [`swallowed-failure/`](evals/debug-github-workflows/swallowed-failure/)
-  (a green run whose `mapfile < <(gh ...)` swallowed a failed listing; two
-  `command_succeeds` probes run the final script against a scripted gh, one
-  where the listing works and one where it fails),
-  [`git-identity/`](evals/debug-github-workflows/git-identity/) (a bare exit
-  128 from a test script that commits with no git identity; probes run the
-  final suite with git forbidden to guess an identity, and with a broken
-  changelog to show the tests still run) and
-  [`secret-name/`](evals/debug-github-workflows/secret-name/) (a workflow
-  reads a secret the repository does not have, and gh's own hint points at
-  `github.token`; checks require the secret listing and the existing name).
-  None of them has an A/B calibration yet.
+  from. `debug-github-workflows` had four covered slices
+  (issue [#76](https://github.com/Adam-S-Daniel/skills-evals/issues/76)); the
+  skill was removed from the registry (acsi-agentskills pull 147), so the
+  fixtures were retired in issue 996 and their recorded results stay on
+  `persistent/eval-results`.
   [`consumer-repo-provisioning`](https://github.com/example-adopter/skills-evals/blob/main/evals/consumer-repo-provisioning/fixture.yaml)
   now has its first Class B fixture:
   a consumer startup failure with a required Actions secret missing and the
@@ -1896,7 +1874,7 @@ the reference they point at.
 
 Backfill order, by usage × decidability × incident material:
 `cms-stuck-pr-triage` (builds the fake-`gh` machinery every Class B eval
-reuses), `debug-github-workflows` (four slices have shipped, above), then `acsi-writing-style` as the
+reuses), `debug-github-workflows` (four slices shipped, then retired when the skill was removed), then `acsi-writing-style` as the
 Class C pilot. (`github-actions-sha-pinning` — fully decidable, including the
 example-site-platform tag carve-out — has shipped: `evals/github-actions-sha-pinning/`.
 `review-bash-ci-reliability`, which headed this list because the incident
@@ -2679,8 +2657,10 @@ what it teaches. That verdict never removes anything. Because the alone pair
 now runs only near removal, it may have few or no runs when the in-situ test
 reaches `retire`: a `retire` whose alone pair is unfinished (no alone cell,
 or one still `missing`, `insufficient`, `cannot-discriminate` or `paused`)
-has `removal: proposal`, never `auto`, and `scripts/retire_skill.py`
-re-checks the alone cells itself rather than trusting the field. The
+is `insufficient` (2026-11-13), keeping `in_situ_verdict: retire` so the
+planner still fires the alone arm: it is neither removed nor proposed to the
+owner, and `scripts/retire_skill.py` re-checks the alone cells itself and
+files nothing for a verdict document that predates this. The
 explorer publishes a section's alone results (the `section` mode and
 `alone_verdict`) only when its in-situ verdict is `retire`, the one case
 they factor into its decision; it keeps every `none` run, which the page's
@@ -2692,29 +2672,30 @@ section trend, help-per-word sort and early-sign chip read the in-situ gain
 sweep; the owner's decision on it is pending), the same for skills and sections
 in `gate-policy.yml`'s two blocks. A betting confidence sequence on the
 paired per-fire difference D = with minus without (aGRAPA bets, no
-variance prior). A cell shows no benefit when its test shows D below 0.15
-(`objective_margin`) at 90% (`retire_confidence`); a subject keeps when a
-cell's keep test shows D above 0 at 80% (`benefit_confidence`), split over a
+variance prior). Current values: [docs/rules.md](docs/rules.md). A cell
+shows no benefit when its test shows D below the margin (`objective_margin`)
+at the removal level (`retire_confidence`); a subject keeps when a
+cell's keep test shows D above 0 at `benefit_confidence`, split over a
 family of fixed size m = fixtures on main x roster models (Bonferroni,
-#578's per-subject keep). A cell whose without arm a betting bound at 90%
-shows above 1 minus the margin, with a no-harm test agreeing, is `ceiling`
+#578's per-subject keep). A cell whose without arm a betting bound at the
+removal level shows above 1 minus the margin, with a no-harm test agreeing, is `ceiling`
 and does not vote (a harm test runs there too and makes a cell no-benefit
 once it decides, so a harm beyond the margin parks only at the no-harm
-test's error rate); a high cell undecided after 20 pairs
-(`max_runs_high_cell`), whose no-harm test has rejected and whose without
-arm averages at least 0.90, stops as `ceiling-unconfirmed`, which does not
+test's error rate); a high cell undecided after `max_runs_high_cell` pairs,
+whose no-harm test has rejected and whose without
+arm averages at least `high_stop_min_without`, stops as `ceiling-unconfirmed`, which does not
 vote either, and any other high cell is fired on to the cap; one undecided
-after 20 pairs (`max_runs_per_cell`) is `no-clear-effect`, which can only
-propose a removal, when no test crossed and its pairs span two CLI
+after `max_runs_per_cell` pairs is `no-clear-effect`, which can decide a
+removal, when no test crossed and its pairs span `min_cli_versions` CLI
 versions, and otherwise stays `insufficient`, unfired, as a `cell-at-cap`
 work item; a fixture the eval scope pass paused keeps its cells, parked as
-`paused` unless they showed benefit or decided no-benefit, and a pause makes
+`paused` (a cell paused for no recorded use, `zero-use`, keeps the subject
+`insufficient` instead of letting the other cells reach `retire`) unless they showed benefit or decided no-benefit, and a pause makes
 a subject `ceiling` only where each paused cell's own runs show the ceiling
 (else `insufficient`, a `paused-unmeasured` work item); a removal decides once its test is at
-its level on pairs spanning two CLI versions (a keep crossing wins unless
-the removal decided first); an automatic removal needs two or more headroom
-cells, all no-benefit, and no parked cell. The judge is reported and does not vote (`judge_margin` 1.5
-on its 0-to-10 scale sets only its reported figure). The alone pair keeps
+its level on pairs spanning `min_cli_versions` CLI versions (a keep crossing wins unless
+the removal decided first); every removal is automatic (2026-11-13). The judge is reported and does not vote (`judge_margin`
+sets only its reported figure). The alone pair keeps
 its per-cell keep for the twist above. An agent-errored trial counts 0 and
 does not block a guidance removal. `harness/gates.py`'s docstring is the
 full statement, and `test/issues/test_issue_betting_gate.py` its seeded
@@ -2725,21 +2706,25 @@ acts on at most one section per evaluation. `shorten-or-merge` always
 becomes a skills-evals issue. `retire` becomes an issue in `proposal` mode,
 and in `auto` mode (the committed `guidance.retirement_mode`) a branch
 `retire-guidance/<id>` in the `_agent-guidance` checkout that auto-merges
-(a verdict with `removal: proposal` files the issue in either mode).
+(a section whose alone pair is unfinished files nothing: the gates report it `insufficient`; with no credential in `auto` mode the run files nothing and exits 1 so the scheduled-run health audit flags it).
 That branch removes the extent from `base.md` (or `git rm`s a `sections/`
 file when this was its only `##`) and re-copies `base.md` to
 `.claude/hooks/fleet-guidance.md`. It also deletes the manifest row, runs
 `check-guidance-coverage.js --write-bytes`, adds a typed `remove` entry to
 `docs/guidance-impact.md` whose `Eval:` line gives the pooled run count
 (`n=`) and the fixtures, and rebuilds `AGENTS.md`, split on the
-`## Repo-specific additions` heading line. A dry run lists every step.
+`## Repo-specific additions` heading line. When `_agent-guidance` has
+`scripts/build-contributor-rules.js`, it also runs it with `--write` and commits
+`.github/fleet-contributor-rules.md`; without the script nothing changes. A dry
+run lists every step.
 Retirement was made automatic, with no human approval (the owner, 2026-10-10,
 #124); the owner's 2026-11-03 "Resume, auto-removal off" set
 `guidance.retirement_mode` to `proposal`, and `evals/gate-policy.yml` commits
 `auto` again since withdrawal was hardened (PR #740, #645). In `auto`, a verdict with `removal: auto` opens the
 removal pull request in `_agent-guidance` is written with the eval-improve
 GitHub App's token minted for that repository alone (`skill-coverage.yml`'s
-`retirement` job). With no token it files the issue instead. Every removal
+`retirement` job). With no write token, or for a copy the bot cannot remove itself, it files an
+`agent-ready` issue for the fleet worker instead (_agent-guidance ADR 0044); it opens no pull request while an agent-stamped issue is open. Every removal
 pull request is followed by a notice issue in skills-evals that mentions
 the owner, links the pull request and says how to reverse it (close it, or press
 Revert once merged), and the explorer lists removed sections and skills

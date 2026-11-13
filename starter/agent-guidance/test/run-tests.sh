@@ -305,6 +305,25 @@ _row_cell_equals() {   # <row> <needle> — some `|`-delimited cell equals <need
     done
     return 1
 }
+# assert_row_col_equals <file> <row-key> <column-name> <needle> <label> — the
+# cell UNDER the named header column equals <needle>. assert_row_contains accepts
+# any cell, so a `**missing**` in another column would satisfy it.
+assert_row_col_equals() {
+    local file="$1" key="$2" col="$3" needle="$4" label="$5"
+    local header row i idx=-1 cell
+    local -a hcells rcells
+    header=$(grep -m1 '^| Repository |' "$file") || { fail "$label — no table header in $file"; return; }
+    row=$(grep -F -- "$key" "$file" | grep -m1 '^|') || { fail "$label — no row containing '$key' in $file"; return; }
+    IFS='|' read -r -a hcells <<< "$header"
+    IFS='|' read -r -a rcells <<< "$row"
+    for i in "${!hcells[@]}"; do
+        cell="${hcells[$i]}"; cell="${cell#"${cell%%[![:space:]]*}"}"; cell="${cell%"${cell##*[![:space:]]}"}"
+        [[ "$cell" == "$col" ]] && idx=$i
+    done
+    if [[ $idx -lt 0 ]]; then fail "$label — no column '$col' in $file"; return; fi
+    cell="${rcells[$idx]:-}"; cell="${cell#"${cell%%[![:space:]]*}"}"; cell="${cell%"${cell##*[![:space:]]}"}"
+    if [[ "$cell" == "$needle" ]]; then pass "$label"; else fail "$label — column '$col' is '$cell', expected '$needle'"; fi
+}
 # assert_row_note_contains <file> <row-key> <needle> <label> — a substring of
 # the row's LAST cell, which is Notes.
 #
@@ -595,7 +614,9 @@ YAML
     mkdir -p .claude/hooks
     cp "$REPO_ROOT/.claude/hooks/fleet-memory.sh" .claude/hooks/fleet-memory.sh
     cp "$REPO_ROOT/agents-md/base.md" .claude/hooks/fleet-guidance.md
-    git add .agents-sync.yml AGENTS.md .claude/hooks/fleet-memory.sh .claude/hooks/fleet-guidance.md
+    mkdir -p .github
+    cp "$REPO_ROOT/.github/fleet-contributor-rules.md" .github/fleet-contributor-rules.md
+    git add .agents-sync.yml AGENTS.md .claude/hooks/fleet-memory.sh .claude/hooks/fleet-guidance.md .github/fleet-contributor-rules.md
     git commit -m "init" >/dev/null 2>&1
     git push origin HEAD:main >/dev/null 2>&1
 
@@ -805,6 +826,7 @@ YAML
     setup_ancestor_branch_repo
     setup_sync_yaml_failure_repo
     setup_big_agents_md_repo
+    setup_contributor_guard_repos
 
     cd "$REPO_ROOT"
 }
@@ -942,7 +964,9 @@ YAML
     mkdir -p .claude/hooks
     cp "$REPO_ROOT/.claude/hooks/fleet-memory.sh" .claude/hooks/fleet-memory.sh
     cp "$REPO_ROOT/agents-md/base.md" .claude/hooks/fleet-guidance.md
-    git add .agents-sync.yml AGENTS.md .claude/hooks/fleet-memory.sh .claude/hooks/fleet-guidance.md
+    mkdir -p .github
+    cp "$REPO_ROOT/.github/fleet-contributor-rules.md" .github/fleet-contributor-rules.md
+    git add .agents-sync.yml AGENTS.md .claude/hooks/fleet-memory.sh .claude/hooks/fleet-guidance.md .github/fleet-contributor-rules.md
     git commit -m "init" >/dev/null 2>&1
     git push origin HEAD:main >/dev/null 2>&1
     cd "$REPO_ROOT"
@@ -1009,6 +1033,39 @@ YAML
     git commit -m "init" >/dev/null 2>&1
     git push origin HEAD:main >/dev/null 2>&1
     cd "$REPO_ROOT"
+}
+
+# ── Contributor-rules guard fixtures (ADR 0043) ────────────────────────────
+#   cguardorg/repo-drifted   managed header, stale body: refreshed
+#   cguardorg/repo-foreign   a file of the repo's own at the path: refused
+#   cguardorg/repo-symlink   a symlink at the path: refused, target untouched
+setup_contributor_guard_repos() {
+    local name bare work
+    for name in repo-drifted repo-foreign repo-symlink; do
+        bare="$TEST_DIR/bare/cguardorg_$name"
+        work="$TEST_DIR/work/cguardorg-$name"
+        mkdir -p "$bare" "$work/.github"
+        git init --bare --initial-branch=main "$bare" >/dev/null 2>&1
+        git init --initial-branch=main "$work" >/dev/null 2>&1
+        (
+            cd "$work"
+            git config commit.gpgsign false
+            git remote add origin "$bare"
+            printf 'sections: []\n' > .agents-sync.yml
+            echo "# $name" > README.md
+            case "$name" in
+                repo-drifted)
+                    printf '<!-- Managed by _agent-guidance: stale copy -->\nold rules\n' > .github/fleet-contributor-rules.md ;;
+                repo-foreign)
+                    printf 'my own contributor notes\n' > .github/fleet-contributor-rules.md ;;
+                repo-symlink)
+                    ln -s ../README.md .github/fleet-contributor-rules.md ;;
+            esac
+            git add -A
+            git commit -m init >/dev/null 2>&1
+            git push origin HEAD:main >/dev/null 2>&1
+        )
+    done
 }
 
 # ── Set up the skills-bootstrap fixtures ───────────────────────────────────
@@ -2381,6 +2438,13 @@ case "$1" in
                           {"nameWithOwner":"bigorg/repo-big-agents-md"}
                         ]'
                         ;;
+                    cguardorg)
+                        json='[
+                          {"nameWithOwner":"cguardorg/repo-drifted"},
+                          {"nameWithOwner":"cguardorg/repo-foreign"},
+                          {"nameWithOwner":"cguardorg/repo-symlink"}
+                        ]'
+                        ;;
                     emptyorg)
                         # An owner that really does hold nothing. Distinct from
                         # `failorg` below, and the distinction is the point:
@@ -3387,6 +3451,28 @@ test_build_script() {
     echo "$output" > "$TEST_DIR/build-full.md"
     assert_contains "$TEST_DIR/build-full.md" "$base_heading" "full mode inlines base content"
     assert_contains "$TEST_DIR/build-full.md" "Mode: full" "full mode reports itself"
+    # ADR 0043: full inlines the contributor file, never base.md, so no
+    # owner-only section may reach a repo that cannot receive the hook.
+    assert_contains "$TEST_DIR/build-full.md" "Managed by _agent-guidance: built by scripts/build-contributor-rules.js" "full mode inlines the contributor rules header"
+    assert_contains "$TEST_DIR/build-full.md" "$stub_heading" "full mode keeps the stub (irreversible rules, first-reply check, pointer)"
+    assert_contains "$TEST_DIR/build-full.md" "fleet-guidance check:" "full mode keeps the first-reply check rule"
+    # Owner headings come from the manifest, parsed (not regexed): every row
+    # with audience: owner in agents-md/base.md must be absent from full mode.
+    local owner_headings owner_n=0 owner_h
+    owner_headings=$(cd "$REPO_ROOT" && node -e '
+        const yaml = require("yaml");
+        const rows = yaml.parse(require("fs").readFileSync("agents-md/eval-coverage.yml", "utf8"));
+        const list = Array.isArray(rows) ? rows : (rows.sections || rows.rows || []);
+        for (const r of list) if (r.audience === "owner" && r.file === "agents-md/base.md") console.log(r.heading);
+    ' 2>/dev/null) || owner_headings=""
+    while IFS= read -r owner_h; do
+        [[ -n "$owner_h" ]] || continue
+        owner_n=$((owner_n + 1))
+        assert_not_contains "$TEST_DIR/build-full.md" "## $owner_h" "full mode carries no owner-only heading: $owner_h"
+    done <<<"$owner_headings"
+    if [[ "$owner_n" -lt 1 ]]; then
+        fail "full mode owner-heading check is vacuous: no audience: owner rows read from eval-coverage.yml"
+    fi
 
     # An unrecognised mode must stop, not silently pick one. Captured without a
     # pipe so the exit code is the script's own.
@@ -4173,9 +4259,12 @@ test_drift_report_partial_read() {
         fail "partial read: the short read was silent -- no ::error:: annotation"
     fi
 
-    # Restore a clean report for any test that runs after this one.
+    # Restore a clean report for any test that runs after this one. Its output
+    # goes under $TEST_DIR: the default is the repo root, where the report and
+    # its sidecars would be left for `git add -A` to commit (#547).
     (
         GITHUB_REPOSITORY_OWNER=testorg \
+        DRIFT_REPORT_OUTPUT="$TEST_DIR/drift-restore.md" \
         MOCK_BARE_DIR="$TEST_DIR/bare" \
         REPOS_YML="$TEST_DIR/repos.yml" \
         PATH="$TEST_DIR/bin:$PATH" \
@@ -4524,6 +4613,8 @@ YAML
     "$REPO_ROOT/scripts/build-agents-md.sh" >"$work/AGENTS.md"
     cp "$REPO_ROOT/.claude/hooks/fleet-memory.sh" "$work/.claude/hooks/fleet-memory.sh"
     cp "$REPO_ROOT/agents-md/base.md" "$work/.claude/hooks/fleet-guidance.md"
+    mkdir -p "$work/.github"
+    cp "$REPO_ROOT/.github/fleet-contributor-rules.md" "$work/.github/fleet-contributor-rules.md"
     push_fleet_payload_fixture
 
     run_fleet_payload_report
@@ -4534,6 +4625,19 @@ YAML
     expected_sha=$(sha256sum "$REPO_ROOT/agents-md/base.md")
     assert_row_note_contains "$rpt" "fleetorg/repo-payload" "expected \`${expected_sha:0:8}\`, found \`${expected_sha:0:8}\`" \
         "fleet payload: current hash matches the installed verdict"
+
+    rm "$work/.github/fleet-contributor-rules.md"
+    push_fleet_payload_fixture
+    run_fleet_payload_report
+    assert_row_col_equals "$rpt" "fleetorg/repo-payload" "contributor-rules" "**missing**" \
+        "fleet payload: absent contributor rules read missing"
+    printf 'stale\n' >"$work/.github/fleet-contributor-rules.md"
+    push_fleet_payload_fixture
+    run_fleet_payload_report
+    assert_row_col_equals "$rpt" "fleetorg/repo-payload" "contributor-rules" "**drifted**" \
+        "fleet payload: stale contributor rules read drifted"
+    cp "$REPO_ROOT/.github/fleet-contributor-rules.md" "$work/.github/fleet-contributor-rules.md"
+    push_fleet_payload_fixture
 
     # A changed body and a changed trailing newline must both be visible.
     printf 'stale payload\n' >"$work/.claude/hooks/fleet-guidance.md"
@@ -7251,6 +7355,71 @@ PY
     fi
 }
 
+# ── Test: sync.sh guards the contributor-rules destination (ADR 0043) ──────
+test_sync_contributor_guards() {
+    echo ""
+    echo "=== Test: sync.sh contributor rules (drift refresh, symlink and foreign-file refusal, missing source) ==="
+    local out="$TEST_DIR/sync-cguard.txt" rc=0
+    printf 'exclude: []\n' > "$TEST_DIR/repos-cguard.yml"
+    GITHUB_REPOSITORY_OWNER=cguardorg \
+    MOCK_BARE_DIR="$TEST_DIR/bare" \
+    REPOS_YML="$TEST_DIR/repos-cguard.yml" \
+    PATH="$TEST_DIR/bin:$PATH" \
+    "$REPO_ROOT/scripts/sync.sh" > "$out" 2>&1 || rc=$?
+
+    local v="$TEST_DIR/verify-cguard"
+    rm -rf "$v"; mkdir -p "$v"
+    local name
+    for name in repo-drifted repo-foreign repo-symlink; do
+        git clone "$TEST_DIR/bare/cguardorg_$name" "$v/$name" >/dev/null 2>&1 || fail "cguard: could not clone $name"
+    done
+
+    if cmp -s "$v/repo-drifted/.github/fleet-contributor-rules.md" "$REPO_ROOT/.github/fleet-contributor-rules.md"; then
+        pass "cguard: a drifted managed file is refreshed byte for byte"
+    else
+        fail "cguard: a drifted managed file is refreshed byte for byte"
+    fi
+    if git -C "$v/repo-drifted" log -1 --format=%B | grep -qF "contributor rules"; then
+        pass "cguard: the refresh commit message mentions the contributor rules"
+    else
+        fail "cguard: the refresh commit message mentions the contributor rules"
+    fi
+
+    if [[ "$(cat "$v/repo-foreign/.github/fleet-contributor-rules.md")" == "my own contributor notes" ]]; then
+        pass "cguard: a file without the managed header is left alone"
+    else
+        fail "cguard: a file without the managed header is left alone"
+    fi
+    assert_contains "$out" "cguardorg/repo-foreign: .github/fleet-contributor-rules.md exists but does not carry the managed header" "cguard: the foreign-file refusal names the repo"
+
+    if [[ -L "$v/repo-symlink/.github/fleet-contributor-rules.md" && "$(cat "$v/repo-symlink/README.md")" == "# repo-symlink" ]]; then
+        pass "cguard: a symlink at the destination is not written through"
+    else
+        fail "cguard: a symlink at the destination is not written through"
+    fi
+    assert_contains "$out" "cguardorg/repo-symlink: .github/fleet-contributor-rules.md (or .github) is a symlink" "cguard: the symlink refusal names the repo"
+    assert_contains "$out" "synced, 0 skipped, 2 failed ===" "cguard: both refusals count as failed repos, the drifted one still synced"
+    [[ "$rc" -ne 0 ]] && pass "cguard: a run with refused repos exits nonzero" || fail "cguard: a run with refused repos exits nonzero (got $rc)"
+
+    # A missing or empty source stops the run before any repo is touched.
+    local tree="$TEST_DIR/cguard-tree" src_rc=0
+    rm -rf "$tree"; mkdir -p "$tree/.github"
+    cp -r "$REPO_ROOT/scripts" "$tree/scripts"
+    : > "$tree/.github/fleet-contributor-rules.md"
+    GITHUB_REPOSITORY_OWNER=cguardorg \
+    MOCK_BARE_DIR="$TEST_DIR/bare" \
+    REPOS_YML="$TEST_DIR/repos-cguard.yml" \
+    PATH="$TEST_DIR/bin:$PATH" \
+    "$tree/scripts/sync.sh" > "$TEST_DIR/sync-cguard-nosrc.txt" 2>&1 || src_rc=$?
+    if [[ "$src_rc" -ne 0 ]]; then
+        pass "cguard: an empty contributor-rules source fails the run (rc=$src_rc)"
+    else
+        fail "cguard: an empty contributor-rules source fails the run"
+    fi
+    assert_contains "$TEST_DIR/sync-cguard-nosrc.txt" "is missing or empty" "cguard: the missing-source failure says why"
+    assert_not_contains "$TEST_DIR/sync-cguard-nosrc.txt" "=== cguardorg/" "cguard: no repo was processed after the source check failed"
+}
+
 # ── Test 5b: sync.sh delivers the bootstrap hook (opt-in, double-keyed) ────
 
 test_sync_bootstrap() {
@@ -7326,6 +7495,12 @@ test_sync_bootstrap() {
         pass "repo-no-lock: fleet-memory still delivered (it is not allowlisted)"
     else
         fail "repo-no-lock: fleet-memory still delivered (it is not allowlisted)"
+    fi
+    # ADR 0043: the contributor rules go to every synced repo, byte for byte.
+    if cmp -s "$nolock/.github/fleet-contributor-rules.md" "$REPO_ROOT/.github/fleet-contributor-rules.md"; then
+        pass "repo-no-lock: contributor rules delivered byte for byte"
+    else
+        fail "repo-no-lock: contributor rules delivered byte for byte"
     fi
     # The guidance-load record rides with fleet-memory: same repos, a managed
     # byte-identical copy, executable, and one Stop group with its timeout.
@@ -7407,8 +7582,14 @@ for g in doc["hooks"]["Stop"]:
             pass "repo-ignored: guidance-load-record withheld with fleet-memory"
         fi
         assert_contains "$ignored/AGENTS.md" "$full_sentinel" "repo-ignored: keeps the FULL guidance inline (undeliverable repo)"
-        assert_not_contains "$ignored/AGENTS.md" "$stub_sentinel" "repo-ignored: is NOT given the stub"
+        assert_contains "$ignored/AGENTS.md" "$stub_sentinel" "repo-ignored: gets the stub (full mode is stub plus contributor rules)"
+        assert_contains "$ignored/AGENTS.md" "Managed by _agent-guidance: built by scripts/build-contributor-rules.js" "repo-ignored: gets the contributor rules inline too"
         assert_contains "$ignored/AGENTS.md" "Mode: full" "repo-ignored: AGENTS.md records full mode"
+        if cmp -s "$ignored/.github/fleet-contributor-rules.md" "$REPO_ROOT/.github/fleet-contributor-rules.md"; then
+            pass "repo-ignored: contributor rules delivered even in full mode"
+        else
+            fail "repo-ignored: contributor rules delivered even in full mode"
+        fi
     fi
 
     # ── repo-unparseable: refuse to edit, deliver nothing, leave it alone.
@@ -7727,6 +7908,7 @@ test_sync_bootstrap_dry_run() {
     assert_contains "$TEST_DIR/sync-bootstrap-dry.txt" "[DRY RUN] Would add .claude/hooks/skills-bootstrap.sh" "dry-run: names the hook it would add"
     assert_contains "$TEST_DIR/sync-bootstrap-dry.txt" "[DRY RUN] Would append a SessionStart entry" "dry-run: names the settings.json append"
     assert_contains "$TEST_DIR/sync-bootstrap-dry.txt" "existing entries preserved" "dry-run: states that existing entries are preserved"
+    assert_contains "$TEST_DIR/sync-bootstrap-dry.txt" "[DRY RUN] Would add .github/fleet-contributor-rules.md" "dry-run: names the contributor rules it would add"
     assert_contains "$TEST_DIR/sync-bootstrap-dry.txt" "[DRY RUN] Would NOT touch skills.lock" "dry-run: states that skills.lock is never touched"
     assert_contains "$TEST_DIR/sync-bootstrap-dry.txt" "no skills.lock in the repo yet" "dry-run: explains the withheld repo"
     assert_contains "$TEST_DIR/sync-bootstrap-dry.txt" "[DRY RUN] Would write $GREC_REL_PATH_T (guidance-load record hook missing)" "dry-run: names the guidance-load-record hook it would add"
@@ -13950,10 +14132,10 @@ test_prompt_audit_sweep() {
     local pass_n fail_n
     pass_n=$(grep -oE '^# pass [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
     fail_n=$(grep -oE '^# fail [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
-    if [[ "$rc" -eq 0 && "$pass_n" == "20" && "$fail_n" == "0" ]]; then
-        pass "prompt-audit sweep policy: 20 passed"
+    if [[ "$rc" -eq 0 && "$pass_n" == "21" && "$fail_n" == "0" ]]; then
+        pass "prompt-audit sweep policy: 21 passed"
     else
-        fail "prompt-audit sweep policy: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=20, fail=0): $(tail -20 "$out" | tr '\n' ' ')"
+        fail "prompt-audit sweep policy: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=21, fail=0): $(tail -20 "$out" | tr '\n' ' ')"
     fi
 }
 
@@ -14815,6 +14997,35 @@ EOF
         "check-agents-md: the out-of-order failure names it as an ordering problem"
 }
 
+# ── Test: build-contributor-rules.js (ADR 0043 contributor file) ──
+test_contributor_rules() {
+    echo ""
+    echo "=== Test: build-contributor-rules.js (contributor half of base.md) ==="
+    if [[ ! -d "$REPO_ROOT/node_modules/yaml" || ! -d "$REPO_ROOT/node_modules/markdown-it" ]]; then
+        fail "contributor rules: node_modules/yaml or node_modules/markdown-it is missing — run \`npm ci\` first"
+        return
+    fi
+    local out="$TEST_DIR/contributor-rules-tap.txt" rc=0
+    # NEVER pipe this: a pipe's exit status belongs to its last command.
+    node --test --test-reporter=tap "$REPO_ROOT/test/test-contributor-rules.js" > "$out" 2>&1 || rc=$?
+    local pass_n fail_n
+    pass_n=$(grep -oE '^# pass [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
+    fail_n=$(grep -oE '^# fail [0-9]+' "$out" | tail -1 | grep -oE '[0-9]+' || true)
+    # 7 is the suite's actual count; a deleted test fails here.
+    if [[ "$rc" -eq 0 && "$fail_n" == "0" && -n "$pass_n" && "$pass_n" -ge 7 ]]; then
+        pass "contributor rules: node:test suite is green ($pass_n passed)"
+    else
+        fail "contributor rules: node:test suite — exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, fail=0, pass>=7): $(tail -20 "$out" | tr '\n' ' ')"
+    fi
+    local facts="$TEST_DIR/contributor-rules-step.txt"
+    if workflow_step_by_run "$REPO_ROOT/.github/workflows/ci.yml" "build-contributor-rules.js --check" checks > "$facts" 2>/dev/null \
+            && grep -qxF -- "found" "$facts" && grep -qxF -- "if -" "$facts"; then
+        pass "contributor rules: ci.yml's checks job runs the staleness check unconditionally"
+    else
+        fail "contributor rules: ci.yml's checks job should run node scripts/build-contributor-rules.js --check with no if: — got: $(tr '\n' ' ' < "$facts" 2>/dev/null)"
+    fi
+}
+
 # ── Test: check-guidance-coverage.js (section manifest graduation gate) ──
 #
 # agents-md/eval-coverage.yml is the join between a `##` heading in the
@@ -14882,6 +15093,7 @@ more text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 12
 '
@@ -14915,6 +15127,7 @@ text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 12
 '
@@ -14934,6 +15147,7 @@ text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/heading-one/
   bytes: 12
@@ -14954,6 +15168,7 @@ text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: skipped
   since: "2026-01-01"
   bytes: 12
@@ -14971,12 +15186,42 @@ text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: skipped
   reason: deliberately not covered, for this test fixture
   bytes: 12
 '
     assert_guidance skipped_no_since 1 "is status: skipped but has no 'since'" \
         "guidance coverage: a skipped row with no since date fails"
+
+    # 4c. A row with no `audience` (ADR 0043). build-contributor-rules.js
+    #     decides from this field alone what ships to every consumer repo, so
+    #     a missing or misspelled value fails here rather than defaulting.
+    guidance_fixture no_audience \
+'## Heading One
+text
+' \
+'- id: heading-one
+  heading: Heading One
+  file: agents-md/base.md
+  status: gap
+  bytes: 19
+'
+    assert_guidance no_audience 1 'has audience "undefined", expected contributor or owner' \
+        "guidance coverage: a row with no audience fails"
+    guidance_fixture bad_audience \
+'## Heading One
+text
+' \
+'- id: heading-one
+  heading: Heading One
+  file: agents-md/base.md
+  audience: everyone
+  status: gap
+  bytes: 19
+'
+    assert_guidance bad_audience 1 'has audience "everyone", expected contributor or owner' \
+        "guidance coverage: a row with an unknown audience fails"
 
     # 6. Zero headings anywhere — refused (exit 2), never a silent pass. Per
     #    the fleet's own convention, a gate that finds nothing must not read
@@ -15002,12 +15247,14 @@ more text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 21
 
 - id: heading-two
   heading: Heading Two
   file: agents-md/base.md
+  audience: owner
   status: skipped
   reason: deliberately not covered, for this test fixture
   since: "2026-01-01"
@@ -15026,6 +15273,7 @@ text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 999999
 '
@@ -15063,6 +15311,7 @@ some text
 '- id: only-heading
   heading: Only Heading
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 555
 '
@@ -15115,6 +15364,7 @@ text $i
             manifest+="- id: heading-$i
   heading: Heading $i
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 0
 
@@ -15143,6 +15393,7 @@ text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 12
 
@@ -15186,6 +15437,7 @@ text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 12
 
@@ -15219,6 +15471,7 @@ more text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 999999
 '
@@ -15243,6 +15496,7 @@ text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 12
 
@@ -15288,6 +15542,7 @@ more text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/heading-one/
   bytes: 21
@@ -15295,6 +15550,7 @@ more text
 - id: heading-two
   heading: Heading Two
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/heading-two/
   bytes: 25
@@ -15328,12 +15584,14 @@ text
 '- id: heading-one
   heading: Heading One
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 15
 
 - id: section-heading
   heading: Section Heading
   file: agents-md/sections/extra.md
+  audience: owner
   status: covered
   fixture: evals/guidance/section-heading/
   bytes: 16
@@ -15435,12 +15693,14 @@ more text
 '- id: closed-form
   heading: Closed Form
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 10
 
 - id: indented-heading
   heading: Indented Heading
   file: agents-md/base.md
+  audience: owner
   status: gap
   bytes: 10
 '
@@ -19275,6 +19535,113 @@ GHSTUB
         "sweep (control): an empty listing did not become one nameless PR"
 }
 
+# ── Test: the sweep step has repository context without a checkout ────────
+#
+# The job has no checkout (see the workflow header), so on the real runner the
+# step's cwd is not a git repository. gh then needs GH_REPO (or --repo) for
+# every `gh pr ...` call and otherwise runs git to find a repository, failing
+# with "failed to run git: fatal: not a git repository". Every fleet repo's
+# scheduled sweep failed that way on 2026-11-13. The tests above run the step
+# from inside this repo's checkout with a stub gh that needs no context, which
+# is why they never saw it. This one models the runner: the step's own `env:`
+# from the YAML, a cwd that is not a git repository, and a gh stub that
+# refuses like the real one.
+test_dependabot_sweep_repo_context() {
+    echo ""
+    echo "=== Test: dependabot-auto-merge.yml (the sweep has repo context with no checkout) ==="
+
+    local wf="$REPO_ROOT/.github/workflows/dependabot-auto-merge.yml"
+    local body="$TEST_DIR/repoctx-step.sh" envfile="$TEST_DIR/repoctx-env.txt"
+
+    if ! workflow_run_body "$wf" 'app/dependabot' > "$body" 2>"$TEST_DIR/repoctx-extract.err"; then
+        fail "sweep repo context: could not extract the sweep step — $(cat "$TEST_DIR/repoctx-extract.err")"
+        return
+    fi
+
+    # The step's env as the runner would export it: NAME=value lines, with the
+    # three expressions this workflow uses replaced by fixed fakes.
+    if ! node -e '
+const fs = require("node:fs");
+const YAML = require(process.argv[1] + "/node_modules/yaml");
+const doc = YAML.parse(fs.readFileSync(process.argv[2], "utf8"));
+const subs = {
+  "github.repository": "example-owner/example-repo",
+  "secrets.GITHUB_TOKEN": "dummy-value",
+  "github.workflow": "Dependabot auto-merge",
+};
+for (const spec of Object.values((doc && doc.jobs) || {})) {
+  for (const step of (spec && spec.steps) || []) {
+    if (typeof step.run !== "string" || !step.run.includes("app/dependabot")) continue;
+    for (const [k, v] of Object.entries(step.env || {})) {
+      const val = String(v).replace(/\$\{\{\s*([\w.]+)\s*\}\}/g, (m, e) => {
+        if (!(e in subs)) { console.error("unmodeled expression: " + e); process.exit(2); }
+        return subs[e];
+      });
+      process.stdout.write(k + "=" + val + "\0");
+    }
+    process.exit(0);
+  }
+}
+process.exit(1);
+' "$REPO_ROOT" "$wf" > "$envfile" 2>"$TEST_DIR/repoctx-env.err"; then
+        fail "sweep repo context: could not read the sweep step's env — $(cat "$TEST_DIR/repoctx-env.err")"
+        return
+    fi
+
+    # gh as the real one behaves with no git repository around it.
+    mkdir -p "$TEST_DIR/bin-repoctx"
+    cat > "$TEST_DIR/bin-repoctx/gh" <<'GHSTUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "pr" ]]; then
+    has_repo=0
+    # Only the value the test substitutes for github.repository is a valid
+    # repository; anything else fails as real gh does for an unknown repo.
+    [[ "${GH_REPO:-}" == "example-owner/example-repo" ]] && has_repo=1
+    for a in "$@"; do
+        [[ "$a" == "--repo" || "$a" == "-R" ]] && has_repo=1
+    done
+    if [[ $has_repo -eq 0 ]]; then
+        echo "failed to run git: fatal: not a git repository (or any of the parent directories): .git" >&2
+        exit 1
+    fi
+    if [[ "${2:-}" == "list" ]]; then
+        exit 0
+    fi
+fi
+echo "mock gh: unexpected call: $*" >&2
+exit 1
+GHSTUB
+    chmod +x "$TEST_DIR/bin-repoctx/gh"
+
+    local nogit; nogit="$(mktemp -d)"
+    local -a envargs=()
+    local item
+    while IFS= read -r -d '' item; do envargs+=("$item"); done < "$envfile"
+
+    # Negative control: the same env minus GH_REPO must be refused by the stub,
+    # so the test can fail.
+    local ctl="$TEST_DIR/repoctx-control.txt" ctl_code=0
+    local -a noenv=()
+    for item in "${envargs[@]}"; do [[ "$item" == GH_REPO=* ]] || noenv+=("$item"); done
+    (cd "$nogit" && env -u GH_REPO "${noenv[@]}" PATH="$TEST_DIR/bin-repoctx:$PATH" bash "$body") > "$ctl" 2>&1 || ctl_code=$?
+    if [[ $ctl_code -ne 0 ]] && grep -qF "not a git repository" "$ctl"; then
+        pass "sweep repo context (control): without GH_REPO and without a checkout gh refuses"
+    else
+        fail "sweep repo context (control): the stub did not refuse without GH_REPO (exit $ctl_code): $(cat "$ctl")"
+    fi
+
+    local out="$TEST_DIR/repoctx-out.txt" code=0
+    (cd "$nogit" && env -u GH_REPO "${envargs[@]}" PATH="$TEST_DIR/bin-repoctx:$PATH" bash "$body") > "$out" 2>&1 || code=$?
+    if [[ $code -eq 0 ]]; then
+        pass "sweep repo context: the step exits 0 from a directory that is not a git repository"
+    else
+        fail "sweep repo context: the step exits 0 from a non-git directory (got $code): $(cat "$out")"
+    fi
+    assert_contains "$out" "No open Dependabot PRs" \
+        "sweep repo context: it reaches the empty-sweep branch with the env the workflow declares"
+    rm -rf "$nogit"
+}
+
 # ── Test: dependabot-auto-merge.yml no longer merges before CI reports ────
 #
 # cms-platform#437: `gh pr merge --auto` does not "no-op" when nothing is
@@ -19433,13 +19800,6 @@ case "${1:-}" in
                     *) exit 0 ;;
                 esac
                 ;;
-            update-branch)
-                if [[ -n "${UPDATE_FAILS:-}" ]]; then
-                    echo "mock gh: update-branch refused" >&2
-                    exit 1
-                fi
-                exit 0
-                ;;
             *)
                 echo "mock gh: unexpected pr subcommand: $*" >&2
                 exit 1
@@ -19494,6 +19854,22 @@ case "${1:-}" in
                 jq -r "$jqf" "$src"
                 exit 0
                 ;;
+            repos/*/issues/*/comments\?per_page=100)
+                if [[ -n "${COMMENTS_FAIL:-}" ]]; then
+                    echo '{"message":"Server Error"}'
+                    exit 1
+                fi
+                num="${endpoint#*/issues/}"
+                num="${num%%/*}"
+                if [[ -f "$FIXTURES/comments-${num}.json" ]]; then
+                    src="$FIXTURES/comments-${num}.json"
+                else
+                    src="$FIXTURES/comments-default.json"
+                    echo '[]' > "$src"
+                fi
+                jq -r "$jqf" "$src"
+                exit 0
+                ;;
             repos/*/compare/*)
                 if [[ -f "$FIXTURES/compare-fails" ]]; then
                     echo '{"message":"Not Found"}'
@@ -19530,8 +19906,8 @@ GHSTUB
     # the extracted step against that fixture set and prints the exit code.
     run_case() {
         local fx="$1" mf="$2" sw="$3" out="$4" rc=0
-        PATH="$binhome:$PATH" FIXTURES="$fx" MERGE_FAILS="$mf" UPDATE_FAILS="${UPDATE_FAILS:-}" \
-            FILES_FAIL="${FILES_FAIL:-}" COMMITS_FAIL="${COMMITS_FAIL:-}" \
+        PATH="$binhome:$PATH" FIXTURES="$fx" MERGE_FAILS="$mf" SWEEP_TEST="${SWEEP_TEST:-}" SWEEP_NOW_EPOCH="${SWEEP_NOW_EPOCH:-}" \
+            FILES_FAIL="${FILES_FAIL:-}" COMMITS_FAIL="${COMMITS_FAIL:-}" COMMENTS_FAIL="${COMMENTS_FAIL:-}" \
             GITHUB_REPOSITORY="example-adopter/_agent-guidance" SELF_WORKFLOW="$sw" \
             bash "$body" > "$out" 2>&1 || rc=$?
         echo "$rc"
@@ -19569,8 +19945,8 @@ GHSTUB
     else
         fail "sweep gating (a): the merge call should end with the PR number — got: $(cat "$fx_a/calls.log" 2>/dev/null)"
     fi
-    assert_contains "$out_a" "merged=1 updated=0 skipped=0 blocked=0 failed=0" \
-        "sweep gating (a): summary is merged=1 updated=0 skipped=0 blocked=0 failed=0"
+    assert_contains "$out_a" "merged=1 waiting=0 skipped=0 blocked=0 failed=0" \
+        "sweep gating (a): summary is merged=1 waiting=0 skipped=0 blocked=0 failed=0"
 
     # (b) every check on the head is from THIS workflow — no real CI has
     #     reported, so the floor must not be satisfied by the gate itself.
@@ -19607,7 +19983,7 @@ GHSTUB
     fi
 
     # (d) the pinned merge is refused and the head has since moved — do not
-    #     fall through to update-branch; the next sweep judges the new head.
+    #     treat it as behind; the next sweep judges the new head.
     local fx_d="$TEST_DIR/auto-merge-gating-case-d"
     mkdir -p "$fx_d"
     printf '900\n' > "$fx_d/pr-numbers.txt"
@@ -19623,7 +19999,9 @@ GHSTUB
         fail "sweep gating (d): a refused merge with a moved head still exits 0 — got $rc_d: $(cat "$out_d")"
     fi
     assert_not_contains "$fx_d/calls.log" "update-branch" \
-        "sweep gating (d): does not fall through to pr update-branch when the head moved"
+        "sweep gating (d): never calls pr update-branch"
+    assert_not_contains "$fx_d/calls.log" "pr comment" \
+        "sweep gating (d): never comments"
     assert_contains "$out_d" "its head moved" \
         "sweep gating (d): it says the head moved"
     assert_contains "$out_d" "skipped=1" \
@@ -19656,7 +20034,7 @@ GHSTUB
     fi
 
     # (g) the pinned merge is refused, the head has NOT moved, and the PR is
-    #     BEHIND — refresh the branch rather than retry the merge.
+    #     BEHIND — it waits for Dependabot's rebase rather than retry the merge.
     local fx_g="$TEST_DIR/auto-merge-gating-case-g"
     mkdir -p "$fx_g"
     printf '900\n' > "$fx_g/pr-numbers.txt"
@@ -19669,15 +20047,17 @@ GHSTUB
     else
         fail "sweep gating (g): a refused BEHIND merge with an unmoved head still exits 0 — got $rc_g: $(cat "$out_g")"
     fi
-    assert_contains "$fx_g/calls.log" "update-branch" \
-        "sweep gating (g): falls through to pr update-branch"
-    assert_contains "$out_g" "updated=1" \
-        "sweep gating (g): summary counts it as updated"
+    assert_not_contains "$fx_g/calls.log" "pr comment" \
+        "sweep gating (g): the sweep never comments"
+    assert_not_contains "$fx_g/calls.log" "update-branch" \
+        "sweep gating (g): never pushes to the Dependabot branch"
+    assert_contains "$out_g" "waiting=1" \
+        "sweep gating (g): summary counts it as waiting"
 
     # (h) #296 on 2026-10-20: the merge is refused and mergeStateStatus is
     #     CLEAN (main does not require an up-to-date head), but the head is
-    #     2 commits behind main. Treat it as stale and refresh it, rather than
-    #     report "not behind".
+    #     2 commits behind main. Treat it as stale and wait for Dependabot,
+    #     rather than report "not behind".
     local fx_h="$TEST_DIR/auto-merge-gating-case-h"
     mkdir -p "$fx_h"
     printf '900\n' > "$fx_h/pr-numbers.txt"
@@ -19691,32 +20071,58 @@ GHSTUB
     else
         fail "sweep gating (h): a refused CLEAN merge that is behind by commit count exits 0 — got $rc_h: $(cat "$out_h")"
     fi
-    assert_contains "$fx_h/calls.log" "update-branch" \
-        "sweep gating (h): falls through to pr update-branch"
+    assert_not_contains "$fx_h/calls.log" "pr comment" \
+        "sweep gating (h): the sweep never comments"
+    assert_not_contains "$fx_h/calls.log" "update-branch" \
+        "sweep gating (h): never pushes to the Dependabot branch"
     assert_not_contains "$out_h" "is not behind" \
         "sweep gating (h): does not claim the PR is not behind"
-    assert_contains "$out_h" "updated=1" \
-        "sweep gating (h): summary counts it as updated"
+    assert_contains "$out_h" "waiting=1" \
+        "sweep gating (h): summary counts it as waiting"
 
-    # (i) same as (h), but update-branch is refused too, as GITHUB_TOKEN is
-    #     for a stale workflow-file PR. The run fails and names the remedy.
-    local fx_i="$TEST_DIR/auto-merge-gating-case-i"
+    # (i) a PR behind its base with the owner's rebase request for THIS head
+    #     (a non-bot comment: first line @dependabot rebase, then the marker):
+    #     25 h old is BLOCKED (the run goes red), 23 h old is still WAITING.
+    #     "Now" is the SWEEP_NOW_EPOCH test seam, honored only with SWEEP_TEST=1.
+    local NOW_EPOCH=1800000000 req_iso
+    iso_ago() { date -u -d "@$((NOW_EPOCH - $1 * 3600))" +%Y-%m-%dT%H:%M:%SZ; }
+    local fx_i out_i rc_i
+    for hrs in 25 23; do
+        fx_i="$TEST_DIR/auto-merge-gating-case-i$hrs"
+        mkdir -p "$fx_i"
+        printf '900\n' > "$fx_i/pr-numbers.txt"
+        printf '2\n' > "$fx_i/behind-by"
+        req_iso=$(iso_ago "$hrs")
+        printf '[{"user":{"login":"some-owner","type":"User"},"author_association":"OWNER","created_at":"%s","body":"@dependabot rebase\\r\\n\\r\\n<!-- fleet-worker: behind at %s -->\\n\\nfooter"}]\n' \
+            "$req_iso" "$HEAD_X" > "$fx_i/comments-900.json"
+        write_pr "$fx_i/pr-900.json" 900 "$HEAD_X" "MERGEABLE" "CLEAN" \
+            '[{"workflowName":"CI","name":"test","conclusion":"SUCCESS"},{"workflowName":"Dependabot auto-merge","name":"auto-merge","conclusion":"SUCCESS"}]'
+        out_i="$TEST_DIR/auto-merge-gating-out-i$hrs.txt"
+        rc_i=$(SWEEP_TEST=1 SWEEP_NOW_EPOCH=$NOW_EPOCH run_case "$fx_i" "" "$SELF" "$out_i")
+        assert_not_contains "$fx_i/calls.log" "pr merge" "sweep gating (i$hrs): a behind PR is never merged"
+        if [[ "$hrs" == 25 ]]; then
+            if [[ "$rc_i" -ne 0 ]]; then pass "sweep gating (i25): a rebase request over 24 h old exits non-zero"; else fail "sweep gating (i25): a rebase request over 24 h old exits non-zero — got 0: $(cat "$out_i")"; fi
+            assert_contains "$out_i" "blocked=1" "sweep gating (i25): counted as blocked"
+            assert_contains "$out_i" "Dependabot has not rebased it" "sweep gating (i25): the error says Dependabot has not rebased it"
+            assert_not_contains "$out_i" "blocked by the base branch policy" "sweep gating (i25): the policy summary does not claim a policy cause"
+        else
+            if [[ "$rc_i" -eq 0 ]]; then pass "sweep gating (i23): a rebase request under 24 h old exits 0"; else fail "sweep gating (i23): a rebase request under 24 h old exits 0 — got $rc_i: $(cat "$out_i")"; fi
+            assert_contains "$out_i" "waiting=1" "sweep gating (i23): still waiting"
+            assert_contains "$out_i" "blocked=0" "sweep gating (i23): not blocked"
+        fi
+    done
+    # The seam is ignored without SWEEP_TEST=1: a request dated 2100 is not
+    # 24 h old by the real clock, though the seam would say it is.
+    fx_i="$TEST_DIR/auto-merge-gating-case-inoseam"
     mkdir -p "$fx_i"
     printf '900\n' > "$fx_i/pr-numbers.txt"
     printf '2\n' > "$fx_i/behind-by"
+    printf '[{"user":{"login":"some-owner","type":"User"},"author_association":"OWNER","created_at":"2100-01-01T00:00:00Z","body":"@dependabot rebase\\n\\n<!-- fleet-worker: behind at %s -->"}]\n' "$HEAD_X" > "$fx_i/comments-900.json"
     write_pr "$fx_i/pr-900.json" 900 "$HEAD_X" "MERGEABLE" "CLEAN" \
         '[{"workflowName":"CI","name":"test","conclusion":"SUCCESS"},{"workflowName":"Dependabot auto-merge","name":"auto-merge","conclusion":"SUCCESS"}]'
-    local out_i="$TEST_DIR/auto-merge-gating-out-i.txt" rc_i
-    rc_i=$(UPDATE_FAILS=1 run_case "$fx_i" "900" "$SELF" "$out_i")
-    if [[ "$rc_i" -ne 0 ]]; then
-        pass "sweep gating (i): a stale workflow-file PR that cannot be refreshed fails the run"
-    else
-        fail "sweep gating (i): a stale workflow-file PR that cannot be refreshed fails the run — got 0: $(cat "$out_i")"
-    fi
-    assert_contains "$out_i" "@dependabot rebase" \
-        "sweep gating (i): the error names the @dependabot rebase remedy"
-    assert_contains "$out_i" "failed=1" \
-        "sweep gating (i): summary counts it as failed"
+    out_i="$TEST_DIR/auto-merge-gating-out-inoseam.txt"
+    rc_i=$(SWEEP_NOW_EPOCH=5000000000 run_case "$fx_i" "" "$SELF" "$out_i")
+    assert_contains "$out_i" "waiting=1" "sweep gating (i): SWEEP_NOW_EPOCH is ignored unless SWEEP_TEST=1"
 
     # (j) control: refused, CLEAN and NOT behind — still the "not behind"
     #     error, and no refresh attempt.
@@ -19727,8 +20133,8 @@ GHSTUB
         '[{"workflowName":"CI","name":"test","conclusion":"SUCCESS"},{"workflowName":"Dependabot auto-merge","name":"auto-merge","conclusion":"SUCCESS"}]'
     local out_j="$TEST_DIR/auto-merge-gating-out-j.txt"
     run_case "$fx_j" "900" "$SELF" "$out_j" >/dev/null
-    assert_not_contains "$fx_j/calls.log" "update-branch" \
-        "sweep gating (j): no pr update-branch when the head is not behind"
+    assert_not_contains "$fx_j/calls.log" "pr comment" \
+        "sweep gating (j): no rebase request when the head is not behind"
     assert_contains "$out_j" "is not behind main" \
         "sweep gating (j): reports the merge refusal as not behind"
 
@@ -19744,7 +20150,7 @@ GHSTUB
         '[{"workflowName":"CI","name":"test","conclusion":"SUCCESS"},{"workflowName":"Dependabot auto-merge","name":"auto-merge","conclusion":"SUCCESS"}]'
     local out_k="$TEST_DIR/auto-merge-gating-out-k.txt"
     run_case "$fx_k" "" "$SELF" "$out_k" >/dev/null
-    assert_contains "$out_k" "merged=1 updated=0 skipped=0 blocked=0 failed=0" \
+    assert_contains "$out_k" "merged=1 waiting=0 skipped=0 blocked=0 failed=0" \
         "sweep gating (k): a first-read UNKNOWN is re-read and then merged"
 
     # (l) control: UNKNOWN on every read stops after the bound and skips,
@@ -19855,7 +20261,7 @@ GHSTUB
     write_pr "$fx_s/pr-900.json" 900 "$HEAD_X" "MERGEABLE" "CLEAN" "$cs_ok"
     local out_s="$TEST_DIR/auto-merge-gating-out-s.txt"
     run_case "$fx_s" "" "$SELF" "$out_s" >/dev/null
-    assert_contains "$out_s" "merged=1 updated=0 skipped=0 blocked=0 failed=0" \
+    assert_contains "$out_s" "merged=1 waiting=0 skipped=0 blocked=0 failed=0" \
         "sweep gating (s): a diff of .github/workflows/actions.lock alone merges"
     assert_contains "$fx_s/calls.log" "pr merge --merge --match-head-commit $HEAD_X 900" \
         "sweep gating (s): the merge call is recorded, pinned to the head"
@@ -19867,7 +20273,7 @@ GHSTUB
     local C_MERGE='{"sha":"2222222222222222222222222222222222222222","author":{"login":"github-actions[bot]"},"commit":{"verification":{"verified":true}},"parents":[{},{}]}'
     # one_case <name> <files-json|""> <commits-json|""> [behind-by] [rollup]:
     # one PR, run once; output in $oc_out, fixtures in $oc_fx.
-    local oc_out oc_fx
+    local oc_out oc_fx oc_rc
     one_case() {
         oc_fx="$TEST_DIR/auto-merge-gating-case-$1"
         oc_out="$TEST_DIR/auto-merge-gating-out-$1.txt"
@@ -19881,7 +20287,7 @@ GHSTUB
         if [[ -n "$3" ]]; then printf '%s\n' "$3" > "$oc_fx/commits-900.json"; fi
         if [[ -n "${4:-}" ]]; then printf '%s\n' "$4" > "$oc_fx/behind-by"; fi
         write_pr "$oc_fx/pr-900.json" 900 "$HEAD_X" "MERGEABLE" "CLEAN" "${5:-$cs_two}" "$nfiles"
-        run_case "$oc_fx" "" "$SELF" "$oc_out" >/dev/null
+        oc_rc=$(run_case "$oc_fx" "" "$SELF" "$oc_out")
     }
     # no_merge <label>: the last one_case made no `pr merge` call.
     no_merge() {
@@ -19901,9 +20307,19 @@ GHSTUB
         "sweep gating (t): the warning names the short sha and the sanitized login"
     one_case t2 "" "[$(jq -c '.commit.verification.verified=false' <<<"$C_BOT")]"
     no_merge "(t2) an unverified Dependabot commit"
+    # A github-actions[bot] two-parent merge commit (what an older sweep's
+    # `gh pr update-branch` pushed) is not accepted: BLOCKED (red) with the
+    # recreate remedy, never merged, even with every check green and one from
+    # outside this workflow.
     one_case t3 "" "[$C_BOT,$C_MERGE]"
-    assert_contains "$oc_out" "merged=1 updated=0 skipped=0 blocked=0 failed=0" \
-        "sweep gating (t3): verified Dependabot commits plus the sweep's own two-parent merge commit merge"
+    no_merge "(t3) a github-actions[bot] two-parent merge commit"
+    assert_contains "$oc_out" "commit 2222222 (author 'github-actions[bot]')" \
+        "sweep gating (t3): the error names the merge commit and its author"
+    assert_contains "$oc_out" "@dependabot recreate" \
+        "sweep gating (t3): the error names the recreate remedy"
+    assert_contains "$oc_out" "blocked=1" \
+        "sweep gating (t3): summary counts it as blocked"
+    if [[ "$oc_rc" -ne 0 ]]; then pass "sweep gating (t3): the run exits non-zero"; else fail "sweep gating (t3): the run exits non-zero — got 0"; fi
     one_case t4 "" "[$C_BOT,$(jq -c '.parents=[{}]' <<<"$C_MERGE")]"
     no_merge "(t4) a one-parent github-actions[bot] commit"
     one_case t5 "" "[]"
@@ -19933,17 +20349,77 @@ GHSTUB
     one_case u7 "[{\"filename\":\".github/workflows/ci.yml\",\"status\":\"renamed\",\"previous_filename\":\".github/workflows/old.yml\",\"patch\":\"$PATCH_OK\"}]" ""
     no_merge "(u7) a renamed workflow file"
 
-    # (v) a PR behind its base is refreshed, never merged; an unmeasurable gap skips.
+    # (v) a PR behind its base with Dependabot-only commits WAITS: no merge, no
+    #     write call of any kind (no comment, no update-branch), exit 0, a
+    #     notice naming the PR and the fleet worker. An unmeasurable gap skips.
     one_case v "" "" 2
     no_merge "(v) a PR 2 commits behind"
-    assert_contains "$oc_fx/calls.log" "update-branch" "sweep gating (v): it goes straight to pr update-branch"
-    assert_contains "$oc_out" "updated=1" "sweep gating (v): summary counts it as updated"
+    if grep -qE '^pr (merge|comment|edit|review|close)|update-branch|(^| )(-X|--method) ' "$oc_fx/calls.log" 2>/dev/null; then
+        fail "sweep gating (v): no gh write call — got: $(cat "$oc_fx/calls.log")"
+    else
+        pass "sweep gating (v): no gh write call"
+    fi
+    if [[ "$oc_rc" -eq 0 ]]; then pass "sweep gating (v): a waiting PR exits 0"; else fail "sweep gating (v): a waiting PR exits 0 — got $oc_rc: $(cat "$oc_out")"; fi
+    assert_contains "$oc_out" "waiting=1" "sweep gating (v): summary counts it as waiting"
+    assert_contains "$oc_out" "::notice::#900" "sweep gating (v): a notice names the PR"
+    assert_contains "$oc_out" "the fleet worker asks Dependabot to rebase it" "sweep gating (v): the notice says the fleet worker asks"
+    # A request for ANOTHER head, a bot's comment or a comment without the
+    # exact first line does not start the 24 h clock: still waiting at 100 h.
+    local C_USER_X="\"user\":{\"login\":\"some-owner\",\"type\":\"User\"},\"author_association\":\"OWNER\""
+    local C_STRANGER="\"user\":{\"login\":\"some-stranger\",\"type\":\"User\"},\"author_association\":\"NONE\""
+    local C_OLD="$(iso_ago 100)"
+    local v5 v5n=0
+    for v5 in \
+        "[{$C_USER_X,\"created_at\":\"$C_OLD\",\"body\":\"@dependabot rebase\\n\\n<!-- fleet-worker: behind at $HEAD_Y -->\"}]" \
+        "[{\"user\":{\"login\":\"github-actions[bot]\",\"type\":\"Bot\"},\"created_at\":\"$C_OLD\",\"body\":\"@dependabot rebase\\n\\n<!-- fleet-worker: behind at $HEAD_X -->\"}]" \
+        "[{$C_USER_X,\"created_at\":\"$C_OLD\",\"body\":\"please @dependabot rebase\\n<!-- fleet-worker: behind at $HEAD_X -->\"}]" \
+        "[{$C_USER_X,\"created_at\":\"$C_OLD\",\"body\":\"@dependabot rebased\\n\\n<!-- fleet-worker: behind at $HEAD_X -->\"}]" \
+        "[{$C_STRANGER,\"created_at\":\"$C_OLD\",\"body\":\"@dependabot rebase\\n\\n<!-- fleet-worker: behind at $HEAD_X -->\"}]"; do
+        v5n=$((v5n + 1))
+        oc_fx="$TEST_DIR/auto-merge-gating-case-v5$v5n"; mkdir -p "$oc_fx"; printf '900\n' > "$oc_fx/pr-numbers.txt"; printf '2\n' > "$oc_fx/behind-by"
+        printf '%s\n' "$v5" > "$oc_fx/comments-900.json"
+        write_pr "$oc_fx/pr-900.json" 900 "$HEAD_X" "MERGEABLE" "CLEAN" "$cs_two"
+        oc_rc=$(SWEEP_TEST=1 SWEEP_NOW_EPOCH=$NOW_EPOCH run_case "$oc_fx" "" "$SELF" "$TEST_DIR/auto-merge-gating-out-v5$v5n.txt")
+        assert_contains "$TEST_DIR/auto-merge-gating-out-v5$v5n.txt" "waiting=1" "sweep gating (v5.$v5n): a request for another head, by a bot, by a NONE-association author, or not exactly the command on the first line does not count"
+    done
+    # The comment list cannot be read: fail closed as FAILED (run goes red),
+    # never merged, and not counted as waiting.
+    oc_fx="$TEST_DIR/auto-merge-gating-case-v6"; mkdir -p "$oc_fx"; printf '900\n' > "$oc_fx/pr-numbers.txt"; printf '2\n' > "$oc_fx/behind-by"
+    write_pr "$oc_fx/pr-900.json" 900 "$HEAD_X" "MERGEABLE" "CLEAN" "$cs_two"
+    local rc_v6
+    rc_v6=$(COMMENTS_FAIL=1 run_case "$oc_fx" "" "$SELF" "$TEST_DIR/auto-merge-gating-out-v6.txt")
+    no_merge "(v6) a failed comments API call"
+    if [[ "$rc_v6" -ne 0 ]]; then pass "sweep gating (v6): an unreadable comment list exits non-zero"; else fail "sweep gating (v6): an unreadable comment list exits non-zero — got 0"; fi
+    assert_contains "$TEST_DIR/auto-merge-gating-out-v6.txt" "failed=1" "sweep gating (v6): counted as failed"
+    assert_contains "$TEST_DIR/auto-merge-gating-out-v6.txt" "waiting=0" "sweep gating (v6): not counted as waiting"
+    assert_not_contains "$oc_fx/calls.log" "pr comment" "sweep gating (v6): nothing is posted"
     oc_fx="$TEST_DIR/auto-merge-gating-case-v2"; mkdir -p "$oc_fx"; printf '900\n' > "$oc_fx/pr-numbers.txt"; : > "$oc_fx/compare-fails"
     write_pr "$oc_fx/pr-900.json" 900 "$HEAD_X" "MERGEABLE" "CLEAN" "$cs_two"
     run_case "$oc_fx" "" "$SELF" "$TEST_DIR/auto-merge-gating-out-v2.txt" >/dev/null
     no_merge "(v2) a failed compare call (not assumed 0)"
     one_case v3 "" "" "oops"
     no_merge "(v3) a non-numeric behind_by"
+
+    # Provenance runs BEFORE the checks gate: a stranded PR with the old
+    # github-actions[bot] merge commit and an EMPTY rollup (GITHUB_TOKEN pushes
+    # start no CI) is BLOCKED, not skipped as "checks not green" forever.
+    one_case t8 "" "[$C_BOT,$C_MERGE]" "" "[]"
+    no_merge "(t8) a merge-commit PR with an empty check rollup"
+    assert_contains "$oc_out" "@dependabot recreate" "sweep gating (t8): the empty-rollup PR still gets the recreate remedy"
+    assert_contains "$oc_out" "blocked=1" "sweep gating (t8): counted as blocked"
+    if [[ "$oc_rc" -ne 0 ]]; then pass "sweep gating (t8): the run exits non-zero"; else fail "sweep gating (t8): the run exits non-zero — got 0"; fi
+
+    # A behind PR that changes a workflow file (a Dependabot actions bump),
+    # even when GitHub reads it BLOCKED to GITHUB_TOKEN, takes the same
+    # WAITING path and 24 h grace as any other: not red on the first night,
+    # and no "needs a human" text where the fleet worker does it.
+    oc_fx="$TEST_DIR/auto-merge-gating-case-wf"; mkdir -p "$oc_fx"; printf '900\n' > "$oc_fx/pr-numbers.txt"; printf '2\n' > "$oc_fx/behind-by"
+    write_pr "$oc_fx/pr-900.json" 900 "$HEAD_X" "MERGEABLE" "BLOCKED" "$cs_two"
+    oc_rc=$(run_case "$oc_fx" "" "$SELF" "$TEST_DIR/auto-merge-gating-out-wf.txt")
+    no_merge "(wf) a behind workflow-file PR"
+    if [[ "$oc_rc" -eq 0 ]]; then pass "sweep gating (wf): a behind workflow-file PR waits and exits 0"; else fail "sweep gating (wf): a behind workflow-file PR waits and exits 0 — got $oc_rc: $(cat "$TEST_DIR/auto-merge-gating-out-wf.txt")"; fi
+    assert_contains "$TEST_DIR/auto-merge-gating-out-wf.txt" "waiting=1" "sweep gating (wf): counted as waiting"
+    assert_not_contains "$TEST_DIR/auto-merge-gating-out-wf.txt" "Needs a human" "sweep gating (wf): no needs-a-human text"
 
     # (w) a SKIPPED-only outside check does not satisfy the outside-CI floor.
     one_case w "" "" "" '[{"workflowName":"CI","name":"test","conclusion":"SKIPPED"}]'
@@ -20894,9 +21370,24 @@ test_register_codex_hook() {
     local script="$REPO_ROOT/scripts/register-codex-hook.sh"
     local d="$TEST_DIR/codexhook"
     rm -rf "$d"
-    mkdir -p "$d/home"
+    mkdir -p "$d/home" "$d/nolauncher"
     local target="$d/home/hooks.json"
     local out rc shape
+
+    # 0. The registered command runs the per-user launcher that acsi-agentskills'
+    #    setup.sh --owner-machine installs (ADR 0043). With none installed there
+    #    is nothing for the hook to run, so refuse (exit 6) and write nothing.
+    local -x XDG_DATA_HOME="$d/xdg-data"
+    rc=0
+    out=$(CODEX_HOME="$d/nolauncher" "$script" 2>&1) || rc=$?
+    if [[ $rc -eq 6 && "$out" == *refused-no-launcher* && "$out" == *'setup.sh --owner-machine'* \
+            && ! -e "$d/nolauncher/hooks.json" ]]; then
+        pass "register-codex-hook: an absent launcher is refused with exit 6, naming setup.sh --owner-machine, and nothing is written"
+    else
+        fail "register-codex-hook: absent launcher exit $rc, file=$(ls "$d/nolauncher"): $out"
+    fi
+    mkdir -p "$XDG_DATA_HOME/fleet-guidance"
+    printf '#!/usr/bin/env bash\necho launcher-ran\n' > "$XDG_DATA_HOME/fleet-guidance/codex-session-start.sh"
 
     # 1. Absent file → created.
     rc=0
@@ -20911,7 +21402,7 @@ test_register_codex_hook() {
     assert_contains "$d/out1" "/hooks" "register-codex-hook: names the trust step the operator still owes"
 
     rc=0
-    shape=$(python3 - "$target" 2>&1 <<'PY'
+    shape=$(python3 - "$target" "$XDG_DATA_HOME" 2>&1 <<'PY'
 import json, sys
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -20926,8 +21417,10 @@ e = entries[0]
 assert e["type"] == "command", "type is %r" % e.get("type")
 assert e["timeout"] == 30, "timeout is %r" % e.get("timeout")
 assert e["statusMessage"] == "fleet-guidance", "statusMessage is %r" % e.get("statusMessage")
-assert "fleet-memory.sh" in e["command"], "command does not name the hook"
-assert "git rev-parse --show-toplevel" in e["command"], "command does not resolve from the git root"
+assert "fleet-guidance/codex-session-start.sh" in e["command"], "command does not name the launcher"
+assert e["command"].endswith(" _ " + sys.argv[2] + "/fleet-guidance/codex-session-start.sh"), "command does not bake in the absolute launcher path: %r" % e["command"]
+assert "XDG_DATA_HOME" not in e["command"], "command still reads XDG_DATA_HOME when Codex runs"
+assert "fleet-memory.sh" not in e["command"], "command still runs a repo's fleet-memory.sh"
 print("OK")
 PY
 ) || rc=$?
@@ -21005,7 +21498,7 @@ a = after["hooks"]["SessionStart"]
 assert len(a) == len(b) + 1, "expected one added group, got %d -> %d" % (len(b), len(a))
 # Order AND content: the operator's group is still first and is deep-equal.
 assert a[0] == b[0], "the pre-existing group changed: %r -> %r" % (b[0], a[0])
-assert a[-1]["hooks"][0]["command"].find("fleet-memory.sh") >= 0, "ours was not appended last"
+assert a[-1]["hooks"][0]["command"].find("codex-session-start.sh") >= 0, "ours was not appended last"
 # Nothing else in the document moved.
 assert after["description"] == before["description"], "an unrelated top-level key changed"
 assert after["hooks"]["SessionEnd"] == before["hooks"]["SessionEnd"], "an unrelated event changed"
@@ -21068,12 +21561,13 @@ test_register_codex_hook_workspace_upgrade() {
     echo "TEST: register-codex-hook.sh (workspace command and legacy upgrade)"
     local script="$REPO_ROOT/scripts/register-codex-hook.sh"
     local d="$TEST_DIR/codexhook-workspace"
-    local target="$d/empty/hooks.json" out rc command
-    mkdir -p "$d/empty" "$d/legacy" "$d/manual"
+    local target="$d/empty/hooks.json" out rc command rc2 out2
+    rm -rf "$d"
+    mkdir -p "$d/empty" "$d/legacy" "$d/legacy2" "$d/manual" "$d/xdg-data/fleet-guidance"
     : > "$target"
-    cat > "$d/expected-command" <<'EOF'
-bash -c 'r="$(git rev-parse --show-toplevel 2>/dev/null)"; h="$r/.claude/hooks/fleet-memory.sh"; [ -n "$r" ] && [ -f "$h" ] && exec bash "$h"; for h in ./*/.claude/hooks/fleet-memory.sh; do grep -q -e --workspace "$h" 2>/dev/null && exec bash "$h" --workspace "$PWD"; done; exit 0'
-EOF
+    local -x XDG_DATA_HOME="$d/xdg-data"
+    : > "$XDG_DATA_HOME/fleet-guidance/codex-session-start.sh"
+    printf '%s\n' "bash -c '[ -f \"\$1\" ] && exec bash \"\$1\"; exit 0' _ $XDG_DATA_HOME/fleet-guidance/codex-session-start.sh" > "$d/expected-command"
     rc=0
     out=$(CODEX_HOME="$d/empty" "$script" 2>&1) || rc=$?
     if [[ $rc -eq 0 ]]; then
@@ -21089,7 +21583,7 @@ print(doc["hooks"]["SessionStart"][0]["hooks"][0]["command"])
 PY
 ) || rc=$?
     if [[ $rc -eq 0 && "$command" == "$(cat "$d/expected-command")" ]]; then
-        pass 'register workspace: empty hooks.json gets the exact workspace-capable command'
+        pass 'register workspace: empty hooks.json gets the exact launcher command'
     else
         fail 'register workspace: empty hooks.json command differs from the delivery contract'
     fi
@@ -21158,6 +21652,115 @@ PY
         fail "register workspace: rerun after upgrade changed hooks.json: $out"
     fi
 
+    # The previous default (the workspace-capable repo command) is upgraded in
+    # place too, and nothing but its command field changes.
+    python3 - "$d/legacy2/hooks.json" <<'PY'
+import json, sys
+previous = """bash -c 'r="$(git rev-parse --show-toplevel 2>/dev/null)"; h="$r/.claude/hooks/fleet-memory.sh"; [ -n "$r" ] && [ -f "$h" ] && exec bash "$h"; for h in ./*/.claude/hooks/fleet-memory.sh; do grep -q -e --workspace "$h" 2>/dev/null && exec bash "$h" --workspace "$PWD"; done; exit 0'"""
+doc = {"hooks": {"SessionStart": [
+    {"matcher": "mine", "hooks": [{"type": "command", "command": "true"}]},
+    {"matcher": "startup|resume", "hooks": [
+        {"type": "command", "command": previous, "timeout": 30, "statusMessage": "fleet-guidance"}]},
+]}, "other": 1}
+json.dump(doc, open(sys.argv[1], "w", encoding="utf-8"), indent=2)
+PY
+    cp "$d/legacy2/hooks.json" "$d/legacy2-before.json"
+    rc=0
+    out=$(CODEX_HOME="$d/legacy2" "$script" 2>&1) || rc=$?
+    rc2=0
+    out2=$(python3 - "$d/legacy2-before.json" "$d/legacy2/hooks.json" "$d/expected-command" 2>&1 <<'PY'
+import json, sys
+before = json.load(open(sys.argv[1], encoding="utf-8"))
+after = json.load(open(sys.argv[2], encoding="utf-8"))
+before["hooks"]["SessionStart"][1]["hooks"][0]["command"] = open(sys.argv[3], encoding="utf-8").read().rstrip("\n")
+assert before == after, "upgrade changed more than the command field"
+print("OK")
+PY
+) || rc2=$?
+    if [[ $rc -eq 0 && "$out" == *'register-codex-hook: updated'* && $rc2 -eq 0 && "$out2" == OK ]]; then
+        pass 'register workspace: the previous workspace command is upgraded to the launcher command in place'
+    else
+        fail "register workspace: previous-command upgrade exit $rc: $out / $out2"
+    fi
+
+    # The deleted repo launcher, named by a manual CODEX_HOOK_COMMAND recipe,
+    # is an old command too: it is upgraded in place, never "already registered".
+    mkdir -p "$d/deleted-launcher"
+    python3 - "$d/deleted-launcher/hooks.json" <<'PY'
+import json, sys
+doc = {"hooks": {"SessionStart": [{"matcher": "startup|resume", "hooks": [
+    {"type": "command", "command": "bash /home/me/proj/.claude/hooks/codex-session-start.sh",
+     "timeout": 30, "statusMessage": "fleet-guidance"}]}]}}
+json.dump(doc, open(sys.argv[1], "w", encoding="utf-8"), indent=2)
+PY
+    rc=0
+    out=$(CODEX_HOME="$d/deleted-launcher" "$script" 2>&1) || rc=$?
+    command=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$d/deleted-launcher/hooks.json")
+    if [[ $rc -eq 0 && "$out" == *'register-codex-hook: updated'* && "$command" == "$(cat "$d/expected-command")" ]]; then
+        pass 'register workspace: a command naming the deleted repo launcher is upgraded in place'
+    else
+        fail "register workspace: deleted-launcher command exit $rc: $out / $command"
+    fi
+
+    # An old Windows entry (the previous command with its commandWindows
+    # pointing at the deleted file): a Windows run swaps in the new
+    # commandWindows, a non-Windows run drops the stale one.
+    local old_win='"C:\Program Files\Git\bin\bash.exe" "D:/repos/_agent-guidance/.claude/hooks/codex-session-start.sh"'
+    local variant
+    for variant in windows plain; do
+        mkdir -p "$d/oldwin-$variant"
+        python3 - "$d/legacy2/hooks.json" "$d/oldwin-$variant/hooks.json" "$old_win" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+doc["hooks"]["SessionStart"][1]["hooks"][0] = {
+    "type": "command",
+    "command": "bash -c 'r=\"$(git rev-parse --show-toplevel 2>/dev/null)\"; h=\"$r/.claude/hooks/fleet-memory.sh\"; [ -n \"$r\" ] && [ -f \"$h\" ] && exec bash \"$h\"; for h in ./*/.claude/hooks/fleet-memory.sh; do grep -q -e --workspace \"$h\" 2>/dev/null && exec bash \"$h\" --workspace \"$PWD\"; done; exit 0'",
+    "timeout": 30, "statusMessage": "fleet-guidance", "commandWindows": sys.argv[3]}
+json.dump(doc, open(sys.argv[2], "w", encoding="utf-8"), indent=2)
+PY
+    done
+    rc=0
+    out=$(CODEX_HOME="$d/oldwin-windows" "$script" --windows --launcher 'D:/Users/me/fleet-guidance/codex-session-start.sh' 2>&1) || rc=$?
+    rc2=0
+    out2=$(python3 - "$d/oldwin-windows/hooks.json" "$d/expected-command" 2>&1 <<'PY'
+import json, sys
+e = json.load(open(sys.argv[1], encoding="utf-8"))["hooks"]["SessionStart"][1]["hooks"][0]
+assert e["command"] == open(sys.argv[2]).read().rstrip("\n"), e["command"]
+assert e["commandWindows"] == '"C:\\Program Files\\Git\\bin\\bash.exe" "D:/Users/me/fleet-guidance/codex-session-start.sh"', e["commandWindows"]
+print("OK")
+PY
+) || rc2=$?
+    if [[ $rc -eq 0 && "$out" == *'register-codex-hook: updated'* && $rc2 -eq 0 && "$out2" == OK ]]; then
+        pass 'register workspace: an old Windows entry gets the new command and commandWindows'
+    else
+        fail "register workspace: old Windows entry exit $rc: $out / $out2"
+    fi
+    rc=0
+    out=$(CODEX_HOME="$d/oldwin-plain" "$script" 2>&1) || rc=$?
+    rc2=0
+    out2=$(python3 - "$d/oldwin-plain/hooks.json" 2>&1 <<'PY'
+import json, sys
+e = json.load(open(sys.argv[1], encoding="utf-8"))["hooks"]["SessionStart"][1]["hooks"][0]
+assert "commandWindows" not in e, e
+print("OK")
+PY
+) || rc2=$?
+    if [[ $rc -eq 0 && $rc2 -eq 0 && "$out2" == OK ]]; then
+        pass 'register workspace: a non-Windows upgrade drops a stale commandWindows naming the deleted file'
+    else
+        fail "register workspace: stale commandWindows kept, exit $rc: $out / $out2"
+    fi
+
+    # A CODEX_HOOK_COMMAND override is not refused for a missing default launcher.
+    mkdir -p "$d/override"
+    rc=0
+    out=$(XDG_DATA_HOME="$d/none" CODEX_HOOK_COMMAND='bash /my/own/codex-session-start.sh' CODEX_HOME="$d/override" "$script" 2>&1) || rc=$?
+    if [[ $rc -eq 0 && "$out" == *'registered'* ]]; then
+        pass 'register workspace: a CODEX_HOOK_COMMAND override registers without the default launcher'
+    else
+        fail "register workspace: override refused, exit $rc: $out"
+    fi
+
     # A current registration wins over a leftover legacy entry regardless of
     # position. In particular, a legacy entry encountered first must not be
     # rewritten when the current definition is already present elsewhere.
@@ -21198,7 +21801,7 @@ PY
     python3 - "$d/manual/hooks.json" <<'PY'
 import json, sys
 doc = {"hooks": {"SessionStart": [{"matcher": "mine", "hooks": [
-    {"type": "command", "command": "bash my/fleet-memory.sh", "timeout": 4}
+    {"type": "command", "command": "bash my/codex-session-start.sh", "timeout": 4}
 ]}]}}
 with open(sys.argv[1], "w", encoding="utf-8") as fh:
     json.dump(doc, fh, separators=(",", ":"))
@@ -21225,11 +21828,14 @@ test_register_codex_hook_windows() {
     local d="$TEST_DIR/codexhook-windows"
     local out rc
     rm -rf "$d"
-    mkdir -p "$d/fresh" "$d/upgrade" "$d/plain" "$d/override" "$d/nobash" "$d/stub"
+    mkdir -p "$d/fresh" "$d/upgrade" "$d/plain" "$d/override" "$d/nobash" "$d/stub" \
+        "$d/default" "$d/nolauncher" "$d/xdg-data/fleet-guidance"
+    local -x XDG_DATA_HOME="$d/xdg-data"
+    : > "$XDG_DATA_HOME/fleet-guidance/codex-session-start.sh"
     local expected_bash='C:\Program Files\Git\bin\bash.exe'
     # The launcher is passed explicitly in Windows mixed form, as `cygpath -m`
     # would produce, so the expected string is the same on every machine.
-    local launcher='D:/repos/_agent-guidance/.claude/hooks/codex-session-start.sh'
+    local launcher='D:/Users/me/.local/share/fleet-guidance/codex-session-start.sh'
     local helper="$d/check.py"
     cat > "$helper" <<'PY'
 import json, sys
@@ -21403,6 +22009,26 @@ PY
         fail "register windows: a foreign commandWindows was changed: $out"
     fi
 
+    # 7b. With no --launcher the default is the per-user launcher under
+    #     XDG_DATA_HOME (no cygpath here, so it is written as found); with none
+    #     installed the registration is refused with exit 6, before Windows
+    #     handling, and nothing is written.
+    rc=0
+    out=$(CODEX_HOME="$d/default" "$script" --windows 2>&1) || rc=$?
+    result=$(python3 "$helper" "$d/default/hooks.json" "$expected_bash" "$XDG_DATA_HOME/fleet-guidance/codex-session-start.sh" 2>&1) || true
+    if [[ $rc -eq 0 && "$result" == OK ]]; then
+        pass "register windows: the default launcher is the per-user one under XDG_DATA_HOME"
+    else
+        fail "register windows: default launcher exit $rc — $result $out"
+    fi
+    rc=0
+    out=$(XDG_DATA_HOME="$d/none" CODEX_HOME="$d/nolauncher" "$script" --windows 2>&1) || rc=$?
+    if [[ $rc -eq 6 && "$out" == *'refused-no-launcher'* && ! -e "$d/nolauncher/hooks.json" ]]; then
+        pass "register windows: an uninstalled default launcher is refused with exit 6"
+    else
+        fail "register windows: uninstalled launcher exit $rc, file=$(ls "$d/nolauncher"): $out"
+    fi
+
     # 8. A launcher path carrying a cmd metacharacter is refused, nothing written.
     mkdir -p "$d/meta"
     rc=0
@@ -21414,59 +22040,39 @@ PY
     fi
 }
 
-# The Windows launcher is the registered `bash -c` snippet as a file, so it must
-# behave identically to it. Both are run in the same fixtures: a repo with a
-# synced hook at its git root (started from a subdirectory), a multi-repo
-# parent whose child hook supports --workspace, and a directory with neither.
-# The stub hooks print their arguments, so a wrong branch is visible.
-test_codex_session_start_launcher() {
+# The registered command must find the launcher where setup.sh --owner-machine
+# installs it: under an absolute XDG_DATA_HOME, else $HOME/.local/share (a
+# relative XDG_DATA_HOME is ignored, as setup.sh ignores it), pass its stdout
+# through untouched, and exit 0 silently when the launcher is gone.
+test_register_codex_hook_command_runs_the_launcher() {
     echo ""
-    echo "TEST: codex-session-start.sh launcher (same behavior as the registered snippet)"
-    local launcher="$REPO_ROOT/.claude/hooks/codex-session-start.sh"
+    echo "TEST: registered Codex command runs the per-user launcher"
     local script="$REPO_ROOT/scripts/register-codex-hook.sh"
-    local d="$TEST_DIR/codex-launcher"
-    local out_old out_new rc_old rc_new snippet
+    local d="$TEST_DIR/codexhook-command" cmd out rc
     rm -rf "$d"
-    mkdir -p "$d/home" "$d/repo/.claude/hooks" "$d/repo/sub/dir" \
-        "$d/parent/child/.claude/hooks" "$d/parent/plain" "$d/empty"
-    git -C "$d/repo" init -q
-    printf '#!/usr/bin/env bash\necho "root-hook args=[$*]"\n' > "$d/repo/.claude/hooks/fleet-memory.sh"
-    printf '#!/usr/bin/env bash\n# supports --workspace\necho "child-hook args=[$*]"\n' > "$d/parent/child/.claude/hooks/fleet-memory.sh"
-
-    CODEX_HOME="$d/home" "$script" >/dev/null 2>&1 || true
-    snippet=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$d/home/hooks.json")
-
-    if [[ -x "$launcher" ]]; then
-        pass "launcher: codex-session-start.sh is executable"
-    else
-        fail "launcher: codex-session-start.sh is not executable"
-    fi
-
-    local where label
-    for where in repo/sub/dir parent empty; do
-        rc_old=0
-        out_old=$(cd "$d/$where" && GIT_CEILING_DIRECTORIES="$d" bash -c "$snippet" 2>&1) || rc_old=$?
-        rc_new=0
-        out_new=$(cd "$d/$where" && GIT_CEILING_DIRECTORIES="$d" bash "$launcher" 2>&1) || rc_new=$?
-        label="$where"
-        if [[ "$out_old" == "$out_new" && $rc_old -eq $rc_new && $rc_new -eq 0 ]]; then
-            pass "launcher: matches the registered snippet from $label (output [$out_new])"
-        else
-            fail "launcher: differs from the registered snippet from $label — old [$out_old] rc=$rc_old, new [$out_new] rc=$rc_new"
-        fi
-    done
-    out_new=$(cd "$d/repo/sub/dir" && bash "$launcher" 2>&1)
-    [[ "$out_new" == "root-hook args=[]" ]] \
-        && pass "launcher: a git root's own hook runs with no arguments" \
-        || fail "launcher: git root hook branch wrong: $out_new"
-    out_new=$(cd "$d/parent" && GIT_CEILING_DIRECTORIES="$d" bash "$launcher" 2>&1)
-    [[ "$out_new" == "child-hook args=[--workspace $d/parent]" ]] \
-        && pass "launcher: a parent dir runs the workspace-capable child hook with --workspace" \
-        || fail "launcher: workspace branch wrong: $out_new"
-    out_new=$(cd "$d/empty" && GIT_CEILING_DIRECTORIES="$d" bash "$launcher" 2>&1)
-    [[ -z "$out_new" ]] \
-        && pass "launcher: with no hook anywhere it exits silently" \
-        || fail "launcher: expected silence, got: $out_new"
+    mkdir -p "$d/codex" "$d/xdg dir/fleet-guidance" "$d/home/.local/share/fleet-guidance" "$d/cwd" "$d/codex2"
+    printf '#!/usr/bin/env bash\necho "xdg-launcher args=[$*]"\n' > "$d/xdg dir/fleet-guidance/codex-session-start.sh"
+    printf '#!/usr/bin/env bash\necho "home-launcher"\n' > "$d/home/.local/share/fleet-guidance/codex-session-start.sh"
+    # The absolute path (here with a space in it) is fixed when registering, so
+    # the command works from an environment with no XDG_DATA_HOME and another HOME.
+    HOME="$d/home" XDG_DATA_HOME="$d/xdg dir" CODEX_HOME="$d/codex" "$script" >/dev/null 2>&1 || true
+    cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$d/codex/hooks.json")
+    out=$(cd "$d/cwd" && env -i PATH="$PATH" HOME="$d/none" sh -c "$cmd" 2>&1)
+    [[ "$out" == "xdg-launcher args=[]" ]] \
+        && pass "registered command: the baked-in launcher path runs from any environment, spaces included" \
+        || fail "registered command: baked path branch wrong: $out"
+    HOME="$d/home" XDG_DATA_HOME="relative/data" CODEX_HOME="$d/codex2" "$script" >/dev/null 2>&1 || true
+    cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$d/codex2/hooks.json")
+    out=$(cd "$d/cwd" && env -i PATH="$PATH" HOME="$d/none" sh -c "$cmd" 2>&1)
+    [[ "$out" == "home-launcher" ]] \
+        && pass "registered command: a relative XDG_DATA_HOME is ignored at registration for \$HOME/.local/share" \
+        || fail "registered command: relative XDG branch wrong: $out"
+    rm -f "$d/home/.local/share/fleet-guidance/codex-session-start.sh"
+    rc=0
+    out=$(cd "$d/cwd" && env -i PATH="$PATH" HOME="$d/none" sh -c "$cmd" 2>&1) || rc=$?
+    [[ $rc -eq 0 && -z "$out" ]] \
+        && pass "registered command: with the launcher gone it exits 0 silently" \
+        || fail "registered command: expected silence, rc=$rc: $out"
 }
 
 # base.md opens with a repo-file header ("# AGENTS.md" plus "Edit only below
@@ -21527,30 +22133,22 @@ test_fleet_memory_repo_header() {
     assert_not_contains "$d/codex/AGENTS.md" "Edit only below" "repo header: Codex Cloud drops the repo-only notice"
 }
 
-# Run the actual command the registration script wrote, so a stale hook
-# definition cannot hide behind tests that invoke fleet-memory.sh directly.
+# Run the workspace command that drove fleet-memory.sh --workspace before the
+# registration moved to the launcher (ADR 0043), so the mode keeps its tests.
 # Fixture repos are fresh git init repositories with no remote and fixed commit
 # dates; their payload stamps do not depend on the machine's clock.
 test_fleet_memory_workspace() {
     echo ""
-    echo "TEST: registered Codex hook (multi-repo workspace)"
+    echo "TEST: fleet-memory.sh --workspace command (multi-repo parent)"
     local d="$TEST_DIR/fleet-workspace"
     local parent="$d/parent" empty="$d/empty" registered_command out rc
     local repo hook="$REPO_ROOT/.claude/hooks/fleet-memory.sh"
     mkdir -p "$parent/alpha/.claude/hooks" "$parent/beta/.claude/hooks" \
         "$empty" "$d/register-home"
-    rc=0
-    out=$(CODEX_HOME="$d/register-home" "$REPO_ROOT/scripts/register-codex-hook.sh" 2>&1) || rc=$?
-    if [[ $rc -ne 0 ]]; then
-        fail "fleet workspace: registration for command behavior exit $rc: $out"
-        return
-    fi
-    registered_command=$(python3 - "$d/register-home/hooks.json" <<'PY'
-import json, sys
-doc = json.load(open(sys.argv[1], encoding="utf-8"))
-print(doc["hooks"]["SessionStart"][0]["hooks"][0]["command"])
-PY
-)
+    # ADR 0043: the registered Codex command no longer runs a repo's hook, but
+    # fleet-memory.sh keeps its --workspace mode, so the command that used to
+    # drive it is spelled out here.
+    registered_command='r="$(git rev-parse --show-toplevel 2>/dev/null)"; h="$r/.claude/hooks/fleet-memory.sh"; [ -n "$r" ] && [ -f "$h" ] && exec bash "$h"; for h in ./*/.claude/hooks/fleet-memory.sh; do grep -q -e --workspace "$h" 2>/dev/null && exec bash "$h" --workspace "$PWD"; done; exit 0'
     for repo in alpha beta; do
         git init -q "$parent/$repo"
         git -C "$parent/$repo" config --local user.name 'Fleet fixture'
@@ -22494,11 +23092,29 @@ INC
     run_githooks CLAUDE_CODE_REMOTE=true >/dev/null
     if cmp -s "$inc" "$expected"; then pass "git hooks: includeIf present, .inc missing: the file is written"
     else fail "git hooks: partial install left the include file missing"; fi
+    # The read has the write's scope (#542), so an entry in the GLOBAL config
+    # does not count for the system one: all nine system entries are written
+    # and the global entry stays as it was.
     n="$(git config --file "$sys" --get-regexp '^includeif\..*\.path$' | grep -c 'agent-hooks.inc$' || true)"
-    [[ "$n" -eq 8 ]] && pass "git hooks: the missing entries are added (8 beside the 1 present)" \
-        || fail "git hooks: expected 8 added system entries, got $n"
+    [[ "$n" -eq 9 ]] && pass "git hooks: the entries missing from the write scope are added (9 system entries)" \
+        || fail "git hooks: expected 9 system entries, got $n"
     n="$(git config --file "$glob" --get-all 'includeIf.hasconfig:remote.*.url:https://github.com/example-adopter-two/**.path' | wc -l)"
-    [[ "$n" -eq 1 ]] && pass "git hooks: the present entry is not duplicated" || fail "git hooks: entry duplicated ($n)"
+    [[ "$n" -eq 1 ]] && pass "git hooks: the present global entry is not duplicated" || fail "git hooks: entry duplicated ($n)"
+
+    # 5c. A repo-local includeIf (the session's cwd is a project) must not
+    #     suppress the system entry: the read uses the scope the write does.
+    reset_githooks
+    local proj="$d/proj" owner prefix
+    rm -rf "$proj"; mkdir -p "$proj"; git init -q "$proj"
+    for owner in example-adopter example-adopter example-adopter-two; do
+        for prefix in https://github.com/ git@github.com: ssh://git@github.com/; do
+            git -C "$proj" config --local --add "includeIf.hasconfig:remote.*.url:${prefix}${owner}/**.path" '~/.config/git/agent-hooks.inc'
+        done
+    done
+    ( cd "$proj" && run_githooks CLAUDE_CODE_REMOTE=true >/dev/null )
+    n="$(git config --file "$sys" --get-regexp '^includeif\..*\.path$' | grep -c 'agent-hooks.inc$' || true)"
+    [[ "$n" -eq 9 ]] && pass "git hooks: repo-local includeIf entries do not suppress the system entries" \
+        || fail "git hooks: repo-local includeIf suppressed the install (got $n system entries)"
 
     # 6. Opt-out.
     reset_githooks
@@ -22727,15 +23343,18 @@ test_fleet_memory_owner_gate() {
     gate_run "$bundle/fleet-memory.sh" --
     gate_expect_noop "plugin style with neither signal"
 
-    # i. The Codex user-level registration command and the Windows launcher,
-    #    run from inside a git repo that carries the synced hook and payload.
+    # i. The Codex user-level registration command, which runs the per-user
+    #    launcher (ADR 0043). The launcher stands in for acsi-agentskills' real
+    #    one: it runs the hook and payload of a git repo, as the plugin's hook
+    #    does with its own bundled copy, so the gate is what is under test.
     local regdir="$d/reg" cmd
-    mkdir -p "$regdir/codex"
-    CODEX_HOME="$regdir/codex" HOME="$regdir" XDG_CONFIG_HOME="$regdir/xdg" \
+    mkdir -p "$regdir/codex" "$regdir/.local/share/fleet-guidance"
+    : > "$regdir/.local/share/fleet-guidance/codex-session-start.sh"
+    CODEX_HOME="$regdir/codex" HOME="$regdir" XDG_CONFIG_HOME="$regdir/xdg" XDG_DATA_HOME="" \
         bash "$REPO_ROOT/scripts/register-codex-hook.sh" "$regdir/codex/hooks.json" > /dev/null 2>&1
     cmd="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' \
         "$regdir/codex/hooks.json")"
-    if [[ "$cmd" == "bash -c '"*"fleet-memory.sh"* ]]; then
+    if [[ "$cmd" == "bash -c '"*"fleet-guidance/codex-session-start.sh"* ]]; then
         pass "owner gate: the registered Codex command was read from hooks.json"
     else
         fail "owner gate: no usable registered command: '$cmd'"
@@ -22745,12 +23364,17 @@ test_fleet_memory_owner_gate() {
     git init -q "$repo" 2>/dev/null
     cp "$hook" "$repo/.claude/hooks/fleet-memory.sh"
     cp "$bundle/fleet-guidance.md" "$repo/.claude/hooks/fleet-guidance.md"
-    for via in command launcher; do
-        local -a runner
-        if [[ "$via" == command ]]; then runner=(bash -c "$cmd")
-        else runner=(bash "$REPO_ROOT/.claude/hooks/codex-session-start.sh"); fi
+    # The stand-in launcher is written before each run.
+    gate_launcher() {
+        # At the path baked into the registered command, outside the fresh $h.
+        printf '#!/usr/bin/env bash\ncd "%s" && exec bash .claude/hooks/fleet-memory.sh\n' "$repo" \
+            > "$regdir/.local/share/fleet-guidance/codex-session-start.sh"
+    }
+    for via in command; do
+        local -a runner=(bash -c "$cmd")
         # With the marker: the block reaches $CODEX_HOME/AGENTS.md.
         gate_new
+        gate_launcher
         mkdir -p "$h/.codex" "$h/.config/fleet-guidance"; : > "$h/.config/fleet-guidance/owner"
         rc=0
         ( cd "$repo" && env -i PATH="$PATH" HOME="$h" TMPDIR="$d/tmp" CLAUDE_CONFIG_DIR="$h/.claude" \
@@ -22763,6 +23387,7 @@ test_fleet_memory_owner_gate() {
         fi
         # Without it: silent, and nothing written.
         gate_new
+        gate_launcher
         mkdir -p "$h/.codex"
         snap
         rc=0
@@ -26692,6 +27317,7 @@ GROUP_sync=(
     test_sync_stale_cleanup
     test_sync_failure_exit_code
     test_sync_round_trip_no_marker
+    test_sync_contributor_guards
 )
 
 # The skills-bootstrap lane mutates the bootorg bares in a fixed order:
@@ -26728,12 +27354,36 @@ GROUP_bootstrap=(
 # reset — so they always saw pristine testorg bares, which is what a fresh
 # group gives them.
 GROUP_drift_testorg=(
+    test_drift_tree_baseline
     test_drift_report_skills_classification
     test_drift_report_registry_orphan
     test_drift_report_registry_orphan_multi_owner
     test_drift_report_registry_orphan_owner_failure
     test_drift_report_partial_read
+    test_drift_tree_clean
 )
+
+# The drift_testorg group must leave the working tree as it found it (#547): a test that
+# ran scripts/drift-report.sh without DRIFT_REPORT_OUTPUT wrote the report and
+# its sidecars into the repo root, and a worker PR committed one. These two
+# bracket the group. `--ignored` is part of the snapshot because a gitignored
+# leftover is as wrong as an untracked one; it just does not show in a plain
+# `git status --porcelain`.
+test_drift_tree_baseline() {
+    DRIFT_TREE_BASELINE="$(git -C "$REPO_ROOT" status --porcelain --ignored 2>/dev/null | LC_ALL=C sort)"
+}
+
+test_drift_tree_clean() {
+    echo ""
+    echo "TEST: the drift_testorg group leaves the working tree unchanged"
+    local after
+    after="$(git -C "$REPO_ROOT" status --porcelain --ignored 2>/dev/null | LC_ALL=C sort)"
+    if [[ "$after" == "$DRIFT_TREE_BASELINE" ]]; then
+        pass "drift_testorg group: git status --porcelain --ignored is unchanged"
+    else
+        fail "drift_testorg group: left files in the working tree: $(diff <(printf '%s\n' "$DRIFT_TREE_BASELINE") <(printf '%s\n' "$after") | grep '^>' | tr '\n' ' ')"
+    fi
+}
 
 # The sync lane direct-pushes to main; this lane observes the pre-sync
 # baseline, which a fresh group's bares already are (test_sync_multi_owner
@@ -26857,10 +27507,12 @@ GROUP_self_hosted=(
     test_yq_install_pinned
     test_check_agents_md
     test_check_guidance_coverage
+    test_contributor_rules
     test_check_guidance_touch
     test_yq_preflight
     test_shared_repos_yml_helpers_are_identical
     test_dependabot_sweep_list_failure
+    test_dependabot_sweep_repo_context
     test_dependabot_sweep_merge_gating
     test_dependabot_config_health
     test_impact_report
@@ -26888,7 +27540,7 @@ GROUP_codex=(
     test_register_codex_hook
     test_register_codex_hook_workspace_upgrade
     test_register_codex_hook_windows
-    test_codex_session_start_launcher
+    test_register_codex_hook_command_runs_the_launcher
     test_fleet_memory_hook
     test_fleet_memory_codex
     test_fleet_memory_freshness

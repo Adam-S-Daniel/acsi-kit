@@ -1,6 +1,7 @@
 - id: name-becomes-scanner-data
   heading: A name you choose becomes data a scanner reads
   file: agents-md/base.md
+  audience: contributor
   status: covered
   fixture: evals/guidance/name-becomes-scanner-data/
   bytes: 1003

@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "acsi-coding-local",
-  "version": "2.2.6",
+  "version": "2.2.8",
   "description": "Machine-bound coding skills and hooks for Claude Code on your own machines (WSL and Windows homes): clone sync and the API-credit lane.",
   "author": { "name": "<your name>" },
   "repository": "https://github.com/example-adopter/acsi-agentskills",

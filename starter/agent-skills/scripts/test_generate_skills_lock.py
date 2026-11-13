@@ -4630,9 +4630,24 @@ _TESTS_IN_ANOTHER_REPO = {
     # `report_digest_format`'s docstring as the far end of a contract this
     # repo cannot run.
     "test_bump_format_gate_empty_skills",
-    # _agent-guidance's test/run-tests.sh; named by a comment in
-    # .claude/hooks/fleet-memory.sh, which that repo's sync delivers here.
-    "test_fleet_memory_git_hooks",
+}
+
+# Files _agent-guidance's sync owns byte for byte and pushes straight to main,
+# past this repo's CI, plus a verbatim copy of a sync-owned file (the plugin's
+# fleet-memory.sh below). Their comments cite tests in _agent-guidance, and this
+# repo can neither check nor edit them (the next sync overwrites any edit), so
+# the citation scan skips them. Scanning them turned main's pytest red for
+# every pull request the moment a sync delivered a new citation (27994ee,
+# fleet-memory.sh naming test_fleet_memory_git_hooks). skills-bootstrap.sh is
+# not here: the sync delivers it, but its source is this repo, so its
+# citations are this repo's to keep true.
+_DELIVERED_BY_AGENT_GUIDANCE_SYNC = {
+    ".claude/hooks/agent-checks-guard.sh",
+    ".claude/hooks/fleet-memory.sh",
+    ".claude/hooks/guidance-load-record.sh",
+    # The plugin's bundled verbatim copy of fleet-memory.sh, refreshed by hand
+    # in a reviewed pull request and never edited here (AGENTS.md).
+    "plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh",
 }
 
 
@@ -4684,7 +4699,7 @@ def test_every_test_this_repo_cites_by_name_exists():
     dangling = {}
     for name in tracked:
         path = REPO_ROOT / name
-        if path.name.startswith("test_"):
+        if path.name.startswith("test_") or name in _DELIVERED_BY_AGENT_GUIDANCE_SYNC:
             continue
         for cited in sorted(_cited_test_names(path) - defined):
             dangling.setdefault(cited, []).append(name)
@@ -4694,6 +4709,18 @@ def test_every_test_this_repo_cites_by_name_exists():
         "the repo it lives in: "
         + "; ".join(f"{cited} (cited in {', '.join(where)})"
                     for cited, where in sorted(dangling.items())))
+
+
+def test_every_synced_file_the_citation_scan_skips_is_still_tracked():
+    """A skip-list entry for a file the sync stopped delivering hides nothing
+    today, but would silently exempt a same-named file this repo writes later."""
+    tracked = set(subprocess.run(
+        ["git", "ls-files", "*.sh"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True).stdout.split())
+    stale = sorted(_DELIVERED_BY_AGENT_GUIDANCE_SYNC - tracked)
+    assert not stale, (
+        "drop these from _DELIVERED_BY_AGENT_GUIDANCE_SYNC, the sync no longer "
+        "delivers them: " + ", ".join(stale))
 
 
 # The one function allowed to spell this script's own name. Everything else in
@@ -13682,7 +13709,7 @@ def test_setup_script_survives_a_failed_install(tmp_path):
     assert settings_json["hooks"]["SessionStart"]
 
 
-@pytest.mark.parametrize("script_name", ["skills-bootstrap.sh", "fleet-memory.sh"])
+@pytest.mark.parametrize("script_name", ["skills-bootstrap.sh"])
 def test_setup_script_sessionstart_matcher_includes_fork(script_name):
     document = (REPO_ROOT / "docs" / "multi-repo-delivery.md").read_text(
         encoding="utf-8"
@@ -13715,6 +13742,16 @@ def _documented_commands():
         for group in groups:
             for hook in group["hooks"]:
                 yield hook["command"]
+
+
+def test_setup_script_wires_only_bootstrap_and_the_commit_guard():
+    # _agent-guidance ADR 0043: the owner's guidance comes from the plugin (and
+    # later the environment setup script), so the snippet no longer runs a
+    # consumer repo's fleet-memory or guidance-load-record hooks.
+    commands = list(_documented_commands())
+    names = sorted(re.search(r"/hooks/([\w-]+\.sh)", c).group(1) for c in commands)
+    assert names == ["agent-checks-guard.sh", "skills-bootstrap.sh"]
+    assert "Stop" not in _documented_settings()["hooks"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="cloud-only Linux setup script")
