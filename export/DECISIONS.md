@@ -2654,3 +2654,17 @@ pins both sides. The private `PRIVACY_DENYLIST` stays the place for the exact
 name.
 
 Reverse: drop the two `leak_scan` entries and the test.
+
+## Re-pin round 13 (2026-11-13): follow three source changes
+
+All five public pins move to their heads; `agentskills-private` keeps its pin and its lockfile follows the new public registry. Three source changes needed a follow-up in the `_agent-guidance` patches, and each had held that source back since 2026-11-10:
+
+- `_agent-guidance` rewrote the `acsi-kit` bullet in `repos.yml` (it no longer ends "as for verify-actions-lock") and added a bullet about `verify-actions-lock` before `exclude:`. `patches/_agent-guidance/kit_repos.py` matches the new text and still drops both bullets and the exclusion (the kit is not in an adopter fleet).
+- A case in `test/fixtures/agent-checks-cases.jsonl` carries Unicode whitespace inside a JSON string, so `machinery_tests.py` splitting the file with `str.splitlines()` cut a line in two. It now splits on newline only.
+- ADR 0043 gave every row of `agents-md/eval-coverage.yml` an `audience`. The rows `blank_content.py` writes for empty section files and gap rows say `contributor`, as the source does for its own section files.
+
+The prompt-file count floor in `test_routine_prompts_name_only_kit_repos` drops from 8 to 7: the sources dropped another routine prompt.
+
+After merging main (which brought the prompt-audit sweep), the pins moved again to the heads of 2026-11-13: all five public sources exported at their new heads with no further patch change, so none is held back. The three `skills-doctor` edits from the sweep still apply: the source has not yet fixed the wording.
+
+Reverse: re-pin the old shas and revert the three patch edits.

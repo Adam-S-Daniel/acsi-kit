@@ -1,6 +1,7 @@
 - id: security
   heading: Security
   file: agents-md/base.md
+  audience: contributor
   status: covered
   fixture: evals/guidance/security/
   bytes: 617

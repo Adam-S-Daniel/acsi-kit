@@ -564,7 +564,7 @@ def _prompt_files():
 def test_routine_prompts_name_only_kit_repos():
     protector = _protector()
     files = list(_prompt_files())
-    assert len(files) >= 8, files  # the sources dropped two prompts in re-pin round 7
+    assert len(files) >= 7, files  # the sources dropped two prompts in re-pin round 7 and one more by 2026-11-13
     stray = {}
     for path in files:
         bad = sorted(set(n for n in prompt_repo_refs(path.read_text(encoding="utf-8"), protector)

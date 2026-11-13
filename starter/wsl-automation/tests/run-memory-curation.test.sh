@@ -51,7 +51,30 @@ printf 'SUMMARYSECRET curated things\n'
 exit "${CLAUDE_EXIT:-0}"
 EOF_STUB
 chmod +x "$test_root/bin/"*
-export PATH="$test_root/bin:$PATH"
+
+# Stand-in for the caller's PATH: a directory holding a second, failing `claude` that
+# logs every call, put first on the PATH this test inherits, as a developer machine
+# has the real one. The runs below must never reach it; the end of the file asserts
+# its log stayed empty.
+export CALLER_CLAUDE_CALLS="$test_root/caller-claude-calls"
+mkdir -p "$test_root/caller-bin"
+cat >"$test_root/caller-bin/claude" <<'EOF_STUB'
+#!/usr/bin/env bash
+printf 'call\n' >>"$CALLER_CLAUDE_CALLS"
+exit 1
+EOF_STUB
+chmod +x "$test_root/caller-bin/claude"
+: >"$CALLER_CLAUDE_CALLS"
+PATH="$test_root/caller-bin:$PATH"
+
+# Build PATH from the stub directory and the system directories only, never from the
+# caller's PATH, so no real `claude` is reachable. git and python3 may live outside
+# the system directories (/usr/local/bin), so link them in from where the caller has them.
+mkdir -p "$test_root/tools"
+for tool in git python3; do
+    ln -s -- "$(command -v "$tool")" "$test_root/tools/$tool"
+done
+export PATH="$test_root/bin:$test_root/tools:/usr/bin:/bin"
 
 # Never read the real settings file: point it at one that does not exist.
 export WSL_AUTOMATION_SETTINGS="$test_root/no-such-settings.env"
@@ -165,12 +188,13 @@ assert_contains "$prompt" "$win_home/projects/*/memory/" 'prompt names the Windo
 assert_contains "$prompt" "$test_root/roots-one" 'prompt names an existing clone root'
 assert_lacks "$prompt" 'no-such-root' 'prompt omits a missing clone root'
 assert_contains "$argv" $'--permission-mode\nauto' 'permission mode auto'
+assert_contains "$argv" $'--model\nsonnet' 'the model is sonnet unless MEMORY_CURATION_MODEL says otherwise'
 assert_eq "$(grep -cx -- '--add-dir' "$CLAUDE_ARGV")" 2 'one --add-dir per home'
 assert_contains "$argv" $'--add-dir\n'"$wsl_home/projects" 'WSL projects dir added'
 assert_contains "$argv" $'--add-dir\n'"$win_home/projects" 'Windows projects dir added'
 assert_match "$(cat "$CLAUDE_CWD")" '/_agent-guidance\|doc$' 'claude runs in the fresh clone'
 assert_eq "$(sed -n 1p "$TIMEOUT_CALLS")" "--kill-after=5s 300s $test_root/bin/pwsh.exe -NoProfile -File $repository_root/scripts/update-task-checkout.ps1 -UpdateOnly" 'bootstrap deadline and arguments'
-assert_eq "$(sed -n 2p "$TIMEOUT_CALLS")" '--kill-after=60s 7200 claude -p '"$prompt"' --permission-mode auto --add-dir '"$wsl_home/projects"' --add-dir '"$win_home/projects" 'claude runs under the default 2h timeout'
+assert_eq "$(sed -n 2p "$TIMEOUT_CALLS")" '--kill-after=60s 7200 claude -p '"$prompt"' --model sonnet --permission-mode auto --add-dir '"$wsl_home/projects"' --add-dir '"$win_home/projects" 'claude runs under the default 2h timeout'
 assert_contains "$out" 'SUMMARYSECRET curated things' 'summary is printed to stdout'
 
 # Summary file: written, private, and exactly Claude's output.
@@ -290,6 +314,10 @@ assert_match "$(last_log)" ' homes=1 windows_home=unresolved dirs=1 notes_before
 MEMORY_CURATION_TIMEOUT=90 bash "$script" >/dev/null 2>&1
 assert_match "$(tail -n 1 "$TIMEOUT_CALLS")" '^--kill-after=60s 90 claude ' 'MEMORY_CURATION_TIMEOUT overrides the default'
 
+# MEMORY_CURATION_MODEL reaches claude.
+MEMORY_CURATION_MODEL=opus bash "$script" >/dev/null 2>&1
+assert_contains "$(cat "$CLAUDE_ARGV")" $'--model\nopus' 'MEMORY_CURATION_MODEL overrides the default'
+
 # Offline/failed bootstrap still runs and preserves Claude's status.
 rc=0
 out=$(BOOTSTRAP_EXIT=1 CLAUDE_EXIT=4 bash "$script" 2>&1) || rc=$?
@@ -341,5 +369,8 @@ rc=0
 out=$(env -u AGENT_GUIDANCE_URL WSL_AUTOMATION_SETTINGS="$test_root/settings.env" bash "$script" --dry-run 2>&1) || rc=$?
 assert_eq "$rc" 0 'AGENT_GUIDANCE_URL from the settings file is used'
 assert_match "$(last_log)" ' exit=0 memory curation: mode=dry-run ' 'the clone from the settings file reaches the audits'
+
+# No run above reached a `claude` from the caller's PATH.
+assert_eq "$(wc -l <"$CALLER_CLAUDE_CALLS" | tr -d ' ')" 0 "a claude on the caller's PATH is never called"
 
 printf 'PASS: %s assertions\n' "$passed"

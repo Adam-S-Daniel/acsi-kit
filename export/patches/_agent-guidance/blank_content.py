@@ -162,6 +162,7 @@ naming the section in its `.agents-sync.yml`.
 SECTION_ROW = """- id: {id}
   heading: {heading}
   file: {file}
+  audience: contributor
   status: gap
   bytes: 0
 """
@@ -169,6 +170,7 @@ SECTION_ROW = """- id: {id}
 GAP_ROW = """- id: {id}
   heading: {heading}
   file: agents-md/base.md
+  audience: contributor
   status: gap
   bytes: 0
 """

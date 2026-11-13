@@ -69,7 +69,13 @@ REPOS_YML_LINES = [
      "#     Code in the clone, so a managed AGENTS.md there (and the hooks the sync\n"
      "#     delivers with it) would load this fleet's rules into their setup\n"
      "#     session. Its agent-checks workflow and .githooks/ are copied by hand\n"
-     "#     instead, as for verify-actions-lock.\n"
+     "#     instead.\n"
+     "#   \u2022 verify-actions-lock is NOT excluded, although it is a published Action:\n"
+     "#     the sync reaches it like any fleet repo, with the stub AGENTS.md, the\n"
+     "#     agent-checks runner, CI check and guard, and skills-bootstrap per its\n"
+     "#     skills.lock. Until ADR 0043 step 5 it also gets the owner payload and\n"
+     "#     its hooks; after it, the contributor file in their place. Whether to\n"
+     "#     exclude it is a separate question.\n"
      "exclude:\n  - acsi-kit\n", "exclude: []\n"),
     # cron_coverage.fleet audits the kit's own daily re-sync in the source
     # fleet (re-pin 2026-11-09). An adopter's fleet has no copy of the kit.
