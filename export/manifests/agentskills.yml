@@ -4,7 +4,7 @@
 repo: agentskills
 kit_name: agent-skills
 source: adam-agentskills
-source_sha: c25ca77a9c8a0dca276760c8b46065ca73f6211e
+source_sha: e05f2b4f4acd19c6184dc3910779e91d20ae2b72
 after: [_agent-guidance]
 
 exclude:

@@ -6,7 +6,7 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: 35c62e01891cf7b3311fa3408c4bbac7bb5aa79d
+source_sha: 251214679681ab8aeca99af88e6c643ed4193583
 
 exclude:
   - path: docs/reference/adopt-the-whole-system.md
