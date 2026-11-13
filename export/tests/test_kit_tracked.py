@@ -38,6 +38,8 @@ def disk_files(root: Path) -> set[str]:
         for name in names:
             if name.endswith(".pyc"):
                 continue
+            if name == ".git" and here == root:   # a linked worktree's .git is a file, not a directory
+                continue
             out.add((here / name).relative_to(root).as_posix())
     return out
 
@@ -78,6 +80,24 @@ def test_an_ignored_file_is_reported(tmp_path):
     (repo / ".gitignore").write_text("**/[Bb]in/*\n*.log\n!/kit/**/[Bb]in/*\n!/kit/**/*.log\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, env=env)
     assert untracked_files(repo / "kit") == []
+
+
+def test_a_linked_worktrees_git_file_is_not_kit_content(tmp_path):
+    """In a linked worktree `.git` is a file; it is git's own, never an untracked kit file."""
+    repo = tmp_path / "repo"
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+    (repo / "README.md").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "init"], check=True, env=env)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", "work", str(wt)], check=True, env=env)
+    assert (wt / ".git").is_file()
+    assert untracked_files(wt) == []
+    (wt / "stray.txt").write_text("x\n", encoding="utf-8")   # a real untracked file still shows
+    assert untracked_files(wt) == ["stray.txt"]
 
 
 def _kit_is_its_own_clone() -> bool:
