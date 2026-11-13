@@ -484,6 +484,7 @@ for r in "${FLEET[@]}"; do
   t=$(tree_of "$r")
   run bash "$B/copy-starter.sh" --config "$CFGP" "starter/$t" "$O/$r"; rc=$?
   assert_eq "copy-starter $t exits 0" "$rc" 0
+  [ "$rc" = 0 ] || { printf '  copy-starter %s stderr (last 20 lines):\n' "$t"; tail -n 20 "$ERR" | sed 's/^/    /'; }
   g="$T/remotes/$O/$r.git"
   assert "copy-starter $t pushed starter/$t" git --git-dir="$g" rev-parse -q --verify "refs/heads/starter/$t"
   assert_eq "copy-starter $t left main alone" "$(git --git-dir="$g" rev-list --count main)" 1
