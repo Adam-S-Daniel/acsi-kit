@@ -232,6 +232,32 @@ def test_scanner_finds_an_email_and_claude_and_account_ids():
     assert hits["Anthropic federation id"] == 1 and hits["numeric noreply id"] == 1
 
 
+def _username_tokens():
+    return [(n, rx) for n, rx in TOKENS if "username" in n]
+
+
+def test_scanner_flags_a_username_in_a_home_path_but_not_a_placeholder():
+    """The rule matches the shape of a home path, so no real name is spelled in the manifest."""
+    tokens = _username_tokens()
+    assert len(tokens) == 2, [n for n, _ in tokens]
+    bad = "jq" + "ueryname"   # invented; assembled so this file holds no username-shaped literal
+    flagged = [
+        f"/home/{bad}/repos", f"cd /home/{bad}", f"/Users/{bad}/.claude", "C:\\Users\\" + bad + "\\x",
+        "\\\\wsl.localhost\\Ubuntu\\home\\" + bad + "\\.config", f"/mnt/c/Users/{bad}/x",
+        f"'/home/{bad}'", f"~/.claude/projects/-home-{bad}-repos-app/memory/a.md",
+    ]
+    for text in flagged:
+        assert any(rx.search(text) for _, rx in tokens), text
+    allowed = [
+        "/home/user/repos", "/home/runner/work", "/home/example/x", "/home/<user>/x", "/home/$USER/x",
+        "/home/${user}/x", "/home/fictional-dev/.config", "C:\\Users\\runneradmin\\x", "/Users/fixtureuser/x",
+        "/home/hooks.json", "/home/.config", "-home-example-proj", "-home-hook-x", "$HOME/repos", "~/repos",
+        "the user's home directory", "/home/...",
+    ]
+    for text in allowed:
+        assert not any(rx.search(text) for _, rx in tokens), text
+
+
 def test_scanner_decodes_base64_and_hex_runs():
     import base64
     protector = _protector()
