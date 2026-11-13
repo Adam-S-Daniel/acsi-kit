@@ -2673,9 +2673,9 @@ Reverse: re-pin the old shas and revert the three patch edits.
 
 All five public pins move to their heads; `agentskills-private` keeps its pin. The 2026-11-13 re-sync held `skills-evals` back, and `_agent-guidance` broke too once it moved past its new section:
 
-- `_agent-guidance` added the base.md section "Eval rules" (`_agent-guidance#558`), which points at `skills-evals`' generated `docs/rules.md`. `blank_content.py` lists it with tier `none`: only the evals track ships `skills-evals`, so a base-only adopter would get a pointer to a repo it does not have. The kit's own docs link the starter copy of `docs/rules.md` instead.
+- `_agent-guidance` added the base.md section "Eval rules" (`_agent-guidance#558`), which points at `skills-evals`' generated `docs/rules.md`. `blank_content.py` lists it with tier `none`: only the evals track ships `skills-evals`, so a base-only adopter would get a pointer to a repo it does not have. The kit's `docs/evals-and-loop.md` links the starter copy of `docs/rules.md` instead (acsi-kit#64).
 - `skills-evals` deleted the `debug-github-workflows` fixtures and the four `test_issue_76*` tests that locked them. The manifest drops their five excludes, and `retargets.txt` drops the four fixture paths from `test_issue_scheduled_fixtures.py`'s `REVIEWED` anchor.
-- `_agent-guidance` rewrote the stub's first section (ADR 0043). `starter/agent-skills-private/AGENTS.md` takes the rebuilt managed block, written by hand from `bootstrap/lib/content.py`'s recipe because the private source is not exported here.
+- `_agent-guidance` rewrote the stub's first section (ADR 0043). `starter/agent-skills-private/AGENTS.md` takes the rebuilt managed block, written by hand from `bootstrap/lib/content.py`'s recipe because the private source is not exported here. It also gets `.github/fleet-contributor-rules.md`, which that block names and `sync.sh` delivers to every synced repo: a byte copy of the other starters' copy.
 - `library/` was rewritten from the five public sources (the private registry puts nothing in it): two library items follow `skills-evals`' schedule changes.
 
 | Source | Before | After |
