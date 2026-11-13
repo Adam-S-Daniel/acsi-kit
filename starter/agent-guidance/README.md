@@ -198,29 +198,36 @@ once per machine with `scripts/register-codex-hook.sh` (default target
 `~/.codex/hooks.json`) and then **trusted once** in the Codex TUI with
 `/hooks` — Codex trusts non-managed hooks per definition hash per config layer,
 so a per-repo `.codex/hooks.json` would cost one review prompt in every repo.
-The registered command passes no owner signal, so the machine also needs the
-owner marker (ADR 0042). Reasoning: [`docs/decisions/0012`](docs/decisions/0012-codex-gets-the-guidance-as-user-instructions.md).
+The registered command runs a per-user launcher, not a file in any repo
+([ADR 0043](docs/decisions/0043-the-owner-only-guidance-leaves-the-consumer-repos.md)):
+`${XDG_DATA_HOME:-$HOME/.local/share}/fleet-guidance/codex-session-start.sh`
+(`XDG_DATA_HOME` counts only when absolute), which acsi-agentskills'
+`setup.sh --owner-machine` installs. The launcher runs the installed
+`acsi-anything-anywhere` plugin's fleet-guidance hook with
+`FLEET_GUIDANCE_OWNER=1`, which writes `~/.codex/AGENTS.md`. The registrar
+refuses (exit 6, `refused-no-launcher`) until that setup has run. Reasoning:
+[`docs/decisions/0012`](docs/decisions/0012-codex-gets-the-guidance-as-user-instructions.md).
 On **native Windows Codex**, run the registrar from Git Bash: Codex runs hooks
 through `cmd.exe`, where a bare `bash` is WSL's launcher and single quotes are
 not quoting, so the registrar also writes a `commandWindows` override that runs
-the tracked launcher `.claude/hooks/codex-session-start.sh` under Git Bash by
-explicit path (override with `CODEX_HOOK_GIT_BASH` / `--launcher`). Re-running
-it upgrades an existing registration in place; re-trust the changed definition
-in `/hooks`.
+the same launcher under Git Bash by explicit path (override with
+`CODEX_HOOK_GIT_BASH` / `--launcher`). Re-running it upgrades an existing
+registration in place, including either earlier command that ran a repo's own
+`fleet-memory.sh`; re-trust the changed definition in `/hooks`.
 
-**2026-09-28 — parent-directory launches:** from a multi-repo parent, the
-registered command runs the first child hook supporting `--workspace`; that
-hook selects the freshest immediate child's payload using the same delivery
-stamp and installed-block arbitration as normal runs. A second
-`fleet-workspace:` line lists the child repos whose `AGENTS.md` must be read
-before working in them, even when guidance is opted out (but not on a durable
-machine without the owner signal, where the hook prints nothing). Codex does not load
-child instructions from the parent (nor through `--add-dir`); inlining 19
-repos' files would consume a large context budget for instructions relevant
-only while working in each repo. **Upgrade once per machine:** run
-[`scripts/register-codex-hook.sh`](scripts/register-codex-hook.sh), then
-re-trust the changed definition in `/hooks`. Only the exact previous default
-command is upgraded; hand-written variants stay untouched.
+**2026-09-28 — parent-directory launches (historical):** `fleet-memory.sh
+--workspace <dir>` still selects the freshest immediate child's payload and
+prints a `fleet-workspace:` line naming the child repos whose `AGENTS.md` must
+be read, because Codex does not load child instructions from a parent (nor
+through `--add-dir`). Since ADR 0043 the registered local-Codex command runs the
+per-user launcher, which does not call that mode, so a Codex session started
+from a multi-repo parent gets no such list; the guidance itself still arrives
+through the plugin hook. **Upgrade once per machine:** run
+[`scripts/register-codex-hook.sh`](scripts/register-codex-hook.sh) after
+`setup.sh --owner-machine`, then re-trust the changed definition in `/hooks`.
+Both earlier defaults, and a command naming the deleted
+`.claude/hooks/codex-session-start.sh`, are upgraded in place; other
+hand-written variants stay untouched.
 
 The Codex Cloud cold-start path is verified with **Manual** environment setup
 and persistent `CODEX_HOME=/opt/codex`: preserve `npm ci`, then run
@@ -386,8 +393,9 @@ through the real `fleet-memory.sh` and proving each arm got it
 results go to skills-evals' [`persistent/eval-results`](https://github.com/example-adopter/skills-evals/tree/persistent/eval-results)
 branch. From there the regression detector and the gates read them. A section
 is retired when its `full` against `full-minus-section` pair, pooled across
-versions of the rest of the guidance, shows with 90% confidence that it does
-not improve results by 0.15 or more. Retirement is an auto-merging pull
+versions of the rest of the guidance, shows no benefit by the thresholds in
+skills-evals' [`docs/rules.md`](https://github.com/example-adopter/skills-evals/blob/main/docs/rules.md).
+Retirement is an auto-merging pull
 request in this repo, with no human approval. Each removal is followed by a
 skills-evals notice issue to the owner with the way to revert it, and a section
 that helps only alone gets a shorten-or-merge issue

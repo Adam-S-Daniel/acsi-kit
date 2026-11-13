@@ -160,8 +160,9 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(COMMITTED_POLICY, {
             "objective_margin": 0.15, "judge_margin": 1.5, "benefit_confidence": 0.80,
             "retire_confidence": 0.90, "min_cli_versions": 2, "max_runs_per_cell": 20,
-            "max_runs_high_cell": 20, "floor_fraction": 0.10,
-            "retirement_mode": "auto"})
+            "max_runs_high_cell": 20, "floor_fraction": 0.10, "floor_min_runs": 3,
+            "high_stop_min_without": 0.90, "recheck_weeks": 8, "recheck_weeks_high": 4,
+            "max_removal_pauses": 3, "retirement_mode": "auto"})
 
     def _text(self, **changes):
         values = {**POLICY, **changes}
@@ -190,7 +191,11 @@ class PolicyTests(unittest.TestCase):
                          ("objective_margin", 1), ("judge_margin", 11),
                          ("floor_fraction", 1), ("max_runs_high_cell", 0),
                          # Round 2's M2: the high-cell stop is inside the cap.
-                         ("max_runs_high_cell", 41)):
+                         ("max_runs_high_cell", 41),
+                         # Moved from code into the policy (docs/rules.md).
+                         ("floor_min_runs", 0), ("high_stop_min_without", 1.1),
+                         ("recheck_weeks", 0), ("recheck_weeks_high", 1.5),
+                         ("max_removal_pauses", 0)):
             with self.assertRaises(gates.GatePolicyError, msg=f"{key}={bad}"):
                 gates.parse_gate_policy(self._text(**{key: bad}))
 
@@ -516,7 +521,7 @@ class CellTests(unittest.TestCase):
 
     def test_the_floor_needs_floor_min_runs_pairs(self):
         low = [(1, 1, 1), (1, 1, 0)] * 3
-        n = gates.FLOOR_MIN_RUNS
+        n = POLICY["floor_min_runs"]
         result = cell(series("with", low[:n - 1], total=10),
                       series("without", low[:n - 1], total=10))
         self.assertEqual(result["class"], "insufficient")
@@ -729,13 +734,13 @@ class VerdictTests(unittest.TestCase):
 
     def test_ceiling_cells_do_not_vote_and_all_ceiling_is_ceiling(self):
         # The review's C2 (2026-11-03): a ceiling cell is parked, never a
-        # vote for removal; the other cells decide. Round 1's C1: evidence
-        # that did not vote makes the removal a proposal, never automatic.
+        # vote for removal; the other cells decide. The owner, 2026-11-13: every
+        # retire is automatic, so the parked cell only shows in the reason.
         runs = [r for m in self.MODELS[1:] for r in self.flat(m)] + self.ceiling("model-a")
         result = self.verdict(runs)
         self.assertEqual([c["class"] for c in result["cells"]],
                          ["ceiling", "no-benefit", "no-benefit"])
-        self.assertEqual((result["verdict"], result["removal"]), ("retire", "proposal"))
+        self.assertEqual((result["verdict"], result["removal"]), ("retire", "auto"))
         self.assertIn("parked cell(s) (at the ceiling", result["removal_reason"])
         # Every cell at the ceiling: the subject needs a fixture, and is never
         # removed for it.
@@ -1802,11 +1807,11 @@ class ComputeGatesTests(unittest.TestCase):
                           d["judge"].update(overall=v))
         _, doc = self.run_gates("a.json")
         # Decided, not caught: the judge figures are reported only, and the
-        # objective is flat. One cell with headroom can only propose.
+        # objective is flat. One cell with headroom still retires, automatically.
         flat = doc["skills"]["flat"]
         self.assertEqual((flat["verdict"], flat["reason"], flat["removal"]),
                          ("retire", "the one cell with headroom shows no benefit",
-                          "proposal"))
+                          "auto"))
         self.assertTrue(all(math.isfinite(v) for v in
                             (flat["cells"][0]["judge"]["benefit_lower"],
                              flat["cells"][0]["judge"]["retire_upper"])))

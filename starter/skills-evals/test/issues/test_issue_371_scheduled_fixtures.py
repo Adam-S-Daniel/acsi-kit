@@ -112,9 +112,6 @@ MEASURED: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
                     "evals/consumer-repo-provisioning")},
     **{path: (_FLEET_574, _FLEET_574)
        for path in ("evals/ci-job-performance/browser-cache",
-                    *(f"evals/debug-github-workflows/{name}"
-                      for name in ("git-identity", "secret-name",
-                                   "swallowed-failure", "wrong-branch")),
                     *(f"evals/vendor-release-impact-issues/{name}"
                       for name in ("closed-duplicate", "closing-keywords",
                                    "issue-hygiene", "stamps-skip-quotes")))},
@@ -190,8 +187,6 @@ ADOPTED = frozenset({
     "evals/ci-job-performance/browser-cache",
     "evals/cms-stuck-pr-triage",
     "evals/consumer-repo-provisioning",
-    *(f"evals/debug-github-workflows/{name}"
-      for name in ("git-identity", "secret-name", "swallowed-failure", "wrong-branch")),
     "evals/post-failure-comment",
     *(f"evals/vendor-release-impact-issues/{name}"
       for name in ("closed-duplicate", "closing-keywords", "issue-hygiene",
