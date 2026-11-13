@@ -3,17 +3,17 @@
    itself when its datasets are empty, so a dashboard with only the explorer
    dataset shows the public views alone. */
 import { STRINGS } from '../core/strings.js';
-import { clean, parseTime, fmtDateTime, fmtDay, fmtCount, fmtUsd } from '../core/format.js';
+import { clean, parseTime, fmtDateTime, fmtDay, fmtCount, fmtUsd, fmtWeekStart, fmtResetLabel, utcClockToEt, utcMomentToEt } from '../core/format.js';
 import { h } from '../core/h.js';
 import { hashFor } from '../core/route.js';
-import { table, panel, srcLine, tile, badge } from '../views/bits.js';
+import { table, panel, fold, srcLine, tile, badge } from '../views/bits.js';
 import { alertText } from '../views/alerts.js';
-import { problemsToggle } from '../views/ops.js';
+import { problemsToggle, PROBLEMS_PANEL, runName } from '../views/ops.js';
 import { rowsOf, some } from './datasets.js';
 import { P } from './strings.js';
 import { conversionView } from './conversion.js';
 import { isTrending, alertKindLabel } from '../core/stats.js';
-import { LOOP_BRANCH } from '../views/loop.js';
+import { LOOP_BRANCH, LIST_CAP, repoNumber } from '../views/loop.js';
 
 const at = (s) => (s ? fmtDateTime(parseTime(s)) : STRINGS.noValue);
 const n = (v) => (v === null || v === undefined ? '' : fmtCount(v));
@@ -35,12 +35,66 @@ const isLoopBranch = (b) => LOOP_BRANCH.test(String(b || ''));
 /* "Monday noon ET": the weekday and clock time of a reset, in US Eastern,
    read from the reset itself rather than assumed. */
 export function resetLabel(iso) {
-  const ms = parseTime(iso);
-  if (!isFinite(ms)) return STRINGS.unknown;
-  const f = (o) => new Intl.DateTimeFormat('en-US', Object.assign({ timeZone: 'America/New_York' }, o)).format(new Date(ms));
-  const day = f({ weekday: 'long' });
-  const clock = f({ hour: 'numeric', minute: '2-digit', hour12: false });
-  return day + ' ' + (clock === '12:00' ? 'noon' : f({ hour: 'numeric', minute: '2-digit' })) + ' ' + STRINGS.et;
+  return fmtResetLabel(parseTime(iso));
+}
+
+/* Who opened a pull request, in a few words beside its title: "by a bot" or "by <login>".
+   GitHub's own account type says so (`Bot`); a login ending in [bot] is the fallback. */
+export function byLine(author, type) {
+  const a = String(author || '').trim();
+  if (!a) return '';
+  return type === 'Bot' || /\[bot\]$/i.test(a) ? 'by a bot' : 'by ' + clean(a);
+}
+
+const WEEKDAY_STEMS = ['Mon', 'Tues', 'Wednes', 'Thurs', 'Fri', 'Satur', 'Sun'];
+const WEEKDAY_WORD = /\b(?:Mon|Tues?|Wed(?:nes)?|Thu(?:rs?)?|Fri|Sat(?:ur)?|Sun)(?:days?|s)?\b/i;
+const MONTH_WORD = /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b|\b\d{4}-\d{2}-\d{2}\b/i;
+/* "Mondays 02:00 UTC", "Nov 2 at 16:57 UTC", "at 07:00 UTC" or a bare "07:00 UTC". */
+const BARE_UTC = /(?:\b((?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)days?)\s+|\b(?:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)) (\d{1,2}) at\s+|\bat\s+)?\b(\d{1,2}):(\d{2}) UTC\b/gi;
+/* A UTC clock time that already has its Eastern time beside it: "06:53 UTC, GitHub Actions (1:53 AM ET)". */
+const UTC_WITH_ET = /(?:\b((?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)days?)\s+)?(\d{1,2}):(\d{2}) UTC([^()]*)\(([^()]*\bET)\)/gi;
+/* The text of the clause before a match: since the last ; . or ( . */
+const clauseBefore = (whole, offset) => whole.slice(0, offset).split(/[;.(]/).pop();
+
+/* The weekday one day earlier, keeping the word's shape: Mondays to Sundays, TUESDAY to MONDAY. */
+function prevWeekday(word) {
+  const m = /^(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)(days?)$/i.exec(word);
+  const i = WEEKDAY_STEMS.findIndex((x) => x.toLowerCase() === m[1].toLowerCase());
+  const out = WEEKDAY_STEMS[(i + 6) % 7] + m[2].toLowerCase();
+  return word === word.toLowerCase() ? out.toLowerCase() : word === word.toUpperCase() ? out.toUpperCase() : out;
+}
+
+/* A routine's schedule or note in US Eastern only. The routine list words some
+   schedules as "Daily 06:53 UTC, GitHub Actions (1:53 AM ET)": the Eastern time
+   in the parentheses replaces the UTC one, and a "UTC hours ..." aside keeps
+   only its Eastern list. A bare UTC time is converted, and a weekday word before
+   it moves back a day when Eastern time is the evening before. A dated one
+   ("Oct 30 at 16:57 UTC") is converted at its own moment. Anything else that
+   names a weekday or date it cannot move is left as the data wrote it. */
+export function etSchedule(text, refMs) {
+  return String(text === null || text === undefined ? '' : text)
+    .replace(UTC_WITH_ET, (m, wd, hh, mm, mid, et, offset, whole) => {
+      const { shift } = utcClockToEt(hh, mm, refMs);
+      const before = clauseBefore(whole, offset);
+      if (shift !== 0 && WEEKDAY_WORD.test(before)) return m;
+      const rest = mid.trim();
+      return (wd ? (shift !== 0 ? prevWeekday(wd) : wd) + ' ' : '') + et + (rest ? (rest.startsWith(',') ? rest : ' ' + rest) : '');
+    })
+    .replace(/\(UTC hours [^:()]*: /g, '(')
+    .replace(BARE_UTC, (m, wd, mon, day, hh, mm, offset, whole) => {
+      const before = clauseBefore(whole, offset);
+      if (mon) {
+        const r = utcMomentToEt(mon, day, hh, mm, refMs);
+        if (!r) return m;
+        if (r.date !== r.named && WEEKDAY_WORD.test(before)) return m;
+        return r.date + ' at ' + r.clock;
+      }
+      const { text, shift } = utcClockToEt(hh, mm, refMs);
+      const at = /^at\s/i.test(m);
+      if (shift === 0) return (wd ? wd + ' ' : at ? 'at ' : '') + text;
+      if (WEEKDAY_WORD.test(before) || MONTH_WORD.test(before)) return m;
+      return wd ? prevWeekday(wd) + ' ' + text : (at ? 'at ' : '') + text;
+    });
 }
 
 /* Test use this week against the cap, from eval_allowance and budget. */
@@ -315,7 +369,7 @@ export function makeExt(dash, opts) {
       return [h('h3', null, P.byRepoHeading), table([
         { label: P.colRepo, sort: (g) => g.repo, cell: (g) => clean(g.repo) },
         { label: P.colUses, num: true, sort: (g) => g.uses, cell: (g) => n(g.uses) },
-        { label: P.colLastWeek, sort: (g) => g.last, cell: (g) => g.last }], byRepo)];
+        { label: P.colLastWeek, sort: (g) => g.last, cell: (g) => fmtWeekStart(g.last) }], byRepo)];
     },
     /* The live merged pull requests, in the document's own shape, for the changes list. */
     changePulls() {
@@ -333,9 +387,9 @@ export function makeExt(dash, opts) {
         { label: P.colBlocked, num: true, sort: (g) => g.blocked, cell: (g) => n(g.blocked) },
         { label: P.colRedCi, num: true, sort: (g) => g.overridden, cell: (g) => n(g.overridden) },
         { label: P.colRepos, num: true, sort: (g) => g.repos.size, cell: (g) => n(g.repos.size) },
-        { label: P.colLastWeek, sort: (g) => g.last, cell: (g) => g.last }], usageGroup(rows, (r) => r.kind + '|' + r.name).sort((a, b) => b.uses - a.uses), { tall: true }),
+        { label: P.colLastWeek, sort: (g) => g.last, cell: (g) => fmtWeekStart(g.last) }], usageGroup(rows, (r) => r.kind + '|' + r.name).sort((a, b) => b.uses - a.uses), { tall: true }),
       h('h3', null, P.byWeekHeading), table([
-        { label: P.colWeek, sort: (g) => g.week, cell: (g) => g.week },
+        { label: P.colWeek, sort: (g) => g.week, cell: (g) => fmtWeekStart(g.week) },
         { label: P.colSurface, sort: (g) => g.surface, cell: (g) => clean(g.surface) },
         { label: P.colUses, num: true, sort: (g) => g.uses, cell: (g) => n(g.uses) },
         { label: P.colBlocked, num: true, sort: (g) => g.blocked, cell: (g) => n(g.blocked) },
@@ -357,7 +411,7 @@ export function makeExt(dash, opts) {
         { label: P.colStatus, cell: (r) => (r.status ? pill(r.status) : '') },
         { label: P.colNote, cell: (r) => clean(r.note || '') }], some(dash, 'cost_benefit_summary')),
       weeks ? [h('details', { class: 'history' }, h('summary', null, P.costByWeek), table([
-        { label: P.colWeek, sort: (r) => r.week, cell: (r) => r.week },
+        { label: P.colWeek, sort: (r) => r.week, cell: (r) => fmtWeekStart(r.week) },
         { label: P.colEvalRuns, num: true, sort: (r) => r.run_count, cell: (r) => n(r.run_count) },
         { label: P.colRunPoints, num: true, sort: (r) => r.run_points_est, cell: (r) => n(r.run_points_est) },
         { label: P.colApi, num: true, sort: (r) => r.api_usd, cell: (r) => usd(r.api_usd) },
@@ -372,10 +426,10 @@ export function makeExt(dash, opts) {
       return [panel(P.routinesTable, ok('routines') ? [asOf('routines'), table([
         { label: P.colRoutine, sort: (r) => r.name, cell: (r) => plink(r.link, clean(r.name)) },
         { label: P.colDoes, cell: (r) => clean(r.what) },
-        { label: P.colSchedule, cell: (r) => clean(r.schedule) },
+        { label: P.colSchedule, cell: (r) => clean(etSchedule(r.schedule, now())) },
         { label: P.colLastRun, sort: (r) => r.last_run, cell: (r) => at(r.last_run) },
         { label: P.colHealth, sort: (r) => r.health, cell: (r) => pill(r.health) },
-        { label: P.colNote, cell: (r) => clean(r.note || '') }], some(dash, 'routines'))] : null),
+        { label: P.colNote, cell: (r) => clean(etSchedule(r.note || '', now())) }], some(dash, 'routines'), { cap: 10 })] : null),
       panel(P.checkinsHeading, ok('checkins') ? table([
         { label: P.colWhen, sort: (r) => r.when, cell: (r) => at(r.when) },
         { label: P.colWhat, cell: (r) => clean(r.what) }], some(dash, 'checkins')) : null)];
@@ -389,42 +443,33 @@ export function makeExt(dash, opts) {
         { label: P.colWhen, cls: 'when', sort: (r) => r.at, cell: (r) => at(r.at) },
         { label: P.colState, sort: (r) => r.state, cell: (r) => pill(r.state) },
         { label: P.colWhere, sort: (r) => r.source, cell: (r) => clean(r.source || '') },
-        { label: P.colJob, sort: (r) => r.name, cell: (r) => clean(r.name || '') },
-        { label: P.colRun, sort: (r) => r.title, cell: (r) => plink(r.link, clean(r.title || '')) },
+        { label: P.colRun, sort: (r) => runName(r.title, r.name), cell: (r) => plink(r.link, clean(runName(r.title, r.name))) },
         { label: P.colTook, num: true, sort: (r) => r.duration_s, cell: (r) => took(r.duration_s, r) }],
-      some(dash, 'run_stream').slice().sort((a, b) => String(b.at).localeCompare(String(a.at))), { tall: true, cls: 'console', rowAttrs: (r) => (PROBLEM.includes(r.state) ? null : { 'data-ok': '' }) })]);
+      some(dash, 'run_stream').slice().sort((a, b) => String(b.at).localeCompare(String(a.at))), { tall: true, cls: 'console', counts: (r) => PROBLEM.includes(r.state), rowAttrs: (r) => (PROBLEM.includes(r.state) ? null : { 'data-ok': '' }) })], PROBLEMS_PANEL);
     },
     prs() {
       const open = some(dash, 'open_prs') || [];
       const merged = some(dash, 'merged_prs') || [];
       return panel(P.prsHeading, [srcLine(P.srcLive, NaN), open.length ? [h('h3', null, P.openPrs), table([
-        { label: P.colRepo, sort: (p) => p.repo, cell: (p) => clean(p.repo) },
-        { label: P.colNumber, num: true, sort: (p) => p.number, cell: (p) => plink(p.url, '#' + p.number) },
-        { label: P.colTitle, sort: (p) => p.title, cell: (p) => [plink(p.url, clean(p.title)), isLoopBranch(p.branch) ? [' ', badge('loop')] : null] },
-        { label: P.colOpenedBy, sort: (p) => p.author, cell: (p) => clean(String(p.author || '').replace('[bot]', ' (bot)')) },
-        { label: P.colOpened, sort: (p) => p.created_at, cell: (p) => at(p.created_at) },
-        { label: P.colChecks, sort: (p) => p.checks, cell: (p) => plink(p.checks_url, pill(p.checks)) },
-        { label: P.colLabels, cell: (p) => clean(p.labels || '') }], open, { tall: true })] : null,
+        { label: STRINGS.colRepoNumber, sort: (p) => p.repo + '#' + String(p.number).padStart(9, '0'), cell: (p) => repoNumber(p.repo, p.number, p.url) },
+        { label: P.colTitle, sort: (p) => p.title, cell: (p) => [plink(p.url, clean(p.title)), isLoopBranch(p.branch) ? [' ', badge('loop')] : null, ' ', plink(p.checks_url, pill(p.checks)), byLine(p.author, p.author_type) ? [' ', h('span', { class: 'sub' }, byLine(p.author, p.author_type))] : null,
+          p.labels ? [' ', h('span', { class: 'sub' }, clean(p.labels))] : null] },
+        { label: P.colOpened, sort: (p) => p.created_at, cell: (p) => at(p.created_at) }], open, { tall: true, cap: LIST_CAP })] : null,
       merged.length ? [h('h3', null, P.mergedPrs), prRows(merged.map((p) => Object.assign({ state: 'merged' }, p)))] : null]);
     },
     issues() {
       return panel(P.issuesHeading, [srcLine(P.srcLive, NaN), table([
-        { label: P.colRepo, sort: (i) => i.repo, cell: (i) => clean(i.repo) },
-        { label: P.colNumber, num: true, sort: (i) => i.number, cell: (i) => plink(i.url, '#' + i.number) },
-        { label: P.colTitle, sort: (i) => i.title, cell: (i) => plink(i.url, clean(i.title)) },
-        { label: P.colLabels, cell: (i) => clean(i.labels || '') },
+        { label: STRINGS.colRepoNumber, sort: (i) => i.repo + '#' + String(i.number).padStart(9, '0'), cell: (i) => repoNumber(i.repo, i.number, i.url) },
+        { label: P.colTitle, sort: (i) => i.title, cell: (i) => [plink(i.url, clean(i.title)), i.labels ? [' ', h('span', { class: 'sub' }, clean(i.labels))] : null] },
         { label: P.colUpdated, sort: (i) => i.updated_at, cell: (i) => at(i.updated_at) }],
-      some(dash, 'open_issues').slice().sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))), { tall: true })]);
+      some(dash, 'open_issues').slice().sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))), { tall: true, cap: LIST_CAP })]);
     },
     opsBottom() {
       return [
         panel(P.ingestsHeading, ok('eval_ingests') ? [h('p', { class: 'note' }, P.ingestsNote), table([
           { label: P.colRun, sort: (r) => r.run_id || r.message, cell: (r) => plink(r.url, clean(r.run_id || r.message)) },
           { label: P.colSaved, sort: (r) => r.ingested_at, cell: (r) => at(r.ingested_at) }], some(dash, 'eval_ingests'), { tall: true })] : null),
-        panel(P.threadsHeading, ok('threads') ? table([
-          { label: P.colThread, sort: (r) => r.title, cell: (r) => plink(r.link, clean(r.title)) },
-          { label: P.colState, sort: (r) => r.state, cell: (r) => pill(r.state) },
-          { label: P.colActive, sort: (r) => r.last_active, cell: (r) => at(r.last_active) }], some(dash, 'threads')) : null)];
+        panel(P.threadsHeading, ok('threads') ? threadTables(some(dash, 'threads')) : null)];
     },
     searchExtra() {
       const out = [];
@@ -438,12 +483,20 @@ export function makeExt(dash, opts) {
   return ext;
 }
 
+/* Threads still going first; the finished ones fold away under their count. */
+export function threadTables(threads) {
+  const cols = [
+    { label: P.colThread, sort: (r) => r.title, cell: (r) => plink(r.link, clean(r.title)) },
+    { label: P.colState, sort: (r) => r.state, cell: (r) => pill(r.state) },
+    { label: P.colActive, sort: (r) => r.last_active, cell: (r) => at(r.last_active) }];
+  const open = threads.filter((r) => r.state !== 'Done'), done = threads.filter((r) => r.state === 'Done');
+  return [open.length ? table(cols, open) : h('p', null, P.threadsNoneOpen), fold(P.threadsDone(done.length), done.length ? table(cols, done, { tall: true }) : null)];
+}
+
 function prRows(rows) {
   return table([
-    { label: P.colRepo, sort: (p) => p.repo, cell: (p) => clean(p.repo) },
-    { label: P.colNumber, num: true, sort: (p) => p.number, cell: (p) => plink(p.url, '#' + p.number) },
+    { label: STRINGS.colRepoNumber, sort: (p) => p.repo + '#' + String(p.number).padStart(9, '0'), cell: (p) => repoNumber(p.repo, p.number, p.url) },
     { label: P.colTitle, sort: (p) => p.title, cell: (p) => plink(p.url, clean(p.title)) },
-    { label: P.colState, sort: (p) => p.state, cell: (p) => clean(p.state) },
-    { label: P.colMerged, sort: (p) => p.closed_at || p.created_at, cell: (p) => at(p.closed_at || p.created_at) }],
-  rows.slice().sort((a, b) => String(b.closed_at || b.created_at).localeCompare(String(a.closed_at || a.created_at))), { tall: true });
+    { label: P.colMerged, sort: (p) => p.closed_at || p.created_at, cell: (p) => clean(p.state) + ' ' + at(p.closed_at || p.created_at) }],
+  rows.slice().sort((a, b) => String(b.closed_at || b.created_at).localeCompare(String(a.closed_at || a.created_at))), { tall: true, cap: LIST_CAP });
 }

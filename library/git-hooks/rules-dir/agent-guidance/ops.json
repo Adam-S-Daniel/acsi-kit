@@ -39,8 +39,8 @@
     {
       "op": "replace",
       "file": "test/test_agent_check_lane.py",
-      "old": "        self.assertLessEqual({\"secret-file\", \"skill-shell\", \"repo-local\", \"pr-tldr\"}, ids)\n",
-      "new": "        self.assertLessEqual({\"rules-dir\", \"secret-file\", \"skill-shell\", \"repo-local\", \"pr-tldr\"}, ids)\n"
+      "old": "        self.assertLessEqual({\"secret-file\", \"skill-shell\", \"repo-local\", \"pr-tldr\", \"local-identity\"}, ids)\n",
+      "new": "        self.assertLessEqual({\"rules-dir\", \"secret-file\", \"skill-shell\", \"repo-local\", \"pr-tldr\", \"local-identity\"}, ids)\n"
     },
     {
       "op": "replace",

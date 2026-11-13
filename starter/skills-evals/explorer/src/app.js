@@ -9,6 +9,7 @@ import { renderRoute } from './views/page.js';
 import { buildFailure } from './views/failure.js';
 import { DEFAULT_DATA_URL } from './adapters/web.js';
 import { installDefs } from './core/terms.js';
+import { markScrollers } from './views/bits.js';
 
 /* opts: { groups (the top-level groups this build has, in order), home (the
    route an empty address opens), ext (state -> the private overlays, or
@@ -18,9 +19,8 @@ export function boot(source, opts) {
   const groups = o.groups || ['summary', 'changes', 'results', 'spend', 'activity'];
   const root = document.getElementById(o.rootId || 'app');
   const tip = document.getElementById(o.tipId || 'tip');
-  const state = { route: parseRoute(location.hash, location.search, groups, o.home), sortBy: 'next', doc: null, url: DEFAULT_DATA_URL,
+  const state = { route: parseRoute(location.hash, location.search, groups, o.home), doc: null, url: DEFAULT_DATA_URL,
     notice: null, search: { text: '', registry: '', verdict: '', model: '', stakes: '' } };
-  try { const s = localStorage.getItem('explorer-sort'); if (s === 'size' || s === 'value' || s === 'next') state.sortBy = s; } catch (e) { /* storage unavailable */ }
 
   // The top bar is built once, so the search box keeps its focus while the
   // content below it re-renders on every keystroke.
@@ -61,12 +61,8 @@ export function boot(source, opts) {
   function mount(node) {
     while (content.firstChild) content.removeChild(content.firstChild);
     content.appendChild(toDom(node, document));
+    markScrollers(content);
     document.title = STRINGS.title;
-  }
-  function setSort(s) {
-    state.sortBy = s;
-    try { localStorage.setItem('explorer-sort', s); } catch (e) { /* storage unavailable */ }
-    renderContent();
   }
   function clearSearch() {
     state.search = { text: '', registry: '', verdict: '', model: '', stakes: '' };
@@ -80,10 +76,9 @@ export function boot(source, opts) {
       const enter = entering;
       entering = false;
       content.classList.toggle('enter', enter);
-      mount(renderRoute(state.doc, state.route, { sortBy: state.sortBy, url: state.url, notice: state.notice,
+      mount(renderRoute(state.doc, state.route, { url: state.url, notice: state.notice,
         ext: o.ext ? o.ext(state) : null, search: state.search,
-        onFilter: (k, v) => { state.search[k] = v; renderContent(); }, onClear: clearSearch,
-        handlers: { sortNext: () => setSort('next'), sortValue: () => setSort('value'), sortSize: () => setSort('size') } }));
+        onFilter: (k, v) => { state.search[k] = v; renderContent(); }, onClear: clearSearch }));
     } catch (e) {
       mount(buildFailure({ kind: 'parse', url: state.url }));
     }
@@ -128,6 +123,9 @@ export function boot(source, opts) {
   root.addEventListener('pointerdown', () => { tip.hidden = true; });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { tip.hidden = true; toggleMenu(false); } });
   root.addEventListener('focusout', () => { tip.hidden = true; });
+  window.addEventListener('resize', () => markScrollers(content), { passive: true });
+  // A fold that opens changes what fits; toggle does not bubble, so listen in the capture phase.
+  content.addEventListener('toggle', () => markScrollers(content), true);
   window.addEventListener('scroll', () => { tip.hidden = true; }, { passive: true });
 
   installDefs(document);
