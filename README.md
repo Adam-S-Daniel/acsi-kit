@@ -1,14 +1,12 @@
 # Adopt the whole self-improvement system
 
 A kit for building, on your own GitHub account and Claude plan, the system
-its author runs: fleet guidance delivered once per session, a skills
-registry, git-hook checks, memory that points at its home, evals, and the
-loop that improves and retires skills and guidance on its own.
+I run: fleet guidance delivered to any surface and deduplicated in multi-rep sessions, a skills registry, git-hook checks, centralized memory, evals, the
+loop that improves and retires skills and guidance and public and private dashboards.
 
 **In one sentence:** the kit holds working exports of the six real repos
 that run that system, with every owner name replaced, plus scripts that
-create your repos, settings, environments and GitHub Apps and copy each
-export in through a pull request.
+create your repos, settings, environments and GitHub Apps and copy each export in through a pull request.
 
 ## Start here
 
