@@ -37,7 +37,8 @@ For the kit's owner and the agents working on it; adopters can skip this.
   `resync/auto` pull request. The fire needs the
   repository variable `RESYNC_FIXER_FIRE_URL` and the Actions secret
   `RESYNC_FIXER_FIRE_BEARER`, both from the routine's API trigger on
-  claude.ai; without them the step fails naming the missing one. The routine
+  claude.ai (`export/FIX-ROUTINE-SETUP.md` sets both up); without them the
+  step fails naming the missing one. The routine
   cannot run PowerShell, so a fix that touches a shipped `.ps1` asks for a
   Pester run on Windows. A failed run opens or
   updates one open issue, "Re-sync from sources is failing", with the run's
