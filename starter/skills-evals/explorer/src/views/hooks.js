@@ -1,9 +1,9 @@
 /* Git hooks: one row per check, and a page per check. */
 import { STRINGS } from '../core/strings.js';
 import { HOOK_GLOSSES } from '../core/glosses.js';
-import { clean, parseTime, fmtCount, fmtUtcDay } from '../core/format.js';
+import { clean, parseTime, fmtCount, fmtDayKey, fmtWeekStart, fmtDay } from '../core/format.js';
 import { h, link } from '../core/h.js';
-import { hookItems, cloudCounted } from '../core/hooks.js';
+import { hookItems, hookNext, cloudCounted } from '../core/hooks.js';
 import { hashFor } from '../core/route.js';
 import { table, srcLine, navLink, panel, badge, rangeLine, srcLineFor } from './bits.js';
 import { weekChart } from './weekchart.js';
@@ -33,6 +33,12 @@ function overrides(it) {
   return fmtCount(it.overridden || 0) + (it.overrideRate !== null ? ' (' + pct(it.overrideRate) + ')' : '');
 }
 
+/* The next step for a check, with its date in Eastern time. */
+export function nextStep(it, weeks, refMs) {
+  const n = hookNext(it, weeks, refMs);
+  return STRINGS.hookNext[n.key](n.at === null ? null : fmtDay(n.at, refMs), weeks);
+}
+
 function where(it) {
   return STRINGS.hookWhere[it.where];
 }
@@ -43,7 +49,6 @@ export function hooksList(doc) {
   if (!hk || typeof hk !== 'object') return h('section', { class: 'block' }, h('h2', null, STRINGS.hooksHeading), h('p', null, STRINGS.hooksNone));
   const items = hookItems(doc);
   const w = hk.window || {};
-  const day = (d) => fmtUtcDay(Date.parse(d + 'T00:00:00Z'), refMs);
   // Overrides are not counted for any check yet: drop the column of
   // "not counted" cells and say so once under the table.
   const anyMeasured = items.some((it) => it.measured);
@@ -53,12 +58,14 @@ export function hooksList(doc) {
     { label: STRINGS.colRunsWindow(w.weeks || 8), num: true, sort: (it) => (it.runs !== null ? it.runs : it.runsCounted), cell: runsCell },
     { label: STRINGS.colBlocked, num: true, sort: (it) => it.blocked, cell: blockedCell },
     anyMeasured ? { label: STRINGS.colOverrides, num: true, sort: (it) => (it.measured ? it.overridden : -1), cell: overrides } : null,
-    { label: STRINGS.colVerdictShort, sort: (it) => it.verdict || '', cell: hookVerdict }
+    { label: STRINGS.colVerdictShort, sort: (it) => it.verdict || '', cell: hookVerdict },
+    { label: STRINGS.colSince, sort: (it) => it.since, cell: (it) => (it.since === null ? STRINGS.noValue : fmtDay(it.since, refMs)) },
+    { label: STRINGS.colNextStep, sort: (it) => (hookNext(it, w.weeks || 8, refMs).at || 0), cell: (it) => nextStep(it, w.weeks || 8, refMs) }
   ].filter(Boolean), items, { cls: 'hooks' });
   const policy = hk.policy || {};
   return h('section', { class: 'block' }, h('h2', null, STRINGS.hooksHeading),
     rangeLine(doc),
-    w.from ? h('p', { class: 'note' }, STRINGS.hooksNote(w.weeks, day(w.from), day(w.to))) : null,
+    w.from ? h('p', { class: 'note' }, STRINGS.hooksNote(w.weeks, fmtDayKey(w.from, refMs), fmtDayKey(w.to, refMs))) : null,
     cloudNote(doc),
     typeof policy.max_override_rate === 'number' ? h('p', { class: 'note' }, STRINGS.hookRule(pct(policy.max_override_rate), w.weeks || 8)) : null,
     items.length ? rows : h('p', null, STRINGS.hooksNone),
@@ -73,7 +80,7 @@ export function hooksList(doc) {
 export function cloudNote(doc) {
   const c = cloudCounted(doc);
   if (c === null) return null;
-  const from = doc.hooks && typeof doc.hooks.cloud_from === 'string' ? fmtUtcDay(Date.parse(doc.hooks.cloud_from + 'T00:00:00Z')) : null;
+  const from = doc.hooks && typeof doc.hooks.cloud_from === 'string' ? fmtDayKey(doc.hooks.cloud_from) : null;
   return h('p', { class: 'note' }, c ? STRINGS.hooksCloudFrom(from) : STRINGS.hooksCloudNotLong);
 }
 
@@ -101,7 +108,6 @@ export function hookPage(doc, name, ctx) {
   const it = hookItems(doc).find((x) => x.name === name);
   const back = h('p', { class: 'back' }, navLink(hashFor('hooks'), STRINGS.back(STRINGS.hookBack)));
   if (!it) return h('div', null, back, h('p', null, STRINGS.hookNotFound));
-  const day = (d) => fmtUtcDay(Date.parse(d + 'T00:00:00Z'), refMs);
   const weeks = checkWeeks(it);
   const cloud = cloudCounted(doc) === true;
   const gloss = Object.prototype.hasOwnProperty.call(HOOK_GLOSSES, it.name) ? HOOK_GLOSSES[it.name] : STRINGS.hookEnforcesMissing;
@@ -128,10 +134,10 @@ export function hookPage(doc, name, ctx) {
         overrides(it), '.'),
       it.measured ? null : h('p', { class: 'note' }, STRINGS.hookOverridesNote)),
     panel(STRINGS.hookByWeek, weeks.length ? [
-      weekChart(weeks.map((w) => ({ label: day(w.week), short: day(w.week), a: w.localBlocked + (cloud ? w.cloudBlocked : 0), b: w.ciBlocked })),
+      weekChart(weeks.map((w) => ({ label: fmtDayKey(w.week, refMs), short: fmtDayKey(w.week, refMs), a: w.localBlocked + (cloud ? w.cloudBlocked : 0), b: w.ciBlocked })),
         [cloud ? STRINGS.colLocalCloudBlocked : STRINGS.colLocalBlocked, STRINGS.colCiBlocked], STRINGS.hookByWeek, STRINGS.weekTitles.hooks, [STRINGS.weekDefs.local, STRINGS.weekDefs.ci]),
       table([
-        { label: STRINGS.colWeek, sort: (w) => w.week, cell: (w) => day(w.week) },
+        { label: STRINGS.colWeek, sort: (w) => w.week, cell: (w) => fmtWeekStart(w.week, refMs) },
         { label: STRINGS.colLocalRuns, num: true, sort: (w) => w.localRuns, cell: (w) => fmtCount(w.localRuns) },
         { label: STRINGS.colLocalBlocked, num: true, sort: (w) => w.localBlocked, cell: (w) => fmtCount(w.localBlocked) },
         { label: STRINGS.colCiRuns, num: true, sort: (w) => (w.ciRuns === null ? -1 : w.ciRuns), cell: (w) => (w.ciRuns === null ? STRINGS.runsNotCounted : fmtCount(w.ciRuns)) },
