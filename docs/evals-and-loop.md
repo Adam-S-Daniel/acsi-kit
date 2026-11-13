@@ -177,8 +177,10 @@ is used.
   `improve-policy.yml`'s `improve_merge_mode: auto` makes it ready with
   auto-merge; `draft` leaves it for you.
 - **Retire:** every day `skill-coverage.yml` computes each skill's verdict;
-  a skill with no benefit on every fixture and model at two fixed looks
-  gets a removal pull request (`retirement_mode: auto`), or an issue. The
+  a `retire` verdict gets a removal pull request (`retirement_mode: auto`),
+  or an issue. When a verdict is `retire`, and which removals file an issue
+  instead, is in the generated
+  [`docs/rules.md`](../starter/skills-evals/docs/rules.md). The
   core items listed in `evals/retirement-exempt.yml` are never retired: their
   verdict reads `retire-exempt` and nothing is opened.
 - **New skills:** `routine-draft-skill.yml` picks one new-skill lesson a day
