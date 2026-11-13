@@ -2537,6 +2537,47 @@ Reverse: restore the previous pins, put back the two loop cold-start edits in
 census README patch step, the script header edit and the three test edits
 above.
 
+## Re-pin round 12 (2026-11-13)
+
+`export/resync.py` moved all five public pins to their sources' current heads.
+The export failed in one place, and the kit follows the source:
+
+- **_agent-guidance added a `local-identity` check to the agent-checks
+  runner.** It refuses a changed file that holds the committing machine's own
+  account name in a home path, or its hostname; the names come from the
+  machine at run time, so the runner carries none, and it never runs under
+  GitHub Actions. The source's `test_core_check_ids` now lists the id, so the
+  `machinery_tests.py` anchor on that assertion matched nothing. The anchor and
+  its replacement carry the new id, and so does the inverse replacement the
+  `rules-dir` library item makes (`library/git-hooks/rules-dir/agent-guidance/ops.json`).
+  The check ships in the kit's runner as the source has it, beside
+  `secret-file` and `skill-shell`: it names nobody and holds no opinion about
+  how a repo is laid out, so it is treated as core, not as a library item.
+  Its tests ship unchanged. Every starter's `.githooks/agent-checks` copy
+  follows, the private registry's included (a `copy_from_kit` of the exported
+  template, written by hand because the fix routine cannot read the private
+  source).
+- **skills-evals added a second fixture to the `subagent-delegation`
+  guidance item** (`routing-four-tasks`) and its weekly row. The library item
+  carries both; `library/` was rewritten from the five public sources (the
+  private registry puts nothing in it).
+- The other sources changed without a break. skills-evals also gains the
+  `docs-only-required-check` fixture and explorer and dashboard changes;
+  wsl-automation changes `tests/CcstatuslineConfig.Tests.ps1`.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `5c6b3aebb001` | `30ba3821c6e7` |
+| acsi-agentskills | `27994ee9c516` | `e2069029fb3f` |
+| repo-settings | `970e1c54aa94` | `b1423a5eee85` |
+| skills-evals | `194edfb4bf0f` | `685ab6bcb979` |
+| wsl-automation | `6987040ddf99` | `72c5a0c3165f` |
+
+Reverse: restore the previous pins and drop `"local-identity"` from the
+`test_core_check_ids` anchor, its replacement and the library item's inverse
+replacement in `machinery_tests.py`. To ship the kit without the check
+instead, move it to a library item as `rules-dir` is (`blank_content.py`).
+
 ## The guidance overlap judgment (2026-11-10)
 
 `_agent-guidance#495` added a warn-only "Repo-specific guidance overlap"

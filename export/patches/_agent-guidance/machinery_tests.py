@@ -91,8 +91,8 @@ LANE_EDITS = [
         # The kit's runner: the machinery's own three, secret-file and skill-shell (Content tiers).
         self.assertGreaterEqual(len(calls), 5)'''),
     ('''        self.assertLessEqual({"rules-dir", "secret-file", "skill-shell", "staged-index", "push-to-default", "persistent-delete",
-                              "repo-local", "pr-tldr"}, ids)''',
-     '''        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr"}, ids)'''),
+                              "repo-local", "pr-tldr", "local-identity"}, ids)''',
+     '''        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)'''),
 ]
 
 # What the rules-dir library item puts back in the same file.
@@ -104,8 +104,8 @@ LANE_RULES_DIR_OPS = [
      "old": '        self.assertEqual(entry["checks"], ["secret-file", "skill-shell", "repo-local"])\n',
      "new": '        self.assertEqual(entry["checks"], ["rules-dir", "secret-file", "skill-shell", "repo-local"])\n'},
     {"op": "replace", "file": "test/test_agent_check_lane.py",
-     "old": '        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr"}, ids)\n',
-     "new": '        self.assertLessEqual({"rules-dir", "secret-file", "skill-shell", "repo-local", "pr-tldr"}, ids)\n'},
+     "old": '        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)\n',
+     "new": '        self.assertLessEqual({"rules-dir", "secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)\n'},
 ]
 
 

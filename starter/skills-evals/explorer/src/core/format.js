@@ -55,6 +55,89 @@ export function fmtDateTime(ms) {
   return s + ' ' + STRINGS.et;
 }
 
+/* The only place this page reads or writes a calendar field of a date. A view
+   never calls toISOString, getUTC* or Intl.DateTimeFormat itself: the ET guard
+   in test/run.js fails the build if it does. A day or week key is the
+   'YYYY-MM-DD' the data buckets by (a UTC day, or the UTC Monday of a week). */
+const DAY_MS = 86400000;
+export const dayKeyMs = (key) => (typeof key === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(key) ? Date.parse(key + 'T00:00:00Z') : NaN);
+export const isDayKey = (key) => isFinite(dayKeyMs(key));
+
+/* A calendar day the data names without a time ('2026-11-10'), shown as that
+   day in US Eastern: read at noon, so no zone moves it to another date. */
+export function fmtCalendarDay(key, refMs) {
+  return isDayKey(key) ? fmtDay(dayKeyMs(key) + 12 * 3600 * 1000, refMs) : STRINGS.unknown;
+}
+
+/* The day key of an instant, and of the Monday that starts its week. */
+export function dayKeyOf(ms) {
+  return isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null;
+}
+export function weekKeyOf(ms) {
+  if (!isFinite(ms)) return null;
+  const d = new Date(ms);
+  return dayKeyOf(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7)));
+}
+/* Every day key from `first` to `last`, so a day without data shows as a gap. */
+export function dayKeysBetween(first, last) {
+  const out = [];
+  if (!isDayKey(first) || !isDayKey(last)) return out;
+  for (let t = dayKeyMs(first); t <= dayKeyMs(last); t += DAY_MS) out.push(dayKeyOf(t));
+  return out;
+}
+
+/* "Nov 12", with the year only when it differs from the reference's. */
+export function fmtDayKey(key, refMs) {
+  return isDayKey(key) ? fmtUtcDay(dayKeyMs(key), refMs) : STRINGS.unknown;
+}
+/* "Mon Nov 9" for the row of a week, "week of Mon Nov 9" inside a sentence. */
+export function fmtWeekStart(key, refMs) {
+  if (!isDayKey(key)) return STRINGS.unknown;
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' }).format(new Date(dayKeyMs(key)));
+  return wd + ' ' + fmtUtcDay(dayKeyMs(key), refMs);
+}
+export const fmtWeekOf = (key, refMs) => STRINGS.weekOf(fmtWeekStart(key, refMs));
+
+/* "Monday noon ET": the weekday and clock time of an instant in US Eastern. */
+export function fmtResetLabel(ms) {
+  if (!isFinite(ms)) return STRINGS.unknown;
+  const f = (o) => new Intl.DateTimeFormat('en-US', Object.assign({ timeZone: TIME_ZONE }, o)).format(new Date(ms));
+  const clock = f({ hour: 'numeric', minute: '2-digit', hour12: false });
+  return f({ weekday: 'long' }) + ' ' + (clock === '12:00' ? 'noon' : f({ hour: 'numeric', minute: '2-digit' })) + ' ' + STRINGS.et;
+}
+
+/* "06:53" on the UTC clock as an Eastern clock time ("1:53 AM ET"), using the
+   offset in force on the reference day (daylight saving moves it). */
+export function fmtClockUtcToEt(hour, minute, refMs) {
+  return utcClockToEt(hour, minute, refMs).text;
+}
+/* The same, with `shift`: -1 when the Eastern time falls on the day before the
+   UTC one (02:00 UTC is 9:00 PM ET the evening before), else 0. */
+export function utcClockToEt(hour, minute, refMs) {
+  const base = isFinite(refMs) ? new Date(refMs) : new Date(0);
+  const at = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), Number(hour), Number(minute)));
+  const f = (o) => new Intl.DateTimeFormat('en-US', Object.assign({ timeZone: TIME_ZONE }, o));
+  const etDay = f({ day: 'numeric' }).format(at);
+  const utcDay = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', day: 'numeric' }).format(at);
+  return { text: f({ hour: 'numeric', minute: '2-digit' }).format(at) + ' ' + STRINGS.et, shift: etDay === utcDay ? 0 : -1 };
+}
+
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/* "Oct 30 at 16:57 UTC" as the moment it names, in US Eastern: the date and the
+   clock, each in the offset in force then (daylight saving moves it). The year is
+   the reference's, or the one before when that day is still ahead of the reference.
+   Null when the month is not one. */
+export function utcMomentToEt(mon, day, hour, minute, refMs) {
+  const idx = MONTH_ABBR.indexOf(String(mon).charAt(0).toUpperCase() + String(mon).slice(1, 3).toLowerCase());
+  if (idx < 0) return null;
+  const year = isFinite(refMs) ? new Date(refMs).getUTCFullYear() : 2001;
+  let at = Date.UTC(year, idx, Number(day), Number(hour), Number(minute));
+  if (isFinite(refMs) && at > refMs) at = Date.UTC(year - 1, idx, Number(day), Number(hour), Number(minute));
+  const f = (o) => new Intl.DateTimeFormat('en-US', Object.assign({ timeZone: TIME_ZONE }, o)).format(new Date(at));
+  return { date: f({ month: 'short', day: 'numeric' }), clock: f({ hour: 'numeric', minute: '2-digit' }) + ' ' + STRINGS.et,
+    named: MONTH_ABBR[idx] + ' ' + Number(day) };
+}
+
 /* A UTC calendar day (a census window edge, which is a UTC Monday), shown
    as that day rather than shifted into Eastern time. */
 export function fmtUtcDay(ms, refMs) {

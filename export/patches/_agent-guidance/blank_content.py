@@ -34,9 +34,9 @@ tiers, and the tests check this file against it.
 - templates/agent-checks/agent-checks (and this repo's own copy in
   .githooks/) keeps the runner: events, the problem/note_ran bookkeeping,
   the run log, the empty lesson slot (check_lessons) and the repo-local
-  .agent-checks/local.sh mechanism. Of the fleet checks it keeps the two
-  core ones, `secret-file` and `skill-shell`, exactly as the source has
-  them, and a commented-out example check (`.orig`/`.rej` leftovers). The
+  .agent-checks/local.sh mechanism. Of the fleet checks it keeps the
+  core ones, `secret-file`, `skill-shell` and `local-identity`, exactly as
+  the source has them, and a commented-out example check (`.orig`/`.rej` leftovers). The
   opinionated `rules-dir` check goes to library/git-hooks/rules-dir/ with
   its test cases (machinery_tests.py writes the test half). The pre-push
   checks are not shipped.

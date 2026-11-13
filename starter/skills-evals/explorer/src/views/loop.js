@@ -9,15 +9,26 @@ import { barChart, chartTitle } from '../core/charts.js';
 
 const usd = (x) => fmtUsd(Number(x) || 0);
 
+/* What fixture_queue.py's findings say, by kind (read off the finding id), and
+   each one as a link to what it names. */
+const FINDING_ID = /fixture-queue-(stale-request|stuck-pr|unused-fixture)-/;
+const findingKind = (f) => { const m = FINDING_ID.exec(String(f.finding_id || '')); return m ? m[1] : 'other'; };
+function findingsView(list) {
+  if (!list.length) return null;
+  const kinds = Object.keys(STRINGS.fqFindingKinds).filter((k) => list.some((f) => findingKind(f) === k))
+    .map((k) => STRINGS.fqFindingKinds[k](list.filter((f) => findingKind(f) === k).length)).join('; ');
+  return [h('p', { class: 'warn' }, STRINGS.fqFindings(kinds)),
+    h('ul', { class: 'plain' }, list.map((f) => h('li', null, link(f.url, clean(f.subject || f.finding_id)) || clean(f.subject || f.finding_id))))];
+}
+
 export function fixtureRequestsView(doc, refMs) {
   const fq = fixtureQueue(doc, refMs);
   if (!fq) return h('p', { class: 'note' }, STRINGS.fqNone);
   const t = fq.totals;
   const n = (k) => fmtCount(Number(t[k]) || 0);
-  const high = fq.findings.filter((f) => f.severity === 'high').length;
   return [srcLineFor(doc, 'queue'), h('p', { class: 'note' }, STRINGS.fqNote),
     h('p', null, STRINGS.fqTotals(n('requests_open'), n('requests_closed'), n('prs_merged'), n('fixtures_real_work'), n('fixtures_invented'), n('fixture_runs'))),
-    fq.findings.length ? h('p', { class: 'warn' }, STRINGS.fqFindings(fq.findings.length, high)) : null,
+    findingsView(fq.findings),
     fq.rows.length ? table([
       { label: STRINGS.colSubject, sort: (r) => r.subject, cell: (r) => link(r.issueUrl, clean(r.subject)) || clean(r.subject) },
       { label: STRINGS.colKind, sort: (r) => r.kind, cell: (r) => r.kind },
@@ -74,12 +85,19 @@ export function isLoopPull(p) {
   return typeof p.title === 'string' && LOOP_TITLE.test(p.title);
 }
 
+/* Pull request and issue lists show this many rows before "Show all". */
+export const LIST_CAP = 6;
+/* "skills-evals #961", linked, so the repo and the number share one column. */
+export function repoNumber(repo, number, url) {
+  const text = clean(String(repo).split('/').pop()) + ' #' + number;
+  return link(url, text) || text;
+}
+
 export function prTable(rows, refMs) {
   return table([
-    { label: STRINGS.colRepo, sort: (p) => p.repo, cell: (p) => clean(String(p.repo).split('/').pop()) },
-    { label: STRINGS.colNumber, num: true, sort: (p) => p.number, cell: (p) => link(p.url, '#' + p.number) },
+    { label: STRINGS.colRepoNumber, sort: (p) => p.repo + '#' + String(p.number).padStart(9, '0'), cell: (p) => repoNumber(p.repo, p.number, p.url) },
     { label: STRINGS.colTitle, sort: (p) => p.title, cell: (p) => clean(p.title) },
-    { label: STRINGS.colState, sort: (p) => p.state, cell: (p) => STRINGS.prStates[p.state] || clean(p.state) },
-    { label: STRINGS.colUpdated, sort: (p) => p.merged_at || p.updated_at || p.created_at, cell: (p) => fmtDay(parseTime(p.merged_at || p.updated_at || p.created_at), refMs) }
-  ], rows.slice().sort((x, y) => String(y.merged_at || y.updated_at || '').localeCompare(String(x.merged_at || x.updated_at || ''))), { tall: true });
+    { label: STRINGS.colUpdated, sort: (p) => p.merged_at || p.updated_at || p.created_at,
+      cell: (p) => (STRINGS.prStates[p.state] || clean(p.state)) + ' ' + fmtDay(parseTime(p.merged_at || p.updated_at || p.created_at), refMs) }
+  ], rows.slice().sort((x, y) => String(y.merged_at || y.updated_at || '').localeCompare(String(x.merged_at || x.updated_at || ''))), { tall: true, cap: LIST_CAP });
 }
