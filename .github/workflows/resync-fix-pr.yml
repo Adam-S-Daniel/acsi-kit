@@ -86,6 +86,11 @@ jobs:
           set -euo pipefail
           branch="$BRANCH"
           [[ "$branch" =~ ^resync-fix/[0-9A-Za-z._/-]+$ ]] || { echo "::error::unexpected branch name"; exit 1; }
+          # A deleted branch (after a merge) can still end here; nothing to open.
+          if ! gh api "repos/$GITHUB_REPOSITORY/branches/$branch" --silent 2>/dev/null; then
+            echo "::notice::$branch no longer exists; nothing to open"
+            exit 0
+          fi
           open=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open --json number,isCrossRepository \
             --jq '[.[] | select(.isCrossRepository | not)] | length') \
             || { echo "::error::could not list open pull requests"; exit 1; }
@@ -99,8 +104,9 @@ jobs:
           [ -n "$title" ] || title="Follow the held-back source changes"
           body="$RUNNER_TEMP/pr-body.md"
           tail -n +2 <<<"$message" | sed '1{/^[[:space:]]*$/d}' > "$body"
-          # A body without the TLDR heading keeps its text under a fallback one.
-          if ! grep -qxF -- '## TLDR' "$body"; then
+          # A body that does not open with the TLDR heading (agent-checks needs it
+          # first) keeps its text under a fallback one.
+          if [ "$(head -n 1 "$body")" != '## TLDR' ]; then
             {
               printf '## TLDR\n\n'
               printf "The fix routine's commit gave no pull request body with a TLDR, so this is a fallback: it follows the source changes the daily re-sync held back. Review the changes before merging.\n\n"
@@ -109,7 +115,7 @@ jobs:
             mv "$body.new" "$body"
           fi
           url=$(gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE_BRANCH" --head "$branch" \
-            --title "$title" --body-file "$body") \
+            --title="$title" --body-file "$body") \
             || { echo "::error::could not open the pull request"; exit 1; }
           echo "opened $url"
           gh pr edit "$url" --add-label agent-authored > /dev/null \
