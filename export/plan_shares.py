@@ -43,7 +43,7 @@ PLANS = ("pro", "max5x", "max20x")
 
 #: Dollars per fire, API-equivalent at list prices: each session's own
 #: `total_cost_usd`, one fire of each on the owner's Max 20x account and
-#: 13-repo fleet, 2026-11-13. One fire is a thin sample.
+#: 16-repo fleet (FLEET_SIZE), 2026-11-13. One fire is a thin sample.
 USD_PER_FIRE = {
     "fleet_worker": 1.85,   # a fire that took an issue; an idle fire costs less
     "changelog": 2.68,      # a fire that stopped at its first step
