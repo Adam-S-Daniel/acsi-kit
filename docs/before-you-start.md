@@ -126,7 +126,7 @@ Two things are not known, and each share's range spans both:
   hours Anthropic gave in 2025 (40 to 80, 140 to 280 and 240 to 480) would
   make them 0.58 and a sixth, the favorable end of each range.
 
-The figures also come from the owner's fleet of 13 repos, and the kit
+The figures also come from the owner's fleet of 16 repos, and the kit
 starts you with 5, or 6 with `skills-evals`. Two routines grow with the
 count, neither one measured across fleet sizes:
 

@@ -12,6 +12,7 @@ Run: python3 -m pytest KIT/export/tests -q
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -37,6 +38,16 @@ def test_the_eval_row_quotes_what_the_cap_lets_through():
     cells = [c.strip() for c in line.strip("|").split("|")][1:]
     for cell, want in zip(cells, plan_shares.eval_cells(), strict=True):
         assert cell.startswith(want.strip()), f"the eval row says '{cell}', the model '{want}'"
+
+
+def test_the_docs_quote_the_measured_fleet_size():
+    # Lexical: the number in one sentence of prose, not code shape.
+    found = re.findall(r"owner's fleet of (\d+) repos", " ".join(DOC))
+    assert found, "docs/before-you-start.md no longer names the owner's fleet size"
+    want = plan_shares.FLEET_SIZE["measured_repos"]
+    assert {int(n) for n in found} == {want}, (
+        f"docs/before-you-start.md says the owner's fleet has {found} repos; "
+        f"export/plan_shares.py FLEET_SIZE['measured_repos'] is {want}")
 
 
 def test_the_base_counts_the_fleet_worker_at_its_cadence(monkeypatch):
