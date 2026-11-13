@@ -2616,3 +2616,18 @@ the required `pytest` check, and the draft lane could not use those names.
   skill, or misses a skill the registry ships.
 
 Reverse: drop the patch, its manifest entry and the test.
+
+## Local username rule (2026-11-13, issue 47)
+
+`leak_scan` gains two rules for a local username: one in a home-directory path
+(a Linux, macOS, WSL-share or Windows-drive home folder followed by the user component) and one in a
+Claude-encoded project directory (the encoded form of such a path). Neither spells a name:
+each matches the SHAPE and passes only the invented placeholder users the
+starters use (`example`, `user`, `runner`, `fixtureuser*`, `fictional-dev`,
+and a few one-word fixtures). A bare-substring rule would also hit ordinary
+identifiers that contain the name. A new invented user a fixture needs is added
+to the list in both patterns; `test_scanner_flags_a_username_in_a_home_path_but_not_a_placeholder`
+pins both sides. The private `PRIVACY_DENYLIST` stays the place for the exact
+name.
+
+Reverse: drop the two `leak_scan` entries and the test.
