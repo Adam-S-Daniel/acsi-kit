@@ -139,7 +139,7 @@ jobs:
       - name: Mint the App token
         id: token
         if: steps.app.outputs.configured == 'true'
-        uses: actions/create-github-app-token@v3.2.0
+        uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ vars.RESYNC_APP_CLIENT_ID }}
           private-key: ${{ secrets.RESYNC_APP_PEM }}
