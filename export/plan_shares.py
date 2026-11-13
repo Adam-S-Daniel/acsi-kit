@@ -43,7 +43,7 @@ PLANS = ("pro", "max5x", "max20x")
 
 #: Dollars per fire, API-equivalent at list prices: each session's own
 #: `total_cost_usd`, one fire of each on the owner's Max 20x account and
-#: 13-repo fleet, 2026-11-13. One fire is a thin sample.
+#: 16-repo fleet (FLEET_SIZE), 2026-11-13. One fire is a thin sample.
 USD_PER_FIRE = {
     "fleet_worker": 1.85,   # a fire that took an issue; an idle fire costs less
     "changelog": 2.68,      # a fire that stopped at its first step
@@ -78,9 +78,12 @@ WEEK_RATIO_FAVORABLE = {"pro": 1 / 6, "max5x": 0.58, "max20x": 1.0}
 
 #: How two routines grow with the number of repos in the fleet. Bounds read
 #: from one fire's tool calls and context sizes, not a measured slope: the
-#: fleet worker's fire was on 15 repos, and one small repo's sweep child
-#: session cost $0.46.
-FLEET_SIZE = {"measured_repos": 15, "fleet_worker_usd_per_repo": (0.02, 0.09),
+#: fleet worker's fire covered the owner's 16 repos (`cron_coverage.fleet` in
+#: _agent-guidance's repos.yml on 2026-11-13, the fire's date), and one small
+#: repo's sweep child session cost $0.46. measured_repos is a fact about that
+#: fire, so it stays fixed when the owner's fleet grows; the docs quote it and
+#: export/tests/test_plan_shares.py holds them to it.
+FLEET_SIZE = {"measured_repos": 16, "fleet_worker_usd_per_repo": (0.02, 0.09),
               "sweep_child_usd_per_repo": 0.46}
 
 
