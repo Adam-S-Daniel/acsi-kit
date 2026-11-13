@@ -105,8 +105,8 @@ Why each one:
 
 The dollar figures are the owner's, on Max 20x, measured on 2026-11-13 from
 one fire of each routine: fleet worker $1.85, changelog watcher $2.68,
-memory curation $4.54 (weekly), prompt-audit sweep $2.03 (counted as one
-fire every two weeks), and $0.87 for an eval fire (the mean of 304 fires
+memory curation $4.54 (weekly), prompt-audit sweep $2.03 for its own
+session (counted as one fire every two weeks), and $0.87 for an eval fire (the mean of 304 fires
 since 2026-11-09, plus the routine session that runs it). One fire is a
 thin sample: a fleet worker fire that finds nothing to do costs less.
 
@@ -124,6 +124,25 @@ Two things are not known, and each share's range spans both:
   Max 5x as a quarter of Max 20x's week and Pro as a twentieth. The weekly
   hours Anthropic gave in 2025 (40 to 80, 140 to 280 and 240 to 480) would
   make them 0.58 and a sixth, the favorable end of each range.
+
+The figures also come from the owner's fleet of 13 repos, and the kit
+starts you with 5, or 6 with `skills-evals`. Two routines grow with the
+count, neither one measured across fleet sizes:
+
+- **The fleet worker** lists pull requests and issues in every repo: about
+  25 of that fire's 79 tool calls. By what those calls and each repo's share
+  of the session's starting context can cost, a repo adds $0.02 to $0.09 a
+  fire: $1.05 to $1.65 a fire for 6 repos, $2.15 to $3.20 for 30. The fire
+  follows the open pull requests and issues it finds more than the count:
+  44 of the 79 calls worked on specific items.
+- **The prompt-audit sweep** audits each repo in a child session that the
+  $2.03 leaves out. One small repo's child cost $0.46, so a sweep is nearer
+  $5 for 6 repos and $9 for 15.
+
+At the kit's starting size the two roughly cancel, so the table stands. Each
+repo you add costs about $0.40 to $0.90 a week on Pro, 1% to 2% of the week
+at the middle estimate, and a smaller share of a larger plan's. A fleet of
+30 repos puts the base routines a fifth to three quarters above the table.
 
 The eval row is what the guard books, at its own rate: 30% of the week is
 $10, $50 or $200 of eval calls, against about $42 for one pass over the 48
