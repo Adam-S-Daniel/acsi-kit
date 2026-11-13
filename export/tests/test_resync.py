@@ -190,7 +190,7 @@ def test_a_failure_opens_or_updates_one_issue_and_a_clean_success_closes_it():
     assert run.index("printf '## TLDR") < run.index("printf 'The daily")
     assert "--add-label agent-authored > /dev/null \\\n" in run and "|| echo \"::warning::" in run
     # It names the failed step from the step outcomes, never the log.
-    named = {"resync", "holdback", "push", "fire"}
+    named = {"resync", "token", "holdback", "push", "closestale", "fire"}
     assert {k.removeprefix("OUTCOME_").lower() for k in report["env"] if k.startswith("OUTCOME_")} == named
     assert named <= {s.get("id") for s in job["steps"]}
     assert "gh run view" not in run and "--log" not in run
@@ -273,3 +273,107 @@ def test_the_fix_routine_guide_names_the_branch_prefix_the_workflow_watches():
 def test_runs_queue_so_two_cannot_both_fire_the_routine():
     doc, _ = _job()
     assert doc["concurrency"] == {"group": "resync", "cancel-in-progress": False}
+
+
+# ── The fix routine's pull request is opened by a workflow ──────────────────
+
+FIX_WORKFLOW = EXPORT_DIR.parent / ".github" / "workflows" / "resync-fix-pr.yml"
+ACTIONS_LOCK = EXPORT_DIR.parent / ".github" / "workflows" / "actions.lock"
+
+
+PUSHED_WORKFLOW = EXPORT_DIR.parent / ".github" / "workflows" / "resync-fix-pushed.yml"
+
+
+def _on(doc):
+    return doc.get("on", doc.get(True))
+
+
+def _fix_job():
+    doc = yaml.safe_load(FIX_WORKFLOW.read_text(encoding="utf-8"))
+    return doc, doc["jobs"]["open-pr"]
+
+
+def test_the_pushed_workflow_triggers_only_on_resync_fix_pushes_and_holds_nothing():
+    text = PUSHED_WORKFLOW.read_text(encoding="utf-8")
+    doc = yaml.safe_load(text)
+    assert _on(doc) == {"push": {"branches": ["resync-fix/**"]}}
+    assert doc["permissions"] in ({}, {"contents": "read"})
+    assert len(doc["jobs"]) == 1
+    (job,) = doc["jobs"].values()
+    assert job["if"] == "${{ !github.event.deleted }}"
+    assert "secrets." not in text
+    assert all("uses" not in s for s in job["steps"]) and len(job["steps"]) == 1
+    assert "run" in job["steps"][0] and "${{" not in job["steps"][0]["run"]
+
+
+def test_the_fix_pr_workflow_runs_only_after_the_pushed_workflow_with_least_privilege():
+    pushed = yaml.safe_load(PUSHED_WORKFLOW.read_text(encoding="utf-8"))
+    doc, job = _fix_job()
+    assert _on(doc) == {"workflow_run": {"workflows": [pushed["name"]], "types": ["completed"]}}
+    assert pushed["name"] == "Re-sync fix branch pushed"
+    assert doc["permissions"] == {"contents": "read"}
+    assert job["permissions"] == {"contents": "read", "issues": "write"}
+    assert len(doc["jobs"]) == 1
+    cond = " ".join(job["if"].split())
+    assert "github.event.workflow_run.conclusion == 'success'" in cond
+    assert "github.event.workflow_run.event == 'push'" in cond
+    assert "github.event.workflow_run.head_repository.full_name == github.repository" in cond
+    assert job["concurrency"] == {
+        "group": "resync-fix-pr-${{ github.event.workflow_run.head_branch }}",
+        "cancel-in-progress": False}
+    for step in job["steps"]:
+        assert "${{" not in step.get("run", ""), step.get("name")
+
+
+def test_the_fix_pr_workflow_opens_the_pull_request_with_the_app_token_after_checking_for_one():
+    _, job = _fix_job()
+    mint = _step(job, "Mint the App token")
+    assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
+    assert mint["with"]["permission-contents"] == "read"
+    assert mint["with"]["permission-pull-requests"] == "write"
+    step = _step(job, "Open the pull request and link it on the issue")
+    assert step["env"]["GH_TOKEN"] == "${{ steps.token.outputs.token }}"
+    assert step["env"]["ISSUE_TOKEN"] == "${{ github.token }}"
+    assert step["env"]["BRANCH"] == "${{ github.event.workflow_run.head_branch }}"
+    assert step["env"]["HEAD_SHA"] == "${{ github.event.workflow_run.head_sha }}"
+    run = step["run"]
+    assert "^resync-fix/[0-9A-Za-z._/-]+$" in run
+    assert run.index("gh pr list --repo") < run.index("gh pr create")
+    assert "--state open" in run and "--body-file" in run and "## TLDR" in run
+    assert 'GH_TOKEN="$ISSUE_TOKEN" gh issue comment' in run
+    assert "Fix routine pull request:" in run
+    # The commit message is never printed.
+    assert 'echo "$message' not in run and 'printf "%s" "$message' not in run
+    assert "agent-authored" in run
+
+
+def test_the_actions_lock_lists_both_fix_workflows():
+    lock = yaml.safe_load(ACTIONS_LOCK.read_text(encoding="utf-8"))
+    assert lock["workflows"][".github/workflows/resync-fix-pushed.yml"] == []
+    assert lock["workflows"][".github/workflows/resync-fix-pr.yml"] == [
+        "actions/create-github-app-token@v3.2.0"]
+    keys = list(lock["workflows"])
+    assert keys == sorted(keys)
+
+
+def test_a_run_with_nothing_to_move_closes_a_stale_resync_pull_request():
+    _, job = _job()
+    names = [s.get("name") for s in job["steps"]]
+    close = _step(job, "Close a stale re-sync pull request")
+    assert close["if"] == "steps.app.outputs.configured == 'true' && steps.resync.outputs.changed == 'false'"
+    assert close["env"]["GH_TOKEN"] == "${{ steps.token.outputs.token }}"
+    assert "gh pr close" in close["run"] and "isCrossRepository" in close["run"]
+    assert "could not list open pull requests" in close["run"] and "exit 1" in close["run"]
+    assert "<sub>🤖 Written by the daily re-sync on behalf of @$OWNER</sub>" in close["run"]
+    assert close["env"]["OWNER"] == "${{ github.repository_owner }}"
+    push = "Push resync/auto and open or update the pull request"
+    assert names.index(push) < names.index(close["name"])
+    assert "steps.resync.outputs.changed == 'true'" in _step(job, push)["if"]
+    # The App steps also run when nothing changed.
+    assert _step(job, "Check for the App")["if"] == "steps.holdback.outputs.all_held != 'true'"
+
+
+def test_the_fix_routine_leaves_the_pull_request_to_the_workflow():
+    guide = (EXPORT_DIR / "FIX-ROUTINE.md").read_text(encoding="utf-8")
+    assert "resync-fix-pr.yml" in guide
+    assert "Do not open a pull request" in guide

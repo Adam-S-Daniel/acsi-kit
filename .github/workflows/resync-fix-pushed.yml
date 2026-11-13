@@ -1,0 +1,27 @@
+# Announces that a re-sync fix branch was pushed, so resync-fix-pr.yml can open
+# its pull request. It holds no secrets and uses no actions, on purpose: a
+# `push` workflow runs the file from the pushed branch, and the fix routine
+# that pushes `resync-fix/` branches reads untrusted source text, so anything
+# that held the GitHub App key here could be rewritten by the branch itself.
+# resync-fix-pr.yml runs on this workflow's completion (`workflow_run`), which
+# always runs the default branch's copy of that file.
+#
+# Every push to such a branch is salient, so there is no `paths` filter. Not a
+# pull_request workflow, so it is no required check.
+name: Re-sync fix branch pushed
+
+on:
+  push:
+    branches: ["resync-fix/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    # A deleted branch also fires a push event; there is nothing to open then.
+    if: ${{ !github.event.deleted }}
+    steps:
+      - name: Note the push
+        run: echo "::notice::a re-sync fix branch was pushed; resync-fix-pr.yml opens its pull request"
