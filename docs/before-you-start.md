@@ -72,9 +72,12 @@ a smaller plan has a smaller week. From it, `copy-starter.sh` sizes the
 | `points_per_usd` in `evals/budget.yml` | `0.03` | `0.006` | `0.0015` (as exported) |
 | `stop_when_session_above` (5-hour window) | `0.90` | `0.90` | not set |
 | `judge_exclude_tiers` in `evals/roster-policy.yml` | `[fable, mythos]` | not set | not set |
-| Fleet worker (`FLEET_WORKER_EVERY_HOURS` on `_agent-guidance`) | every 24 hours | every 6 hours | every 3 hours |
-| Base routines, share of the week (model) | ~25% | ~8% | ~3% |
-| Evals of the core fixtures, share of the week (model) | ~20%, and the 80% stop is reached most weeks | ~16% | ~6% |
+| Fleet worker (`FLEET_WORKER_EVERY_HOURS` on `_agent-guidance`) | every 24 hours | every 12 hours | every 3 hours |
+| Agent changelog watcher (you set its schedule, [routines](routines.md#agent-changelog-watcher)) | weekly | daily | daily |
+| One week of the plan, in API-equivalent dollars (model) | about $50 ($33 to $280) | about $250 ($170 to $990) | about $1,000 ($670 to $1,700) |
+| Base routines, a week | about $21 | about $50 | about $128 |
+| Base routines, share of the week (model) | ~42% (7% to 64%) | ~20% (5% to 30%) | ~13% (8% to 19%) |
+| Evals the weekly cap lets through, a week | about $10: a quarter of the core fixtures | about $50: each core fixture once | about $200: each core fixture four times |
 
 The weekly cap (30%) and the 80% account stop stay as exported on every plan.
 
@@ -91,23 +94,62 @@ Why each one:
   and no fire starts, once the window reads 90%.
 - **The judge.** Pro bills Fable as usage credits from the first call, so the
   roster picks the judge from another tier.
-- **The fleet worker.** It fires about 56 times a week at every 3 hours,
-  about 35% of a Pro week on its own.
+- **The fleet worker.** One fire that took an issue cost $1.85. At every 3
+  hours that is 56 fires and about $104 a week: two Pro weeks at the middle
+  estimate.
+- **The changelog watcher.** One fire cost $2.68, so daily it is about $19 a
+  week, more than a third of a Pro week at the middle estimate. Weekly, it
+  reads a week of vendor releases in one run.
 
-The shares were modeled at the earlier rate of $20 per point. At the
-2026-11-10 rate of about $6.70 the base routines' shares, and the fleet
-worker's 35% of a Pro week, may be up to three times as high until they are
-re-modeled ([acsi-kit#43](https://github.com/Adam-S-Daniel/acsi-kit/issues/43)).
-Evals stay within the 30% cap, which the guard now charges at the new rate.
+### What the shares rest on
 
-The shares are a model, not a measurement on smaller plans. They assume Max
-5x is a quarter of Max 20x's weekly allowance and Pro a twentieth (the plan
-multipliers; Anthropic does not publish the weekly ratios), the owner's
-measured routine costs, and an adopter whose own work fills 30% of the week.
-On Pro the daily changelog watcher is most of what is left of the base's
-cost; leave the optional dashboard refresh off on
-Pro and Max 5x (it adds about 44% and 12%). Most Pro adopters are better
-served by the base alone.
+The dollar figures are the owner's, on Max 20x, measured on 2026-11-13 from
+one fire of each routine: fleet worker $1.85, changelog watcher $2.68,
+memory curation $4.54 (weekly), prompt-audit sweep $2.03 (counted as one
+fire every two weeks), and $0.87 for an eval fire (the mean of 304 fires
+since 2026-11-09, plus the routine session that runs it). One fire is a
+thin sample: a fleet worker fire that finds nothing to do costs less.
+
+Two things are not known, and each share's range spans both:
+
+- **Dollars per point.** The exported $6.70 is the low end of what was
+  measured, which suits a guard: it charges evals too much, never too
+  little. Over the 20 meter points that ticked in overnight windows from
+  2026-10-26 to 2026-11-11 with evals running, eval calls cost $8.80 a point
+  ($6.20 to $12.90 by night), and three whole weeks of the account's known
+  spend come to at least $14, $17 and $20 a point. The middle estimate uses
+  $10; the range runs from $6.70 to $17.
+- **How the plans' weeks compare.** Anthropic publishes 5x and 20x for the
+  5-hour window, not for the week. The middle estimate and the guard take
+  Max 5x as a quarter of Max 20x's week and Pro as a twentieth. The weekly
+  hours Anthropic gave in 2025 (40 to 80, 140 to 280 and 240 to 480) would
+  make them 0.58 and a sixth, the favorable end of each range.
+
+The eval row is what the guard books, at its own rate: 30% of the week is
+$10, $50 or $200 of eval calls, against about $42 for one pass over the 48
+core fixtures. On the meter that is 30% at worst and about 20% at the
+middle estimate.
+
+### On Pro and Max 5x
+
+Both run the whole kit, at a slower pace:
+
+- **Max 5x.** The fleet worker fires twice a day, and evals cover the core
+  fixtures about once a week. At the worst end of the ranges the base
+  routines and evals together take 60% of the week, so watch the meter in
+  the first week.
+- **Pro.** The fleet worker fires once a day, and evals cover the core
+  fixtures about once a month. Schedule the changelog watcher weekly, set
+  the memory curation task's model to Sonnet (the owner's $4.54 fire ran on
+  Opus), and leave the optional dashboard refresh off: one refresh cost the
+  owner $7.59. At the worst end the base routines alone take 64% of the
+  week, and with evals they reach the 80% stop, which holds evals but not
+  routines.
+
+If the first week's meter shows the worst end, turn things off in this
+order: evals (the base setup works without `skills-evals`), then the fleet
+worker (disable `fleet-worker-fire.yml` in `_agent-guidance` and press
+**Run now** when you want a pass), then the changelog watcher.
 
 ## The config file
 
