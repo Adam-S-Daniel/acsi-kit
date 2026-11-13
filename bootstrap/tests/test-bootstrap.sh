@@ -148,7 +148,17 @@ assert_not "an invalid CLAUDE_PLAN is refused" bash "$B/create-repos.sh" --confi
 assert_eq "fleet.env.example leaves CLAUDE_PLAN for the adopter" "$(grep -c '^CLAUDE_PLAN=$' "$B/fleet.env.example")" 1
 for plan in pro max5x max20x; do
   assert_eq "fleet_worker_hours $plan" "$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
-    "$(case $plan in pro) echo 24;; max5x) echo 12;; max20x) echo 3;; esac)"
+    "$(case $plan in pro) echo 168;; max5x) echo 12;; max20x) echo 3;; esac)"
+done
+# The starter's fire workflow must accept each plan's value: run its step by
+# hand with nothing configured, so it stops at "not configured", after the
+# value check and before any network call.
+python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["jobs"]["fire"]["steps"][0]["run"])' \
+  "$B/../starter/agent-guidance/.github/workflows/fleet-worker-fire.yml" > "$T/fire-step.sh"
+for plan in pro max5x max20x; do
+  hours=$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")
+  EVERY_HOURS=$hours GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL= FIRE_BEARER= bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
+  assert "the starter's fire workflow accepts $plan's $hours hours" has "$T/fire-step.out" "not configured"
 done
 
 # ======================================================== plan sizing (acsi-kit#28)

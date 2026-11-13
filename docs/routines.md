@@ -45,7 +45,7 @@ when the stub itself changes.
 
 | Setting | Value |
 |---|---|
-| Schedule | none on claude.ai: an API trigger only, fired by `_agent-guidance`'s `fleet-worker-fire.yml` every 3 hours, thinned to every 12 or 24 by the `FLEET_WORKER_EVERY_HOURS` variable `create-environments.sh` sets from `CLAUDE_PLAN` ([which plan](before-you-start.md#which-plan)) (set `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER` there, [bootstrap README](../bootstrap/README.md#variables-and-secrets-set-by-hand)); fresh session per fire |
+| Schedule | none on claude.ai: an API trigger only, fired by `_agent-guidance`'s `fleet-worker-fire.yml` every 3 hours, thinned to every 12 hours or weekly by the `FLEET_WORKER_EVERY_HOURS` variable `create-environments.sh` sets from `CLAUDE_PLAN` ([which plan](before-you-start.md#which-plan)) (set `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER` there, [bootstrap README](../bootstrap/README.md#variables-and-secrets-set-by-hand)); fresh session per fire |
 | Connector | the GitHub connector |
 | Repos | it attaches the repos in `_agent-guidance`'s `repos.yml` `cron_coverage.fleet` itself |
 | Notifications | push on, "Auto-fix pull requests" on |

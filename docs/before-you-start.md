@@ -72,11 +72,11 @@ a smaller plan has a smaller week. From it, `copy-starter.sh` sizes the
 | `points_per_usd` in `evals/budget.yml` | `0.03` | `0.006` | `0.0015` (as exported) |
 | `stop_when_session_above` (5-hour window) | `0.90` | `0.90` | not set |
 | `judge_exclude_tiers` in `evals/roster-policy.yml` | `[fable, mythos]` | not set | not set |
-| Fleet worker (`FLEET_WORKER_EVERY_HOURS` on `_agent-guidance`) | every 24 hours | every 12 hours | every 3 hours |
+| Fleet worker (`FLEET_WORKER_EVERY_HOURS` on `_agent-guidance`) | weekly (`168`) | every 12 hours | every 3 hours |
 | Agent changelog watcher (you set its schedule, [routines](routines.md#agent-changelog-watcher)) | weekly | daily | daily |
 | One week of the plan, in API-equivalent dollars (model) | about $50 ($33 to $280) | about $250 ($170 to $990) | about $1,000 ($670 to $1,700) |
-| Base routines, a week | about $21 | about $50 | about $128 |
-| Base routines, share of the week (model) | ~42% (7% to 64%) | ~20% (5% to 30%) | ~13% (8% to 19%) |
+| Base routines, a week | about $10 | about $50 | about $128 |
+| Base routines, share of the week (model) | ~20% (4% to 30%) | ~20% (5% to 30%) | ~13% (8% to 19%) |
 | Evals the weekly cap lets through, a week | about $10: a quarter of the core fixtures | about $50: each core fixture once | about $200: each core fixture four times |
 
 The weekly cap (30%) and the 80% account stop stay as exported on every plan.
@@ -96,7 +96,8 @@ Why each one:
   roster picks the judge from another tier.
 - **The fleet worker.** One fire that took an issue cost $1.85. At every 3
   hours that is 56 fires and about $104 a week: two Pro weeks at the middle
-  estimate.
+  estimate. Even daily it is a quarter of one, so Pro fires it once a week,
+  on Tuesday at 00:20 UTC, after the allowance week turns over.
 - **The changelog watcher.** One fire cost $2.68, so daily it is about $19 a
   week, more than a third of a Pro week at the middle estimate. Weekly, it
   reads a week of vendor releases in one run.
@@ -140,9 +141,10 @@ count, neither one measured across fleet sizes:
   $5 for 6 repos and $9 for 15.
 
 At the kit's starting size the two roughly cancel, so the table stands. Each
-repo you add costs about $0.40 to $0.90 a week on Pro, 1% to 2% of the week
-at the middle estimate, and a smaller share of a larger plan's. A fleet of
-30 repos puts the base routines a fifth to three quarters above the table.
+repo you add costs about $0.25 to $0.30 a week on Pro, half a percent of
+the week at the middle estimate, and no larger a share of a larger plan's.
+A fleet of 30 repos puts the base routines a fifth to four fifths above the
+table.
 
 The eval row is what the guard books, at its own rate: 30% of the week is
 $10, $50 or $200 of eval calls, against about $42 for one pass over the 48
@@ -157,13 +159,14 @@ Both run the whole kit, at a slower pace:
   fixtures about once a week. At the worst end of the ranges the base
   routines and evals together take 60% of the week, so watch the meter in
   the first week.
-- **Pro.** The fleet worker fires once a day, and evals cover the core
+- **Pro.** The fleet worker fires once a week, and evals cover the core
   fixtures about once a month. Schedule the changelog watcher weekly, set
   the memory curation task's model to Sonnet (the owner's $4.54 fire ran on
   Opus), and leave the optional dashboard refresh off: one refresh cost the
-  owner $7.59. At the worst end the base routines alone take 64% of the
-  week, and with evals they reach the 80% stop, which holds evals but not
-  routines.
+  owner $7.59. At the worst end the base routines take 30% of the week
+  and evals another 30%. A weekly fleet worker takes at most three
+  `agent-ready` issues a week, so press **Run now** on its routine when you
+  want a pass sooner.
 
 If the first week's meter shows the worst end, turn things off in this
 order: evals (the base setup works without `skills-evals`), then the fleet

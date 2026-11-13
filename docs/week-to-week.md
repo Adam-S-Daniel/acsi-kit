@@ -2,7 +2,7 @@
 
 | When | What happens | What you do |
 |---|---|---|
-| Every 3 to 24 hours, by plan | The fleet worker | Read its list of pull requests that need you |
+| Every 3 hours to weekly, by plan | The fleet worker | Read its list of pull requests that need you |
 | Daily | Fixture supply, the draft lane, retirement verdicts, the changelog watcher, the drift report (including its guidance overlap section), and on your machine the session miner and usage census | Nothing, unless an issue or pull request is waiting on you |
 | Weekly | The roster refresh, the planned sweep (Tuesdays 07:00 UTC), memory curation (Mondays) | Skim the results on `persistent/eval-results`, and act on the drift report's guidance overlap section by the rules in `_agent-guidance`'s README, "Repeated guidance across repos" (a check first, then a skill, then `base.md`) |
 | On demand | A `plugin-runtime-review` deployment, a routine prompt change, a leaked key | Only you can do these |
