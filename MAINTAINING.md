@@ -27,9 +27,13 @@ For the kit's owner and the agents working on it; adopters can skip this.
   (`export/FIX-ROUTINE.md` is its guide) and pushes a `resync-fix/` branch,
   at most once a UTC day and never while such a pull request is open. The
   routine can push but cannot open pull requests or comment, so
-  `.github/workflows/resync-fix-pr.yml` opens the pull request from the last
-  commit's message, labels it and links it on the issue; review and merge it
-  like any other. A run that finds every source at its pin closes a stale
+  `.github/workflows/resync-fix-pr.yml` opens the pull request from the
+  pushed commit's message, labels it and links it on the issue; review and
+  merge it like any other. Two workflows, so the App key stays off the
+  branch: `resync-fix-pushed.yml` runs on the push, holds no secrets and only
+  announces it, and `resync-fix-pr.yml` runs on its `workflow_run`, which
+  always uses the default branch's copy, so a pushed branch cannot change
+  what holds the key. A run that finds every source at its pin closes a stale
   `resync/auto` pull request. The fire needs the
   repository variable `RESYNC_FIXER_FIRE_URL` and the Actions secret
   `RESYNC_FIXER_FIRE_BEARER`, both from the routine's API trigger on

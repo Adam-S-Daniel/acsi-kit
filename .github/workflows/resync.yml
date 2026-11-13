@@ -30,7 +30,8 @@
 # issues: write. A held-back source also fires the fix routine
 # (export/FIX-ROUTINE.md), at most once a day, which pushes a `resync-fix/`
 # branch that follows it; resync-fix-pr.yml opens the pull request, because the
-# routine can push but cannot open pull requests or comment.
+# routine can push but cannot open pull requests or comment (a second workflow,
+# resync-fix-pushed.yml, only triggers that one).
 name: Re-sync from sources
 
 on:
@@ -202,6 +203,7 @@ jobs:
       # left open by an earlier run has nothing left to move: close it.
       # Not best effort: a failed list fails the step and so the run.
       - name: Close a stale re-sync pull request
+        id: closestale
         if: steps.app.outputs.configured == 'true' && steps.resync.outputs.changed == 'false'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -338,7 +340,7 @@ jobs:
             exit 1
           fi
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "Started the fix routine for: $HELD_BACK. It opens a pull request from a \`resync-fix/\` branch. $marker" > /dev/null \
+            --body "Started the fix routine for: $HELD_BACK. It pushes a \`resync-fix/\` branch, and resync-fix-pr.yml opens the pull request. $marker" > /dev/null \
             || echo "::warning::fired, but could not leave the day's marker comment"
           echo "::notice::fix routine fired"
 
@@ -353,15 +355,19 @@ jobs:
           ISSUE_TITLE: Re-sync from sources is failing
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           OUTCOME_RESYNC: ${{ steps.resync.outcome }}
+          OUTCOME_TOKEN: ${{ steps.token.outcome }}
           OUTCOME_HOLDBACK: ${{ steps.holdback.outcome }}
           OUTCOME_PUSH: ${{ steps.push.outcome }}
+          OUTCOME_CLOSESTALE: ${{ steps.closestale.outcome }}
           OUTCOME_FIRE: ${{ steps.fire.outcome }}
         run: |
           set -euo pipefail
           failed=""
           [ "$OUTCOME_RESYNC" = failure ] && failed="${failed}${failed:+, }Move the pins to each source's head"
           [ "$OUTCOME_HOLDBACK" = failure ] && failed="${failed}${failed:+, }Regenerate starter/, holding back a source that breaks it"
+          [ "$OUTCOME_TOKEN" = failure ] && failed="${failed}${failed:+, }Mint the App token"
           [ "$OUTCOME_PUSH" = failure ] && failed="${failed}${failed:+, }Push resync/auto and open or update the pull request"
+          [ "$OUTCOME_CLOSESTALE" = failure ] && failed="${failed}${failed:+, }Close a stale re-sync pull request"
           [ "$OUTCOME_FIRE" = failure ] && failed="${failed}${failed:+, }Fire the fix routine"
           [ -n "$failed" ] || failed="another step (see the run)"
           body="$RUNNER_TEMP/resync-issue.md"

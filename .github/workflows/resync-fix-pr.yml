@@ -5,16 +5,25 @@
 # from the pushed commit's message, labels it, and comments the link on the
 # "Re-sync from sources is failing" issue.
 #
-# Every push to such a branch is salient, so there is no `paths` filter. Not a
-# pull_request workflow, so it is no required check. Needs the same GitHub App
-# as resync.yml (variable RESYNC_APP_CLIENT_ID, secret RESYNC_APP_PEM); without
-# one it reports that and succeeds. The App's token, unlike GITHUB_TOKEN, lets
-# the pull request's own checks run, which the required `test` check needs.
+# It runs on `workflow_run` of resync-fix-pushed.yml, not on the push itself. A
+# `push` workflow runs the file from the pushed branch, so whoever can push a
+# `resync-fix/` branch (the routine, which reads untrusted source text) could
+# edit this file there and use the App key. A `workflow_run` workflow always
+# runs the default branch's copy, so a pushed branch cannot change what holds
+# the key. The job reads only the branch name and sha from the event and never
+# checks the branch out.
+#
+# Not a pull_request workflow, so it is no required check. Needs the same
+# GitHub App as resync.yml (variable RESYNC_APP_CLIENT_ID, secret
+# RESYNC_APP_PEM); without one it reports that and succeeds. The App's token,
+# unlike GITHUB_TOKEN, lets the pull request's own checks run, which the
+# required `test` check needs.
 name: Open the re-sync fix pull request
 
 on:
-  push:
-    branches: ["resync-fix/**"]
+  workflow_run:
+    workflows: ["Re-sync fix branch pushed"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -22,6 +31,14 @@ permissions:
 jobs:
   open-pr:
     runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    # One run per branch at a time; a queued run is never cancelled.
+    concurrency:
+      group: "resync-fix-pr-${{ github.event.workflow_run.head_branch }}"
+      cancel-in-progress: false
     # A job-level block replaces the workflow's, so contents: read is repeated;
     # issues: write is for the issue comment, made with GITHUB_TOKEN.
     permissions:
@@ -49,8 +66,9 @@ jobs:
         with:
           client-id: ${{ vars.RESYNC_APP_CLIENT_ID }}
           private-key: ${{ secrets.RESYNC_APP_PEM }}
-          # Only what opening and labeling the pull request need.
-          permission-contents: write
+          # Only what opening and labeling the pull request need; the branch
+          # is already pushed, so contents is read-only.
+          permission-contents: read
           permission-pull-requests: write
 
       # The commit message's first line is the title and the rest the body. The
@@ -60,8 +78,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           ISSUE_TOKEN: ${{ github.token }}
-          BRANCH: ${{ github.ref_name }}
-          HEAD_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           BASE_BRANCH: ${{ github.event.repository.default_branch }}
           ISSUE_TITLE: Re-sync from sources is failing
         run: |

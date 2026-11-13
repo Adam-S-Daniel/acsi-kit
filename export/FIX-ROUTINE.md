@@ -69,7 +69,8 @@ comment on them or open pull requests on them.
    comment: `.github/workflows/resync-fix-pr.yml` does both when the branch
    arrives, using the commit message. So the commit message is the pull
    request. Its first line is the title. After a blank line comes the full
-   body: it starts with `## TLDR` (one to three plain sentences), then the
+   body, written to a file and committed with `git commit -F <file>` (an
+   editor commit drops `#` lines such as `## TLDR`): it starts with `## TLDR` (one to three plain sentences), then the
    changes, the test commands with their counts and exit codes, and anything
    you could not verify. End it with
    `<sub>🤖 Written by Claude Code on behalf of @<owner></sub>`. The
@@ -91,5 +92,5 @@ the routine's session output reaches the owner.
 
 ## Limits
 
-No subagents. Work within about 80 tool calls; if a fix needs more, report
-on the issue instead.
+No subagents. Work within about 80 tool calls; if a fix needs more, end with a
+message saying so instead.

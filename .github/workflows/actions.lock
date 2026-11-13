@@ -11,6 +11,7 @@ workflows:
         - 'actions/setup-python@v7.1.0'
     '.github/workflows/resync-fix-pr.yml':
         - 'actions/create-github-app-token@v3.2.0'
+    '.github/workflows/resync-fix-pushed.yml': []
     '.github/workflows/resync.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/create-github-app-token@v3.2.0'
