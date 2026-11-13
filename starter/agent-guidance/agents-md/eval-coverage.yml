@@ -20,6 +20,16 @@
 #              evals/guidance/<id>/) names the eval that exercises it.
 #   skipped  — deliberately not covered; `reason` and `since` are required.
 #
+# audience: (ADR 0043) who the section is for.
+#   contributor — any contributor's agent needs it in a fleet repo; for
+#                 agents-md/base.md rows, scripts/build-contributor-rules.js
+#                 copies these sections, in base.md order, into
+#                 .github/fleet-contributor-rules.md, which the sync delivers.
+#   owner       — the owner and his agents only; reaches them through the
+#                 owner-side routes (ADR 0043 decision 2), never a consumer.
+#   The split is section-granular: a bullet that must not reach contributors
+#   moves to an owner section.
+#
 # `bytes` is generated — the section's byte extent from its heading through
 # the line before the next `##` heading (or end of file). Regenerate with
 # `node scripts/check-guidance-coverage.js --write-bytes`; CI runs
@@ -34,6 +44,7 @@
 - id: working-in-these-repos
   heading: Working in these repos
   file: agents-md/base.md
+  audience: contributor
   status: covered
   fixture: evals/guidance/working-in-these-repos/
   bytes: 349
@@ -41,6 +52,7 @@
 - id: turn-lessons-into-checks
   heading: Turn lessons into checks, skills and guidance
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/turn-lessons-into-checks/
   bytes: 705
@@ -48,6 +60,7 @@
 - id: data-exposure-in-ci
   heading: Data exposure in CI and public repos
   file: agents-md/base.md
+  audience: contributor
   status: covered
   fixture: evals/guidance/data-exposure-in-ci/
   bytes: 1197
@@ -55,6 +68,7 @@
 - id: automation-vs-branch-protection
   heading: Automation vs branch protection
   file: agents-md/base.md
+  audience: contributor
   status: covered
   fixture: evals/guidance/automation-vs-branch-protection/
   bytes: 2210
@@ -62,6 +76,7 @@
 - id: agent-contribution-markers
   heading: Agent-made GitHub contributions carry a marker
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/agent-contribution-markers/
   bytes: 631
@@ -69,6 +84,7 @@
 - id: pr-tldr
   heading: PR descriptions open with a TLDR
   file: agents-md/base.md
+  audience: contributor
   status: skipped
   reason: >-
     Enforced mechanically by agent-checks' pr-tldr check, whose refusal message
@@ -82,6 +98,7 @@
 - id: watch-finished-is-not-ci-passed
   heading: '"The watch finished" is not "CI passed"'
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/watch-finished-is-not-ci-passed/
   bytes: 1364
@@ -89,6 +106,7 @@
 - id: git-push-does-not-mean-commit-exists
   heading: A successful `git push` does not mean your commit exists
   file: agents-md/base.md
+  audience: contributor
   status: covered
   fixture: evals/guidance/git-push-does-not-mean-commit-exists/
   bytes: 1111
@@ -96,6 +114,7 @@
 - id: pinning-github-actions
   heading: Pinning GitHub Actions
   file: agents-md/base.md
+  audience: contributor
   status: covered
   fixture: evals/guidance/pinning-github-actions/
   bytes: 1173
@@ -103,6 +122,7 @@
 - id: skills-ecosystem
   heading: Skills ecosystem
   file: agents-md/base.md
+  audience: owner
   status: skipped
   reason: >-
     Account facts the model cannot know otherwise, so an eval's outcome is known
@@ -116,6 +136,7 @@
 - id: two-setup-gaps
   heading: Two setup gaps you may close, and must not nag about
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/two-setup-gaps/
   bytes: 1972
@@ -123,6 +144,7 @@
 - id: git-practices
   heading: Git practices
   file: agents-md/base.md
+  audience: contributor
   status: covered
   fixture: evals/guidance/git-practices/
   bytes: 214
@@ -130,41 +152,48 @@
 - id: section-docker
   heading: Docker
   file: agents-md/sections/docker.md
+  audience: contributor
   status: gap
   bytes: 127
 
 - id: section-dotnet
   heading: .NET / C#
   file: agents-md/sections/dotnet.md
+  audience: contributor
   status: gap
   bytes: 130
 
 - id: section-go
   heading: Go
   file: agents-md/sections/go.md
+  audience: contributor
   status: gap
   bytes: 123
 
 - id: section-javascript
   heading: JavaScript
   file: agents-md/sections/javascript.md
+  audience: contributor
   status: gap
   bytes: 131
 
 - id: section-python
   heading: Python
   file: agents-md/sections/python.md
+  audience: contributor
   status: gap
   bytes: 127
 
 - id: section-rust
   heading: Rust
   file: agents-md/sections/rust.md
+  audience: contributor
   status: gap
   bytes: 125
 
 - id: section-typescript
   heading: TypeScript
   file: agents-md/sections/typescript.md
+  audience: contributor
   status: gap
   bytes: 131

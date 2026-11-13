@@ -1,5 +1,6 @@
 - id: working-habits
   heading: Working habits
   file: agents-md/base.md
+  audience: contributor
   status: gap
   bytes: 0

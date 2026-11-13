@@ -1,6 +1,7 @@
 - id: finding-your-unknowns
   heading: Finding your unknowns
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/finding-your-unknowns/
   bytes: 1015

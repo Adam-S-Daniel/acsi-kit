@@ -1,6 +1,7 @@
 - id: github-404-means-not-authorized
   heading: A GitHub 404 means "not authorized", not "not there"
   file: agents-md/base.md
+  audience: owner
   status: covered
   fixture: evals/guidance/github-404-means-not-authorized/
   bytes: 875

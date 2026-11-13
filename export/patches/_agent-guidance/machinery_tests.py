@@ -38,7 +38,10 @@ RULES_DIR_CASES = ["rules-dir-refused", "claude-dir-other-file-passes"]
 
 def _cases(root: Path, lib) -> None:
     path = root / "test" / "fixtures" / "agent-checks-cases.jsonl"
-    lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    # Split on "\n" only: str.splitlines() also breaks on U+2028, U+0085 and the
+    # other Unicode line boundaries, which a case about Unicode whitespace
+    # carries inside a JSON string (_agent-guidance#496).
+    lines = [l for l in path.read_text(encoding="utf-8").split("\n") if l.strip()]
     ids = [json.loads(l)["id"] for l in lines]
     if not set(RULES_DIR_CASES) <= set(ids):
         raise SystemExit(f"machinery_tests: the case table lacks a rules-dir case: {RULES_DIR_CASES}")
