@@ -337,6 +337,11 @@ def render_md(doc: dict) -> str:
         "- Ceiling and floor never pause a `stakes: high` subject, a kept one, or one whose "
         f"confidence that it helps is at least {v(C + 'keep_guard')} "
         f"({ref(C + 'keep_guard')}).",
+        "- **Weekly guidance window:** no automated eval run, in any mode, starts while "
+        f"_agent-guidance's weekly guidance merge window is open ([`base-md-merge-window.yml`]({MERGE_WINDOW}), "
+        "US Eastern, so its UTC hours move with daylight saving time); a run already going "
+        "finishes. Planned fires wait for the next sweep after it closes "
+        "([ADR 0017](decisions/0017-guidance-loop-merges-wait-for-the-weekly-window.md)).",
         "",
         "## Re-checks and stakes",
         "",
@@ -359,8 +364,9 @@ def render_md(doc: dict) -> str:
         "",
         "A check that blocked but whose overrides no source counts is `earning`, marked "
         "unmeasured; `overridden-often` needs a measured rate. Non-public repositories "
-        f"are shown only when at least {v(H + 'min_private_repos')} feed the data "
-        f"({ref(H + 'min_private_repos')}). **No rule removes a hook check**: the verdicts "
+        f"get their own row only when at least {v(H + 'min_private_repos')} feed the data "
+        f"({ref(H + 'min_private_repos')}); below that, their runs and blocks still count, "
+        "unnamed, in each check's totals and verdict. **No rule removes a hook check**: the verdicts "
         "are reported, not acted on.",
         "",
     ]
