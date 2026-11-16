@@ -8,7 +8,13 @@ audience and runtime: `acsi-anything-anywhere` and `acsi-coding-anywhere` (cloud
 enabled by default), `acsi-coding-local` and `acsi-non-coding-local` (machine-bound,
 opt-in). A skill is a folder `plugins/<plugin>/skills/<skill>/` holding a
 `SKILL.md`, and the same file works in Codex and any agent that reads the
-Agent Skills format.
+Agent Skills format. A plugin can also carry hooks: `acsi-anything-anywhere`
+ships the fleet-guidance fetch and a hook that blocks a GitHub write without
+the agent marker, and any APPROVE review.
+
+The marketplace has a fifth entry, `example-site-platform`: an example of a
+federated plugin served from another repo. Point it at a repo of your own or
+remove it; removing it is a retired name, so it needs the review below.
 
 The kit ships its skills in tiers ([choosing optional
 content](#choosing-optional-content)). The four core skills are always in
@@ -33,8 +39,16 @@ skill:
    are the worked example.
 
 Its folder name is a one-way door once shipped: a consumer's `skills.lock`
-keys on it, and the marketplace has no `renames` map. The registry's
-`AGENTS.md` says what else each change needs.
+keys on it, and the marketplace has no `renames` map. The required `pytest`
+job enforces both halves. `scripts/check_skill_gates.py` fails a pull
+request whose new, edited or removed `SKILL.md` lacks its `PURPOSE.md`, its
+`docs/skill-impact.md` entry or an eval line. `scripts/check_one_way_doors.py`
+fails one that removes, renames or moves a shipped skill or plugin, or
+reuses a retired name (the ledger is `scripts/shipped_names.json`), unless
+its description ends an adversarial review with
+`Adversarial-review: pass <link>`
+([`docs/one-way-doors.md`](../starter/agent-skills/docs/one-way-doors.md)).
+The registry's `AGENTS.md` says what else each change needs.
 
 **Durable machines** add the marketplace once and get the enabled plugins:
 `install-machine.sh` runs the registry's `setup.sh --owner-machine`, which
@@ -49,7 +63,8 @@ three tiers, listed in
 
 - **Core**: what the rest of the system depends on. It is always in
   `starter/`, and the automatic retirement never removes it
-  ([evals](evals-and-loop.md#the-loop)).
+  ([evals](evals-and-loop.md#the-loop)). Anything else you add can be
+  removed by the loop, on its eval verdict or because nobody uses it.
 - **Recommended**: skills and guidance most adopters want: two skills
   (`review-bash-ci-reliability`, `disarm-inherited-reach`), four safety
   sections and two sections of everyday working and git habits.
@@ -92,8 +107,9 @@ every lock, which needs a setup script in the cloud environment
 The exports' locks still pin the owner's registry (or forty zeros, in the
 registries themselves) until you regenerate them
 ([the skills locks](generated-files.md#the-skills-locks)). After that,
-`_agent-guidance`'s nightly `skills-lock-bump.yml` re-pins every consumer's
-lock and the hook pin with the `guidance-sync` App.
+`_agent-guidance`'s `skills-lock-bump.yml` re-pins every consumer's lock and
+the hook pin with the `guidance-sync` App, four times a day and, with evals,
+whenever your registry's `main` changes.
 
 ## Plugin runtime review
 
@@ -111,8 +127,9 @@ there. Never approve it for an agent.
 ## The privacy check
 
 The registries' predecessor was retired because its git history carried
-personal data, so `acsi-agentskills`' required `privacy` job scans every added
-line and commit message of a change against a denylist of your real names,
+personal data, so `acsi-agentskills`' required `privacy` job scans every
+tracked file's path and text, and a change's commit messages, author
+identities and branch name, against a denylist of your real names,
 emails, hosts and account ids. The list is the repository secret
 `PRIVACY_DENYLIST`, never a file in a repo; the script prints only
 `file:line` and the pattern's number, never the match, and fails closed
@@ -138,6 +155,7 @@ packaged the same way, for skills that are personal rather than reusable.
 Its branch `persistent/lessons` holds the lesson records the session miner
 writes from your transcripts on your machine
 ([machines](machine.md#scheduled-jobs-wsl-automation)); `skills-evals`'
-daily draft lane reads them with the `registry-read` App and turns one
-new-skill lesson a day into a draft skill, or, when a check would do, a
-hook proposal ([evals](evals-and-loop.md#the-loop)).
+daily draft lane (evals only) reads them with the `registry-read` App,
+ranks them with the `skill-proposal` issues you file in `acsi-agentskills`,
+and turns one proposal a day into a draft skill, or, when a check would do,
+a hook proposal ([evals](evals-and-loop.md#the-loop)).

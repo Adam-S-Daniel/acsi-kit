@@ -202,8 +202,8 @@ artifact, and a refresh republishes it.
 
 1. **The private dashboard.** Follow `skills-evals`'
    [`dashboard/README.md`](../starter/skills-evals/dashboard/README.md),
-   "Adopting it": a Dashboard artifact with `page/index.html` as its page and
-   every entry of `page/datasets.json` as a dataset, the `explorer` dataset
+   "Adopting it": a Dashboard artifact with `dashboard/page/index.html` as its
+   page and every entry of `dashboard/page/datasets.json` as a dataset, the `explorer` dataset
    (`build.py` copies `explorer/latest.json` into it) among them, with your
    owner and repo names in the live queries. A scheduled task bound to the
    dashboard's project thread refreshes it every 12 hours from

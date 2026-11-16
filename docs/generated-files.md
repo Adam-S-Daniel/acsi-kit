@@ -7,7 +7,11 @@ Apps, so they arrive holding a placeholder or the owner's value, and
 `bootstrap/regenerate.sh <task>` rebuilds each with the repo's own tooling
 and proposes the result as a pull request on `regenerate/<task>`;
 `--check` reads your default branches and says whether it is done (that is
-what `status.sh` asks). The steps below run after the starter pull requests
+what `status.sh` asks), `--dry-run` changes nothing, and `--track base` or
+`--track evals` limits a task to one track's repos. The tasks are
+`skills-locks`, `hook-pin`, `run-health-sha`, `codex-pin`, `actions-lock`
+and, for evals, `evals-fleet`, which merges `fleet.evals.yml` into
+`fleet.yml` ([the first apply](settings-and-apps.md#the-first-apply)). The steps below run after the starter pull requests
 are merged, before the first settings apply.
 
 Every item `REGENERATE.md` lists, and the quick start step that handles it:
@@ -43,8 +47,10 @@ Every item `REGENERATE.md` lists, and the quick start step that handles it:
 | `acsi-agentskills` | `<your name>` | 12 |
 | `acsi-agentskills-private` | `<your name>` | 12 |
 
-(`acsi-agentskills-private` has no `scheduled-run-health.yml`; `REGENERATE.md`
-lists the two registries under one heading.)
+(The table has a row for every item `REGENERATE.md` lists, and that file
+puts the two registries under one heading: `acsi-agentskills-private` has no
+`scheduled-run-health.yml`, so step 16 does nothing there. Step 2 creates
+the waiting feed's repository only with `--with-optional`.)
 
 ## The skills locks
 
@@ -62,8 +68,9 @@ lists the two registries under one heading.)
 
 Your registry starts with the core skills and the optional ones you added
 in step 1, so each lock names them (the exported consumer locks name the source registry's longer
-list until this step replaces them). From then on the nightly `skills-lock-bump.yml` in `_agent-guidance` keeps the consumers
-current.
+list until this step replaces them). From then on `skills-lock-bump.yml` in
+`_agent-guidance` keeps the consumers current, four times a day and on a
+registry change.
 
 ## The skills-bootstrap hook pin
 
@@ -74,7 +81,7 @@ commit the delivered `.claude/hooks/skills-bootstrap.sh` comes from; its
 HEAD after checking that the hook there has exactly that sha256, and refuses
 if the two copies have drifted (then review the hook and run
 `_agent-guidance`'s own `scripts/bump-hook-pin.sh`, which re-pins both and
-opens its own pull request; the nightly bumper runs it from then on).
+opens its own pull request; the bumper runs it from then on).
 
 ## The scheduled-run-health pin
 
@@ -117,13 +124,16 @@ The owner's fleet includes a site platform and two sites, so
 `repo-settings/fleet.yml` declares `example-site-platform`,
 `example-site-a` and `<OWNER_TWO>/example-site-b`, `tests/test_repo_settings.py`
 has rows for them, and `_agent-guidance`'s `repos.yml` lists them under
-`cron_coverage.fleet`. Unless you have those repos, remove them in a pull
+`cron_coverage.fleet` and under `skills_bootstrap.repos`. Unless you have those repos, remove them in a pull
 request on each repo before the first apply: `apply-settings.sh` refuses
 while `fleet.yml` names a repo that does not exist, and a missing
 `cron_coverage.fleet` repo is an error for the coverage check. Add your own
 consumers the same way later.
 
-These are the only places the invented example repos remain in live config.
+Those are the places the invented example repos remain in live config,
+besides `acsi-agentskills`' federated marketplace entry
+([the registry](skills.md#the-registry)) and the eval runner's RULES line
+([routines](routines.md#the-eval-runner)).
 `skills-evals` does not check them out, pass them to the coverage census or
 list them in `harness/registries.yml`, which names only your two registries;
 the private one may be empty (`may_be_empty: true`), so the census runs on day

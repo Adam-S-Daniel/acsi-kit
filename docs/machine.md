@@ -18,15 +18,21 @@ branch) your `acsi-agentskills` and `_agent-guidance` into `REPOS_DIR` from
 `fleet.env`, refuses a clone whose `origin` is not your repo, and then runs
 each repo's own installer:
 
-1. `acsi-agentskills`' `setup.sh --owner-machine`: adds your marketplace and
-   enables the plugins in `~/.claude/settings.json`.
+1. `acsi-agentskills`' `setup.sh --owner-machine`: registers both
+   marketplaces and enables the plugins in `~/.claude/settings.json`, where
+   it also sets `syncClaudeAiSkills: false` (your claude.ai account's skills
+   stop loading in terminals) and `disableSkillShellExecution: true`. It
+   writes the fleet-guidance owner marker and installs the launcher step 4
+   registers. On Windows, run the installer in Git Bash and in WSL: each has
+   its own home.
 2. `acsi-agentskills`' `scripts/install-agent-hooks.sh`: the config-based git
    hooks (Git 2.54+) that run `.githooks/agent-checks` on every commit and
    push, in clones of your two owners' repos only (an `includeIf` per owner).
 3. `_agent-guidance`'s `scripts/register-memory-home-hook.sh`: the
    user-level `memory-home.sh` hook ([memory](guidance.md#memory-that-points-at-its-home)).
-4. With `--with-codex`, `_agent-guidance`'s `scripts/register-codex-hook.sh`;
-   then run `codex`, type `/hooks` and trust the hook once.
+4. With `--with-codex`, `_agent-guidance`'s `scripts/register-codex-hook.sh`,
+   which registers the launcher from step 1 and refuses without it; then run
+   `codex`, type `/hooks` and trust the hook once.
 
 Every installer is idempotent, so run it again after a plugin is added or
 moved. The fleet guidance itself needs nothing more: step 1 also writes the
@@ -47,17 +53,23 @@ login:
 | session miner | daily at 07:17 | turns your transcripts into short, redacted lesson records on `acsi-agentskills-private`'s `persistent/lessons` |
 | usage census | daily at 12:37 | publishes which models and skills you ran each week to `skills-evals`' `persistent/eval-results`; the roster picks eval models from it and the planner improves the most used skills first |
 | memory curation | weekly, Monday at 13:47 (Windows with WSL only) | curates the memory notes of both homes, WSL's and the Windows profile's ([routines](routines.md#memory-curation)) |
-| waiting feed | every minute (optional) | publishes the sessions waiting on you to a private `waiting-feed` repo |
+| waiting feed | every minute | publishes the sessions waiting on you to a private `waiting-feed` repo. Optional on Linux and macOS; on Windows the task is always registered, and exits 2 each minute until `WAITING_FEED_URL` is set |
+
+On Windows `register-tasks.ps1` also registers three housekeeping tasks (a
+ccstatusline config sync and a WSL memory log every 5 minutes, and a Docker
+Desktop WSL integration watchdog), and a Codex Cloud environment sync that
+stays disabled unless you pass `-EnableCodexTasks`.
 
 **On Windows** (WSL), from the clone, once per machine:
 
-1. Install PowerShell 7 from the MSI, not the Microsoft Store
+1. Install PowerShell 7.6 or newer from the MSI, not the Microsoft Store
    (`winget install --id Microsoft.PowerShell --scope machine`).
 2. From an elevated prompt, `.\scripts\grant-keeper-batch-logon.ps1`, which
    gives your account the "Log on as a batch job" right the background tasks
    need.
 3. From an elevated PowerShell 7 prompt, `.\scripts\register-tasks.ps1`
-   (`-WhatIf` shows the change first).
+   (`-WhatIf` shows the change first; `-DistroName <name>` if your distro is
+   not `Ubuntu`).
 4. From a normal prompt, `.\scripts\install-ccstatusline.ps1`.
 
 **On Linux or macOS**:

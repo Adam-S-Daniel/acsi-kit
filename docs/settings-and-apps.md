@@ -32,29 +32,45 @@ defaults give every repo:
 
 - merge commits only (squash and rebase off), auto-merge on, branches
   deleted on merge;
-- Actions: full-SHA pins required, a read-only default token that cannot
-  approve pull requests, approval for every outside contributor's fork run;
-- Dependabot alerts and security updates;
+- Actions: pinned actions required (a full SHA, or a tag an `actions.lock`
+  pins), a read-only default token that cannot approve pull requests,
+  approval for every outside contributor's fork run;
+- Dependabot alerts and security updates, secret scanning with push
+  protection, and CodeQL default setup;
 - the label `agent-authored`;
 - the ruleset "default branch protection": a pull request for every change,
   merge commits only, the required check `agent-checks`, admin bypass, and
   the `guidance-sync` App as the one bypass actor, so the sync can push.
+  `repo-settings` itself is stricter: no App bypass, and an admin can bypass
+  only by merging a pull request, because a direct push there would apply
+  settings to the whole fleet with no checks. The sync reaches it through a
+  pull request with auto-merge.
+
+On `PLAN=free` GitHub enforces no ruleset on a private repo, so
+`repo-settings` and `acsi-agentskills-private` stay unprotected
+([free or paid](before-you-start.md#free-or-paid-github-plan)).
 
 Each repo adds its own required checks, the job names its workflows really
 publish:
 
 | Repo | Required checks |
 |---|---|
-| `acsi-agentskills` | `privacy`, `pytest`, `pytest-windows`, `plugin-runtime-approval`, `agent-checks` |
+| `acsi-agentskills` | `privacy`, `pytest`, `pytest-windows`, `plugin-runtime-approval`, `agent-checks`, `merge-gate` |
 | `skills-evals` | `test`, `agent-checks` |
 | `_agent-guidance` | `test`, `agent-checks` |
 | `wsl-automation` | `shell`, `test`, `test-linux`, `agent-checks` |
 | `repo-settings` | `agent-checks`, `unit` |
 | `acsi-agentskills-private` | `agent-checks` |
 
+`privacy` fails closed without the `PRIVACY_DENYLIST` secret, so store it
+before the `acsi-agentskills` starter pull request
+([the privacy check](skills.md#the-privacy-check)).
+
 `skills-evals` also gets the `eval-scaffold` label, a ruleset on
-`roster/proposal` that only the `roster` App may push, and, with
-`_agent-guidance`, a deletion-only ruleset on `persistent/**`.
+`roster/proposal` that only the `roster` App and a repo admin may push, a
+workflow token that may approve pull requests (the one exception to the
+default above), and, with `_agent-guidance`, a deletion-only ruleset on
+`persistent/**`.
 
 **`pull_request_target`.** GitHub blocks that event on public repos by
 default from 2026-11-02 unless an Actions policy allows it. `fleet.yml`
@@ -74,9 +90,11 @@ not declare `skills-evals`: its element waits in
 `guidance-sync`'s id.
 
 After the first apply, `repo-settings`' `repo-settings.yml` reconciles on
-every merge and on a schedule: a read-only `diff` job with the
-`settings-read` App, then an apply job behind the `fleet-apply`
-environment's approval with the `settings-admin` App.
+every merge and every Monday at 07:00 UTC: a read-only `plan` job with the
+`settings-read` App, then, only when the plan found drift, the apply job
+`repo-settings` behind the `fleet-apply` environment's approval with the
+`settings-admin` App. On a pull request a third job, `drift`, reports what
+the change would do; it is advisory, not a required check.
 
 ## Environments
 
@@ -90,11 +108,16 @@ environment's approval with the `settings-admin` App.
 
 It also sets `repo-settings`' variables `GUIDANCE_SYNC_APP_ID` and
 `ROSTER_WRITER_APP_ID` from `fleet.env`, once `create-apps.sh` has filled
-them, so run it again after the Apps. Until the evals track creates
+them, so run it again after the Apps. From the same file it sets
+`_agent-guidance`'s `FLEET_WORKER_EVERY_HOURS` (from `CLAUDE_PLAN`) and,
+once `skills-evals` exists, its `SITE_REPO` and the four federation ids; a
+key left empty in `fleet.env` is skipped. Until the evals track creates
 `skills-evals`, it skips `routine-fire`, and `ROSTER_WRITER_APP_ID` waits
 for the `roster` App; the evals track runs it again (step 37). On `PLAN=free` the private
-`repo-settings` has no environments: `fleet-apply` is skipped and you apply
-from your machine.
+`repo-settings` has no environments: `fleet-apply` is skipped,
+`create-apps.sh` does not create `settings-admin` (its key would have
+nowhere to live), the reconcile's apply job never runs, and you apply from
+your machine.
 
 **Never approve `plugin-runtime-review` for an agent, and never let one
 approve it.** It holds a pull request that changes how a plugin runs code
