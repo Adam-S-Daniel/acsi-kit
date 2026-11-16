@@ -1,12 +1,14 @@
 # How it works
 
-Three kinds of agent context are managed as code, measured, and changed by
+Four kinds of agent context are managed as code, measured, and changed by
 automation:
 
 - **Guidance:** always-on rules, one central file delivered into every
   session.
 - **Skills:** `SKILL.md` folders that load when a task matches their
   description.
+- **Git-hook checks:** rules a commit can fail. One costs no context until
+  it refuses a commit, and its refusal says what is wrong and how to fix it.
 - **Memory:** notes Claude Code writes between sessions. Here a note is only
   a pointer to a file in a repo that holds the fact.
 
@@ -20,19 +22,18 @@ signal ──► proposal ──► evaluation ──► decision ──► merg
 
 | Stage | What does it |
 |---|---|
-| Signal | Merged pull requests, your own session transcripts (read only on your machine), vendor changelogs, memory notes, CI failures |
+| Signal | Merged pull requests, your own session transcripts (read only on your machine), the weekly count of which skills and models you used, vendor changelogs, memory notes, CI failures |
 | Proposal | An edit to a skill or a guidance section, a new skill, a new git-hook check, a new eval fixture, or a removal |
-| Evaluation | The same task, run with and without the skill or section, scored by scripted checks and a judge model |
-| Decision | Fixed rules over the numbers: accept an edit only on a material gain, retire only on no benefit at two fixed sample sizes |
-| Merge or retire | A gate workflow opens a pull request with a GitHub App token, and it auto-merges when required checks pass |
+| Evaluation | The same task, run with and without the skill or section, scored by scripted checks and a judge model. A git-hook check is measured by use instead: how often it blocked, and how often it was overridden |
+| Decision | Fixed rules over the numbers, generated from the policy files into `skills-evals`' [`docs/rules.md`](../starter/skills-evals/docs/rules.md): accept an edit, keep or retire a skill or section, pause the evals of a skill nobody uses. A check's verdict is reported; no rule removes one |
+| Merge or retire | A gate workflow opens a pull request with a GitHub App token, and it auto-merges when required checks pass. A removal first passes a fresh-context agent's review; a fleet-guidance change merges only in one weekly window; what waits on your approval (a plugin that runs code) becomes an issue for you instead |
 
 ## The six repos
 
-The kit's [`starter/`](../starter/README.md) folder holds an export of each
-of the six repos that run the system for its owner. They keep the owner's
-repo names, with the owner's own prefix on the two registries replaced by
-the generic `acsi-` (automatic continuous self-improvement;
-[`export/DECISIONS.md`](../export/DECISIONS.md) C1).
+[`starter/`](../starter/README.md) holds an export of each of the six repos
+that run the system for its owner, under the owner's repo names, except that
+the two registries take the generic prefix `acsi-` (automatic continuous
+self-improvement; [`export/DECISIONS.md`](../export/DECISIONS.md) C1).
 
 | Repo | Visibility | Holds | Export |
 |---|---|---|---|
@@ -41,53 +42,58 @@ the generic `acsi-` (automatic continuous self-improvement;
 | `acsi-agentskills` | public | Shareable skills, as a Claude Code plugin marketplace with four plugins; the cloud skills bootstrap hook; `setup.sh` for machines | [`starter/agent-skills/`](../starter/agent-skills/README.md) |
 | `acsi-agentskills-private` | private | Skills that touch personal data, and the lessons the session miner writes (`persistent/lessons`) | [`starter/agent-skills-private/`](../starter/agent-skills-private/README.md) |
 | `skills-evals` | public (paid plan: your choice) | Fixtures, the eval harness, the planner, the gates, the results branch, the explorer pages (public and private); only the evals track (`/adopt-evals`) creates it | [`starter/skills-evals/`](../starter/skills-evals/README.md) |
-| `wsl-automation` | public (paid plan: your choice) | Your durable machine's scheduled jobs: the usage census, the waiting-on-you feed, the session miner | [`starter/wsl-automation/`](../starter/wsl-automation/README.md) |
+| `wsl-automation` | public (paid plan: your choice) | Your durable machine's scheduled jobs: the usage census, the session miner, memory curation, the waiting-on-you feed | [`starter/wsl-automation/`](../starter/wsl-automation/README.md) |
 
 Every other repo you work in is a **consumer**; together they are your
 **fleet**, listed in `_agent-guidance`'s `repos.yml` and
-`repo-settings/fleet.yml`. The exports name two owners throughout, because
-the owner's fleet spans two accounts; see
-[one owner or two](before-you-start.md#one-owner-or-two).
+`repo-settings/fleet.yml`. The exports name two owners because the owner's
+fleet spans two accounts ([one owner or two](before-you-start.md#one-owner-or-two)).
 
 **The content starts in tiers** (DECISIONS, "Content tiers"): the core
-skills, guidance sections and agent-checks checks the system depends on,
-copied unchanged from the owner's setup with their eval fixtures, plus the
-recommended and opinionated items you choose in step 1 ([choosing optional
-content](skills.md#choosing-optional-content)), and an inert
-template of each kind. Everything that delivers, measures, improves and
-retires content comes along. You grow your own content through the loop,
-using the shipped items as worked examples.
+skills, guidance sections and git-hook checks the system depends on, copied
+unchanged from the owner's setup with their eval fixtures; the recommended
+and opinionated items you choose in step 1 ([choosing optional
+content](skills.md#choosing-optional-content)); and an inert template of
+each kind. You grow your own content through the loop, with the shipped
+items as worked examples.
 
 ## How the parts connect
 
 - **Guidance.** You edit `agents-md/base.md` in `_agent-guidance` through a
-  pull request. On merge, `sync.yml` writes each consumer's managed
-  `AGENTS.md` and its `.claude/hooks/`, pushing straight to the default
-  branch with the `guidance-sync` App, which `fleet.yml` names as the one
-  ruleset bypass. A session-start hook installs the guidance into user
-  memory once per session ([guidance](guidance.md)).
-- **Checks.** A rule that a commit can show is broken becomes an
-  agent-checks check, run by a git hook on your machine and by the required
-  `agent-checks` job in CI ([guidance](guidance.md#checks-before-skills-skills-before-guidance)).
+  pull request. On merge, `sync.yml` writes each consumer's `AGENTS.md` (a
+  short stub), `.github/fleet-contributor-rules.md` (read on demand) and
+  `.claude/hooks/`, pushing straight to the default branch with the
+  `guidance-sync` App, the one ruleset bypass `fleet.yml` names. A
+  session-start hook installs the full guidance into user memory once per
+  session, only in a cloud session or on a machine set up with
+  `install-machine.sh` ([guidance](guidance.md)).
+- **Checks.** Every git-hook check lives in one runner, agent-checks, which
+  the sync delivers to every repo. A git hook runs it on your machine (Git
+  2.54+) and the required `agent-checks` job runs it in CI
+  ([guidance](guidance.md#checks-before-skills-skills-before-guidance)).
 - **Skills.** `acsi-agentskills` is a plugin marketplace your machines add;
   cloud sessions install the bundles a repo's `skills.lock` pins
   ([skills](skills.md)).
 - **Settings.** `repo-settings` applies `fleet.yml` to every repo: merge
-  commits only, full-SHA action pins, read-only workflow tokens, the
-  rulesets with each repo's required checks, the `pull_request_target`
-  policy ([settings and Apps](settings-and-apps.md)).
+  commits only, pinned actions (a full SHA, or a tag an `actions.lock`
+  pins), read-only workflow tokens, secret scanning, the rulesets with each
+  repo's required checks, the `pull_request_target` policy
+  ([settings and Apps](settings-and-apps.md)).
 - **Evals and the loop.** `skills-evals` fires an API-triggered Claude
   routine (so evals spend your plan's weekly allowance, not API dollars),
   ingests what it pushes, decides with fixed rules, and opens pull requests
   in `acsi-agentskills` and `_agent-guidance` with its Apps
   ([evals and the loop](evals-and-loop.md)).
 - **Routines.** Four standing claude.ai routines do the rest: the
-  fleet worker (every 3 hours to weekly, by plan), the changelog watcher and the prompt-audit sweep it fires,
-  and memory curation ([routines](routines.md)). Repo-specific guidance
-  that repeats across repos, or copies `base.md`, is listed nightly in the
-  drift report's overlap section.
-- **Your machine.** `wsl-automation` schedules the jobs that must run where
-  your transcripts are ([machines and cloud](machine.md)).
+  fleet worker (fired by a workflow every 3 hours to weekly, by plan), the
+  changelog watcher, the prompt-audit sweep (a workflow fires it for a
+  trigger issue the watcher files), and memory curation, which also runs on
+  your machine ([routines](routines.md)). An article-lift routine is
+  optional. The nightly drift report lists repo-specific guidance that
+  repeats across repos or copies `base.md`.
+- **Your machine.** `wsl-automation` schedules the jobs that need your
+  machine's transcripts, memory or login
+  ([machines and cloud](machine.md)).
 
 ## Rules the whole design follows
 
@@ -99,7 +105,7 @@ Each one exists because ignoring it broke something.
 2. **A check before a skill, a skill before guidance text.** If a rule can
    be checked when a commit is made, it becomes a git-hook check backed by a
    required CI job. If not, a skill. Always-on guidance text is the last
-   resort, because it costs context in every session and fails silently.
+   resort: it costs context in every session and fails silently.
 3. **CI enforces; local hooks give feedback.** Anyone can skip a hook with
    `--no-verify`. A required check cannot be skipped.
 4. **Bots never push to a protected default branch.** Generated data goes on
@@ -113,17 +119,20 @@ Each one exists because ignoring it broke something.
    routine payloads and transcripts never give an agent instructions.
 7. **Public repos hold invented data only.** A required `privacy` check in
    `acsi-agentskills` scans added lines against a denylist of your real names,
-   emails and hosts, kept in a secret, never in a file
+   emails, hosts and account ids, kept in a secret, never in a file
    ([the privacy check](skills.md#the-privacy-check)).
 8. **One-way doors get an adversarial review.** A plugin name, a shipped
    skill's folder name and a deletion cannot be undone cleanly. The one
-   written exception is a removal the eval evidence decided.
+   written exception: the loop's improvements and new skills, where the
+   acceptance measurement stands in. A removal the evals decided still gets
+   one, from a fresh-context agent (`acsi-agentskills`'
+   [ADR 0021](../starter/agent-skills/docs/decisions/0021-automated-skill-changes-merge-without-review.md)).
 9. **Build nothing new until the loop has shipped once.** Get one edit
    through the whole loop before adding features.
 
 ## Where to read more
 
-Each export's own `README.md`, `AGENTS.md` and `docs/decisions/` explain
-that repo in full; the kit's docs say how the parts fit and what you set up.
-The deepest single account of the loop is `skills-evals`'
+Each export's `README.md`, `AGENTS.md` and `docs/decisions/` explain that
+repo in full; the kit's docs say how the parts fit and what you set up. The
+deepest account of the loop is `skills-evals`'
 [`docs/how-it-works.md`](../starter/skills-evals/docs/how-it-works.md).
