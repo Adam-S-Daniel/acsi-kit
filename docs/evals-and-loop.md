@@ -7,12 +7,17 @@ guidance sections and acts on the numbers:
 
 - `harness/` runs an eval: `run_eval.py` loads a fixture, runs the agent
   with and without the subject (the skill, or a guidance section), scores
-  each arm with scripted checks (`scorers/objective.py`) and a judge model
-  (`scorers/judge.py`), and writes a summary.
+  each arm with scripted checks (`harness/scorers/objective.py`) and a judge model
+  (`harness/scorers/judge.py`), and writes a summary.
 - `evals/` holds the fixtures and the policy files: `budget.yml` (the
   allowance cap), `scheduled.yml` (which fixtures run on the weekly plan),
-  `roster.yml` (which models), `gate-policy.yml` (retirement),
-  `improve-policy.yml` (whether accepted improvements merge on their own).
+  `roster.yml` and `roster-policy.yml` (which models), `gate-policy.yml`
+  (keeping and retiring), `removal-policy.yml` and `scope-policy.yml`
+  (unused skills and paused evals), `improve-policy.yml` (whether accepted
+  improvements merge on their own). The rules they set are written out in
+  the generated [`docs/rules.md`](../starter/skills-evals/docs/rules.md):
+  edit a YAML, run `python3 scripts/build_rules.py`, and CI fails while the
+  page is stale.
 - `scripts/` holds the planner (`plan_week.py`), the allowance guard, the
   gates, ingest, and the improve, draft, scaffold and retire lanes.
 - `.github/workflows/` holds the workflows that fire the eval runner routine
@@ -80,10 +85,12 @@ next skill under `evals/<skill>/<name>/`, run it locally
 to `scheduled.yml` in a pull request. An improve fire needs four fixtures
 for its skill.
 
-The loop also writes fixtures: the daily fixture supply mines your merged
-pull requests into real-work fixtures (the tree before the fix, the pull
-request's own tests as a hidden checker, the closing issue as the prompt),
-and a draft is promoted onto the schedule after two clean ingested runs.
+The loop also asks for fixtures: the weekly plan files `needs-fixtures` and
+`needs-harder-fixtures` issues, the fleet worker builds each one from real
+merged work in your fleet, and a draft is promoted onto the schedule after
+two clean ingested runs (`routine-fixture-supply.yml`, daily). The older
+lane that mined merged pull requests in the routine is paused; its gate
+stays in the table below.
 
 ## The eval runner and its lanes
 
@@ -103,15 +110,21 @@ it and acts:
 | eval results | `claude/eval-*` (files under `eval-results/`) | `routine-eval-ingest.yml` writes `routine-results/<run id>/` to `persistent/eval-results` |
 | improve | `claude/eval-improve-*` (`eval-improve/`) | `routine-improve-gate.yml` opens a pull request in `acsi-agentskills` from `eval-improve/<skill>` with the `eval-improve` App |
 | guidance improve | `claude/eval-guidance-improve-*` (`eval-guidance-improve/`) | `routine-guidance-improve-gate.yml` opens one in `_agent-guidance` |
-| scaffold | `claude/scaffold-*` | `routine-scaffold-gate.yml` opens a fixtures pull request here with the `roster` App |
+| scaffold (paused: nothing fires it) | `claude/scaffold-*` | `routine-scaffold-gate.yml` opens a fixtures pull request here with the `roster` App |
 | improve cost | `claude/eval-cost-*` (`improve-cost/`) | `routine-eval-ingest.yml` validates the cost record of an improve or guidance-improve run |
 | draft skill | `claude/draft-skill-*` (`draft-skill/`, `evals/`) | `routine-draft-skill-gate.yml` opens a skill pull request in `acsi-agentskills` and a fixtures one here, or a hook-proposal issue |
 | weekly spend | `claude/spend-*` (`spend/`) | `routine-eval-ingest.yml` validates `spend/weekly.json` and writes it to `persistent/eval-results`. This lane is the private dashboard refresh's (`dashboard/build.py --spend`), not the routine's; the public document carries it only with `include_spend: true` |
 
 An improve or cost branch also matches `claude/eval-*`; the lanes' path
 filters are disjoint, and the results lane excludes cost branches, so only
-one fires. `skills-evals`' `AGENTS.md` has the full
+one fires. `skills-evals`'
+[`docs/workflows.md`](../starter/skills-evals/docs/workflows.md) has the full
 workflow table.
+
+Other loop pull requests come from workflows, not from a routine branch:
+`retire-skill/<skill>` and `retire-guidance/<section>` removals,
+`eval-scope/<run id>` (evals paused or resumed), `fixture-promotion/<run id>`
+and the `roster/proposal` roster change.
 
 ## Workload identity federation
 
@@ -159,43 +172,70 @@ be read), and the weekly plan, which spends only the room left.
 [What it costs](before-you-start.md#what-it-costs) turns these into calendar
 time.
 
-An improve fire is charged eight eval fires at their measured mean, or eight
-full reservations (0.084) before any run is measured, and the improve cap
-allows at least one fire of each kind a week. So an improve fire can go in
+An improve fire is charged about twelve eval fires at their measured mean
+(`IMPROVE_FIRE_UNITS` in `scripts/allowance_guard.py`), or that many full
+reservations before any run is measured, and the improve cap allows at least
+one fire of each kind a week. So an improve fire can go in
 the first week; a refused one later in a week usually means the cap's share
 is used.
 
 ## The loop
 
-- **The weekly plan** (`routine-eval-weekly.yml`, Tuesdays 07:00 UTC):
+- **The weekly plan** (`routine-eval-weekly.yml`, Tuesdays 07:00 UTC, and
+  again after every ingest to spend the room a finished run freed):
   `plan_week.py` computes the retirement verdicts, then plans eval fires
-  and improve fires by band (missing evidence first, then cells near a
-  decision, then improvements ranked by expected value per allowance point,
-  then re-checks) within the room left, and dispatches them one at a time.
+  and improve fires by band (a skill with a removal open first, then missing
+  evidence, cells near a decision, the guidance sections nearest a verdict,
+  improvements ranked by expected value per allowance point, then re-checks)
+  within the room left, and dispatches them one at a time.
+- **The usage census** from your machine
+  ([machines](machine.md#scheduled-jobs-wsl-automation)) feeds all of it:
+  which models the roster runs (`roster-refresh.yml`, Mondays), which skills
+  the plan favors, and which skills nobody uses. Without a current census
+  the roster falls back to the newest model per tier, and nothing is paused
+  or removed for lack of use.
 - **Improve:** an improve fire runs the skill-creator loop on one skill
   against a fixed holdout; an accepted candidate becomes a pull request.
   `improve-policy.yml`'s `improve_merge_mode: auto` makes it ready with
-  auto-merge; `draft` leaves it for you.
+  auto-merge; `draft` leaves it for you. Even on `auto`, a change the
+  registry's plugin runtime review would hold opens as a draft, and one that
+  would fail its one-way-door check opens an issue instead.
+- **Pause:** `eval-scope.yml` runs after every ingest and daily. It pauses
+  the scheduled fixtures of a skill with no recorded use, of a fixture the
+  bare model already passes, and of a removed skill, and resumes them, in an
+  `eval-scope/<run id>` pull request that merges on its own.
 - **Retire:** every day `skill-coverage.yml` computes each skill's verdict;
   a `retire` verdict gets a removal pull request (`retirement_mode: auto`),
-  or an issue. When a verdict is `retire`, and which removals file an issue
-  instead, is in the generated
+  or an issue. The pull request merges only after a fresh-context agent has
+  reviewed it and written `Adversarial-review: pass` into its body; any
+  other result leaves it open for you. A skill nobody has used is removed
+  the same way. When a verdict is `retire`, when an unused skill goes, and
+  which removals file an issue instead (for you, or for the fleet worker),
+  is in the generated
   [`docs/rules.md`](../starter/skills-evals/docs/rules.md). The
   core items listed in `evals/retirement-exempt.yml` are never retired: their
   verdict reads `retire-exempt` and nothing is opened.
-- **New skills:** `routine-draft-skill.yml` picks one new-skill lesson a day
-  from `acsi-agentskills-private`'s `persistent/lessons`, hooks first.
+- **New skills:** `routine-draft-skill.yml` picks one proposal a day, hooks
+  first, from the new-skill lessons on `acsi-agentskills-private`'s
+  `persistent/lessons` and from the `skill-proposal` issues you file in
+  `acsi-agentskills` (with a "Skill name:" line).
 - **New fixtures:** `routine-fixture-supply.yml`, daily.
+- **Guidance waits for its window:** an accepted guidance improvement opens
+  without auto-merge, and `guidance-merge-window.yml` arms it on Monday
+  between 17:00 and 19:00 UTC; a guidance removal opens only then
+  ([guidance](guidance.md#the-sync)).
 
 These pull requests merge by auto-merge once required checks pass, with no
 human review, within the limits `acsi-agentskills`'
 [ADR 0021](../starter/agent-skills/docs/decisions/0021-automated-skill-changes-merge-without-review.md)
-writes down. Set `improve_merge_mode: draft` and `retirement_mode: proposal` (in
-`evals/gate-policy.yml`) if you want to review each one first.
+writes down. To review each one first, set `improve_merge_mode: draft` in
+`evals/improve-policy.yml` and `retirement_mode: proposal` in both blocks
+(`skills` and `guidance`) of `evals/gate-policy.yml`.
 
 ## Where results land
 
 `persistent/eval-results` in `skills-evals` holds every ingested run, the
-verdicts and the coverage census; it is never deleted (a deletion-only
+verdicts, the coverage census and the usage census your machine publishes;
+it is never deleted (a deletion-only
 ruleset guards it). The weekly plan's ranking is the run's
 `improve-ranking` artifact.
