@@ -29,9 +29,12 @@ each repo's own installer:
    then run `codex`, type `/hooks` and trust the hook once.
 
 Every installer is idempotent, so run it again after a plugin is added or
-moved. The fleet guidance itself needs nothing here: the `fleet-memory`
-hook each repo carries installs it into `~/.claude/CLAUDE.md` at the first
-session in any fleet repo.
+moved. The fleet guidance itself needs nothing more: step 1 also writes the
+owner marker (`~/.config/fleet-guidance/owner`), and with it the
+`fleet-memory` hook each repo carries installs the guidance into
+`~/.claude/CLAUDE.md` at the first session in any fleet repo. Without the
+marker the hook does nothing on a durable machine
+([guidance](guidance.md#the-sync)).
 
 ## Scheduled jobs (wsl-automation)
 
@@ -43,6 +46,7 @@ login:
 |---|---|---|
 | session miner | daily at 07:17 | turns your transcripts into short, redacted lesson records on `acsi-agentskills-private`'s `persistent/lessons` |
 | usage census | daily at 12:37 | publishes which models and skills you ran each week to `skills-evals`' `persistent/eval-results`; the roster picks eval models from it and the planner improves the most used skills first |
+| memory curation | weekly, Monday at 13:47 (Windows with WSL only) | curates the memory notes of both homes, WSL's and the Windows profile's ([routines](routines.md#memory-curation)) |
 | waiting feed | every minute (optional) | publishes the sessions waiting on you to a private `waiting-feed` repo |
 
 **On Windows** (WSL), from the clone, once per machine:

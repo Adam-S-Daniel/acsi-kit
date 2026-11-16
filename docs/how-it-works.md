@@ -22,11 +22,11 @@ signal ──► proposal ──► evaluation ──► decision ──► merg
 
 | Stage | What does it |
 |---|---|
-| Signal | Merged pull requests, your own session transcripts (read only on your machine), vendor changelogs, memory notes, CI failures |
+| Signal | Merged pull requests, your own session transcripts (read only on your machine), the weekly count of which skills and models you used, vendor changelogs, memory notes, CI failures |
 | Proposal | An edit to a skill or a guidance section, a new skill, a new git-hook check, a new eval fixture, or a removal |
 | Evaluation | The same task, run with and without the skill or section, scored by scripted checks and a judge model. A git-hook check is measured by use instead: how often it blocked, and how often it was overridden |
-| Decision | Fixed rules over the numbers, generated from the policy files into `skills-evals`' [`docs/rules.md`](../starter/skills-evals/docs/rules.md): accept an edit, and keep, retire or pause a skill or section. A check's verdict is reported; no rule removes one |
-| Merge or retire | A gate workflow opens a pull request with a GitHub App token, and it auto-merges when required checks pass. A removal first passes a fresh-context agent's review; a fleet-guidance change merges only in one weekly window |
+| Decision | Fixed rules over the numbers, generated from the policy files into `skills-evals`' [`docs/rules.md`](../starter/skills-evals/docs/rules.md): accept an edit, keep or retire a skill or section, pause the evals of a skill nobody uses. A check's verdict is reported; no rule removes one |
+| Merge or retire | A gate workflow opens a pull request with a GitHub App token, and it auto-merges when required checks pass. A removal first passes a fresh-context agent's review; a fleet-guidance change merges only in one weekly window; what waits on your approval (a plugin that runs code) becomes an issue for you instead |
 
 ## The six repos
 
@@ -42,7 +42,7 @@ self-improvement; [`export/DECISIONS.md`](../export/DECISIONS.md) C1).
 | `acsi-agentskills` | public | Shareable skills, as a Claude Code plugin marketplace with four plugins; the cloud skills bootstrap hook; `setup.sh` for machines | [`starter/agent-skills/`](../starter/agent-skills/README.md) |
 | `acsi-agentskills-private` | private | Skills that touch personal data, and the lessons the session miner writes (`persistent/lessons`) | [`starter/agent-skills-private/`](../starter/agent-skills-private/README.md) |
 | `skills-evals` | public (paid plan: your choice) | Fixtures, the eval harness, the planner, the gates, the results branch, the explorer pages (public and private); only the evals track (`/adopt-evals`) creates it | [`starter/skills-evals/`](../starter/skills-evals/README.md) |
-| `wsl-automation` | public (paid plan: your choice) | Your durable machine's scheduled jobs: the usage census, the waiting-on-you feed, the session miner | [`starter/wsl-automation/`](../starter/wsl-automation/README.md) |
+| `wsl-automation` | public (paid plan: your choice) | Your durable machine's scheduled jobs: the usage census, the session miner, memory curation, the waiting-on-you feed | [`starter/wsl-automation/`](../starter/wsl-automation/README.md) |
 
 Every other repo you work in is a **consumer**; together they are your
 **fleet**, listed in `_agent-guidance`'s `repos.yml` and
@@ -75,9 +75,10 @@ items as worked examples.
   cloud sessions install the bundles a repo's `skills.lock` pins
   ([skills](skills.md)).
 - **Settings.** `repo-settings` applies `fleet.yml` to every repo: merge
-  commits only, full-SHA action pins, read-only workflow tokens, the
-  rulesets with each repo's required checks, the `pull_request_target`
-  policy ([settings and Apps](settings-and-apps.md)).
+  commits only, pinned actions (a full SHA, or a tag an `actions.lock`
+  pins), read-only workflow tokens, secret scanning, the rulesets with each
+  repo's required checks, the `pull_request_target` policy
+  ([settings and Apps](settings-and-apps.md)).
 - **Evals and the loop.** `skills-evals` fires an API-triggered Claude
   routine (so evals spend your plan's weekly allowance, not API dollars),
   ingests what it pushes, decides with fixed rules, and opens pull requests
@@ -86,11 +87,13 @@ items as worked examples.
 - **Routines.** Four standing claude.ai routines do the rest: the
   fleet worker (fired by a workflow every 3 hours to weekly, by plan), the
   changelog watcher, the prompt-audit sweep (a workflow fires it for a
-  trigger issue the watcher files), and memory curation
-  ([routines](routines.md)). The nightly drift report lists repo-specific
-  guidance that repeats across repos or copies `base.md`.
-- **Your machine.** `wsl-automation` schedules the jobs that must run where
-  your transcripts are ([machines and cloud](machine.md)).
+  trigger issue the watcher files), and memory curation, which also runs on
+  your machine ([routines](routines.md)). An article-lift routine is
+  optional. The nightly drift report lists repo-specific guidance that
+  repeats across repos or copies `base.md`.
+- **Your machine.** `wsl-automation` schedules the jobs that need your
+  machine's transcripts, memory or login
+  ([machines and cloud](machine.md)).
 
 ## Rules the whole design follows
 
