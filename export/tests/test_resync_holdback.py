@@ -221,3 +221,17 @@ def test_a_failed_git_reset_stops_the_run_instead_of_testing_a_dirty_tree(tmp_pa
     monkeypatch.setattr(runner, "_git", lambda *a: sp.CompletedProcess(a, 1, "", "index.lock exists"))
     with pytest.raises(hb.HoldbackError, match="git reset failed: index.lock exists"):
         runner.reset()
+
+
+def test_the_trial_rewrites_the_docs_regions_between_the_export_and_the_tests(tmp_path, monkeypatch):
+    import subprocess as sp
+    runner = hb.GitRunner(tmp_path, tmp_path, tmp_path)
+    ran = []
+    monkeypatch.setattr(runner, "reset", lambda: None)
+    monkeypatch.setattr(runner, "_npm_at_pin", lambda *a: None)
+    monkeypatch.setattr(runner, "_git", lambda *a: sp.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(runner, "_run", lambda args, **kw: ran.append(args) or sp.CompletedProcess(args, 0, "", ""))
+    assert runner.run()[0] is True
+    steps = [Path(a[1]).name if a[1] != "-m" else "pytest" for a in ran]
+    assert steps == ["export.py", "doc_regions.py", "pytest"]
+    assert "--write" in ran[1]
