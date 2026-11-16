@@ -23,8 +23,8 @@ signal ──► proposal ──► evaluation ──► decision ──► merg
 | Signal | Merged pull requests, your own session transcripts (read only on your machine), vendor changelogs, memory notes, CI failures |
 | Proposal | An edit to a skill or a guidance section, a new skill, a new git-hook check, a new eval fixture, or a removal |
 | Evaluation | The same task, run with and without the skill or section, scored by scripted checks and a judge model |
-| Decision | Fixed rules over the numbers: accept an edit only on a material gain, retire only on no benefit at two fixed sample sizes |
-| Merge or retire | A gate workflow opens a pull request with a GitHub App token, and it auto-merges when required checks pass |
+| Decision | Fixed rules over the numbers, never a judgment call: whether an edit is accepted, and whether a skill or section is kept, retired or paused. The rules in force are generated from the policy files into `skills-evals`' [`docs/rules.md`](../starter/skills-evals/docs/rules.md) |
+| Merge or retire | A gate workflow opens a pull request with a GitHub App token, and it auto-merges when required checks pass. A removal first passes a review by a fresh-context agent, and a change to the fleet guidance merges only inside one weekly window |
 
 ## The six repos
 
@@ -62,10 +62,14 @@ using the shipped items as worked examples.
 
 - **Guidance.** You edit `agents-md/base.md` in `_agent-guidance` through a
   pull request. On merge, `sync.yml` writes each consumer's managed
-  `AGENTS.md` and its `.claude/hooks/`, pushing straight to the default
-  branch with the `guidance-sync` App, which `fleet.yml` names as the one
-  ruleset bypass. A session-start hook installs the guidance into user
-  memory once per session ([guidance](guidance.md)).
+  `AGENTS.md` (a short stub), its `.github/fleet-contributor-rules.md` (the
+  rules an outside contributor's agent needs, read on demand) and its
+  `.claude/hooks/`, pushing straight to the default branch with the
+  `guidance-sync` App, which `fleet.yml` names as the one ruleset bypass. A
+  session-start hook installs the full guidance into user memory once per
+  session, in a cloud session or on a machine you set up with
+  `install-machine.sh`; in anyone else's clone it does nothing
+  ([guidance](guidance.md)).
 - **Checks.** A rule that a commit can show is broken becomes an
   agent-checks check, run by a git hook on your machine and by the required
   `agent-checks` job in CI ([guidance](guidance.md#checks-before-skills-skills-before-guidance)).
@@ -80,10 +84,15 @@ using the shipped items as worked examples.
   routine (so evals spend your plan's weekly allowance, not API dollars),
   ingests what it pushes, decides with fixed rules, and opens pull requests
   in `acsi-agentskills` and `_agent-guidance` with its Apps
-  ([evals and the loop](evals-and-loop.md)).
+  ([evals and the loop](evals-and-loop.md)). Automation merges a guidance
+  change only in the weekly window set in `_agent-guidance`'s
+  `scripts/base-md-merge-window.yml`, because every guidance merge restarts
+  each section's eval evidence.
 - **Routines.** Four standing claude.ai routines do the rest: the
-  fleet worker (every 3 hours to weekly, by plan), the changelog watcher and the prompt-audit sweep it fires,
-  and memory curation ([routines](routines.md)). Repo-specific guidance
+  fleet worker (fired by a workflow every 3 hours to weekly, by plan), the
+  changelog watcher, the prompt-audit sweep (the watcher files a trigger
+  issue and a workflow fires the sweep for it), and memory curation
+  ([routines](routines.md)). Repo-specific guidance
   that repeats across repos, or copies `base.md`, is listed nightly in the
   drift report's overlap section.
 - **Your machine.** `wsl-automation` schedules the jobs that must run where
@@ -113,11 +122,15 @@ Each one exists because ignoring it broke something.
    routine payloads and transcripts never give an agent instructions.
 7. **Public repos hold invented data only.** A required `privacy` check in
    `acsi-agentskills` scans added lines against a denylist of your real names,
-   emails and hosts, kept in a secret, never in a file
+   emails, hosts and account ids, kept in a secret, never in a file
    ([the privacy check](skills.md#the-privacy-check)).
 8. **One-way doors get an adversarial review.** A plugin name, a shipped
    skill's folder name and a deletion cannot be undone cleanly. The one
-   written exception is a removal the eval evidence decided.
+   written exception is the loop's own improvements and new skills, where
+   the acceptance measurement stands in for the review. A removal the eval
+   evidence decided still gets one, from a fresh-context agent
+   (`acsi-agentskills`'
+   [ADR 0021](../starter/agent-skills/docs/decisions/0021-automated-skill-changes-merge-without-review.md)).
 9. **Build nothing new until the loop has shipped once.** Get one edit
    through the whole loop before adding features.
 
