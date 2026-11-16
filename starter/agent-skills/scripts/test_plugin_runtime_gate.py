@@ -793,18 +793,6 @@ def test_an_unchanged_body_in_a_bash_skill_does_not_gate():
     assert_not_gated(_skill_run(BASH_FM + b"same\n", BASH_FM + b"same\n"))
 
 
-def test_the_shipped_bash_skills_are_gated_on_a_body_edit():
-    """The three skills the issue names ship with allowed-tools granting Bash."""
-    skills = REPO_ROOT / "plugins" / "acsi-non-coding-local" / "skills"
-    for name in ("add-from-address", "add-received-from-addresses", "rename-pdfs"):
-        data = (skills / name / "SKILL.md").read_bytes()
-        key = f"plugins/acsi-non-coding-local/skills/{name}/SKILL.md"
-        base = {".claude-plugin/marketplace.json": marketplace("acsi-non-coding-local"),
-                key: data}
-        head = dict(base, **{key: data + b"one more sentence\n"})
-        assert_gated(run(base, head), "skill-body-bash")
-
-
 # --- every location Claude Code loads skills and commands from -------------------
 
 @pytest.mark.parametrize("path", [

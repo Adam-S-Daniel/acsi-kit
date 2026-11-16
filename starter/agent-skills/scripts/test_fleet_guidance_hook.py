@@ -261,7 +261,8 @@ def tool_farm(directory: Path, leave_out) -> Path:
         if not folder.is_dir():
             continue
         for tool in folder.iterdir():
-            if leave_out(tool.name) or (directory / tool.name).exists() \
+            if leave_out(tool.name) or not (tool.is_file() and os.access(tool, os.X_OK)) \
+                    or (directory / tool.name).exists() \
                     or (directory / tool.name).is_symlink():
                 continue
             (directory / tool.name).symlink_to(tool)

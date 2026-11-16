@@ -64,6 +64,39 @@ edits:
       Locks the deduplicated owner list above. Read from the script, since
       git's config keeps one entry per includeIf condition however often the
       installer writes it, so the installed config cannot show a duplicate.
+  # ---- Starter suite on a local machine (acsi-kit#72)
+  - path: scripts/test_plugin_runtime_gate.py
+    stage: output
+    old: |+
+      def test_the_shipped_bash_skills_are_gated_on_a_body_edit():
+          """The three skills the issue names ship with allowed-tools granting Bash."""
+          skills = REPO_ROOT / "plugins" / "acsi-non-coding-local" / "skills"
+          for name in ("add-from-address", "add-received-from-addresses", "rename-pdfs"):
+              data = (skills / name / "SKILL.md").read_bytes()
+              key = f"plugins/acsi-non-coding-local/skills/{name}/SKILL.md"
+              base = {".claude-plugin/marketplace.json": marketplace("acsi-non-coding-local"),
+                      key: data}
+              head = dict(base, **{key: data + b"one more sentence\n"})
+              assert_gated(run(base, head), "skill-body-bash")
+
+
+    new: ""
+    why: >-
+      X9. The test reads three of the source owner's personal skills, which
+      the kit does not ship, so it fails on a missing SKILL.md. The gate it
+      exercises (a body edit to a skill granting Bash) stays covered by the
+      synthetic-skill tests above it.
+  - path: scripts/test_fleet_guidance_hook.py
+    stage: output
+    old: "            if leave_out(tool.name) or (directory / tool.name).exists() \\\n"
+    new: "            if leave_out(tool.name) or not (tool.is_file() and os.access(tool, os.X_OK)) \\\n                    or (directory / tool.name).exists() \\\n"
+    why: >-
+      Hermeticity. tool_farm linked the first file of each name on PATH even
+      when it was not executable (atuin's installer puts a sourceable
+      ~/.atuin/bin/env on PATH), so the hook's `env` failed and
+      test_a_missing_curl_falls_back saw no verdict line. A PATH lookup skips
+      such a file; so does the farm now. Fixed in the source too: drop this
+      edit when the pin moves past it.
   # ---- Prompt-audit sweep (issue 37): skills-doctor contradicts itself on the account store path
   - path: plugins/adam-coding-anywhere/skills/skills-doctor/SKILL.md
     old: "  `synced/manifest.json`, `claude plugin list`), attribute every skill to the\n"
