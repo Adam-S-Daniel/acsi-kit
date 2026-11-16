@@ -115,6 +115,20 @@ jobs:
             --summary "$RUNNER_TEMP/resync-summary.md" --tails "$RUNNER_TEMP/holdback-tails.txt"
           echo "files changed: $(git status --porcelain | wc -l)"
 
+      # Which hand-written pages describe a source this re-sync changed
+      # (export/doc-sources.yml). After hold-back, so it sees the tree that
+      # will be committed, and before the summary is shown and the pull
+      # request body is built, so both carry it. Advisory: a failure here
+      # warns and never blocks the re-sync. No expression is interpolated
+      # into the script.
+      - name: List the pages a changed source makes stale
+        if: steps.resync.outputs.changed == 'true'
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 export/doc_review.py --base HEAD --summary "$RUNNER_TEMP/resync-summary.md" \
+            || echo "::warning::export/doc_review.py failed, so the pull request has no Pages to review section"
+
       - name: Show the summary
         if: steps.resync.outputs.changed == 'true'
         run: cat "$RUNNER_TEMP/resync-summary.md" >> "$GITHUB_STEP_SUMMARY"

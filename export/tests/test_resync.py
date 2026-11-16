@@ -197,6 +197,22 @@ def test_a_failure_opens_or_updates_one_issue_and_a_clean_success_closes_it():
     assert "gh issue close" in close["run"]
 
 
+def test_the_pages_to_review_step_runs_after_holdback_and_before_the_summary_is_read_and_never_blocks():
+    _, job = _job()
+    names = [s.get("name") for s in job["steps"]]
+    step = _step(job, "List the pages a changed source makes stale")
+    holdback = names.index("Regenerate starter/, holding back a source that breaks it")
+    # After hold-back settles the pins; before the summary is shown and the
+    # pull request body (built in the push step) reads the summary file.
+    assert holdback < names.index(step["name"]) < names.index("Show the summary")
+    assert names.index(step["name"]) < names.index("Push resync/auto and open or update the pull request")
+    assert step["if"] == "steps.resync.outputs.changed == 'true'"
+    run = step["run"]
+    assert 'python3 export/doc_review.py --base HEAD --summary "$RUNNER_TEMP/resync-summary.md"' in run
+    assert '|| echo "::warning::' in run
+    assert "continue-on-error" not in step
+
+
 def test_one_step_regenerates_with_the_holdback_and_keeps_the_denylist_guard():
     _, job = _job()
     names = [s.get("name") for s in job["steps"]]
