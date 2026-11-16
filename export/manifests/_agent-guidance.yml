@@ -361,6 +361,52 @@ edits:
       >   decides what each overlap entry should become.
     why: Overlap judgment. The note linked the excluded Fleet health audit.
 
+  # ---- C2 folds the source's first owner, listed in both letter cases, into
+  # one login (as in agentskills.yml's install-agent-hooks.sh edit): the hook
+  # then writes 2 owners x 3 URL forms = 6 includeIf entries, not 9.
+  - path: .claude/hooks/fleet-memory.sh
+    stage: output
+    old: "    for owner in example-adopter example-adopter example-adopter-two; do\n"
+    new: "    for owner in example-adopter example-adopter-two; do\n"
+    why: C2 left the first owner twice; git config --add would keep the duplicate.
+  - path: test/run-tests.sh
+    stage: output
+    old: "    for owner in example-adopter example-adopter example-adopter-two; do\n"
+    new: "    for owner in example-adopter example-adopter-two; do\n"
+    why: The repo-local fixture lists the owners the hook does.
+  - path: test/run-tests.sh
+    stage: output
+    old: '[[ "$n" -eq 9 ]]'
+    new: '[[ "$n" -eq 6 ]]'
+    count: 4
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: expected 9 system entries
+    new: expected 6 system entries
+    count: 2
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: expected 9 global entries
+    new: expected 6 global entries
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: nine system includeIf entries (3 owners x 3 URL forms)
+    new: six system includeIf entries (2 owners x 3 URL forms)
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: (9 system entries)
+    new: (6 system entries)
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: all nine system entries
+    new: all six system entries
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).
 patches:
