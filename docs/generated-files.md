@@ -33,7 +33,7 @@ Every item `REGENERATE.md` lists, and the quick start step that handles it:
 | `wsl-automation` | The Codex Cloud bootstrap pin | 17 |
 | `wsl-automation` | The waiting feed's commit identity | 13 |
 | `wsl-automation` | The Bash tasks' settings | 22 |
-| `wsl-automation` | The waiting feed's repository | 2 (with `--with-optional`), 22 |
+| `wsl-automation` | The waiting feed's repository | 2, 22 |
 | `skills-evals` | `.github/workflows/scheduled-run-health.yml` | 38 |
 | `skills-evals` | `.github/workflows/actions.lock` | 38 |
 | `skills-evals` | The routine trigger id | 24, 25 |
@@ -41,14 +41,16 @@ Every item `REGENERATE.md` lists, and the quick start step that handles it:
 | `acsi-agentskills` | `skills.lock` | 14 |
 | `acsi-agentskills-private` | `skills.lock` | 14 |
 | `acsi-agentskills` | `.github/workflows/scheduled-run-health.yml` | 16 |
+| `acsi-agentskills-private` | `.github/workflows/scheduled-run-health.yml` | 16 |
 | `acsi-agentskills` | `.github/workflows/actions.lock` | 18 |
 | `acsi-agentskills-private` | `.github/workflows/actions.lock` | 18 |
 | `acsi-agentskills` | `<your name>` | 12 |
 | `acsi-agentskills-private` | `<your name>` | 12 |
 
-(`REGENERATE.md` lists the two registries under one heading;
-`acsi-agentskills-private` has no `scheduled-run-health.yml`, so it has no
-row for one.)
+(The table has a row for every item `REGENERATE.md` lists, and that file
+puts the two registries under one heading: `acsi-agentskills-private` has no
+`scheduled-run-health.yml`, so step 16 does nothing there. Step 2 creates
+the waiting feed's repository only with `--with-optional`.)
 
 ## The skills locks
 
