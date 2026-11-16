@@ -33,3 +33,5 @@ claude-code/2026-10-31/1 example-adopter/skills-evals#484
 claude-code/2026-11-07/1 example-adopter/_agent-guidance#459
 claude-code/2026-11-10/1 example-adopter/_agent-guidance#501
 claude-code/2026-11-13/1 example-adopter/acsi-agentskills#155
+claude-code/2026-11-14/1 example-adopter/skills-evals#1023
+claude-code/2026-11-14/2 example-adopter/skills-evals#1024

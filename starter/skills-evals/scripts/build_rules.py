@@ -242,6 +242,13 @@ def render_md(doc: dict) -> str:
         "with a test that crossed but has not decided, it stays *insufficient* and is "
         "listed as a `cell-at-cap` work item.",
         "",
+        "**Cap extension.** A cell whose first "
+        f"{same('max_runs_per_cell')} pairs decided nothing, but whose nearer test is "
+        "projected from those pairs to decide within "
+        f"{same('max_runs_extension')} times that many, may run to that larger cap. "
+        "The tests are valid at any number of pairs, so the cap is a budget; the "
+        "projection reads only pairs already made.",
+        "",
         "**Ceiling (parked).** A cell whose without arm is confidently above "
         f"1 − margin (above {_num(round(1 - margin, 10))} today) cannot show the margin: it "
         "is parked as `ceiling`, stops being fired and does not vote on removal. A high "
@@ -270,7 +277,11 @@ def render_md(doc: dict) -> str:
         "toward removal also needs at least "
         f"{v('gate-policy.yml#guidance.rest_guard_min_pairs')} pairs "
         f"({ref('gate-policy.yml#guidance.rest_guard_min_pairs')}) beside the current rest, "
-        "deciding at the remove level on its own.",
+        "deciding at the remove level on its own. With "
+        f"`keep_stands_until_recheck` {v('gate-policy.yml#guidance.keep_stands_until_recheck')} "
+        f"({ref('gate-policy.yml#guidance.keep_stands_until_recheck')}), a keep made beside "
+        "an earlier version of the rest stands when another section changes: it is "
+        "re-tested at its re-check age, or when its own text changes.",
         "",
         "## Removal",
         "",
@@ -337,6 +348,11 @@ def render_md(doc: dict) -> str:
         "- Ceiling and floor never pause a `stakes: high` subject, a kept one, or one whose "
         f"confidence that it helps is at least {v(C + 'keep_guard')} "
         f"({ref(C + 'keep_guard')}).",
+        "- **Weekly guidance window:** no automated eval run, in any mode, starts while "
+        f"_agent-guidance's weekly guidance merge window is open ([`base-md-merge-window.yml`]({MERGE_WINDOW}), "
+        "US Eastern, so its UTC hours move with daylight saving time); a run already going "
+        "finishes. Planned fires wait for the next sweep after it closes "
+        "([ADR 0017](decisions/0017-guidance-loop-merges-wait-for-the-weekly-window.md)).",
         "",
         "## Re-checks and stakes",
         "",
@@ -345,6 +361,27 @@ def render_md(doc: dict) -> str:
         f"([`stakes.yml`](../evals/stakes.yml): {high}). High-stakes subjects are tested "
         "first within each planning band. No re-check is planned while the subject's "
         "removal is `pr-open`, `worker`, `waiting-turn`, `queued`, `removed` or unknown.",
+        "",
+        "**The re-check window** (while `recheck_window` is "
+        f"{same('recheck_window', lambda r: '`' + v(r) + '`')}): a kept cell's re-check is "
+        "tested on the pairs made since it fell due (counted from the keep's newest "
+        "confirmation), apart from the pairs that made the keep. It ends at the first of: "
+        "a removal test over those pairs deciding at the no-benefit level, which overrides "
+        "the keep; the gain over those pairs clearing the margin at that same level (the "
+        f"early stop); or {same('max_runs_per_cell')} such pairs. A passed re-check counts "
+        "as a new confirmation. The planner fires re-check runs only while "
+        "`recheck_window_fire` is true (today: "
+        f"{same('recheck_window_fire', lambda r: '`' + v(r) + '`')}); false holds every "
+        "re-check run, the gates still computing each cell's re-check.",
+        "",
+        "**The re-check carry** (while `recheck_carry` is "
+        f"{same('recheck_carry', lambda r: '`' + v(r) + '`')}): a kept cell's re-checks "
+        "are one test over its lifetime. Each passed re-check's evidence for removal and "
+        "for the early stop carries into the next, so the chance of ever removing a cell "
+        "whose gain stays at the margin, over all its re-checks, is at most the "
+        "no-benefit level, and a gain that slips under the margin is removed within a "
+        "few re-checks. A carried early stop counts only once the re-check's own pairs "
+        "reach `CARRY_MIN_OWN_PAIRS` (harness/gates.py) and average at least the margin.",
         "",
         "## Git hooks",
         "",
@@ -359,8 +396,9 @@ def render_md(doc: dict) -> str:
         "",
         "A check that blocked but whose overrides no source counts is `earning`, marked "
         "unmeasured; `overridden-often` needs a measured rate. Non-public repositories "
-        f"are shown only when at least {v(H + 'min_private_repos')} feed the data "
-        f"({ref(H + 'min_private_repos')}). **No rule removes a hook check**: the verdicts "
+        f"get their own row only when at least {v(H + 'min_private_repos')} feed the data "
+        f"({ref(H + 'min_private_repos')}); below that, their runs and blocks still count, "
+        "unnamed, in each check's totals and verdict. **No rule removes a hook check**: the verdicts "
         "are reported, not acted on.",
         "",
     ]

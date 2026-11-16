@@ -26,15 +26,20 @@
     {
       "op": "replace",
       "file": "test/test_agent_check_lane.py",
-      "count": 2,
-      "old": "        self.assertEqual(entry[\"checks\"], [\"secret-file\", \"skill-shell\"])\n",
-      "new": "        self.assertEqual(entry[\"checks\"], [\"rules-dir\", \"secret-file\", \"skill-shell\"])\n"
+      "old": "        self.assertEqual(entry[\"checks\"], expected_checks([\"secret-file\", \"skill-shell\"], declared_lessons()))\n        self.assertEqual(entry[\"failed\"], [])",
+      "new": "        self.assertEqual(entry[\"checks\"], expected_checks([\"rules-dir\", \"secret-file\", \"skill-shell\"], declared_lessons()))\n        self.assertEqual(entry[\"failed\"], [])"
     },
     {
       "op": "replace",
       "file": "test/test_agent_check_lane.py",
-      "old": "        self.assertEqual(entry[\"checks\"], [\"secret-file\", \"skill-shell\", \"repo-local\"])\n",
-      "new": "        self.assertEqual(entry[\"checks\"], [\"rules-dir\", \"secret-file\", \"skill-shell\", \"repo-local\"])\n"
+      "old": "        want = expected_checks([\"secret-file\", \"skill-shell\"], [\"lesson-example-path\"])\n",
+      "new": "        want = expected_checks([\"rules-dir\", \"secret-file\", \"skill-shell\"], [\"lesson-example-path\"])\n"
+    },
+    {
+      "op": "replace",
+      "file": "test/test_agent_check_lane.py",
+      "old": "        self.assertEqual(entry[\"checks\"], expected_checks([\"secret-file\", \"skill-shell\", \"repo-local\"], declared_lessons()))\n",
+      "new": "        self.assertEqual(entry[\"checks\"], expected_checks([\"rules-dir\", \"secret-file\", \"skill-shell\", \"repo-local\"], declared_lessons()))\n"
     },
     {
       "op": "replace",

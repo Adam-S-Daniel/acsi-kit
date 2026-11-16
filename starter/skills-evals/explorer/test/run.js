@@ -223,6 +223,17 @@ await test('the Needs you list merges half-built issues, document alerts and fir
   ok(rows.map((r) => r.what).join(' | ').includes('2 of 9 fires'), 'the fires line says out of how many');
   eq(attentionRows(fakeDash({}), doc()).length, 0);
 });
+await test('a fixture-queue finding filed as an open half-built issue is listed once, as the issue', () => {
+  const id = 'skills-evals/fixture-queue-unused-fixture-guidance-example-section-fx';
+  const other = 'skills-evals/fixture-queue-unused-fixture-guidance-example-section-gx';
+  const dash = fakeDash({ half_built_issues: okData([{ key: 'k1', state: 'open', kind: 'broken', severity: 'high', title: 'Filed', url: 'https://github.com/example-owner/r/issues/1', finding_id: id },
+    { key: 'k2', state: 'closed', kind: 'broken', severity: 'high', title: 'Closed', url: null, finding_id: other }]) });
+  const f = (fid) => ({ finding_id: fid, kind: 'broken', severity: 'high', subject: 'guidance/example-section', url: 'https://github.com/example-owner/r/tree/main/x' });
+  const rows = attentionRows(dash, doc({ fixture_queue: { findings: [f(id), f(other)] } }));
+  eq(rows.length, 2, JSON.stringify(rows));
+  eq(rows.filter((r) => r.family === 'half-built').length, 1, 'the issue');
+  eq(rows.filter((r) => r.family === 'fixture').length, 1, 'only the finding with no open issue');
+});
 await test('a regression alert is not a Needs attention row: it is trending toward removal, in its own table', () => {
   const d = doc({ alerts: [{ kind: 'regression', name: 'example-skill', subject: 'skill', model: 'claude-opus-5-5', fixture: 'fx-one', verdict: 'regressed', measure: 'judge',
     previous: 7.5, current: 6.0000000000000009, drop: 1.5000000000000009, threshold: 1, noise: 0.472189541352795, text: 'x', url: 'https://github.com/example-owner/r/issues/5' }] });
@@ -263,12 +274,13 @@ await test('the allowance and routine health come from their datasets', () => {
   eq(Math.round(cap.reservation * 1000) / 1000, 1.2);
   eq(capUse(null, []), null);
   const rh = routineHealth([{ health: 'OK' }, { health: 'Stalled' }, { health: 'Not run yet' }]);
-  eq(JSON.stringify(rh), '{"active":3,"ok":1,"fresh":1,"attention":1}');
+  eq(JSON.stringify(rh), '{"active":3,"ok":1,"fresh":1,"attention":1,"due":2}');
   // Every shape of mix: healthy, not run yet and needing a look always add up to the rows the table lists.
   for (const mix of [[], ['OK'], ['Not run yet'], ['OK', 'Late', 'Not run yet', 'Failing', 'Paused', 'Check', 'Not run yet']]) {
     const r = routineHealth(mix.map((health) => ({ health })));
     eq(r.ok + r.fresh + r.attention, r.active, mix.join(','));
     eq(r.active, mix.length);
+    eq(r.due, r.ok + r.attention, 'on time counts only routines with a run due: ' + mix.join(','));
   }
 });
 await test('the private build has six groups, Needs you second, and speaks to "you"', () => {
@@ -428,15 +440,58 @@ await test('C3: the guard\'s own room_points is used when present, and rows with
   const t = textOf(needs(ALLOW({ room_points: 0, points: 90 }))).replace(/\s+/g, ' ');
   ok(t.includes('Room for new tests now: about 0.0 points'), t);
 });
-await test('C4: each panel prints its own block time, never one document time, and the page says the range', () => {
+await test('C4: each panel prints its own block time, never one document time, and the page names its own sources\' times', () => {
   const d = doc({ generated_at: '2026-11-12T16:54:13Z', activity: { fetched_at: '2026-11-12T17:45:57Z', since: '2026-10-29T17:00:00Z', repos: ['example-adopter/skills-evals'],
     runs: [{ repo: 'example-adopter/skills-evals', run_id: 5, workflow: 'CI', title: 'CI', event: 'push', state: 'completed', conclusion: 'success', created_at: '2026-11-12T17:36:00Z', updated_at: '2026-11-12T17:40:00Z', url: 'https://github.com/Adam-S-Daniel/skills-evals/actions/runs/5' }],
     pulls: [], issues: [] }, fixture_queue: Object.assign({}, fqDoc().fixture_queue, { generated_at: '2026-11-12T17:45:00Z' }) });
   const ops = textOf(renderRoute(d, { name: 'activity', id: null }, {})).replace(/\s+/g, ' ');
   ok(ops.includes('as of Nov 12, 2026, 12:45 PM ET'), ops);
-  ok(/Data read between Nov 12, 2026, 11:54 AM ET and Nov 12, 2026, 12:45 PM ET/.test(ops), ops);
+  ok(ops.includes('Data times: GitHub activity Nov 12, 2026, 12:45 PM ET.'), ops);
+  ok(!ops.includes('Data read between'), 'no page-wide range: ' + ops);
   const loop = textOf(renderRoute(d, { name: 'changes', id: null }, {})).replace(/\s+/g, ' ');
   ok(loop.includes('Fixture requests From the results document, as of Nov 12, 2026, 12:45 PM ET'), loop);
+});
+await test('times line: the summary dates every source by its own time, and a page names only the sources it shows', () => {
+  const d = doc({ generated_at: '2026-11-15T00:37:06Z', newest_run: '2026-11-12T02:26:42Z',
+    coverage: Object.assign({}, doc().coverage, { as_of: '2026-11-12T16:53:31Z' }),
+    usage: Object.assign({}, doc().usage, { to: '2026-11-14T17:37:16Z' }),
+    hooks: Object.assign({}, doc().hooks, { read_at: { local: '2026-11-14T17:37:16Z', ci: '2026-11-14T13:49:46Z' } }) });
+  const node = renderRoute(d, { name: 'summary', id: null }, {});
+  const sum = textOf(node).replace(/\s+/g, ' ');
+  ok(!sum.includes('Built Nov 14') && !sum.includes('newest eval run Nov 11, 2026'), 'no built-and-newest-run line above the fold: ' + sum);
+  const fold = findAll(node, (n) => n.tag === 'details' && String(n.attrs && n.attrs.class || '').includes('asof-times'))[0];
+  ok(fold && !fold.attrs.open, 'the data times fold is shut by default');
+  const days = findAll(fold, (n) => n.tag === 'li').map((n) => textOf(n).replace(/\s+/g, ' ').trim());
+  eq(days[0], 'Nov 14 removal PRs (opened by "remove" verdicts), lesson funnel, fixture checks 7:37 PM \u00b7 local skill use 12:37 PM \u00b7 local hook counts 12:37 PM \u00b7 CI hook counts 8:49 AM', 'newest Eastern day first, newest time first, what the build read merged into its day: ' + days.join(' | '));
+  eq(days[1], 'Nov 12 skills census 11:53 AM');
+  eq(days[2], 'Nov 11 newest eval run 9:26 PM');
+  eq(days.length, 3, 'no "Read at build" row: ' + days.join(' | '));
+  const alone = findAll(renderRoute(doc({ generated_at: '2026-11-15T00:37:06Z', newest_run: '2026-11-12T02:26:42Z' }), { name: 'summary', id: null }, {}), (n) => n.tag === 'li' && /fixture checks/.test(textOf(n))).map((n) => textOf(n).replace(/\s+/g, ' ').trim());
+  ok(alone.length === 1 && /^Nov 14 .*fixture checks 7:37 PM/.test(alone[0]), 'the build day gets a row when no source shares it: ' + alone.join(' | '));
+  ok(!sum.includes('Data read between'), sum);
+  ok(!sum.includes('cloud hook counts'), 'an undated source is left out, never given the document time: ' + sum);
+  const hooks = textOf(renderRoute(d, { name: 'hooks', id: null }, {})).replace(/\s+/g, ' ');
+  ok(hooks.includes('Data times: local hook counts Nov 14, 2026, 12:37 PM ET \u00b7 CI hook counts Nov 14, 2026, 8:49 AM ET.'), hooks);
+  ok(!hooks.includes('skills census'), 'the hooks page does not date the census: ' + hooks);
+  const old = textOf(renderRoute(doc({ generated_at: '2026-11-15T00:37:06Z', hooks: Object.assign({}, d.hooks, { read_at: undefined }) }), { name: 'hooks', id: null }, {})).replace(/\s+/g, ' ');
+  ok(old.includes('carries no time of its own; the results document was built Nov 14, 2026, 7:37 PM ET.'), 'undated hook counts are not stamped with the build time as if it were theirs: ' + old);
+});
+await test('data times fold: newest day first even when a day-only source (lessons) mixes with Eastern times', () => {
+  const rows = (extra) => findAll(renderRoute(doc(Object.assign({ generated_at: '2026-11-15T02:00:00Z' }, extra)), { name: 'summary', id: null }, {}),
+    (n) => n.tag === 'li' && n.children && findAll(n, (x) => x.tag === 'b').length).map((n) => textOf(n).replace(/\s+/g, ' ').trim());
+  // A run at 01:00Z on Nov 15 is Nov 14 in Eastern time; lessons dated Nov 15 is the newer day.
+  const a = rows({ newest_run: '2026-11-15T01:00:00Z', lessons: Object.assign({}, doc().lessons, { date: '2026-11-15' }) });
+  ok(a[0].startsWith('Nov 15 lessons') && a[1].startsWith('Nov 14 ') && a[1].endsWith('fixture checks 9:00 PM \u00b7 newest eval run 8:00 PM'), a.join(' | '));
+  // Same day: the timed source first, the day-only one last.
+  const c = rows({ newest_run: '2026-11-14T20:00:00Z', lessons: Object.assign({}, doc().lessons, { date: '2026-11-14' }) });
+  ok(c[0].startsWith('Nov 14 ') && c[0].endsWith('fixture checks 9:00 PM \u00b7 newest eval run 3:00 PM \u00b7 lessons'), c.join(' | '));
+});
+await test('times line: a subject page dates its own newest run, not the fleet\'s', () => {
+  const d = doc({ generated_at: '2026-11-15T00:37:06Z', newest_run: '2026-11-12T02:26:42Z',
+    skills: [{ name: 'demo-skill', status: 'covered', verdict: 'keep', runs: [{ at: '2026-11-03T15:00:00Z' }, { at: '2026-11-05T15:00:00Z' }] }] });
+  const text = textOf(renderRoute(d, { name: 'skills', id: 'demo-skill' }, {})).replace(/\s+/g, ' ');
+  ok(text.includes('its newest run Nov 5, 2026, 10:00 AM ET'), text);
+  ok(!text.includes('newest eval run Nov 11'), text);
 });
 await test('C4 guard: no view prints the single document time for a panel (srcLine(STRINGS.srcDoc, refMs))', () => {
   const dir = path.join(EXPLORER, 'src', 'views');
@@ -451,7 +506,7 @@ await test('C4 guard: no view prints the single document time for a panel (srcLi
       for (const [k, v] of Object.entries(n)) { if (k === 'type') continue; if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') walk(v); }
     })(ast);
   }
-  eq(found.join(','), '', 'use rangeLine(doc) or srcLineFor(doc, block)');
+  eq(found.join(','), '', 'use timesLine(doc, keys) or srcLineFor(doc, block)');
 });
 await test('money is printed with thousands separators everywhere', () => {
   eq(fmtUsd(5541.65), '$5,541.65'); eq(fmtUsd(0), '$0.00'); eq(fmtUsd(12.5), '$12.50');
@@ -589,7 +644,7 @@ await test('the committed private page script runs and answers like the readable
   vm.runInNewContext(scripts[0], sandbox, { filename: 'dashboard-page.js' });
   const shipped = sandbox.module.exports;
   eq(Object.keys(shipped).sort().join(','), Object.keys(exportsOf(privateJs)).sort().join(','), 'the same exports');
-  eq(JSON.stringify(shipped.routineHealth([{ health: 'OK' }, { health: 'Late' }, { health: 'Not run yet' }])), '{"active":3,"ok":1,"fresh":1,"attention":1}');
+  eq(JSON.stringify(shipped.routineHealth([{ health: 'OK' }, { health: 'Late' }, { health: 'Not run yet' }])), '{"active":3,"ok":1,"fresh":1,"attention":1,"due":2}');
   eq(shipped.staleHours(Date.parse('2026-11-12T01:00:00Z'), Date.parse('2026-11-12T20:00:00Z'), 12), 19);
   eq(shipped.staleHours(Date.parse('2026-11-12T01:00:00Z'), Date.parse('2026-11-12T20:00:00Z'), 24), null);
 });
@@ -915,6 +970,17 @@ const needsDash = (extra) => fakeDash(Object.assign({ eval_allowance: SNAP_OK(),
 const needsPage = (dash, d) => renderRoute(d || doc({ newest_run: '2026-11-12T15:00:00Z', generated_at: '2026-11-12T19:00:00Z' }), { name: 'needs', id: null }, { ext: makeExt(dash, { now: () => NOW_ET4PM }) });
 const flat = (node) => textOf(node).replace(/\s+/g, ' ');
 
+await test('a routine that has not run yet is left out of the on-time count, not counted as late', () => {
+  const t = flat(needsPage(needsDash({ routines: okData([routine('R1', 'OK'), routine('R2', 'OK'), routine('R3', 'Not run yet')]) })));
+  ok(t.includes('Loop healthy:'), t);
+  ok(t.includes('2 of 2 routines on time (1 not run yet)'), t);
+  ok(!t.includes('2 of 3'), t);
+  ok(t.includes('2 of 2 routines healthy; 0 late, failing or to check; 1 not run yet, so on time does not apply.'), t);
+  const late = flat(needsPage(needsDash({ routines: okData([routine('R1', 'OK'), routine('R2', 'Late'), routine('R3', 'Not run yet')]) })));
+  ok(late.includes('1 of 2 routines late, failing or to check (1 not run yet)'), late);
+  const none = flat(needsPage(needsDash({ routines: okData([routine('R1', 'Not run yet')]) })));
+  ok(none.includes('no routine due yet (1 not run yet)'), none);
+});
 await test('R3 recommendation 3: with nothing waiting and every routine on time, Needs you says so, in order, and folds the healthy routines', () => {
   const node = needsPage(needsDash());
   const t = flat(node);
@@ -1217,7 +1283,7 @@ await test('recommendation 19: every route of the old six groups still opens a p
 await test('the routine line counts every row of the routine table: healthy, not run yet and needing a look add up', () => {
   const dash = fakeDash({ routines: okData([routine('A', 'OK'), routine('B', 'Not run yet'), routine('C', 'Late')]), eval_allowance: SNAP_OK(), budget: BUDGET });
   const node = needsPage(dash);
-  ok(flat(node).includes('1 of 3 routines healthy; 1 late, failing or to check; 1 not run yet.'), flat(node));
+  ok(flat(node).includes('1 of 2 routines healthy; 1 late, failing or to check; 1 not run yet, so on time does not apply.'), flat(node));
   const sec = findAll(node, (n) => n.tag === 'section' && textOf(n).includes('Routine health'))[0];
   eq(findAll(sec, (n) => n.tag === 'tbody').reduce((t, b) => t + findAll(b, (n) => n.tag === 'tr').length, 0), 3, 'the table lists all three');
   ok(!flat(needsPage(needsDash())).includes('not run yet'), 'no clause when none');
@@ -1441,7 +1507,7 @@ await test('E11: runName never returns a cron expression', () => {
   eq(runName('47 8 * * *', null), STRINGS.scheduledRun);
   eq(runName('Fix the thing', 'CI'), 'Fix the thing');
   eq(runName('', 'CI'), 'CI');
-  ok(hasCron('scheduled — 47 8 * * *') && !hasCron('PR #4743 — tools: sync Evals Explorer to e805c6e'), 'cron detection');
+  ok(hasCron('scheduled — 47 8 * * *') && !hasCron('PR #4743 — tools: sync Improvement Loop Explorer to e805c6e'), 'cron detection');
 });
 await test('E11: the dashboard runs table has one Run column, starts on problems and the threads list leads with the ones not done', () => {
   const dash = fakeDash({ run_stream: okData([{ key: 'k1', at: '2026-11-12T10:00:00Z', kind: 'workflow', source: 's', name: 'Nightly', title: 'scheduled — 47 8 * * *', state: 'Failed', duration_s: 5, link: 'https://github.com/o/r/actions/runs/1' }]),
@@ -1677,6 +1743,30 @@ await test('a calendar day shows as its US Eastern day, and a census window edge
   const skills = flat(renderRoute(doc({ generated_at: '2026-11-12T16:00:00Z', skills: [{ name: 'a', status: 'covered', usage: { invocations: 0 } }], usage: { from: '2026-09-21T00:00:00Z', to: '2026-11-10T17:37:15Z' } }), { name: 'skills', id: null }, {}));
   ok(skills.includes('Sep 21') && skills.includes(STRINGS.utcNote), 'the census window edges are UTC days, and the page says so: ' + skills.slice(0, 400));
 });
+await test('uses are calls plus reads: the table ranks by the sum and the skill page splits them', () => {
+  // The owner, 2026-11-15: a session that read a skill's files used it.
+  const usage = { from: '2026-09-21T00:00:00Z', to: '2026-11-14T17:37:16Z', sessions_scanned: 40, surface: 'local', cloud: null };
+  const d = doc({ generated_at: '2026-11-15T16:00:00Z', usage, skills: [
+    { name: 'calls-only', status: 'covered', usage: { invocations: 3, reads: 0 } },
+    { name: 'read-mostly', status: 'covered', usage: { invocations: 2, reads: 3 } },
+    { name: 'older-data', status: 'covered', usage: { invocations: 1 } }] });
+  const list = flat(renderRoute(d, { name: 'skills', id: null }, {}));
+  ok(list.indexOf('read-mostly') < list.indexOf('calls-only') && list.indexOf('calls-only') < list.indexOf('older-data'), 'ranked by calls plus reads: ' + list.slice(0, 600));
+  ok(list.includes('read its files without calling it'), 'the note says what a use is');
+  const page = flat(renderRoute(d, { name: 'skills', id: 'read-mostly' }, {}));
+  ok(page.includes('Used 5 times') && page.includes('2 calls, 3 by reading its files.'), page.slice(0, 600));
+  const plain = flat(renderRoute(d, { name: 'skills', id: 'calls-only' }, {}));
+  ok(plain.includes('Used 3 times') && !plain.includes('by reading its files'), 'no split without a read: ' + plain.slice(0, 600));
+  ok(flat(renderRoute(d, { name: 'skills', id: 'older-data' }, {})).includes('Used 1 time'), 'data without reads still counts its calls');
+});
+await test('the skills page says cloud sessions are counted, and from when, once the census counts them', () => {
+  const page = (usage) => flat(renderRoute(doc({ generated_at: '2026-11-15T16:00:00Z', skills: [{ name: 'a', status: 'covered', usage: { invocations: 0 } }], usage }), { name: 'skills', id: null }, {}));
+  const local = { from: '2026-09-21T00:00:00Z', to: '2026-11-14T17:37:16Z', sessions_scanned: 40, surface: 'local' };
+  const without = page(Object.assign({}, local, { cloud: null }));
+  ok(without.includes('not counted yet'), without.slice(0, 600));
+  const withCloud = page(Object.assign({}, local, { cloud: { from: '2026-11-02T00:00:00Z', to: '2026-11-14T17:37:16Z', events_scanned: 5 } }));
+  ok(!withCloud.includes('not counted yet') && withCloud.includes('cloud sessions have recorded since Nov 2') && withCloud.includes('cloud sessions counted from Nov 2'), withCloud.slice(0, 600));
+});
 await test('a bare HH:MM UTC in a routine schedule becomes Eastern time, by the offset of the day', () => {
   eq(etSchedule('Daily at 17:00 UTC', Date.parse('2026-11-12T00:00:00Z')), 'Daily at 12:00 PM ET');
   eq(etSchedule('Daily at 17:00 UTC', Date.parse('2026-07-01T00:00:00Z')), 'Daily at 1:00 PM ET');
@@ -1837,6 +1927,18 @@ await test('the loop thresholds come from the data: an absent policy shows unkno
     retire_confidence: 0.95, min_cli_versions: 3, max_runs_per_cell: 12 }, 'skill')).replace(/\s+/g, ' ');
   ok(given.includes('70%') && given.includes('95%') && given.includes('+20') && given.includes('three Claude Code'), given);
   eq(hookNext({ verdict: null, since: 0 }, null, 1).key, 'unknown', 'no window length, no due date');
+});
+
+await test('a check page says what its totals hold beyond the published rows (hidden private repos)', async () => {
+  const { hiddenPrivate } = await import('../src/views/hooks.js');
+  const w = { from: '2026-09-21', to: '2026-11-13', weeks: 8 };
+  const use = [{ week: '2026-11-09', surface: 'local', repo: 'example-adopter/open-one', invocations: 8, blocked: 0, overridden: null },
+    { week: '2026-09-14', surface: 'local', repo: 'example-adopter/open-one', invocations: 5, blocked: 2, overridden: null }];
+  const it = (t) => ({ use, raw: { window_totals: t } });
+  const held = hiddenPrivate(it({ invocations: 1111, invocations_counted: 1111, blocked: 1095 }), w);
+  eq(JSON.stringify(held), JSON.stringify({ runs: 1103, blocked: 1095 }), 'the difference, with the week before the window left out');
+  eq(hiddenPrivate(it({ invocations: 8, invocations_counted: 8, blocked: 0 }), w), null, 'nothing held back');
+  eq(hiddenPrivate(it(null), w), null, 'no totals');
 });
 
 for (const f of failures) console.log('FAIL ' + f);

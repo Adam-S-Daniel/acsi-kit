@@ -1,4 +1,4 @@
-/* The public Evals Explorer (tool/index.html, published to
+/* The public Improvement Loop Explorer (tool/index.html, published to
    example-site-a/tools/evals/). Imports only public views and the web
    adapter; explorer/test/run.js holds the built bundle to that. */
 import { EXPORTS } from './shared.js';

@@ -3,11 +3,11 @@
 import { STRINGS } from '../core/strings.js';
 import { clean, parseTime, fmtUtcDay, fmtDay, fmtDayKey, fmtWeekStart, fmtDateTime, fmtCount, fmtUsd } from '../core/format.js';
 import { h, link } from '../core/h.js';
-import { skillItems } from '../core/items.js';
+import { skillItems, usesOf } from '../core/items.js';
 import { hookItems, hookWeeks, cloudCounted } from '../core/hooks.js';
-import { cloudNote } from './hooks.js';
+import { cloudNote, runsCell } from './hooks.js';
 import { hashFor } from '../core/route.js';
-import { table, panel, navLink, rangeLine, srcLineFor, fold } from './bits.js';
+import { table, panel, navLink, timesLine, srcLineFor, fold } from './bits.js';
 import { VERDICT_CHIPS } from '../core/stats.js';
 import { noUseShare } from './utility.js';
 import { weekChart, weekScale } from './weekchart.js';
@@ -40,13 +40,13 @@ function hookWeeksView(doc, refMs) {
 
 function skillUseView(doc, refMs) {
   const u = doc.usage;
-  const rows = skillItems(doc).filter((s) => s.raw.usage && typeof s.raw.usage.invocations === 'number');
+  const rows = skillItems(doc).filter((s) => usesOf(s.raw.usage) !== null);
   if (!rows.length || !u) return null;
   return [srcLineFor(doc, 'usage'), h('p', { class: 'note' }, STRINGS.impactUseSkillsNote(fmtUtcDay(parseTime(u.from), refMs), fmtUtcDay(parseTime(u.to), refMs))),
     table([
       { label: STRINGS.colName, sort: (s) => s.name, cell: (s) => navLink(hashFor('skills', s.name), clean(s.name)) },
-      { label: STRINGS.colUses, num: true, sort: (s) => s.raw.usage.invocations, cell: (s) => fmtCount(s.raw.usage.invocations) }
-    ], rows.sort((a, b) => b.raw.usage.invocations - a.raw.usage.invocations || (a.name < b.name ? -1 : 1)), { tall: true })];
+      { label: STRINGS.colUses, num: true, sort: (s) => usesOf(s.raw.usage), cell: (s) => fmtCount(usesOf(s.raw.usage)) }
+    ], rows.sort((a, b) => usesOf(b.raw.usage) - usesOf(a.raw.usage) || (a.name < b.name ? -1 : 1)), { tall: true })];
 }
 
 function checkUseView(doc) {
@@ -54,7 +54,7 @@ function checkUseView(doc) {
   if (!items.length) return null;
   return table([
     { label: STRINGS.colCheck, sort: (it) => it.name, cell: (it) => navLink(hashFor('hooks', it.name), clean(it.name)) },
-    { label: STRINGS.colRuns, num: true, sort: (it) => (it.runs !== null ? it.runs : it.runsCounted), cell: (it) => (it.runs !== null ? fmtCount(it.runs) : STRINGS.runsNotCounted) },
+    { label: STRINGS.colRunsWindow(null), num: true, sort: (it) => (it.runs !== null ? it.runs : it.runsCounted), cell: runsCell },
     { label: STRINGS.colBlocked, num: true, sort: (it) => it.blocked, cell: (it) => fmtCount(it.blocked || 0) }
   ], items.slice().sort((a, b) => (b.runs !== null ? b.runs : b.runsCounted) - (a.runs !== null ? a.runs : a.runsCounted)));
 }
@@ -190,7 +190,7 @@ export function impactView(doc, ctx) {
   const ext = ctx && ctx.ext;
   const covers = (k) => !!(ext && ext.covers && ext.covers(k));
   return h('div', null,
-    rangeLine(doc),
+    timesLine(doc, ['spend', 'usage', 'hooksLocal', 'hooksCi', 'hooksCloud']),
     panel(STRINGS.impactSpend, spendView(doc, refMs)),
     covers('cost') ? ext.cost(ctx) : null,
     panel(STRINGS.agentMade, agentMadeView(doc, refMs)),

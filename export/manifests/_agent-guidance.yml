@@ -6,7 +6,7 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: 0ef732fdbd825e35ad6bd853855fe158b61ada2b
+source_sha: 98cba5996ecd415e64456ba0b5e4e16b32662bb6
 
 exclude:
   - path: docs/reference/adopt-the-whole-system.md
@@ -360,6 +360,16 @@ edits:
       >   [Repeated guidance across repos](../../README.md#repeated-guidance-across-repos)
       >   decides what each overlap entry should become.
     why: Overlap judgment. The note linked the excluded Fleet health audit.
+  # ---- Re-pin round (2026-11-16): the article-lift page names a repo the kit does not ship (C11)
+  - path: docs/routines/article-lift.md
+    old: "runs on GitHub Actions and reaches it directly. A git clone of\n`Adam-S-Daniel/rss-inator` shows how the feed is built (its scraper reads\nthe upstream page), not the feed's items. For the items, read\n"
+    new: "runs on GitHub Actions and reaches it directly. A git clone of the\nfeed's own repository shows how the feed is built, not the feed's items.\nFor the items, read\n"
+    why: >-
+      C11. The source now points at the owner's `rss-inator` repo, which the
+      kit does not ship; the routine-prompt guard
+      (test_routine_prompts_name_only_kit_repos) fired. The sentence keeps
+      its point (a clone shows how the feed is built, not its items) without
+      naming the repo.
 
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).

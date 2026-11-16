@@ -1,0 +1,84 @@
+# Categories for scripts/automatic_spend.py: everything that spends Claude
+# usage on its own, on a schedule or when an event fires it (the owner,
+# 2026-11-15: the forecast breaks non-eval spend down by these).
+#
+# The script discovers the jobs itself (scheduled tasks from list_triggers,
+# GitHub workflows from the fleet's checkouts, WORKSTATION tasks from wsl-automation's
+# register-tasks.ps1); this file only names the categories and the few facts
+# no source file states. Nothing here is a count or a cost.
+#
+# Each category says whether its jobs are part of the continuous improvement
+# system (`in_loop`); `outside_loop` and `inside_loop` (job-name regexes,
+# checked in that order) override it for single jobs (the owner, 2026-11-15).
+# `other_in_loop` marks the jobs no category matches (site builds, tests,
+# deploys and the like).
+#
+# A job lands in the FIRST category whose `match` (case-insensitive regex,
+# searched in the job's name, and for a workflow in `<repo>/<file>` too)
+# finds it; a job no category matches lands in `other`.
+categories:
+  - id: new_targets_from_transcripts
+    label: Creating new targets (from transcripts and public gaps)
+    match: ["session miner", "draft a skill", "routine-draft-skill", "skill-coverage"]
+    in_loop: true
+  - id: centralizing_targets_and_memories
+    label: Centralizing existing targets and memories
+    match: ["memory curation", "centralization", "skills-lock-bump", "sync\\.yml$", "propagation"]
+    in_loop: true
+  - id: dashboard_and_explorer
+    label: Updating the dashboard and Explorer
+    match: ["dashboard", "explorer", "site freshness", "site-freshness", "board-feed", "task health", "waiting feed", "usage census"]
+    in_loop: true
+  - id: improving_targets
+    label: Improving and re-checking targets (eval loop upkeep)
+    match: ["eval scope", "hook block review", "prompt[- ]audit", "lesson", "improve", "retire", "removal"]
+    in_loop: true
+  - id: fleet_maintenance
+    label: Fleet maintenance (fleet worker, audits, security, CI health)
+    match: ["fleet", "security", "lockfile", "workflow health", "dependabot", "resync", "fixer", "health", "drift"]
+    in_loop: true
+  - id: watchers
+    label: Watching vendors and articles
+    match: ["changelog", "article", "watch for", "vendor"]
+    in_loop: true
+  - id: personal
+    label: Personal assistant tasks
+    match: ["morning brief", "heartbeat", "media-discovery", "cross-post"]
+    in_loop: false
+  - id: evals
+    label: Eval runs (already inside the eval cap)
+    match: ["eval runner", "routine-eval", "eval\\.yml$", "credit-lane", "credit lane"]
+    in_loop: true
+
+# Jobs outside the loop even though their category is in it (the owner,
+# 2026-11-15: security alert triage, the fleet health audit and the "work
+# locally" feature watch are not part of the continuous improvement system).
+outside_loop:
+  - "security alert triage"
+  - "fleet health audit"
+  - "work locally"
+inside_loop: []
+other_in_loop: false
+
+# Scheduled tasks with no cron of their own, fired by a GitHub workflow,
+# keyed by a regex on the task's name (ids stay out of this public file). The
+# rate is that workflow's cron, thinned to `cadence_hours` when the workflow
+# skips cron lines off that cadence (fleet-worker-fire.yml reads the repo
+# variable FLEET_WORKER_EVERY_HOURS; keep this in step with it).
+fired_by:
+  "^fleet worker$":
+    workflow: _agent-guidance/fleet-worker-fire.yml
+    cadence_hours: 6
+
+# Scheduled tasks (name regexes) whose spend is already counted inside the
+# eval cap by scripts/allowance_guard.py (their fires go through
+# routine-eval-fire.yml).
+eval_cap_triggers:
+  - "eval runner"
+
+# Workflows whose Anthropic spend is eval spend through the monthly API
+# credit (the forecast's "plus API credit" scenario prices it), not a cost
+# outside the eval budget.
+eval_api_workflows:
+  - skills-evals/eval.yml
+  - skills-evals/credit-lane.yml

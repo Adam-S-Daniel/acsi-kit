@@ -4,6 +4,8 @@ import { useGlossVoice } from './glosses.js';
 import { SCHEMA_VERSION, WINDOW_WEEKS, MIN_PAIRED_RUNS, HELPS_MIN_GAIN, WORSE_TOLERANCE, pts, ordinal, countWord } from './rules.js';
 
 const ISSUES_URL = 'https://github.com/' + DATA_REPO + '/issues';
+/* What one skill use is (the census's skill and skill-read rows). */
+const STRINGS_USE_DEF = 'A use is a call of the skill, or a session that read its files without calling it.';
 
 /* `you` is true in the private build (the dashboard speaks to its owner) and
    false in the public one, which says "the owner" and names no person. */
@@ -12,11 +14,9 @@ function buildStrings(you) {
     ? { who: 'you', Who: 'You', whose: 'your', Whose: 'Your', s: '', obj: 'you', own: 'your own', dont: 'don\'t' }
     : { who: 'the owner', Who: 'The owner', whose: 'the owner\'s', Whose: 'The owner\'s', s: 's', obj: 'the owner', own: 'their own', dont: 'doesn\'t' };
   return {
-  title: you ? 'Self-improvement project' : 'Evals Explorer',
+  title: you ? 'Self-improvement project' : 'Improvement Loop Explorer',
   voice: you ? 'you' : 'owner',
   loading: 'Loading the latest results…',
-  newestRun: (when) => 'Newest run: ' + when + '.',
-  noRunsYet: 'No runs have been recorded yet.',
   hidden: '[hidden]',
   unknown: 'unknown',
   weekOf: (start) => 'week of ' + start,
@@ -88,7 +88,7 @@ function buildStrings(you) {
   skillsHeading: 'Does each skill help?',
   purposeMissing: 'No description of what this skill is for was found.',
   skillsNote: 'One row per tested skill, best-faring first. Open a name for everything measured about it.',
-  unusedLine: (n, t, from, to) => n + ' of ' + t + ' tested skills were not used in ' + W.whose + ' real work from ' + from + ' to ' + to + ' (cloud sessions are not counted yet).',
+  unusedLine: (n, t, from, to, cloudFrom) => n + ' of ' + t + ' tested skills were not used in ' + W.whose + ' real work from ' + from + ' to ' + to + (cloudFrom ? ' (cloud sessions counted from ' + cloudFrom + ').' : ' (cloud sessions are not counted yet).'),
   colGain: 'Gain, points', colNext: 'Next test', colDecision: 'Official decision',
   sectionsHeading: 'Does each section earn its place?',
   sectionsNote: 'One row per section, best-faring first. Open a name for everything measured about it.',
@@ -147,9 +147,10 @@ function buildStrings(you) {
   confidenceNone: 'How sure the loop is: no figure yet. It needs a completed comparison first.',
   used: (n, from, to) => n === 0 ? 'Not used in ' + W.whose + ' real work from ' + from + ' to ' + to + '.'
     : 'Used ' + n + (n === 1 ? ' time' : ' times') + ' in ' + W.whose + ' real work from ' + from + ' to ' + to + '.',
+  usedSplit: (calls, reads) => calls + (calls === 1 ? ' call' : ' calls') + ', ' + reads + ' by reading its files.',
   copies: (match, older, unknown) => 'Copies loaded in the last 2 weeks: ' + match + ' match main, ' + older + ' older, ' + unknown + ' unknown.',
   copiesNone: 'Copies loaded in the last 2 weeks: no uses in the window.',
-  usageNote: (sessions) => 'Real-work counts come from ' + sessions + ' of ' + W.whose + ' Claude Code sessions on ' + W.own + ' computer. Sessions in the cloud are not counted yet.',
+  usageNote: (sessions, cloudFrom) => 'Real-work counts come from ' + sessions + ' of ' + W.whose + ' Claude Code sessions on ' + W.own + ' computer' + (cloudFrom ? ', plus every skill use ' + W.whose + ' cloud sessions have recorded since ' + cloudFrom + '.' : '. Sessions in the cloud are not counted yet.') + ' ' + STRINGS_USE_DEF,
   size: (words) => 'About ' + words + ' words. It costs that much reading in every session.',
 
   barWith: 'With the skill',
@@ -353,7 +354,14 @@ function buildStrings(you) {
   subNavLabel: 'Results',
   srcDoc: 'the results document',
   srcLine: (source, when) => 'From ' + source + (when ? ', as of ' + when : '') + '.',
-  srcRange: (from, to) => 'Data read between ' + from + ' and ' + to + '.',
+  timesLine: (parts) => 'Data times: ' + parts + '.',
+  timesUndated: (built) => 'The data on this page carries no time of its own; the results document was built ' + built + '.',
+  timeLabels: { runs: 'newest eval run', coverage: 'skills census', usage: 'local skill use',
+    hooksLocal: 'local hook counts', hooksCi: 'CI hook counts', hooksCloud: 'cloud hook counts',
+    activity: 'GitHub activity', queue: 'fixture queue', spend: 'spend', lessons: 'lessons' },
+  subjectNewestRun: 'its newest run',
+  timesFold: 'Data times',
+  timesAtBuildList: 'removal PRs (opened by "remove" verdicts), lesson funnel, fixture checks',
   srcTip: (source, when) => 'Source: ' + source + '.' + (when ? ' As of ' + when + '.' : ''),
   noValue: '—',
   privateBadge: 'Private',
@@ -397,7 +405,7 @@ function buildStrings(you) {
   sectionsBarAria: (n) => 'States of ' + n + ' guidance sections.',
   tileAlerts: 'Alerts',
   tileAlertsNote: 'open, listed under Needs you.',
-  summaryLead: 'What the self-improvement loop measured: git hook checks, skills and guidance, each kept only while it earns its place.',
+  summaryLead: 'Git hooks, skills and guidance: harvested from real work, measured, improved, then kept or cut.',
 
   hooksHeading: 'Does each git hook check earn its place?',
   hooksNote: (weeks, from, to) => 'Each check runs before a commit or push on ' + W.whose + ' computers (git hooks) and again in CI. Counts cover the ' + weeks + ' weeks from ' + from + ' to ' + to + '. "Blocked" is a refused commit or push on a computer, or a red check in CI.',
@@ -411,11 +419,10 @@ function buildStrings(you) {
   hookWhere: { fleet: 'Fleet', repo: 'Repo-local' },
   hookWhereLine: (where, repo) => where === 'repo' ? 'Runs from ' + (repo || 'one repo') + '\'s own checks (repo-local).' : 'Runs in every fleet repo from the shared template.',
   colCheck: 'Check', colWhere: 'Where it runs', colRuns: 'Runs', colBlocked: 'Blocked', colOverrides: 'Overrides',
-  colRunsWindow: (weeks) => (weeks === null ? 'Runs' : 'Runs, ' + weeks + ' weeks'),
+  colRunsWindow: (weeks) => (weeks === null ? 'Runs outside CI' : 'Runs outside CI, ' + weeks + ' weeks'),
   runsNotCounted: 'not counted',
-  runsPartial: (n) => n + ' local, CI not counted',
   blockedOf: (blocked, runs) => blocked + ' of ' + runs + (runs === 1 ? ' run' : ' runs'),
-  hookRunsNote: 'Local runs come from the hook telemetry on ' + W.whose + ' computers: every commit or push that runs the check is counted. CI records only which checks failed in a red run, not how often each ran, so a check\'s CI runs are not counted; its Runs cell then shows only the local runs, or "not counted". Where runs are counted, Blocked reads like "4 of 30 runs".',
+  hookRunsNote: 'Runs outside CI are commits and pushes on ' + W.whose + ' computers (and cloud sessions, where recorded) that ran the check. CI records only which checks failed a red run, never how often each ran, so no check\'s CI runs are counted. For a check with no CI blocks, Blocked reads like "4 of 30 runs".',
   overridesNotCounted: 'not counted',
   hookOverridesNote: 'Overrides (work pushed past a refusal) are not counted for this check yet, so "overridden often" cannot be judged; the verdict rests on runs and blocks alone.',
   hookRule: (rate, weeks) => 'A check earns its place when it blocks something in ' + (weeks === null ? 'the window (length unknown)' : weeks + ' weeks') + '; it is overridden often when more than ' + rate + ' of its blocks are pushed past anyway.',
@@ -430,6 +437,7 @@ function buildStrings(you) {
   colWeek: 'Week of', colLocalRuns: 'Local runs', colLocalBlocked: 'Local blocks', colCiRuns: 'CI runs', colCiBlocked: 'CI blocks', colRepo: 'Repo',
   hookUnlisted: (n) => n + ' more ' + (n === 1 ? 'check ran but is' : 'checks ran but are') + ' not listed.',
   hookPrivateFold: 'Checks in private repos are counted in one "private repos" row.',
+  hookPrivateHidden: (runs, blocked) => 'The totals above include ' + (runs === null ? '' : runs + ' runs and ') + blocked + ' blocks in private repos. The tables below leave private repos out.',
   hookBack: 'All git hook checks',
   hookNotFound: 'No git hook check by that name is in this build.',
 
@@ -558,7 +566,7 @@ function buildStrings(you) {
   colUnknown: 'Unknown', agentMadeOlder: (n) => 'Older items (' + n + ')',
   agentMadeVerdicts: (list) => list ? 'verdicts: ' + list : 'no verdicts yet',
   impactUseSkills: 'Real-work use by skill',
-  impactUseSkillsNote: (from, to) => 'Uses from ' + from + ' to ' + to + '. Guidance has no direct use signal; its effect shows only in test results.',
+  impactUseSkillsNote: (from, to) => 'Uses from ' + from + ' to ' + to + '. ' + STRINGS_USE_DEF + ' Guidance has no direct use signal; its effect shows only in test results.',
   impactUseChecks: 'Real-work use by git hook check',
   impactSpend: 'Spend',
   impactSpendTotal: (since, usd, verdicts, each, tests, build, api) => 'Since ' + since + ': ' + usd + ' for ' + verdicts + ' decided verdicts, ' + each + ' each (tests ' + tests + ', building ' + build + ', API ' + api + ').',
