@@ -80,7 +80,21 @@ exclude:
     why: X9 (a personal mail skill; its trigger set is new in re-pin Round 4).
   - path: evals/admin-config-render/
     why: X4 and X9 (a platform-only skill's fixtures).
-  - path: evals/browser-testing/
+  # The browser-testing fixture itself is left out (X4, X9); its seed's
+  # package.json and package-lock.json stay (acsi-kit#72): they pin the Acorn
+  # parser scripts/checker_call_names.js loads from there, and ci.yml,
+  # dev_setup.sh and routine-scaffold-gate.yml install them.
+  - path: evals/browser-testing/PROVENANCE.md
+    why: X4 and X9 (a platform-only skill's fixtures).
+  - path: evals/browser-testing/fixture.yaml
+    why: X4 and X9 (a platform-only skill's fixtures).
+  - path: evals/browser-testing/seed/e2e/
+    why: X4 and X9 (a platform-only skill's fixtures).
+  - path: evals/browser-testing/seed/theme/
+    why: X4 and X9 (a platform-only skill's fixtures).
+  - path: evals/browser-testing/seed/check-spec.js
+    why: X4 and X9 (a platform-only skill's fixtures).
+  - path: evals/browser-testing/seed/playwright.config.js
     why: X4 and X9 (a platform-only skill's fixtures).
   - path: evals/ci-job-performance/
     why: X9 and Content tiers (the fixtures of a skill the kit does not ship).
@@ -134,6 +148,14 @@ edits:
       builds from the registry's own name, so it must follow the C1 renames;
       as one literal after github.com/ it read as a citation (P2) and kept the
       source owner's name, failing the test in the kit.
+  - path: test/issues/test_issue_124_guidance_gates.py
+    old: "        source = \"https://github.com/jodidaniel/example-site/pull/7\"\n"
+    new: "        source = \"https://github.com/\" + \"jodidaniel/example-site/pull/7\"\n"
+    why: >-
+      acsi-kit#72, as Round 10. without_origin_urls blanks only a fleet
+      owner's pull request URL, matched by fixture_pr_gate.py's substituted
+      owner pattern; as one literal after github.com/ the test's URL read as
+      a citation (P2) and kept the source owner's name, so it was not blanked.
   - path: explorer/test/run.js
     old: "url: 'https://github.com/Adam-S-Daniel/adam-agentskills/pull/142' };\n"
     new: "url: 'https://github.com/' + 'Adam-S-Daniel/adam-agentskills/pull/142' };\n"
@@ -222,36 +244,6 @@ edits:
     old: "    # The audit scripts still come from cms-platform, at the release named\n    # in _agent-guidance's .github/health-audit-platform-ref.\n"
     new: "    # The audit script is copied into _agent-guidance too (the adoption\n    # kit's DECISIONS C4).\n"
     why: C4. The kit has no platform repo and no release pin; the script lives in _agent-guidance.
-  # ---- X9: no browser-testing fixture to install
-  - path: .github/workflows/ci.yml
-    old: |2
-            - name: Set up Node for the browser-testing AST fixture
-              if: steps.salient.outputs.run == 'true'
-              uses: actions/setup-node@v7.1.0
-              with:
-                node-version: 22
-            - name: Install browser-testing parser dependencies
-              if: steps.salient.outputs.run == 'true'
-              working-directory: skills-evals/evals/browser-testing/seed
-              run: npm ci --ignore-scripts --no-audit --no-fund
-    new: |2
-            - name: Set up Node for the real-work fixtures' dependencies
-              if: steps.salient.outputs.run == 'true'
-              uses: actions/setup-node@v7.1.0
-              with:
-                node-version: 22
-    why: >-
-      X9. The browser-testing fixture whose parser this step installed is left
-      out; Node stays for the real-work fixtures' own npm installs below.
-  - path: scripts/dev_setup.sh
-    old: "    --print-npm-dirs) echo evals/browser-testing/seed; echo explorer; real_work_dirs npm; exit 0 ;;\n"
-    new: "    --print-npm-dirs) echo explorer; real_work_dirs npm; exit 0 ;;\n"
-    why: X9. Follows ci.yml, which no longer installs the left-out browser-testing fixture.
-  - path: scripts/dev_setup.sh
-    old: "for dir in evals/browser-testing/seed explorer $npm_dirs; do\n"
-    new: "for dir in explorer $npm_dirs; do\n"
-    why: X9. Same.
-
   # ---- C7: the routine's trigger id is the adopter's, held in a repo variable
   - path: .github/workflows/routine-eval-fire.yml
     stage: output
@@ -319,6 +311,20 @@ edits:
     stage: output
     old: "            \"HOME\": str(self.tmp), \"FIRE_URL\": self.url,\n"
     new: "            \"HOME\": str(self.tmp), \"ROUTINE_TRIGGER_ID\": \"trig_EXAMPLE\",\n"
+    why: C7. Same.
+  - path: test/issues/test_issue_pair_fires.py
+    stage: output
+    old: |2
+              steps = fire_base.load(fire_base.WORKFLOW)["jobs"]["fire"]["steps"]
+              self.url = next(s for s in steps
+                              if s.get("name") == "Fire the eval routine")["env"]["FIRE_URL"]
+    new: |2
+              self.url = "https://api.anthropic.com/v1/claude_code/routines/trig_EXAMPLE/fire"
+    why: C7. The fire URL is built in the step script from ROUTINE_TRIGGER_ID, which fire() passes (acsi-kit#72, as test_issue_68_model_input.py).
+  - path: test/issues/test_issue_pair_fires.py
+    stage: output
+    old: "               \"FIRE_URL\": self.url, \"EVAL_ROUTINE_FIRE_BEARER\""
+    new: "               \"ROUTINE_TRIGGER_ID\": \"trig_EXAMPLE\", \"EVAL_ROUTINE_FIRE_BEARER\""
     why: C7. Same.
   - path: test/issues/test_issue_routine_improve.py
     stage: output
@@ -543,7 +549,7 @@ patches:
   - file: library_fixtures.py
     why: >-
       Content tiers. The recommended and opinionated items' fixtures, weekly
-      rows, test modules and the tests of them inside shared modules move to
+      rows, stakes rows, test modules and the tests of them inside shared modules move to
       library/<kind>/<id>/skills-evals/, with the ops add-content.sh runs to
       put each back; machinery_tests.py then removes those tests from the
       tree.
@@ -572,9 +578,12 @@ patches:
       source owner's first name; it is an invented one of the same shape.
   - file: empty_config.py
     why: >-
-      X9 and Content tiers. evals/scheduled.yml keeps the rows of the core items' fixtures and
-      evals/non-coverage.yml keeps its header and key with an empty list;
-      the dropped rows named fixtures and skills the kit does not ship.
+      X9 and Content tiers. evals/scheduled.yml keeps the rows of the core items' fixtures,
+      evals/stakes.yml the rows of the skills and sections whose fixtures
+      are in the tree (acsi-kit#72: scripts/stakes.py refuses a row with no
+      fixture directory), and evals/non-coverage.yml keeps its header and
+      key with an empty list; the dropped rows named fixtures and skills
+      the kit does not ship.
   - file: standing_budget.py
     why: >-
       C6. evals/budget.yml ships the standing 30-point weekly cap and 80%
@@ -643,6 +652,17 @@ protect_except:
       Its expected activity URLs (citation-shaped test data) are built by
       explorer_public.py from the substituted owner, so both sides are
       substituted together.
+  - path: test/issues/test_issue_fixture_queue.py
+    why: >-
+      acsi-kit#72. Its real-work origin source and expected pull request URLs
+      (citation-shaped test data) are checked against fixture_queue.py's and
+      fixture_pr_gate.py's substituted owner and repository, so both sides
+      are substituted together.
+  - path: test/issues/test_issue_72_explorer_data.py
+    why: >-
+      acsi-kit#72. Its expected removal and pull request URLs (citation-shaped
+      test data) are what explorer_data.py builds from the substituted owner
+      and registry names, so both sides are substituted together.
 
 regenerate:
   - copy_from_kit: {repo: _agent-guidance, from: agents-md/base.md, to: .claude/hooks/fleet-guidance.md}
@@ -675,6 +695,12 @@ regenerate:
       the tree's own `npm run check` passes. The pinned esbuild comes from
       the source checkout's explorer/node_modules, installed from the
       source's lockfile at source_sha (ci.yml and resync.yml do that).
+  - run: python3 -I -B scripts/build_rules.py
+    why: >-
+      docs/rules.md and docs/rules.json are build_rules.py's output from the
+      policy files in evals/, and empty_config.py drops the stakes.yml rows of
+      items the kit does not ship, so they are rebuilt from the exported files
+      (acsi-kit#72); the tree's own test checks they are current.
 
 suite:
   git_init: true

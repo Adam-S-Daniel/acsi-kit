@@ -474,13 +474,7 @@
     "stakes.yml#high": [
       "section agent-contribution-markers",
       "section data-exposure-in-ci",
-      "section name-becomes-scanner-data",
-      "section pinning-github-actions",
-      "section security",
-      "section test-that-can-signal-kills-every-session",
-      "skill consumer-repo-provisioning",
-      "skill disarm-inherited-reach",
-      "skill github-actions-sha-pinning"
+      "section pinning-github-actions"
     ]
   },
   "retired_names": {

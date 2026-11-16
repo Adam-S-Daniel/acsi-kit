@@ -154,24 +154,14 @@ class PlannerKeepsPrivateSkillsOutOfPublicOutputs(unittest.TestCase):
     def test_a_private_skill_gets_no_improve_context(self):
         import plan_week
         with tempfile.TemporaryDirectory() as tree:
+            sys.path.insert(0, str(ROOT / "test"))
+            import example_evals
             out = plan_week.skill_contexts(
-                ROOT / "evals", Path(tree), "20261031T235959Z", {},
+                example_evals.checkout() / "evals", Path(tree), "20261031T235959Z", {},
                 {"roster_models": ["claude-sonnet-5-5"], "skills": {}},
                 [], [], [], datetime(2026, 10, 31, 23, 59, tzinfo=timezone.utc))
         self.assertNotIn("acsi-writing-style", out)
-        self.assertIn("rename-pdfs", out)
-
-    def test_its_fixtures_are_off_the_schedule_with_a_reason(self):
-        # The 2026-11-03 scope decision moved acsi-writing-style to owner
-        # review: its fixtures stay on disk, unscheduled, each with a reason.
-        def paths(name):
-            rows = yaml.safe_load((ROOT / "evals" / name).read_text(encoding="utf-8"))["fixtures"]
-            return {row["path"]: row.get("reason") for row in rows}
-        scheduled, unscheduled = paths("scheduled.yml"), paths("unscheduled.yml")
-        for name in ("proposal-bio", "recruiter-reply", "self-appraisal-opening"):
-            path = f"evals/acsi-writing-style/{name}"
-            self.assertNotIn(path, scheduled)
-            self.assertTrue(unscheduled.get(path))
+        self.assertIn("workflow-path-audit", out)
 
 
 if __name__ == "__main__":

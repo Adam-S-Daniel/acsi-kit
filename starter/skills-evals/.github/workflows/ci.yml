@@ -315,11 +315,15 @@ jobs:
         # TestIssue63::test_parallel_pins_agree_with_agentskills_requirements
         # fails the whole suite when the two repos' pins disagree.
         run: pip install pyyaml==6.0.3 markdown-it-py==4.2.0 tree-sitter==0.26.0 tree-sitter-bash==0.25.1 pytest==9.1.1 pytest-xdist==3.8.0 jsonschema==4.26.0
-      - name: Set up Node for the real-work fixtures' dependencies
+      - name: Set up Node for the browser-testing AST fixture
         if: steps.salient.outputs.run == 'true'
         uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
+      - name: Install browser-testing parser dependencies
+        if: steps.salient.outputs.run == 'true'
+        working-directory: skills-evals/evals/browser-testing/seed
+        run: npm ci --ignore-scripts --no-audit --no-fund
       # tool/index.html is the build output of explorer/src (esbuild, pinned
       # in explorer/package-lock.json). The suite's explorer tests import the
       # build, so every shard installs it; esbuild's binary comes from its

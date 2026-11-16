@@ -119,7 +119,9 @@ class WorkflowShapeTests(unittest.TestCase):
 
     def test_each_leg_runs_its_own_fixture(self):
         script = step_named("Select and validate the fixture")["run"]
-        for fixture in planner.committed_fixtures(ROOT)[:3]:
+        isolation = [f for f in planner.committed_fixtures(ROOT)
+                     if not planner.declares_context(ROOT / f)]
+        for fixture in isolation[:3]:
             with tempfile.TemporaryDirectory() as tmp:
                 event = Path(tmp) / "event.json"
                 # The event names a different fixture; the leg must ignore it.

@@ -504,6 +504,11 @@ def regenerate(starter: Path) -> None:
             new = agents_md(build, read(p))
             if new is not None:
                 write(p, new)
+    # skills-evals' docs/rules.md lists the stakes.yml rows, which an
+    # optional item's ops add (its own test checks the page is current).
+    evals = starter / "skills-evals"
+    if (evals / "scripts" / "build_rules.py").is_file():
+        run([sys.executable, "-I", "-B", "scripts/build_rules.py"], evals)
     cov, missing = coverage_with_bytes(ag)
     if missing:
         raise Refused("eval-coverage.yml rows with no section in their file: " + ", ".join(missing))

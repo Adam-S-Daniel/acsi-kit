@@ -148,6 +148,26 @@ def apply(root: Path, ctx) -> None:
     _drop_site_checkouts(root, wf + "loop-pr-refresh.yml", 2)
     _drop_site_flags(root, wf + "loop-pr-refresh.yml", 2)
 
+    # eval-scope.yml's removed rule (acsi-kit#72): it sparse-checks-out each
+    # public registry, and a checkout of a missing repo stops the job.
+    _drop_site_checkouts(root, wf + "eval-scope.yml", 2)
+    _drop_site_flags(root, wf + "eval-scope.yml", 2)
+
+    # scripts/routine_eval.py (acsi-kit#72): the routine fetches each sibling
+    # clone and passes each public registry's --registry flag; the example
+    # sites are neither, so the routine names only the registries the kit has.
+    _sub(root, "scripts/routine_eval.py",
+         'PUBLIC_REGISTRIES = ("acsi-agentskills", "example-site-platform", "example-site-a")\n',
+         'PUBLIC_REGISTRIES = ("acsi-agentskills",)\n')
+    _sub(root, "scripts/routine_eval.py",
+         '            "example-site-platform", "example-site-a", "wsl-automation", "repo-settings")\n',
+         '            "wsl-automation", "repo-settings")\n')
+    # The routine's RULES list the same clones (test_issue_routine_eval_script
+    # checks the two agree).
+    _sub(root, "docs/routine/eval-runner-instructions.md",
+         "acsi-agentskills-private, example-site-platform, example-site-a, wsl-automation",
+         "acsi-agentskills-private, wsl-automation")
+
     ev = wf + "eval.yml"
     _drop_site_checkouts(root, ev, 2)
     _sub(root, ev,

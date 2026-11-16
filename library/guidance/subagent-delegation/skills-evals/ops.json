@@ -11,6 +11,20 @@
       "class": "SecondBatchFixtureTests",
       "method": "test_verifier_trap_accepts_the_report_and_the_runner_finds_the_failure",
       "fragment": "SecondBatchFixtureTests.test_verifier_trap_accepts_the_report_and_the_runner_finds_the_failure.py"
+    },
+    {
+      "op": "insert-method",
+      "file": "test/issues/test_issue_124_guidance_gates.py",
+      "class": "HarderFixtureTests",
+      "method": "test_contradicting_report_setup_and_its_failing_test",
+      "fragment": "HarderFixtureTests.test_contradicting_report_setup_and_its_failing_test.py"
+    },
+    {
+      "op": "insert-method",
+      "file": "test/issues/test_issue_124_guidance_gates.py",
+      "class": "HarderFixtureTests",
+      "method": "test_contradicting_report_trap_merges",
+      "fragment": "HarderFixtureTests.test_contradicting_report_trap_merges.py"
     }
   ]
 }
