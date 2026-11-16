@@ -383,11 +383,14 @@ regenerate:
 
 # The repo's own suite, as its AGENTS.md and ci.yml run it. The two plugin
 # globs match nothing while no skill ships tests, so the command sets
-# nullglob (ci.yml carries the same edit).
+# nullglob (ci.yml carries the same edit). The setup probe runs the python3
+# the command runs, with -P (no cwd on sys.path) rather than -I: -I also drops
+# the user site, so it checked other packages than the suite imports, and a
+# user-site install of the pins (pip --user) always failed the probe.
 suite:
   git_init: true
   setup: >-
-    python3 -I -c 'import yaml, markdown_it, bashlex, jsonschema, xdist; assert yaml.__version__ == "6.0.3", yaml.__version__';
+    python3 -P -c 'import yaml, markdown_it, bashlex, jsonschema, xdist; assert yaml.__version__ == "6.0.3", yaml.__version__';
     if [ "$(id -u)" = 0 ]; then chmod o+rx "$PWD" "$(dirname "$PWD")"; fi
   command: shopt -s nullglob; python3 -m pytest scripts/ plugins/*/skills/*/tests/ plugins/*/skills/*/scripts/ -q -rfEs -n auto -p no:cacheprovider
   needs: >-
