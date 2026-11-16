@@ -407,6 +407,11 @@ regenerate:
     why: The fleet payload mirror must equal base.md byte for byte (scripts/check-fleet-guidance-mirror.js).
   - run: NODE_PATH="$EXPORT_SOURCES/_agent-guidance/node_modules" node scripts/check-guidance-coverage.js --write-bytes >/dev/null
     why: Section byte counts in agents-md/eval-coverage.yml follow base.md.
+  - run: NODE_PATH="$EXPORT_SOURCES/_agent-guidance/node_modules" node scripts/build-contributor-rules.js --write >/dev/null
+    why: >-
+      .github/fleet-contributor-rules.md is built from the base.md sections
+      eval-coverage.yml marks for contributors; blank_content.py changes both,
+      and test-contributor-rules.js checks the committed file is current.
   - run: >-
       printf '%s\n%s\n' "$(./scripts/build-agents-md.sh)"
       "$(sed -n '/^## Repo-specific additions/,$p' AGENTS.md)" > AGENTS.md.new
