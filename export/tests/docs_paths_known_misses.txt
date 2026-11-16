@@ -1,0 +1,7 @@
+# Genuine misses awaiting a page fix (relative to a subfolder, name the full path).
+# Format: <page>: <span>  # what is wrong. Stale-checked like docs_paths_allow.txt:
+# delete the entry when the page is fixed.
+docs/evals-and-loop.md: scorers/objective.py  # lives at starter/skills-evals/harness/scorers/objective.py
+docs/evals-and-loop.md: scorers/judge.py  # lives at starter/skills-evals/harness/scorers/judge.py
+docs/routines.md: page/index.html  # lives at starter/skills-evals/dashboard/page/index.html
+docs/routines.md: page/datasets.json  # lives at starter/skills-evals/dashboard/page/datasets.json

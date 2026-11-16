@@ -64,7 +64,7 @@ jobs:
             fi
             export CI=false
           fi
-          python3 -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
+          python3 -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3 markdown-it-py==4.2.0
           python3 -m pytest export/tests -q -p no:cacheprovider
           python3 export/fetch_sources.py --owner "$SOURCE_OWNER" --dest "$RUNNER_TEMP/kit-sources" --skip agentskills-private
           # Two exports run a source's own Node code (their manifests'
