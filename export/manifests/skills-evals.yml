@@ -140,6 +140,29 @@ exclude:
     why: X9. Every test in it locks the ci-job-performance fixture, which the kit does not ship.
 
 edits:
+  # ---- Starter suite on a local machine (acsi-kit#72)
+  - path: test/issues/test_issue_594_late_writer.py
+    stage: output
+    old: |2+
+              self.enterContext(mock.patch.object(run_eval.run_canary, "cli_bin",
+                                                  return_value=self.CLI))
+              return run_eval.run_agent(self.root, "prompt",
+    new: |2+
+              self.enterContext(mock.patch.object(run_eval.run_canary, "cli_bin",
+                                                  return_value=self.CLI))
+              # The launch also reads the host's git configuration for `include`
+              # sections, and starts `git` (through the patched Popen) when
+              # `~/.gitconfig` has one. A host with one would add children that
+              # are not the CLI launches counted here (#987).
+              self.enterContext(mock.patch.object(run_eval, "_git_include_targets",
+                                                  return_value=[]))
+              return run_eval.run_agent(self.root, "prompt",
+    why: >-
+      skills-evals 9dc471490 verbatim, which is after source_sha: on a machine
+      whose ~/.gitconfig has an include (the fleet hook writes includeIf
+      entries), the follow-up launch test counted the `git config` reads as
+      CLI launches and failed 4 != 2. The old text stops matching at a
+      re-pin past that commit, and the edit is then dropped.
   - path: test/issues/test_issue_unused_removal.py
     old: "        url = \"https://github.com/Adam-S-Daniel/adam-agentskills/pull/999\"\n"
     new: "        url = \"https://github.com/\" + \"Adam-S-Daniel/adam-agentskills/pull/999\"\n"
