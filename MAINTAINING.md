@@ -8,7 +8,14 @@ For the kit's owner and the agents working on it; adopters can skip this.
   (`export/resync.py`), regenerates `starter/`, runs `export/tests`, and
   opens or updates one pull request from `resync/auto`. Before merging it,
   tier any new skill or guidance section in `bootstrap/content-catalog.json`
-  and record every departure in `export/DECISIONS.md`. It needs a GitHub App
+  and record every departure in `export/DECISIONS.md`. The pull request's
+  summary also has a "Pages to review" section (`export/doc_review.py`, from
+  the page-to-source map `export/doc-sources.yml`): update each listed page
+  before merging, or say in the pull request why it needs no change. When you
+  add a page under `docs/`, add its sources to the map. Coverage findings
+  (a routine spec or scheduled workflow no page names) only warn in
+  `export/tests/test_doc_review.py`; set `required: true` in the map to make
+  them fail, once `not_documented` is settled. It needs a GitHub App
   with contents and pull-requests write on this repo, named by the
   repository variable `RESYNC_APP_CLIENT_ID` (its client id) and the
   repository secret `RESYNC_APP_PEM` (its private key); without them it only
