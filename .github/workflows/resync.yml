@@ -164,9 +164,9 @@ jobs:
           git config user.email "${bot_id}+${bot}@users.noreply.github.com"
           gh auth setup-git
           git switch -c "$branch"
-          git add -A -- export/manifests starter
+          git add -A -- export/manifests starter docs
           git commit -q -m "Re-sync the kit from its source repos" \
-            -m "Moves each manifest's source_sha to its source's default-branch head and regenerates starter/ (export/resync.py), except any source the run held back (export/resync_holdback.py)."
+            -m "Moves each manifest's source_sha to its source's default-branch head and regenerates starter/ (export/resync.py) and the docs regions quoted from it (export/doc_regions.py), except any source the run held back (export/resync_holdback.py)."
           echo "commit: $(git rev-parse HEAD)"
           # The job owns this branch, so it may overwrite it, but only from the
           # commit it saw: a lease on the remote's current sha (empty when the
