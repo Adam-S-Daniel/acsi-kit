@@ -75,7 +75,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
+          python3 -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3 markdown-it-py==4.2.0
           summary="$RUNNER_TEMP/resync-summary.md"
           python3 export/resync.py --owner "$SOURCE_OWNER" --summary "$summary"
           if git diff --quiet; then
