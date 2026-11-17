@@ -52,3 +52,7 @@ exact test id and with the reason. `run-all-tests.sh` passes a folder whose
 failures are all on that list, names each one it excused, and still fails
 on any failure that is not listed. Read the exit code directly, not through
 a pipe.
+
+CI runs these suites in the `starter-suites` job of
+[`ci.yml`](../.github/workflows/ci.yml) on any pull request or push that
+changes `starter/` or `export/`.
