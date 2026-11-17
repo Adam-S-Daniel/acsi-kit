@@ -90,3 +90,127 @@ jobs:
 
       - name: Bootstrap tests
         run: bash bootstrap/tests/test-bootstrap.sh
+
+  # Every export's own test suite (starter/run-all-tests.sh), the gap that let
+  # about 250 skills-evals export defects through (issue #72). A required
+  # check, so: no `on.paths`, no matrix and no `concurrency` group. The first
+  # step decides whether this pull request or push changed `starter/`,
+  # `export/`, this workflow or the action lockfile its steps run from; every
+  # later step is gated on it, so an
+  # unrelated change still reports success.
+  starter-suites:
+    name: starter-suites
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          # The whole history, so both ends of the diff below are present
+          # whatever the base branch is.
+          fetch-depth: 0
+
+      # The event's shas are read from $GITHUB_EVENT_PATH, never interpolated
+      # into the script. A dispatch, a new branch's first push or a base that
+      # cannot be found runs the suites rather than skipping them.
+      - name: Detect starter or export changes
+        id: scope
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) base=$(jq -r '.pull_request.base.sha // empty' "$GITHUB_EVENT_PATH")
+                          head=$(jq -r '.pull_request.head.sha // empty' "$GITHUB_EVENT_PATH") ;;
+            push)         base=$(jq -r '.before // empty' "$GITHUB_EVENT_PATH")
+                          head=$(jq -r '.after // empty' "$GITHUB_EVENT_PATH") ;;
+            *)            base="" head="" ;;
+          esac
+          run=true
+          if [[ "$base" =~ ^[0-9a-f]{40}$ && "$head" =~ ^[0-9a-f]{40}$ && ! "$base" =~ ^0+$ ]] \
+             && git cat-file -e "$base^{commit}" 2>/dev/null && git cat-file -e "$head^{commit}" 2>/dev/null; then
+            changed=$(git diff --name-only "$base...$head")
+            if ! grep -qE '^(starter/|export/|\.github/workflows/(ci\.yml|actions\.lock)$)' <<<"$changed"; then
+              run=false
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          if [ "$run" = true ]; then
+            echo "starter/, export/, ci.yml or actions.lock changed (or the diff could not be computed): running the starter suites"
+          else
+            echo "::notice::No change under starter/, export/, ci.yml or actions.lock: skipping the starter suites; this step's success keeps the required starter-suites check present."
+          fi
+
+      # 3.12, the version the exported repos' own CI installs (skills-evals'
+      # test_issue_88 depends on it).
+      - uses: actions/setup-python@v7.1.0
+        if: steps.scope.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v7.1.0
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: 22
+
+      # mikefarah's Go yq v4, which _agent-guidance's scripts/sync.sh needs
+      # (Ubuntu's `yq` is a different program). The version and digest are
+      # the ones _agent-guidance's own ci.yml pins; the digest is
+      # `yq_linux_amd64`'s from that release's `checksums` file.
+      - name: Install yq
+        if: steps.scope.outputs.run == 'true'
+        env:
+          YQ_VERSION: v4.53.3
+          YQ_SHA256: fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          curl -fsSL --retry 3 -o "$tmp/yq" "https://github.com/mikefarah/yq/releases/download/$YQ_VERSION/yq_linux_amd64"
+          printf '%s  %s\n' "$YQ_SHA256" "$tmp/yq" | sha256sum -c -
+          sudo install -m 0755 "$tmp/yq" /usr/local/bin/yq
+          yq --version
+
+      # bubblewrap for skills-evals' workspace-executing scorers (they fail
+      # closed without it), and jq for several suites.
+      - name: Install bubblewrap and jq
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends bubblewrap jq
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor,
+      # so neither `unshare --user` (the PID namespace the suites run in) nor
+      # bwrap inside it can start. Lift the restriction on this throwaway
+      # runner only when the probe shows it is in force.
+      - name: Allow unprivileged user namespaces
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          if ! unshare --user --map-current-user --pid --fork --mount-proc -- true 2>/dev/null; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          unshare --user --map-current-user --pid --fork --mount-proc -- \
+            bwrap --ro-bind / / --unshare-pid --unshare-net --proc /proc --dev /dev --die-with-parent -- true
+
+      # The Python pins agent-skills' and repo-settings' suites check for
+      # (their manifests' `needs`); skills-evals' setup installs its own.
+      # skills-evals' real-work fixture gems need the bundler version their
+      # lockfile names, as skills-evals' own ci.yml installs it.
+      - name: Install suite dependencies
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --ignore-installed PyYAML -r starter/agent-skills/requirements-dev.txt
+          python3 -m pip install --quiet --ignore-installed PyYAML -r starter/repo-settings/requirements-dev.txt
+          sudo gem install bundler --version 4.0.10 --no-document
+
+      - name: Run the starter suites
+        if: steps.scope.outputs.run == 'true'
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -uo pipefail
+          unshare --user --map-current-user --pid --fork --mount-proc -- bash starter/run-all-tests.sh
+          rc=$?
+          echo "run-all-tests.sh exited $rc"
+          exit "$rc"
