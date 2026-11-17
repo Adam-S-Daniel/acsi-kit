@@ -255,3 +255,15 @@ def apply(root: Path, ctx) -> None:
          "#   `git archive` (example-site-a's few skill blobs are fetched lazily from the\n"
          "#   public origin). A shallow one makes the alert unknown (null), never clean.\n",
          "#   `git archive`. A shallow one makes the alert unknown (null), never clean.\n")
+
+    # --- routine-fixture-supply.yml (acsi-kit#72): its promote job checks out
+    # both example sites as context repos and passes them as registries.
+    fs = wf + "routine-fixture-supply.yml"
+    _drop_site_checkouts(root, fs, 2)
+    _drop_site_flags(root, fs, 4)
+    _sub(root, fs,
+         "          for repo in _agent-guidance acsi-agentskills example-site-platform example-site-a wsl-automation; do\n",
+         "          for repo in _agent-guidance acsi-agentskills wsl-automation; do\n")
+    _sub(root, fs,
+         "          for repo in _agent-guidance acsi-agentskills example-site-platform example-site-a wsl-automation repo-settings; do\n",
+         "          for repo in _agent-guidance acsi-agentskills wsl-automation repo-settings; do\n")
