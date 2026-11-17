@@ -95,7 +95,8 @@ jobs:
   # about 250 skills-evals export defects through (issue #72). A required
   # check, so: no `on.paths`, no matrix and no `concurrency` group. The first
   # step decides whether this pull request or push changed `starter/`,
-  # `export/` or this workflow; every later step is gated on it, so an
+  # `export/`, this workflow or the action lockfile its steps run from; every
+  # later step is gated on it, so an
   # unrelated change still reports success.
   starter-suites:
     name: starter-suites
@@ -128,15 +129,15 @@ jobs:
           if [[ "$base" =~ ^[0-9a-f]{40}$ && "$head" =~ ^[0-9a-f]{40}$ && ! "$base" =~ ^0+$ ]] \
              && git cat-file -e "$base^{commit}" 2>/dev/null && git cat-file -e "$head^{commit}" 2>/dev/null; then
             changed=$(git diff --name-only "$base...$head")
-            if ! grep -qE '^(starter/|export/|\.github/workflows/ci\.yml$)' <<<"$changed"; then
+            if ! grep -qE '^(starter/|export/|\.github/workflows/(ci\.yml|actions\.lock)$)' <<<"$changed"; then
               run=false
             fi
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
           if [ "$run" = true ]; then
-            echo "starter/, export/ or ci.yml changed (or the diff could not be computed): running the starter suites"
+            echo "starter/, export/, ci.yml or actions.lock changed (or the diff could not be computed): running the starter suites"
           else
-            echo "::notice::No change under starter/, export/ or ci.yml: skipping the starter suites; this step's success keeps the required starter-suites check present."
+            echo "::notice::No change under starter/, export/, ci.yml or actions.lock: skipping the starter suites; this step's success keeps the required starter-suites check present."
           fi
 
       # 3.12, the version the exported repos' own CI installs (skills-evals'
