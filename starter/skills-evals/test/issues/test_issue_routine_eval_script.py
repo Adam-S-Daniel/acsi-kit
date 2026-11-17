@@ -188,6 +188,15 @@ class CheckoutCase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        # The routine makes its log and branch directories with
+        # tempfile.mkdtemp, which a cloud container throws away; here they
+        # go under self.tmp and leave with it, not into the host's TMPDIR,
+        # where run_eval's arm sandbox lists each one in denyRead.
+        self.temproot = self.tmp / "temp"
+        self.temproot.mkdir()
+        tempdir = mock.patch.object(tempfile, "tempdir", str(self.temproot))
+        tempdir.start()
+        self.addCleanup(tempdir.stop)
         env = mock.patch.dict(os.environ, GIT_ENV)
         env.start()
         self.addCleanup(env.stop)
@@ -253,7 +262,7 @@ class CheckoutCase(unittest.TestCase):
 
     def public_registry_flags(self) -> list[str]:
         out = []
-        for name in ("acsi-agentskills", "example-site-platform", "example-site-a"):
+        for name in ("acsi-agentskills",):
             out += ["--registry", f"{name}={self.sibling(name)}"]
         return out
 
@@ -416,7 +425,7 @@ class CommandTests(CheckoutCase):
         self.assertEqual(self.runner.calls[0],
                          ["python3", "-m", "pip", "install", "--user", *pins])
         expected_git = []
-        for name in ("acsi-agentskills", "example-site-platform", "example-site-a"):
+        for name in ("acsi-agentskills",):
             expected_git += [["-C", self.sibling(name), "fetch", "origin", "main"],
                              ["-C", self.sibling(name), "checkout", "--quiet", "--detach",
                               "origin/main"]]
@@ -430,16 +439,22 @@ class CommandTests(CheckoutCase):
         self.assertIn("harness wrote no summary.json", self.report)
         self.assertTrue(self.report.endswith("RESULT: error\n"))
 
+    def test_the_routines_temp_directories_stay_inside_the_case(self):
+        self.fire(payload(), writes=False)
+        made = sorted(p.name for p in self.temproot.iterdir())
+        self.assertTrue(made, "the fire made no temp directory")
+        self.assertTrue(all(name.startswith("skills-evals-routine-") for name in made), made)
+
     def test_an_in_place_skill_fixture_unshallows_every_sibling_first(self):
         self.fire(payload(fixture="evals/skill-b/deployed"), writes=False,
-                  shallow={"example-site-a", "repo-settings"})
+                  shallow={"wsl-automation", "repo-settings"})
         expected = []
         for name in routine_eval.SIBLINGS:
             expected.append(["-C", self.sibling(name), "rev-parse", "--is-shallow-repository"])
-            if name in ("example-site-a", "repo-settings"):
+            if name in ("wsl-automation", "repo-settings"):
                 expected.append(["-C", self.sibling(name), "fetch", "--unshallow", "origin"])
             expected.append(["-C", self.sibling(name), "fetch", "origin", "main"])
-        for name in ("acsi-agentskills", "example-site-platform", "example-site-a"):
+        for name in ("acsi-agentskills",):
             expected.append(["-C", self.sibling(name), "checkout", "--quiet", "--detach",
                              "origin/main"])
         self.assertEqual(self.git_calls(), expected)
@@ -450,23 +465,21 @@ class CommandTests(CheckoutCase):
 
     def test_a_missing_sibling_is_skipped_and_a_missing_registry_noted(self):
         shutil.rmtree(self.tmp / "wsl-automation")
-        shutil.rmtree(self.tmp / "example-site-platform")
+        shutil.rmtree(self.tmp / "acsi-agentskills")
         self.fire(payload(fixture="evals/skill-b/deployed"), writes=False)
         touched = {Path(call[1]).name for call in self.git_calls()}
         self.assertNotIn("wsl-automation", touched)
-        self.assertNotIn("example-site-platform", touched)
+        self.assertNotIn("acsi-agentskills", touched)
         self.assertEqual([self.eval_argv()[i + 1] for i, a in enumerate(self.eval_argv())
-                          if a == "--registry"],
-                         [f"acsi-agentskills={self.sibling('acsi-agentskills')}",
-                          f"example-site-a={self.sibling('example-site-a')}"])
-        self.assertIn("note: registry clone example-site-platform is not checked out", self.report)
+                          if a == "--registry"], [])
+        self.assertIn("note: registry clone acsi-agentskills is not checked out", self.report)
 
     def test_bare_is_one_isolation_without_arm_and_no_sibling_fetch(self):
         self.fire(payload(fixture="evals/skill-b/deployed", arms="bare", trials=3),
-                  writes=False, shallow={"example-site-a"})
+                  writes=False, shallow={"wsl-automation"})
         calls = self.git_calls()
         self.assertFalse([c for c in calls if "--unshallow" in c or "rev-parse" in c])
-        self.assertEqual(len([c for c in calls if c[2:] == ["fetch", "origin", "main"]]), 3)
+        self.assertEqual(len([c for c in calls if c[2:] == ["fetch", "origin", "main"]]), 1)
         self.assertEqual(self.eval_argv(),
                          self.tail("evals/skill-b/deployed", arm="without_skill", trials=3,
                                    flags=self.public_registry_flags(),
@@ -532,7 +545,7 @@ class CommandTests(CheckoutCase):
                           for model in (MODEL_B, MODEL_A)])
         # Pins, fetches and detaches happen once, not per model.
         self.assertEqual(len([c for c in self.runner.calls if c[0] != "git"]), 1)
-        self.assertEqual(len(self.git_calls()), 6)
+        self.assertEqual(len(self.git_calls()), 2)
         self.assertLess(self.report.index(f"run {MODEL_B}"), self.report.index(f"run {MODEL_A}"))
 
     def test_no_model_is_the_roster_default(self):

@@ -159,7 +159,12 @@ def run_one(kit_name: str, suite: dict, keep: bool, known: dict | None = None) -
                 if p.returncode != 0:
                     return False, f"git setup failed: {p.stderr.strip()}", "", []
         if suite.get("setup"):
-            p = subprocess.run(["bash", "-c", suite["setup"]], cwd=work, capture_output=True, text=True, env=env)
+            # errexit: a setup is a list of probes and steps, and a failed
+            # probe followed by another command (`import ...; if ...; fi`)
+            # must stop the setup and name the suite's needs, not leave the
+            # suite to fail later with the cause buried in its log.
+            p = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", suite["setup"]], cwd=work,
+                               capture_output=True, text=True, env=env)
             log_lines.append(p.stdout + p.stderr)
             if p.returncode != 0:
                 return False, f"setup exited {p.returncode} (needs: {suite.get('needs', 'see the manifest')})", "".join(log_lines), []

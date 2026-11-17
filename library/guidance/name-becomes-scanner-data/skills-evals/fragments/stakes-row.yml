@@ -1,0 +1,3 @@
+  - section: name-becomes-scanner-data
+    stakes: high
+    reason: a flagged name stays in history after a rename and fails every push's scan

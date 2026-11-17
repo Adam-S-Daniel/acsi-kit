@@ -86,7 +86,7 @@ BRANCH = f"claude/eval-guidance-improve-{RUN_ID}"
 # needs no edit here: the last two in name order are validation and holdout.
 SECTION = "anything-you-name-gets-its-link"
 FIXTURES = sorted(f"guidance/{SECTION}/{p.parent.name}" for p in
-                  (Path(__file__).resolve().parents[2] / "evals" / "guidance" / SECTION)
+                  (EXAMPLE_EVALS / "guidance" / SECTION)
                   .glob("*/fixture.yaml"))
 HEADING = "Example section heading"
 MARKER = "do-not-echo-this-marker"

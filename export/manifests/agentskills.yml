@@ -64,6 +64,87 @@ edits:
       Locks the deduplicated owner list above. Read from the script, since
       git's config keeps one entry per includeIf condition however often the
       installer writes it, so the installed config cannot show a duplicate.
+  # ---- Starter suite on a local machine (acsi-kit#72)
+  - path: scripts/test_plugin_runtime_gate.py
+    stage: output
+    old: |+
+      def test_the_shipped_bash_skills_are_gated_on_a_body_edit():
+          """The three skills the issue names ship with allowed-tools granting Bash."""
+          skills = REPO_ROOT / "plugins" / "acsi-non-coding-local" / "skills"
+          for name in ("add-from-address", "add-received-from-addresses", "rename-pdfs"):
+              data = (skills / name / "SKILL.md").read_bytes()
+              key = f"plugins/acsi-non-coding-local/skills/{name}/SKILL.md"
+              base = {".claude-plugin/marketplace.json": marketplace("acsi-non-coding-local"),
+                      key: data}
+              head = dict(base, **{key: data + b"one more sentence\n"})
+              assert_gated(run(base, head), "skill-body-bash")
+
+
+    new: ""
+    why: >-
+      X9. The test reads three of the source owner's personal skills, which
+      the kit does not ship, so it fails on a missing SKILL.md. The gate it
+      exercises (a body edit to a skill granting Bash) stays covered by the
+      synthetic-skill tests above it.
+  - path: scripts/test_fleet_guidance_hook.py
+    stage: output
+    old: |+
+      def tool_farm(directory: Path, leave_out) -> Path:
+          """A directory of symlinks to every tool on the clean PATH except `leave_out`."""
+          directory.mkdir(parents=True, exist_ok=True)
+          for entry in clean_path().split(os.pathsep):
+              folder = Path(entry)
+              if not folder.is_dir():
+                  continue
+              for tool in folder.iterdir():
+                  if leave_out(tool.name) or (directory / tool.name).exists() \
+                          or (directory / tool.name).is_symlink():
+                      continue
+                  (directory / tool.name).symlink_to(tool)
+          return directory
+
+
+    new: |+
+      def tool_farm(directory: Path, leave_out) -> Path:
+          """A directory of symlinks to every tool on the clean PATH except `leave_out`.
+
+          Only executable files count, as in a PATH lookup: a non-executable file that
+          shares a tool's name earlier on PATH (a sourced `env` script in a shell
+          tool's bin directory) must not shadow the real tool."""
+          directory.mkdir(parents=True, exist_ok=True)
+          for entry in clean_path().split(os.pathsep):
+              folder = Path(entry)
+              if not folder.is_dir():
+                  continue
+              for tool in folder.iterdir():
+                  if leave_out(tool.name) or (directory / tool.name).exists() \
+                          or (directory / tool.name).is_symlink() \
+                          or not (tool.is_file() and os.access(tool, os.X_OK)):
+                      continue
+                  (directory / tool.name).symlink_to(tool)
+          return directory
+
+
+      @posix_only
+      def test_tool_farm_skips_a_non_executable_file_that_shadows_a_tool(tmp_path, monkeypatch):
+          shadow = tmp_path / "shadow"
+          shadow.mkdir()
+          (shadow / "env").write_text("# sourced, not run\n", encoding="utf-8")
+          (shadow / "env").chmod(0o644)
+          monkeypatch.setenv("PATH", os.pathsep.join([str(shadow), "/usr/bin", "/bin"]))
+          farm = tool_farm(tmp_path / "farm", lambda name: False)
+          assert os.access(farm / "env", os.X_OK)
+          assert (farm / "env").resolve() != (shadow / "env").resolve()
+
+
+    why: >-
+      Hermeticity, adam-agentskills cb4f17e verbatim (2026-11-14, after this
+      pin). tool_farm linked the first file of each name on PATH, executable
+      or not; with atuin installed, its non-executable ~/.atuin/bin/env
+      shadowed /usr/bin/env, the hook's `env` failed and
+      test_a_missing_curl_falls_back saw no verdict line. Its old text is
+      the pre-fix function, so this edit stops matching once the pin
+      includes cb4f17e: drop it then.
   # ---- Prompt-audit sweep (issue 37): skills-doctor contradicts itself on the account store path
   - path: plugins/adam-coding-anywhere/skills/skills-doctor/SKILL.md
     old: "  `synced/manifest.json`, `claude plugin list`), attribute every skill to the\n"
@@ -383,11 +464,14 @@ regenerate:
 
 # The repo's own suite, as its AGENTS.md and ci.yml run it. The two plugin
 # globs match nothing while no skill ships tests, so the command sets
-# nullglob (ci.yml carries the same edit).
+# nullglob (ci.yml carries the same edit). The setup probe runs the python3
+# the command runs, with -P (no cwd on sys.path) rather than -I: -I also drops
+# the user site, so it checked other packages than the suite imports, and a
+# user-site install of the pins (pip --user) always failed the probe.
 suite:
   git_init: true
   setup: >-
-    python3 -I -c 'import yaml, markdown_it, bashlex, jsonschema, xdist; assert yaml.__version__ == "6.0.3", yaml.__version__';
+    python3 -P -c 'import yaml, markdown_it, bashlex, jsonschema, xdist; assert yaml.__version__ == "6.0.3", yaml.__version__';
     if [ "$(id -u)" = 0 ]; then chmod o+rx "$PWD" "$(dirname "$PWD")"; fi
   command: shopt -s nullglob; python3 -m pytest scripts/ plugins/*/skills/*/tests/ plugins/*/skills/*/scripts/ -q -rfEs -n auto -p no:cacheprovider
   needs: >-

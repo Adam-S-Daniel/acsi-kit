@@ -705,8 +705,8 @@ class MainRun(HookBase):
         self.env["CLAUDE_BIN"] = str(agent)
         registries = self.root / "registries"
         self.registry_env = ",".join(f"{name}={registries / name}" for name in (
-            "example-site-platform", "example-site-a", "acsi-agentskills-private"))
-        for name in ("example-site-platform", "example-site-a", "acsi-agentskills-private"):
+            "acsi-agentskills-private",))
+        for name in ("acsi-agentskills-private",):
             (registries / name).mkdir(parents=True)
         # The run's own TMPDIR, so what it leaves behind is its own.
         self.tmp = self.root / "tmp"

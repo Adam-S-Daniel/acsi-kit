@@ -1,0 +1,3 @@
+  - section: security
+    stakes: high
+    reason: injection, committed secrets and disabled TLS or auth are hard to undo

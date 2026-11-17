@@ -21,6 +21,14 @@ import plan_week  # noqa: E402
 import routine_deadlines  # noqa: E402
 from test_issue_559_empty_fires import MODEL, NOW, SKILL_FIXTURE, fire, one, stamp  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import example_evals  # noqa: E402
+
+# The committed fixtures and schedule these tests read are the example
+# checkout's (the kit ships few; test/example_evals.py); the modules above
+# are imported from this repository.
+ROOT = example_evals.checkout()
+
 PROMPT = ROOT / "docs" / "routine" / "eval-runner-instructions.md"
 
 
@@ -84,7 +92,7 @@ class LostFireTests(unittest.TestCase):
                     "run_stamps_on_model": runs}
         return {"roster_models": [MODEL], "skills": {
             "writing-adrs": {"cells": [row("bootstrap", [])]},
-            "disarm-inherited-reach": {"cells": [row(None, other_runs)]}}}
+            "workflow-path-audit": {"cells": [row("required-check-routing", other_runs)]}}}
 
     def cell(self, doc, fires, now=NOW):
         return one(plan_week.eval_cells(ROOT / "evals", doc, fires, now), SKILL_FIXTURE)

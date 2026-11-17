@@ -25,6 +25,8 @@ import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "test"))
+import example_evals  # noqa: E402
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "harness"))
 
@@ -396,7 +398,8 @@ class EvalCellsTests(unittest.TestCase):
                  "with": {"runs": 1}, "without": {"runs": 1},
                  "objective": objective, "judge": judge, "judge_carried": True,
                  "reason": "the interval is not tight enough yet"}]}}}
-        cells = plan_week.eval_cells(ROOT / "evals", gates_doc, [], NOW)
+        # The example checkout's committed fixtures (test/example_evals.py).
+        cells = plan_week.eval_cells(example_evals.checkout() / "evals", gates_doc, [], NOW)
         mine = next(c for c in cells if c["fixture"] == GUIDANCE_FIXTURE)
         self.assertEqual({k: mine[k] for k in ("objective", "judge", "judge_carried", "reason",
                                                "with_counted", "without_counted", "with_runs",

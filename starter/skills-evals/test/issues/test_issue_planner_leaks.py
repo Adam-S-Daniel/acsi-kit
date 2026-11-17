@@ -64,6 +64,14 @@ import test_issue_pooled_rest_guard as pooled_tests  # noqa: E402
 from test_issue_pooled_rest_guard import POOLED, cell_of, verdict  # noqa: E402
 
 
+sys.path.insert(0, str(ISSUES.parent))
+import example_evals  # noqa: E402
+
+# The committed fixtures and schedule these tests read are the example
+# checkout's (the kit ships few; test/example_evals.py); the modules above
+# are imported from this repository.
+ROOT = example_evals.checkout()
+
 NOW = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
 A, B = "claude-sonnet-5-5", "claude-opus-5-5"
 #: Equal arms with a without arm of 0.93 (high: above 1 - 0.15, and above

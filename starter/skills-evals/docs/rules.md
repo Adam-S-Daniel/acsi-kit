@@ -52,7 +52,7 @@ The eval scope pass ([`scripts/eval_scope.py`](../scripts/eval_scope.py)) pauses
 
 ## Re-checks and stakes
 
-A decided subject is re-checked 8 ([`skills.recheck_weeks`](../evals/gate-policy.yml#L57)) weeks after its newest run, or 4 ([`skills.recheck_weeks_high`](../evals/gate-policy.yml#L58)) weeks for a `stakes: high` one ([`stakes.yml`](../evals/stakes.yml): `agent-contribution-markers`, `data-exposure-in-ci`, `name-becomes-scanner-data`, `pinning-github-actions`, `security`, `test-that-can-signal-kills-every-session`, `consumer-repo-provisioning`, `disarm-inherited-reach`, `github-actions-sha-pinning`). High-stakes subjects are tested first within each planning band. No re-check is planned while the subject's removal is `pr-open`, `worker`, `waiting-turn`, `queued`, `removed` or unknown.
+A decided subject is re-checked 8 ([`skills.recheck_weeks`](../evals/gate-policy.yml#L57)) weeks after its newest run, or 4 ([`skills.recheck_weeks_high`](../evals/gate-policy.yml#L58)) weeks for a `stakes: high` one ([`stakes.yml`](../evals/stakes.yml): `agent-contribution-markers`, `data-exposure-in-ci`, `pinning-github-actions`). High-stakes subjects are tested first within each planning band. No re-check is planned while the subject's removal is `pr-open`, `worker`, `waiting-turn`, `queued`, `removed` or unknown.
 
 ## Git hooks
 

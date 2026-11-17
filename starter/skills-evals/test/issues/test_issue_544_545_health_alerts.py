@@ -595,7 +595,6 @@ class WorkflowAndPageTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(opts.get("fetch-depth"), 0)
                 self.assertIs(opts.get("persist-credentials"), False)
-        self.assertEqual(checkouts["registry-site"].get("filter"), "blob:none")
         run = next(s["run"] for s in steps if s.get("name") == "Build the explorer data")
         flags = {}
         for token in run.split("--context-repo")[1:]:
@@ -604,8 +603,6 @@ class WorkflowAndPageTests(unittest.TestCase):
         self.assertEqual(flags, {
             "example-adopter/skills-evals": "skills-evals",
             "example-adopter/acsi-agentskills": "registry-agentskills",
-            "example-adopter/example-site-platform": "registry-cms",
-            "example-adopter/example-site-a": "registry-site",
             "example-adopter/_agent-guidance": "agent-guidance",
             "example-adopter/repo-settings": "context-repo-settings",
             "example-adopter/wsl-automation": "context-wsl-automation"})

@@ -937,7 +937,21 @@ class TriggerLaneTests(unittest.TestCase):
 
 # These tests fill a cap of three; MAX_IN_FLIGHT itself is a spending lever.
 @mock.patch.object(plan_week, "MAX_IN_FLIGHT", 3)
+def _pin_planner_root(test):
+    """Point plan_week's default checkout, and the improve loop's committed
+    evals/ its fire checks read, at the example checkout (ROOT)."""
+    import propose_skill_edit
+    for patcher in (mock.patch.object(plan_week, "REPO_ROOT", ROOT),
+                    mock.patch.object(plan_week.validate_fire, "__defaults__", (ROOT,)),
+                    mock.patch.object(propose_skill_edit, "EVALS_DIR", ROOT / "evals")):
+        patcher.start()
+        test.addCleanup(patcher.stop)
+
+
 class DispatchLegTests(unittest.TestCase):
+
+    def setUp(self):
+        _pin_planner_root(self)
 
     def test_in_flight_and_waiting(self):
         runs = [fire(1, "Fire eval routine: eval evals/x m", NOW - timedelta(minutes=5)),
@@ -1135,7 +1149,8 @@ class DispatchLegTests(unittest.TestCase):
                 "EVAL_KEY": "writing-adrs/bootstrap", "MODEL": "claude-opus-5-5",
                 "SKILL": "", "HOLDOUT": ""}
     # Committed under evals/ but listed in evals/unscheduled.yml.
-    UNSCHEDULED_LEG = {"FIXTURE": "evals/browser-testing", "EVAL_KEY": "browser-testing"}
+    UNSCHEDULED_LEG = {"FIXTURE": "evals/tool-powershell/whatever-works-pressure",
+                       "EVAL_KEY": "tool-powershell/whatever-works-pressure"}
 
     def run_validate_fire(self, leg):
         """main(["validate-fire"]) under `leg`'s env: (exit code, GITHUB_OUTPUT, stdout)."""
@@ -1191,6 +1206,9 @@ class PlanCommandTests(unittest.TestCase):
     """The step's own command on the real evals directory, an empty results
     tree and recorded evidence: every planned leg passes its revalidation."""
 
+    def setUp(self):
+        _pin_planner_root(self)
+
     def test_plan_writes_a_matrix_whose_legs_revalidate(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -1201,7 +1219,7 @@ class PlanCommandTests(unittest.TestCase):
             output, summary, plan_file = base / "output", base / "summary", base / "plan.json"
             argv = ["plan", "--results-tree", str(base / "tree"), "--as-of",
                     "2026-10-26T12:00:00+00:00", "--evidence", str(evidence),
-                    "--out", str(plan_file)]
+                    "--max-fires", "3", "--out", str(plan_file)]
             out = io.StringIO()
             with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output),
                                               "GITHUB_STEP_SUMMARY": str(summary)}), \

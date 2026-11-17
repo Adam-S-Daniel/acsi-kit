@@ -150,3 +150,16 @@ def test_the_kits_known_failures_name_real_trees_with_well_formed_ids():
         for i in ids:
             assert (i.startswith("group:") or run_suites.PYTEST_ID.fullmatch(i)
                     or re.fullmatch(r"(?:FAIL|ERROR): [\w.]+(?: \(.*\))?", i)), (tree, i)
+
+
+def test_a_failed_setup_probe_stops_the_setup_even_when_a_command_follows_it(tmp_path, monkeypatch):
+    # agentskills.yml's setup was `python3 -I -c 'import ... bashlex ...'; if
+    # [ root ]; then ...; fi`: without errexit its status was the `if`'s, so a
+    # missing bashlex surfaced as pytest exit 3, not as the suite's needs.
+    (tmp_path / "t").mkdir()
+    monkeypatch.setattr(run_suites.export, "STARTER", tmp_path)
+    suite = {"setup": "false; true", "command": "echo SUITE RAN", "needs": "the probe's package"}
+    ok, summary, log, _ = run_suites.run_one("t", suite, keep=False)
+    assert not ok
+    assert summary == "setup exited 1 (needs: the probe's package)"
+    assert "SUITE RAN" not in log
