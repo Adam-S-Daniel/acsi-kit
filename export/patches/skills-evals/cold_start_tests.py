@@ -290,3 +290,16 @@ def apply(root: Path, ctx) -> None:
     _sub(root, t70,
          'registries=[f"example-site-platform={self.make_flat(self.tmp / \'e\')}"])',
          'registries=[f"acsi-agentskills-private={self.make_flat(self.tmp / \'e\')}"])')
+
+    # --- explorer-data.yml loses both example-site checkouts and their flags
+    # (cold_start_registries.py, acsi-kit#72)
+    _sub(root, "test/issues/test_issue_562_loaded_copies.py",
+         '        for name, path in (("acsi-agentskills", "registry-agentskills"),\n'
+         '                           ("example-site-platform", "registry-cms"), ("example-site-a", "registry-site")):\n',
+         '        for name, path in (("acsi-agentskills", "registry-agentskills"),):\n')
+    hx = "test/issues/test_issue_544_545_health_alerts.py"
+    _sub(root, hx,
+         '        self.assertEqual(checkouts["registry-site"].get("filter"), "blob:none")\n', "")
+    _sub(root, hx,
+         '            "example-adopter/example-site-platform": "registry-cms",\n'
+         '            "example-adopter/example-site-a": "registry-site",\n', "")

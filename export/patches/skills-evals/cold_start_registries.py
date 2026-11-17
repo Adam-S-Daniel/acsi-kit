@@ -228,3 +228,30 @@ def apply(root: Path, ctx) -> None:
          "with-skill arm executes — are trusted because only maintainers can push to\n"
          "either of the two repos involved, directly or through an automated lane such\n"
          "as dependabot auto-merge; see\n")
+
+    # --- explorer-data.yml (acsi-kit#72): the daily explorer build checked out
+    # both example sites, passed them as registries and context repos, and
+    # listed their pull requests; a checkout of a missing repo fails the job.
+    xd = wf + "explorer-data.yml"
+    _drop_site_checkouts(root, xd, 2)
+    _drop_site_flags(root, xd, 2)
+    text = _read(root, xd)
+    text, n = re.subn(r'^\s*--context-repo "\S+/example-site-(?:platform|a)=[^\n]*\n', "", text, flags=re.M)
+    if n != 2:
+        raise SystemExit(f"cold_start_registries: {xd}: dropped {n} example-site --context-repo flag(s), expected 2")
+    _write(root, xd, text)
+    _sub(root, xd,
+         "          for repo in example-adopter/acsi-agentskills example-adopter/example-site-platform \\\n"
+         "                      example-adopter/example-site-a example-adopter/_agent-guidance; do\n",
+         "          for repo in example-adopter/acsi-agentskills example-adopter/_agent-guidance; do\n")
+    _sub(root, xd,
+         "#   full history (`fetch-depth: 0`; example-site-a also `filter: blob:none`,\n"
+         "#   its media blobs are large and only lock blobs are read). A shallow\n",
+         "#   full history (`fetch-depth: 0`). A shallow\n")
+    _sub(root, xd,
+         "# * #562 (2026-11-02): the three registry checkouts' full history also feeds\n",
+         "# * #562 (2026-11-02): the registry checkout's full history also feeds\n")
+    _sub(root, xd,
+         "#   `git archive` (example-site-a's few skill blobs are fetched lazily from the\n"
+         "#   public origin). A shallow one makes the alert unknown (null), never clean.\n",
+         "#   `git archive`. A shallow one makes the alert unknown (null), never clean.\n")
