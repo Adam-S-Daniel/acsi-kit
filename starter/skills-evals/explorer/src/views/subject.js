@@ -9,10 +9,16 @@ import { skillItems, sectionItems, purposeOf } from '../core/items.js';
 import { fixtureQueue } from '../core/fixtures.js';
 import { fixtureTerm, defn, termify, SENTENCE_TERMS } from '../core/terms.js';
 import { hashFor } from '../core/route.js';
-import { table, rangeLine, navLink, panel, badge, fold } from './bits.js';
-import { verdictLine, nextLine, stakesLine, usageLine, copiesLine, discardedLine } from './cards.js';
+import { table, timesLine, navLink, panel, badge, fold } from './bits.js';
+
+/* When a subject's newest run started, or NaN with none. */
+function newestOf(runs) {
+  const times = (Array.isArray(runs) ? runs : []).map((r) => parseTime(r && r.at)).filter((m) => isFinite(m));
+  return times.length ? Math.max.apply(null, times) : NaN;
+}
+import { verdictLine, nextLine, stakesLine, usageLine, useByLine, copiesLine, discardedLine } from './cards.js';
 import { modelCharts, legendFor, hasData, hasAlone } from './models.js';
-import { trendChart } from './trend.js';
+import { weekPairsChart } from './wholecharts.js';
 import { confidenceView } from './range.js';
 import { utilityView, decisionsView, utilityTotals } from './utility.js';
 import { lessonItem, lessonIssue, lessonTitle, lessonStatus, lessonIssueTitle } from './lessons.js';
@@ -108,7 +114,7 @@ function fixturesPanel(doc, runs, name, refMs) {
   return table([
     { label: STRINGS.colFixturePath, sort: (f) => f.path, cell: (f) => fixtureTerm(clean(f.path)) },
     { label: STRINGS.colOrigin, sort: (f) => f.origin_kind || '', cell: (f) => clean(f.origin_kind || STRINGS.unknown) },
-    { label: STRINGS.colRuns, num: true, sort: (f) => f.runs, cell: (f) => (f.runs === null || f.runs === undefined ? STRINGS.noValue : fmtCount(f.runs)) }
+    { label: STRINGS.colEvalRuns, num: true, sort: (f) => f.runs, cell: (f) => (f.runs === null || f.runs === undefined ? STRINGS.noValue : fmtCount(f.runs)) }
   ], rows);
 }
 
@@ -144,7 +150,7 @@ export function subjectPage(doc, kind, name, ctx) {
     return h('div', null, back, h('section', { class: 'block subject' },
       h('div', { class: 'subject-head' }, h('h2', { class: 'title' }, clean(name)),
         known.private === true ? badge(STRINGS.privateBadge, 'private') : null),
-      rangeLine(doc),
+      timesLine(doc, ['coverage', 'usage']),
       h('p', { class: 'gl' }, clean(purposeOf(known.description) || STRINGS.purposeMissing)),
       known.registry ? h('p', { class: 'meta' }, STRINGS.registryLine(clean(known.registry))) : null,
       h('p', null, STRINGS.subjectUntested)));
@@ -159,12 +165,13 @@ export function subjectPage(doc, kind, name, ctx) {
     h('section', { class: 'block subject' },
       h('div', { class: 'subject-head' }, h('h2', { class: 'title' }, clean(guidance ? raw.heading || it.id : it.name)), chip(it.chip),
         raw.private === true ? badge(STRINGS.privateBadge, 'private') : null),
-      rangeLine(doc),
+      timesLine(doc, guidance ? [] : ['usage'], [{ label: STRINGS.subjectNewestRun, ms: newestOf(raw.runs) }]),
       h('p', { class: 'gl' }, gloss),
       !guidance && raw.registry ? h('p', { class: 'meta' }, STRINGS.registryLine(clean(raw.registry))) : null,
       guidance ? h('p', { class: 'meta' }, STRINGS.size(wordsFor(it.bytes))) : null,
       nextLine(raw.next_test, refMs, guidance ? 'section' : 'skill', raw.verdict, raw.removal),
       guidance ? null : usageLine(raw.usage, doc.usage, refMs),
+      guidance ? null : useByLine(raw.use_by, doc.removal_policy, refMs),
       testCost(raw.run_utility, refMs),
       stakesLine(raw.stakes),
       h('h3', null, defn('verdict', STRINGS.verdictHeading)),
@@ -174,7 +181,7 @@ export function subjectPage(doc, kind, name, ctx) {
       h('p', { class: 'sent' }, termify(clean(it.sentence), SENTENCE_TERMS)),
       guidance && hasAlone(it.pooled) ? h('p', { class: 'meta' }, STRINGS.aloneShown) : null),
     fold(STRINGS.gainHeading, [confidenceView(raw.confidence, doc.policy, subj),
-      hasData(it.pooled) ? h('div', { class: 'cols' }, h('div', null, legendFor(subj, it.pooled), modelCharts(it.pooled, subj)), h('div', null, trendChart(it.trend, refMs, subj))) : null]),
+      hasData(it.pooled) ? h('div', { class: 'cols' }, h('div', null, legendFor(subj, it.pooled), modelCharts(it.pooled, subj)), h('div', null, weekPairsChart(it.weekly, refMs, subj))) : null]),
     Array.isArray(raw.run_utility) && raw.run_utility.length
       ? fold(STRINGS.utilityHeading, [utilityView([{ label: STRINGS.utilityThis, rows: raw.run_utility }], refMs),
         decisionsView(raw.decisions, friendlyModel)]) : null,

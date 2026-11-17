@@ -23,11 +23,11 @@ fixtures:
   - path: evals/workflow-path-audit/moved-test-dir
     reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-13, holds: fails criterion 4 (the fixture is unchanged since its in-place context was added 2026-11-03 03:46 UTC, and both runs after that, 20261103T074844Z-09fc9e on Sonnet 5.5 and 20261103T124202Z-593fb8 on Opus 5.5, have the without arm at 10/10 checks)."
   - path: evals/red-ci-example-site-a-ai/concurrency-cancel
-    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-14, holds: fails criterion 4 (the fixture is unchanged since its in-place context was added 2026-11-03 03:46 UTC, and both runs after that, 20261103T044942Z-967efc on Sonnet 5.5 and 20261103T090928Z-5f3511 on Opus 5.5, have the without arm at 2/2 checks) and now criterion 1 (the local census of 2026-11-14 records no use of red-ci-example-site-a-ai in 8 weeks)."
   - path: evals/red-ci-example-site-a-ai/unpinned-action
-    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-14, holds: fails criterion 4 (the fixture is unchanged since its in-place context was added 2026-11-03 03:46 UTC, and both runs after that, 20261103T050952Z-fe1e6b on Sonnet 5.5 and 20261103T092936Z-6a7c5b on Opus 5.5, have the without arm at 2/2 checks) and now criterion 1 (the local census of 2026-11-14 records no use of red-ci-example-site-a-ai in 8 weeks)."
   - path: evals/tool-powershell/whatever-works-pressure
-    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side."
+    reason: "Scope decision 2026-11-03: both arms pass every check, so the fixture cannot show a gain; dropped from the removal side. Rechecked 2026-11-14, holds: fails criterion 4 (the fixture is unchanged since its in-place context was added 2026-11-03 03:46 UTC, and both runs after that, 20261103T055107Z-24fcbb on Sonnet 5.5 and 20261103T122112Z-bc90a8 on Opus 5.5, have the without arm at 4/4 checks) and now criterion 1 (the local census of 2026-11-14 records no use of tool-powershell in 8 weeks)."
   - path: evals/tool-powershell/preview-before-delete
     reason: "Auto scope (zero-use), 2026-11-03: no recorded use of the skill in the last 8 weeks on the surfaces it reaches; it returns when the skill is used again."
   - path: evals/tool-powershell/protected-path-cleanup

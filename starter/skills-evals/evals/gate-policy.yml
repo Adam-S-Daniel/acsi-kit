@@ -37,12 +37,32 @@
 #                          merges with no human review) or `proposal` (an
 #                          issue; a person removes). Missing or invalid is
 #                          `proposal`.
+#   recheck_window         true: a kept cell's re-check is tested on its own
+#                          pairs (it can remove, stops early once the gain
+#                          clears the margin, else runs to max_runs_per_cell);
+#                          false: re-check pairs cannot change a keep.
+#   recheck_window_fire    false: the planner fires no re-check run (held
+#                          2026-11-15 during the stopping-rule redesign,
+#                          resumed once it merged: #1053, #1054).
+#   recheck_carry          true: a kept cell's re-checks carry both tests'
+#                          evidence across windows (harness/gates.py THE
+#                          RE-CHECK CARRY): one lifetime removal bound, and
+#                          a strong cell passes in a few pairs. false: each
+#                          re-check starts from scratch.
+#   max_runs_extension     a cell whose first max_runs_per_cell pairs decided
+#                          nothing, but whose nearer test is projected to
+#                          cross by this many times the cap, gets that cap
+#                          (harness/gates.py THE CAP EXTENSION); 1 is off.
 # Guidance block only (ADR 0014, "Pooled-rest addendum (2026-11-07)"):
 #   rest_policy            `pooled-with-current-guard` pools pairs made beside
 #                          every rest of the guidance, guarded by the current
 #                          rest; `current` reads the current rest only.
 #   rest_guard_min_pairs   pairs beside the current rest a removal-direction
 #                          decision needs.
+#   keep_stands_until_recheck  true: a pooled keep made beside an older
+#                          rest stands until its re-check or an edit to its
+#                          own section (the owner, 2026-11-15); false: it waits for
+#                          the current rest and lapses at its cap.
 skills:
   objective_margin: 0.15
   judge_margin: 1.5
@@ -58,6 +78,10 @@ skills:
   recheck_weeks_high: 4
   max_removal_pauses: 3
   retirement_mode: auto
+  recheck_window: true
+  recheck_window_fire: true
+  recheck_carry: true
+  max_runs_extension: 1.5
 guidance:
   objective_margin: 0.15
   judge_margin: 1.5
@@ -73,5 +97,10 @@ guidance:
   recheck_weeks_high: 4
   max_removal_pauses: 3
   retirement_mode: auto
+  recheck_window: true
+  recheck_window_fire: true
+  recheck_carry: true
+  max_runs_extension: 1.5
   rest_policy: pooled-with-current-guard
   rest_guard_min_pairs: 6
+  keep_stands_until_recheck: true

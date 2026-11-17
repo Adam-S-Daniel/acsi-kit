@@ -52,6 +52,16 @@
         "judgeMargin"
       ]
     },
+    "gate-policy.yml#guidance.keep_stands_until_recheck": {
+      "value": true,
+      "source": "evals/gate-policy.yml",
+      "key": "guidance.keep_stands_until_recheck",
+      "names": [
+        "keep_stands_until_recheck",
+        "KEEP_STANDS_UNTIL_RECHECK",
+        "keepStandsUntilRecheck"
+      ]
+    },
     "gate-policy.yml#guidance.max_removal_pauses": {
       "value": 3,
       "source": "evals/gate-policy.yml",
@@ -60,6 +70,16 @@
         "max_removal_pauses",
         "MAX_REMOVAL_PAUSES",
         "maxRemovalPauses"
+      ]
+    },
+    "gate-policy.yml#guidance.max_runs_extension": {
+      "value": 1.5,
+      "source": "evals/gate-policy.yml",
+      "key": "guidance.max_runs_extension",
+      "names": [
+        "max_runs_extension",
+        "MAX_RUNS_EXTENSION",
+        "maxRunsExtension"
       ]
     },
     "gate-policy.yml#guidance.max_runs_high_cell": {
@@ -102,6 +122,16 @@
         "objectiveMargin"
       ]
     },
+    "gate-policy.yml#guidance.recheck_carry": {
+      "value": true,
+      "source": "evals/gate-policy.yml",
+      "key": "guidance.recheck_carry",
+      "names": [
+        "recheck_carry",
+        "RECHECK_CARRY",
+        "recheckCarry"
+      ]
+    },
     "gate-policy.yml#guidance.recheck_weeks": {
       "value": 8,
       "source": "evals/gate-policy.yml",
@@ -120,6 +150,26 @@
         "recheck_weeks_high",
         "RECHECK_WEEKS_HIGH",
         "recheckWeeksHigh"
+      ]
+    },
+    "gate-policy.yml#guidance.recheck_window": {
+      "value": true,
+      "source": "evals/gate-policy.yml",
+      "key": "guidance.recheck_window",
+      "names": [
+        "recheck_window",
+        "RECHECK_WINDOW",
+        "recheckWindow"
+      ]
+    },
+    "gate-policy.yml#guidance.recheck_window_fire": {
+      "value": true,
+      "source": "evals/gate-policy.yml",
+      "key": "guidance.recheck_window_fire",
+      "names": [
+        "recheck_window_fire",
+        "RECHECK_WINDOW_FIRE",
+        "recheckWindowFire"
       ]
     },
     "gate-policy.yml#guidance.rest_guard_min_pairs": {
@@ -225,6 +275,16 @@
         "MAX_LOOP_PAUSES"
       ]
     },
+    "gate-policy.yml#skills.max_runs_extension": {
+      "value": 1.5,
+      "source": "evals/gate-policy.yml",
+      "key": "skills.max_runs_extension",
+      "names": [
+        "max_runs_extension",
+        "MAX_RUNS_EXTENSION",
+        "maxRunsExtension"
+      ]
+    },
     "gate-policy.yml#skills.max_runs_high_cell": {
       "value": 20,
       "source": "evals/gate-policy.yml",
@@ -265,6 +325,16 @@
         "objectiveMargin"
       ]
     },
+    "gate-policy.yml#skills.recheck_carry": {
+      "value": true,
+      "source": "evals/gate-policy.yml",
+      "key": "skills.recheck_carry",
+      "names": [
+        "recheck_carry",
+        "RECHECK_CARRY",
+        "recheckCarry"
+      ]
+    },
     "gate-policy.yml#skills.recheck_weeks": {
       "value": 8,
       "source": "evals/gate-policy.yml",
@@ -285,6 +355,26 @@
         "RECHECK_WEEKS_HIGH",
         "recheckWeeksHigh",
         "RECHECK_AFTER_HIGH"
+      ]
+    },
+    "gate-policy.yml#skills.recheck_window": {
+      "value": true,
+      "source": "evals/gate-policy.yml",
+      "key": "skills.recheck_window",
+      "names": [
+        "recheck_window",
+        "RECHECK_WINDOW",
+        "recheckWindow"
+      ]
+    },
+    "gate-policy.yml#skills.recheck_window_fire": {
+      "value": true,
+      "source": "evals/gate-policy.yml",
+      "key": "skills.recheck_window_fire",
+      "names": [
+        "recheck_window_fire",
+        "RECHECK_WINDOW_FIRE",
+        "recheckWindowFire"
       ]
     },
     "gate-policy.yml#skills.retire_confidence": {

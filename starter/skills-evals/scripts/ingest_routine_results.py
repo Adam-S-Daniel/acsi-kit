@@ -109,7 +109,8 @@ SPEND_MAX_WEEKS = 1040
 #: The only keys a spend file may carry: explorer/schema.json `$defs.spend_file`
 #: allows more, and this gate does not, so a per-session or per-thread row can
 #: never reach the public results branch.
-SPEND_KEYS = frozenset({"schema", "generated_at", "plan", "weeks", "total"})
+SPEND_KEYS = frozenset({"schema", "generated_at", "plan", "weeks", "total", "loop_jobs"})
+SPEND_LOOP_JOBS_KEYS = frozenset({"as_of", "points_per_week", "usd_per_week"})
 SPEND_WEEK_KEYS = frozenset({"week", "eval_runs", "plan_meter_points", "api_usd",
                              "thread_spend_usd", "cost_per_verdict", "plan", "run_usd"})
 SPEND_TOTAL_KEYS = frozenset({"since", "verdicts", "usd", "run_usd", "thread_spend_usd",
@@ -343,6 +344,8 @@ def _object(value, where, allowed, required=()):
         raise Rejected(f"{where}: missing keys {sorted(missing)}")
 
 
+#: `run_eval.sandbox_probe_status` values.
+SANDBOX_PROBE_STATUSES = ("passed", "failed", "skipped", "not_run")
 MODEL_ID_RE = re.compile(r"[^\s`|]{1,128}")
 #: A summary's `judge` when the pair's objective result decided it (#371).
 JUDGE_SKIPPED = {"status": "skipped", "reason": "objective-decided"}
@@ -358,7 +361,9 @@ SUMMARY_ALLOWED = SUMMARY_REQUIRED + (
     "installed", "decoy", "hook_returncode", "guard",
     "model_tokens", "cross_model", "guidance_violations") + ("pairing", "role", "context",
                                       "context_subject", "arm_context") + ("run", "usage") + (
-    "judge_selection", "fixture_digest", "judge_conditional") + (
+    "judge_selection", "fixture_digest", "judge_conditional",
+    # What the arm sandbox canary did (#1024, run_eval.sandbox_probe_status).
+    "sandbox_probe") + (
     # An isolation guidance run's pooling key (#124): its fixture directory's
     # name and the section's and the rest of the guidance's digests.
     "fixture_name", "guidance_digests") + (
@@ -1265,6 +1270,8 @@ def check_summary(doc, where: str, parts: dict) -> None:
                 isinstance(m, str) and MODEL_ID_RE.fullmatch(m)
                 for m in models):
             raise Rejected(f"{where}: {field} must be a short list of model ids")
+    if "sandbox_probe" in doc and doc["sandbox_probe"] not in SANDBOX_PROBE_STATUSES:
+        raise Rejected(f"{where}: sandbox_probe is not a known status")
     selection = doc.get("judge_selection")
     if selection is not None:
         _object(selection, f"{where}: judge_selection", JUDGE_SELECTION_KEYS,
@@ -1739,6 +1746,8 @@ def check_spend(doc: dict, text: str, where: str) -> None:
         raise Rejected(f"{where}: more than {SPEND_MAX_WEEKS} weeks")
     if isinstance(doc.get("total"), dict) and set(doc["total"]) - SPEND_TOTAL_KEYS:
         raise Rejected(f"{where}: the total carries a field that is not a weekly total")
+    if isinstance(doc.get("loop_jobs"), dict) and set(doc["loop_jobs"]) - SPEND_LOOP_JOBS_KEYS:
+        raise Rejected(f"{where}: loop_jobs carries a field that is not a weekly total")
     plans = [doc.get("plan")]
     seen = set()
     for i, week in enumerate(doc["weeks"]):

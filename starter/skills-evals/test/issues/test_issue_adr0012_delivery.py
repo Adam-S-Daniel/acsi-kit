@@ -183,6 +183,7 @@ class Base(unittest.TestCase):
         self.source_profile = tree(self.home / ".claude")
         self.version_log = self.root / "versions.log"
         self.env = {"PATH": str(self.bin) + os.pathsep + os.defpath,
+                    run_eval.SANDBOX_PROBE_SKIP_ENV: "1",
                     "HOME": str(self.home), "GIT_CONFIG_NOSYSTEM": "1",
                     "GIT_CONFIG_GLOBAL": "/dev/null",
                     "GIT_AUTHOR_NAME": "Fixture", "GIT_COMMITTER_NAME": "Fixture",
@@ -1041,7 +1042,13 @@ class ArmDeliveryTests(Base):
 
 class RealHookTests(Base):
     def test_the_real_hook_delivers_identical_blocks_to_both_arms(self):
-        hook = (ROOT / ".claude/hooks/fleet-memory.sh").read_bytes()
+        # The hook's source is _agent-guidance: consumer repos, this one
+        # included, no longer carry a copy (_agent-guidance ADR 0043). CI
+        # checks that repo out side by side.
+        source = ROOT.parent / "_agent-guidance" / ".claude/hooks/fleet-memory.sh"
+        if not source.is_file():
+            self.skipTest(f"no _agent-guidance checkout beside this one ({source})")
+        hook = source.read_bytes()
         self.guidance_sha = self.commit(self.guidance, {".claude/hooks/fleet-memory.sh": hook})
         self.git(self.guidance, "update-ref", "refs/remotes/origin/main", self.guidance_sha)
         self.metadata["guidance_revision"] = self.guidance_sha
@@ -1110,6 +1117,7 @@ class EndToEndTests(Base):
         self.assertIs(sandbox["enabled"], True)
         self.assertIs(sandbox["failIfUnavailable"], True)
         self.assertIs(sandbox["allowUnsandboxedCommands"], False)
+        self.assertIs(sandbox["autoAllowBashIfSandboxed"], True)
         self.assertEqual(sandbox["network"], run_eval.arm_sandbox_settings()["sandbox"]["network"])
         denied = sandbox["filesystem"]["denyRead"]
         scratch_home = Path(call["env"]["HOME"])

@@ -5,17 +5,19 @@ import { clean, parseTime, fmtCount, fmtDayKey, fmtWeekStart, fmtDay } from '../
 import { h, link } from '../core/h.js';
 import { hookItems, hookNext, cloudCounted } from '../core/hooks.js';
 import { hashFor } from '../core/route.js';
-import { table, srcLine, navLink, panel, badge, rangeLine, srcLineFor } from './bits.js';
+import { table, srcLine, navLink, panel, badge, timesLine, srcLineFor } from './bits.js';
 import { weekChart } from './weekchart.js';
 
 const pct = (x) => Math.round(x * 100) + '%';
 /* The window's weeks from the data (evals/hook-policy.yml), or null. */
 const weeksOf = (w) => (Number.isInteger(w.weeks) && w.weeks > 0 ? w.weeks : null);
 
-/* The Runs cell: the count, or what is counted when CI's share is not. */
-function runsCell(it) {
+/* The Runs cell: the counted (local and cloud) runs. CI never records how
+   often a check ran, for any check, so the column header says so once
+   rather than only on the rows that happen to have a red CI run. */
+export function runsCell(it) {
   if (it.runs !== null) return fmtCount(it.runs);
-  if (it.runsCounted) return STRINGS.runsPartial(it.runsCounted);
+  if (it.runsCounted) return fmtCount(it.runsCounted);
   return h('span', { class: 'muted' }, STRINGS.runsNotCounted);
 }
 
@@ -66,7 +68,7 @@ export function hooksList(doc) {
   ].filter(Boolean), items, { cls: 'hooks' });
   const policy = hk.policy || {};
   return h('section', { class: 'block' }, h('h2', null, STRINGS.hooksHeading),
-    rangeLine(doc),
+    timesLine(doc, ['hooksLocal', 'hooksCi', 'hooksCloud']),
     w.from ? h('p', { class: 'note' }, STRINGS.hooksNote(w.weeks, fmtDayKey(w.from, refMs), fmtDayKey(w.to, refMs))) : null,
     cloudNote(doc),
     typeof policy.max_override_rate === 'number' ? h('p', { class: 'note' }, STRINGS.hookRule(pct(policy.max_override_rate), weeksOf(w))) : null,
@@ -105,6 +107,23 @@ export function checkWeeks(it) {
   return out.sort((a, b) => (a.week < b.week ? -1 : 1));
 }
 
+/* What the check's window totals hold beyond its published rows: the
+   private repos the data counts but does not list (too few to show as a
+   row), or null when nothing is held back. */
+export function hiddenPrivate(it, w) {
+  const t = it.raw.window_totals;
+  if (!t || typeof t !== 'object' || !w || typeof w.from !== 'string') return null;
+  let runs = 0, blocked = 0;
+  for (const u of it.use) {
+    if (u.week < w.from) continue;
+    if (Number.isInteger(u.invocations)) runs += u.invocations;
+    blocked += Number(u.blocked) || 0;
+  }
+  const r = Number.isInteger(t.invocations_counted) ? t.invocations_counted - runs : 0;
+  const b = Number.isInteger(t.blocked) ? t.blocked - blocked : 0;
+  return r > 0 || b > 0 ? { runs: Math.max(r, 0), blocked: Math.max(b, 0) } : null;
+}
+
 export function hookPage(doc, name, ctx) {
   const refMs = parseTime(doc.generated_at);
   const it = hookItems(doc).find((x) => x.name === name);
@@ -123,18 +142,20 @@ export function hookPage(doc, name, ctx) {
     r.blocked += Number(u.blocked) || 0;
   }
   const extra = ctx && ctx.ext && ctx.ext.hookPage ? ctx.ext.hookPage(ctx, it) : null;
+  const hidden = hiddenPrivate(it, doc.hooks && doc.hooks.window);
   return h('div', null, back,
     h('section', { class: 'block subject' },
       h('div', { class: 'subject-head' }, h('h2', { class: 'title' }, clean(it.name)), hookVerdict(it)),
-      rangeLine(doc),
+      timesLine(doc, ['hooksLocal', 'hooksCi', 'hooksCloud']),
       h('h3', null, STRINGS.hookEnforcesHeading), h('p', null, gloss, src ? [' (', src, ')'] : null),
       h('p', { class: 'meta' }, STRINGS.hookWhereLine(it.where, it.repo ? clean(it.repo) : null)),
       h('h3', null, STRINGS.verdictHeading),
       h('p', null, hookVerdict(it), ' ', clean(it.reason)),
-      h('p', { class: 'meta' }, STRINGS.colRuns + ': ', runsCell(it), '. '
+      h('p', { class: 'meta' }, STRINGS.colRunsWindow(null) + ': ', runsCell(it), '. '
         + STRINGS.colBlocked + ': ' + blockedCell(it) + '. ' + STRINGS.colOverrides + ': ',
         overrides(it), '.'),
-      it.measured ? null : h('p', { class: 'note' }, STRINGS.hookOverridesNote)),
+      it.measured ? null : h('p', { class: 'note' }, STRINGS.hookOverridesNote),
+      hidden ? h('p', { class: 'note' }, STRINGS.hookPrivateHidden(hidden.runs > 0 ? fmtCount(hidden.runs) : null, fmtCount(hidden.blocked))) : null),
     panel(STRINGS.hookByWeek, weeks.length ? [
       weekChart(weeks.map((w) => ({ label: fmtDayKey(w.week, refMs), short: fmtDayKey(w.week, refMs), a: w.localBlocked + (cloud ? w.cloudBlocked : 0), b: w.ciBlocked })),
         [cloud ? STRINGS.colLocalCloudBlocked : STRINGS.colLocalBlocked, STRINGS.colCiBlocked], STRINGS.hookByWeek, STRINGS.weekTitles.hooks, [STRINGS.weekDefs.local, STRINGS.weekDefs.ci]),

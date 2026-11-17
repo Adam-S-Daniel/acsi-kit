@@ -257,6 +257,9 @@ class DashboardBuildTests(unittest.TestCase):
             self.assertEqual(d["staleAfterHours"], floor, name)
             self.assertNotRegex(d["schedule"], r"every (\d+ )?hours?\b", name)
             self.assertIn("Rebuilt on every refresh", d["schedule"], name)
+            # No clock time: the refresh moved from twice a day to once (2026-11-15) and
+            # seventeen copies of "7:29 AM and 7:29 PM ET" went stale.
+            self.assertNotRegex(d["schedule"], r"\d{1,2}:\d\d", name)
         self.assertGreater(checked, 10)
         readme = " ".join((DASH / "README.md").read_text().split())
         self.assertNotIn("hand-kept ones", readme, "the Compare step stamps every file dataset")
@@ -295,7 +298,8 @@ class DashboardBuildTests(unittest.TestCase):
         bad.mkdir(parents=True)
         (bad / "summary.json").write_text("{")
         runs = g.ingested_runs(er, now, g.window_start(now))
-        state = g.account(er, limits, now, (len(runs), 0), since=g.window_start(now))
+        state = g.account(er, limits, now, (len(runs), 0), since=g.window_start(now),
+                          loop_reserve=False)
         row = build.allowance(er, now)[0]
         self.assertAlmostEqual(row["points"], state["spent"] * 100)
         self.assertAlmostEqual(row["room_points"], g.room(state) * 100)
@@ -703,7 +707,7 @@ class DashboardBuildTests(unittest.TestCase):
     def test_half_built_missing_dump_is_not_checked(self):
         issues, summary = build.half_built({}, self.HB_NOW)
         self.assertEqual([r["key"] for r in issues], ["none"])
-        self.assertEqual((summary[0]["status"], summary[0]["open"], summary[0]["checked_at"]), ("not-checked", 0, None))
+        self.assertEqual((summary[0]["status"], summary[0]["checked_at"]), ("not-checked", None))
         _, via_build = build.half_built(build.load(str(self.tmp / "absent.json"), {}), self.HB_NOW)
         self.assertEqual(via_build[0]["status"], "not-checked")
 
@@ -730,9 +734,8 @@ class DashboardBuildTests(unittest.TestCase):
         self.assertEqual((issues[0]["opened"], issues[0]["age_days"], issues[0]["closed_at"]), ("2026-10-25", 9, None))
         self.assertEqual(issues[-1]["closed_at"], "2026-10-30T12:00:00Z")
         self.assertEqual({k: v for k, v in summary[0].items() if k != "key"},
-                         {"open": 4, "high": 2, "broken": 1, "partial": 1, "implied_only": 1, "idle": 1,
-                          "needs_owner": 0, "fixed_7d": 1,
-                          "checked_at": "2026-11-03T10:00:00Z", "incomplete": True, "status": "attention"})
+                         # No counts: the page counts the issue rows, the one source.
+                         {"checked_at": "2026-11-03T10:00:00Z", "incomplete": True, "status": "attention"})
 
     def test_half_built_puts_high_first_then_what_needs_the_owner(self):
         dump = {"checked_at": "2026-11-03T10:00:00Z", "items": [
@@ -743,7 +746,6 @@ class DashboardBuildTests(unittest.TestCase):
         issues, summary = build.half_built(dump, self.HB_NOW)
         self.assertEqual([r["number"] for r in issues], [3, 4, 2, 1])
         self.assertEqual([r["needs_owner"] for r in issues], ["", "needs you", "needs you", ""])
-        self.assertEqual(summary[0]["needs_owner"], 2)
 
     def test_half_built_unknown_kind_and_severity(self):
         dump = {"checked_at": "2026-11-03T10:00:00Z", "items": [
@@ -751,7 +753,7 @@ class DashboardBuildTests(unittest.TestCase):
         issues, summary = build.half_built(dump, self.HB_NOW)
         self.assertEqual([(r["number"], r["kind"], r["severity"]) for r in issues],
                          [(2, "partial", "low"), (1, "unknown", "unknown")])
-        self.assertEqual((summary[0]["open"], summary[0]["high"]), (2, 0))
+        self.assertEqual(summary[0]["status"], "attention")
 
     def test_a_build_without_the_explorer_document_refuses(self):
         (self.results / "explorer" / "latest.json").unlink()
@@ -784,6 +786,35 @@ class DashboardBuildTests(unittest.TestCase):
         write(tree / "spend" / "weekly.json", doc)
         got = explorer_public.build_spend(tree, True)
         self.assertEqual([w["week"] for w in got["weeks"]], ["2026-10-26", "2026-10-19"], "the public export reads it whole")
+
+    def test_spend_carries_loop_jobs_only_with_a_fire_ledger(self):
+        """--spend adds `loop_jobs` when ROUTINE_FIRES_LEDGER names a ledger (with --workflows-root), and omits it otherwise."""
+        import os
+        from unittest import mock
+        now = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
+        ledger = self.tmp / "routine-fires.jsonl"
+        ledger.write_text(json.dumps({"trigger_id": "trig_example_worker", "fired_at": "2026-10-29T12:00:00Z",
+                                      "total_cost_usd": 1.0, "last_served_model": "model-a"}) + "\n")
+        # The example Fleet worker is fired by this workflow; without it its rate is unknown.
+        wf = self.tmp / "roots" / "_agent-guidance" / ".github" / "workflows"
+        wf.mkdir(parents=True)
+        (wf / "fleet-worker-fire.yml").write_text(
+            "on:\n  schedule:\n    - cron: '0 */6 * * *'\njobs: {}\n")
+        for name, env in (("with", {"ROUTINE_FIRES_LEDGER": str(ledger)}), ("without", {})):
+            spend = self.tmp / f"{name}.json"
+            with mock.patch.dict(os.environ, env):
+                if not env:
+                    os.environ.pop("ROUTINE_FIRES_LEDGER", None)
+                build.main(["--results", str(self.results), "--inputs", str(DASH / "inputs.example"),
+                            "--config", str(DASH / "config.example"), "--out", str(self.tmp / "ds"),
+                            "--now", now.isoformat(), "--spend", str(spend),
+                            "--workflows-root", str(self.tmp / "roots")])
+            doc = json.loads(spend.read_text())
+            if env:
+                self.assertEqual(set(doc["loop_jobs"]), {"as_of", "points_per_week", "usd_per_week"})
+                self.assertEqual(doc["loop_jobs"]["as_of"], "2026-10-30T12:00:00Z")
+            else:
+                self.assertNotIn("loop_jobs", doc)
 
     def test_spend_file_keeps_full_precision(self):
         raw = {"weeks": [{"week": "2026-10-19", "run_count": 3, "run_meter_points": 1.23456, "api_usd": 0.333333,
@@ -818,7 +849,8 @@ class DashboardBuildTests(unittest.TestCase):
             self.assertRegex(page, r'["\']' + name + r'["\']', f"the page never reads {name}")
         for name, key in (("half_built_issues", "key"), ("usage_rows", "kind"),
                           ("cost_benefit_weeks", "week"), ("run_stream", "key"), ("waiting", "id")):
-            self.assertRegex(page, name + r':\s*"' + key + '"', f"{name} placeholder rows stay hidden")
+            # The build writes string literals in whichever quote stores smaller.
+            self.assertRegex(page, name + r':\s*["\']' + key + r'["\']', f"{name} placeholder rows stay hidden")
 
     def test_builds_from_fully_empty_inputs(self):
         # Cold start: a new adopter has no thread list and no dumps. The

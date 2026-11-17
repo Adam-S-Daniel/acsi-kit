@@ -9,7 +9,7 @@ load live through the GitHub connector. The rest are JSON snapshots that
 
 ## One app, three builds
 
-The page is the private build of the Evals Explorer: `explorer/src` builds
+The page is the private build of the Improvement Loop Explorer: `explorer/src` builds
 `tool/index.html` (the public page, read from `latest.json`),
 `page/index.html` (this page, read from the `explorer` dataset) and
 `explorer/dist/artifact/index.html` (the public page as a claude.ai artifact,
@@ -38,7 +38,7 @@ raw.githubusercontent.com URL, fetches no literal URL and leaks nothing private.
 
 Routes are the same in both builds; `?subject=guidance`, the old tab hashes
 (`#overview`, `#evals`, `#costbenefit`, ...) and the old routes (`#/loop`, `#/impact`,
-`#/ops`, `#/removed`) redirect. A snapshot older than 13 hours shows a banner on every group. The public build has no
+`#/ops`, `#/removed`) redirect. A snapshot older than 25 hours shows a banner on every group. The public build has no
 Needs you group, says "the owner" where this page says "you", and folds checks
 in private repos into one row. Its bundle never holds private view code,
 private dataset ids or `dash` (an AST check in `explorer/test/run.js`).
@@ -73,6 +73,17 @@ to the procedure is a pull request here, never an edit to the task.
 
 ### Every run, in order
 
+**Keep the big listings out of the main session.** Steps 1, 2, 3 and 5 (with its fire cost
+ledger) call tools whose output is large: every thread, every thread's messages, every
+session and every scheduled task. Hand each of those steps to a subagent with
+`model: "haiku"`. The subagent makes the calls, writes the result straight to the file or
+helper script the step names (step 5 also writes arg 1 to `$REFRESH_WORK/arg1.json` and the
+run list for step 6 to `$REFRESH_WORK/runs.json`), and returns one line: its counts, or the
+`STOP:` text a helper printed. The main session never reads the raw listings; it runs steps
+4 and 6 to 11 from those files (`"$(cat "$REFRESH_WORK/arg1.json")"` as arg 1) and handles
+every `STOP:` itself. Why: on 2026-11-15 a run that made these calls itself grew to 324k
+tokens and cost $5.43, for a task that fires twice a day.
+
 0. **Setup.** In a skills-evals checkout run `git fetch origin main && git checkout --detach origin/main`
    before anything else (helpers are read from that commit; `refresh.sh` never checks out),
    and `export DASHBOARD_HOME=<private folder>`; run every later step from the checkout's root.
@@ -97,14 +108,22 @@ to the procedure is a pull request here, never an edit to the task.
    `{id: {enabled, cron_expression, next_run_at, last_run, created_at}}` for every non-retired
    trigger row. `refresh.sh` fills a row's missing `added` date from `created_at`. Also refresh
    `inputs/trigger_list.json` (one-shot tasks; drop ones that have run).
-   - **Fire cost ledger.** For each of those rows whose `last_run.session_id` is not yet in
-     `watch/routine-fires.jsonl` and whose `last_run.finished_at` is set, read the session's final
+   - **Fire cost ledger.** The ledger is `spend/routine-fires.jsonl` on the private
+     `persistent/usage-events` branch of `example-adopter/acsi-agentskills-private` (attach it
+     with `add_repo`, push access): it names private tasks and session ids, so it never goes in
+     this public repository. Shallow-clone that branch (`git clone --depth 1 --branch
+     persistent/usage-events ...`) and export `ROUTINE_FIRES_LEDGER=<clone>/spend/routine-fires.jsonl`.
+     For each of the rows above whose `last_run.session_id` is not yet in the ledger and whose
+     `last_run.finished_at` is set, read the session's final
      cost: `list_events` with `kinds: ["result"]`, `limit: 100`, no cursor, and take
      `total_cost_usd` from the newest result; also `get_session` (`session_` prefix) for
      `external_metadata.usage.cost_usd` and `last_served_model`. Append with
      `python3 -I dashboard/refresh/append_routine_fires.py '<json list of {trigger_id, name, fired_at, finished_at, status, session_id, total_cost_usd, session_usage_cost_usd, last_served_model}>'`;
-     it skips session ids already present. Only `last_run` is visible, so a task that fires more
-     than once between refreshes loses the fires in between. acsi-kit's plan model reads this ledger.
+     it skips session ids already present. When it appended any, commit only that file
+     (noreply identity, message `spend: routine fires`) and push with
+     `bash scripts/push_with_rebase_retry.sh origin persistent/usage-events` from the clone.
+     Only `last_run` is visible, so a task that fires more than once between refreshes loses
+     the fires in between. acsi-kit's plan model and `scripts/automatic_spend.py` read this ledger.
 6. **Run console.** `python3 -I dashboard/refresh/collect_runs.py '<list of {trigger_id,name,fired_at,finished_at,status}>'`.
    It keeps 7 days of workflow runs from `site.json` `run_console_repos` and of scheduled-task
    runs in `inputs/run_stream.json`.
@@ -123,7 +142,7 @@ to the procedure is a pull request here, never an edit to the task.
    `build.py` copies `explorer/latest.json` unchanged into the `explorer` dataset and refuses to
    build without it. It refuses to write an empty dataset: an empty list reads as "failed to
    load" on the page, so empty lists get one placeholder row (key field `none`), which the page hides.
-8. **Compare and publish.** Upload only datasets that changed. Still set `updated` on every `file` dataset the build wrote, changed or not, `budget`, `roster` and `explorer_private` included (each is read fresh every run). The dashboard header's "Updated <age>" is the OLDEST `updated.at` of all file datasets, so one dataset left unstamped makes the whole page read days old (2026-11-13: `budget`, last stamped Nov 9, made it say "Updated 4 days ago" after a run that morning). Every dataset goes stale after 26 hours (two refresh intervals plus two). Skip `eval_allowance` when
+8. **Compare and publish.** Upload only datasets that changed. Still set `updated` on every `file` dataset the build wrote, changed or not, `budget`, `roster` and `explorer_private` included (each is read fresh every run). The dashboard header's "Updated <age>" is the OLDEST `updated.at` of all file datasets, so one dataset left unstamped makes the whole page read days old (2026-11-13: `budget`, last stamped Nov 9, made it say "Updated 4 days ago" after a run that morning). Every dataset goes stale after 50 hours (two refresh intervals plus two). Skip `eval_allowance` when
    only its timestamps and pace moved. Never skip `refresh`: it changes every run, and the page's
    "refresh did not land" banner reads it.
    For each changed file, run Artifact `publish` with the dashboard's `url`, `asset: true` and
@@ -137,7 +156,13 @@ to the procedure is a pull request here, never an edit to the task.
    ArtifactData `files/index.html` (field `text`) with `if_version`; keep the `dash/look` doc.
    Then `bash dashboard/refresh/mark_published.sh` (add `page` if you wrote the page): it copies
    what is now live into `$DASHBOARD_HOME/ds`, the baseline the next run compares against.
-9. **Spend.** Build with `--spend` (below) and, when the weeks changed, push only
+9. **Spend.** First sparse-clone `.github/workflows` of `example-adopter/_agent-guidance` to
+   `<root>/_agent-guidance/.github/workflows` (`git clone --depth 1 --filter=blob:none --sparse`,
+   then `git sparse-checkout set .github/workflows`), keep `ROUTINE_FIRES_LEDGER` exported from
+   step 5, and build with `--spend` (below) plus `--workflows-root <root>`: the spend file's
+   `loop_jobs` (the loop's automatic jobs' weekly meter use) needs both, and
+   `scripts/allowance_guard.py` refuses every fire once it is missing or 3 days old. When the
+   weeks or `loop_jobs` changed, push only
    `spend/weekly.json` from a detached worktree at origin/main to
    `claude/spend-<YYYYMMDDTHHMMSSZ>` (noreply identity); check the "Ingest routine eval results"
    run is green.
@@ -148,10 +173,10 @@ to the procedure is a pull request here, never an edit to the task.
     that cadence.
 11. **Log.** Append one line to `$DASHBOARD_HOME/watch/log.md`:
     `- <UTC start> <UTC end> refresh: <counts, what changed>`.
-12. **Backstop.** `send_later` to this session at the next scheduled time plus 90 minutes, text:
-    "Refresh backstop: if watch/log.md has no refresh line from the last 13 hours, run the full
-    refresh now (dashboard/README.md "Refresh") and log it as a backstop run; otherwise end with
-    no reply." A scheduler can skip a fire with no trace; this catches the next one.
+12. **No backstop wake.** Do not `send_later` to this session. The task starts a fresh thread
+    each run, and a wake into a finished run's thread reloads its whole context (300k tokens or
+    more) just to read one log line. A run that never happens is caught by the next one, whose
+    build prints `MISSED:` (step 7); that run says so in its log line and in its thread.
 
 ### Standing rules
 
@@ -184,7 +209,7 @@ Each dump lives in `$DASHBOARD_HOME/inputs/` (shapes in `inputs.example/`):
 | `owner_messages.jsonl` | One line per message the owner wrote in the project, from `read_project_chat` and `read_thread` on threads active since the last refresh: `v`, `message_id`, `sent_at`, `thread_id`. The owner's own messages only, ids and times only, never text |
 | `loop_prs.json` | Written by `refresh/loop_prs.sh`: pull requests in `site.json` `loop_pr_repos` whose head branch starts with a loop prefix (`eval-improve/`, `draft-skill/`, `retire-skill/`, `eval-guidance-improve/`, `retire-guidance/`) |
 
-`session_costs.jsonl`, `owner_messages.jsonl` and `watch/routine-fires.jsonl` are ledgers,
+`session_costs.jsonl`, `owner_messages.jsonl` and the routine fire ledger are ledgers,
 not dumps: append, never rewrite. A missing optional dump builds as empty. Never paste a
 credential into a dump.
 
@@ -207,7 +232,14 @@ With `--spend <file>`, `build.py` also writes the weeks' totals in the shape of
 `spend/weekly.json` (`spend_file` in `explorer/schema.json`): per week `eval_runs`,
 `plan_meter_points`, `run_usd`, `api_usd` and `thread_spend_usd`, and one `total`
 (`since`, `usd`, `run_usd`, `thread_spend_usd`, `api_usd`, `verdicts`, `cost_per_verdict`:
-the three weekly dollar columns sum to it), at full precision, and `plan` when `site.json` names one. No
+the three weekly dollar columns sum to it), at full precision, and `plan` when `site.json` names one.
+`loop_jobs` (`as_of`, `points_per_week`, `usd_per_week`) is the loop's own automatic jobs'
+weekly meter use from `scripts/automatic_spend.py`, over `inputs/triggers.json`, the
+`ROUTINE_FIRES_LEDGER` fires and `--workflows-root`; it is left out when either is unset (the
+allowance guard then refuses evals rather than guess), or when an in-loop task's rate cannot be read.
+An in-loop task with no fire on its current model yet is priced at its dearest recorded fire, a
+task never costed at all at the dearest in-loop fire; WORKSTATION tasks are not counted; and
+`scripts/explorer_public.py` never copies it. No
 session or thread row goes in. At `spend/weekly.json` on the results branch,
 `scripts/explorer_public.py` copies it into the public document's `spend` (when
 `evals/public-export.yml` sets `include_spend`), and the public Spend and use group
@@ -258,6 +290,6 @@ source holds them:
 2. Create a Dashboard artifact. Write `page/index.html` to `files/index.html`,
    and each entry of `page/datasets.json` to `datasets/<id>`, with your owner and
    repo names in the live queries.
-3. Run one refresh by hand, then schedule `tasks/refresh.md` every 12 hours (7:29 AM and 7:29 PM ET; `REFRESH_INTERVAL_HOURS` in `build.py`).
+3. Run one refresh by hand, then schedule `tasks/refresh.md` every 24 hours (7:29 AM ET; `REFRESH_INTERVAL_HOURS` in `build.py`).
 4. The page's words are in `explorer/src/core/strings.js` (shared) and
    `explorer/src/private/strings.js` (this page only); rebuild after editing.

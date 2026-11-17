@@ -27,12 +27,12 @@ const ROUTE = /^#\/[a-z]/;
 export function rowLink(url, text) {
   return typeof url === 'string' && ROUTE.test(url) ? navLink(url, text) : plink(url, text);
 }
-function pill(text) {
+function pill(text, label) {
   const t = String(text || '');
   const kind = /^(Done|OK|Met|Succeeded|Passed|ok|clear)$/i.test(t) ? 'good'
     : /stalled|stopped|not started|failed|^(high|broken)$/i.test(t) ? 'bad'
       : /waiting|partly|needs|not yet|in progress|^(Running|Queued|medium)$/i.test(t) ? 'warn' : '';
-  return h('span', { class: 'st ' + kind }, clean(t));
+  return h('span', { class: 'st ' + kind }, clean(label || t));
 }
 const src = (id) => P.srcSnapshot(id);
 const isLoopBranch = (b) => LOOP_BRANCH.test(String(b || ''));
@@ -122,12 +122,15 @@ export function capUse(allowance, budget) {
 
 /* Every routine is counted once: healthy, not run yet, or needing a look, so
    the three add up to `active`, the rows the table lists (build.py leaves
-   retired routines out of the dataset). */
+   retired routines out of the dataset). On time applies only to `due`, the
+   routines with a run on record or overdue: one that has never run and is not
+   yet late (an on-demand routine nothing has fired) is neither on time nor
+   late, so it is left out of that count and named on its own. */
 export function routineHealth(routines) {
   if (!routines) return null;
   const ok = routines.filter((r) => r.health === 'OK').length;
   const fresh = routines.filter((r) => r.health === 'Not run yet').length;
-  return { active: routines.length, ok, fresh, attention: routines.length - ok - fresh };
+  return { active: routines.length, ok, fresh, attention: routines.length - ok - fresh, due: routines.length - fresh };
 }
 
 function meter(value, max, mark, over) {
@@ -148,9 +151,13 @@ export function alertWhat(a) {
 /* One list of what needs attention, with a kind column. */
 export function attentionRows(dash, doc) {
   const rows = [];
+  // A fixture-queue finding is also filed as a half-built issue with the
+  // same Finding-ID: list it once, as the issue.
+  const filed = new Set();
   for (const r of some(dash, 'half_built_issues') || []) {
     if (r.state !== 'open') continue;
-    rows.push({ kind: P.kindHalfBuilt(r.kind), severity: r.severity, what: r.title, url: r.url, where: r.repo, age: r.age_days, acts: P.actsHalfBuilt, family: 'half-built', hbKind: r.kind });
+    if (typeof r.finding_id === 'string' && r.finding_id) filed.add(r.finding_id);
+    rows.push({ kind: P.kindHalfBuilt(r.kind), severity: r.severity, what: r.title, url: r.url, where: r.repo, age: r.age_days, acts: P.actsHalfBuilt, family: 'half-built', hbKind: r.kind, needsOwner: !!r.needs_owner });
   }
   for (const a of Array.isArray(doc.alerts) ? doc.alerts : []) {
     if (!a) continue;
@@ -166,7 +173,7 @@ export function attentionRows(dash, doc) {
   }
   const q = doc.fixture_queue;
   for (const x of q && Array.isArray(q.findings) ? q.findings : []) {
-    if (x) rows.push({ kind: P.kindFixture(x.kind || ''), severity: x.severity || 'unknown', what: clean(x.subject || x.finding_id || ''), url: x.url, where: null, age: null, acts: P.actsFixture(x.kind || ''), family: 'fixture' });
+    if (x && !filed.has(x.finding_id)) rows.push({ kind: P.kindFixture(x.kind || ''), severity: x.severity || 'unknown', what: clean(x.subject || x.finding_id || ''), url: x.url, where: null, age: null, acts: P.actsFixture(x.kind || ''), family: 'fixture' });
   }
   const order = { high: 0, medium: 1, low: 2 };
   return rows.sort((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3));
@@ -234,6 +241,25 @@ export function groupHref(list) {
   return null;
 }
 
+/* How many of a folded kind's rows sit at each severity, worst first, so the
+   row never reads as if all of them were at the worst one. */
+export function severityCounts(list) {
+  const by = new Map();
+  for (const r of list) by.set(r.severity, (by.get(r.severity) || 0) + 1);
+  return [...by].map(([severity, count]) => ({ severity, count })).sort((a, b) => (SEVERITY[a.severity] ?? 3) - (SEVERITY[b.severity] ?? 3));
+}
+
+/* The half-built line's counts, from the same open issue rows the Needs
+   attention table lists (attentionRows), so the two cannot disagree. Null
+   when the issues dataset is not loaded. */
+export function halfBuiltCounts(dash) {
+  const rows = some(dash, 'half_built_issues');
+  if (!rows) return null;
+  const open = rows.filter((r) => r.state === 'open');
+  return { open: open.length, high: open.filter((r) => r.severity === 'high').length, needsOwner: open.filter((r) => r.needs_owner).length,
+    fixed: rows.filter((r) => r.state === 'closed').length };
+}
+
 /* The Needs you list with a kind that has many rows folded into one row (the
    individual rows stay in `children`), so 29 copies of one notice are one
    line. attentionRows stays the flat list, which the Summary's count reads. */
@@ -250,11 +276,18 @@ export function attentionGroups(rows) {
     const names = new Set(list.map((r) => r.name).filter(Boolean));
     const since = list.map((r) => r.since).filter((x) => typeof x === 'string').sort()[0];
     const worst = list.reduce((a, r) => ((SEVERITY[r.severity] ?? 3) < (SEVERITY[a] ?? 3) ? r.severity : a), list[0].severity);
-    out.push({ kind: list[0].kind, severity: worst, what: drift ? P.driftTitle(list.length, names.size) : P.groupTitle(list.length, list[0].kind),
+    list.sort((a, b) => (SEVERITY[a.severity] ?? 3) - (SEVERITY[b.severity] ?? 3));
+    out.push({ kind: list[0].kind, severity: worst, severities: severityCounts(list), what: drift ? P.driftTitle(list.length, names.size) : P.groupTitle(list.length, list[0].kind),
       note: drift ? P.driftNote(since ? fmtDay(parseTime(since)) : STRINGS.unknown) : list[0].acts || null, url: groupHref(list),
       helpUrl: drift ? P.driftHelpUrl : null, where: null, age: null, children: list });
   }
   return out.sort((a, b) => (SEVERITY[a.severity] ?? 3) - (SEVERITY[b.severity] ?? 3));
+}
+
+/* A folded row's severity: one pill when its rows agree, else a count at each. */
+function attentionSeverity(r) {
+  if (!r.severities || r.severities.length < 2) return pill(r.severity);
+  return r.severities.map((s, i) => [i ? ' ' : null, pill(s.severity, s.count + ' ' + s.severity)]);
 }
 
 /* A group row's cell: its title, the note on who acts, and every row under a fold. */
@@ -262,7 +295,7 @@ function attentionWhat(r) {
   if (!r.children) return rowLink(r.url, clean(r.what));
   return [h('strong', null, rowLink(r.url, clean(r.what))), r.note ? h('p', { class: 'note' }, r.note, r.helpUrl ? [' ', plink(r.helpUrl, P.driftHelpLink)] : null) : null,
     h('details', { class: 'history' }, foldSummary(P.showAll(r.children.length)),
-      h('ul', { class: 'plain' }, r.children.map((c) => h('li', null, rowLink(c.url, clean(c.what))))))];
+      h('ul', { class: 'plain' }, r.children.map((c) => h('li', null, r.severities && r.severities.length > 1 ? [pill(c.severity), ' '] : null, rowLink(c.url, clean(c.what)), c.needsOwner ? [' ', pill(P.needsYou)] : null))))];
 }
 
 /* The use line, its bar and the room line must agree: when the guard still
@@ -290,7 +323,7 @@ const link = (hash, text) => h('a', { href: hash, class: 'nav-link' }, text);
    fresh; with no routine data it says so rather than claim health. */
 export function healthStrip(doc, rh, stale) {
   const when = (t) => (typeof t === 'string' && isFinite(parseTime(t)) ? at(t) : STRINGS.noValue);
-  const routines = rh ? (rh.attention ? P.hsRoutinesBad(rh.attention, rh.active) : P.hsRoutinesOk(rh.ok, rh.active)) : null;
+  const routines = rh ? (rh.attention ? P.hsRoutinesBad(rh.attention, rh.due, rh.fresh) : P.hsRoutinesOk(rh.ok, rh.due, rh.fresh)) : null;
   const state = !rh ? 'unknown' : rh.attention || stale !== null ? 'attention' : 'healthy';
   return [P.hsState[state], ' ', link(hashFor('activity'), P.hsLastTest(when(doc.newest_run))), '; ', routines ? [link(hashFor('activity'), routines), '; '] : null,
     link(hashFor('summary'), P.hsDataRead(when(doc.generated_at))), '. ', link(hashFor('changes'), P.hsChanged), ' · ', link(hashFor('spend'), P.hsCost), '.'];
@@ -307,6 +340,7 @@ function needsView(dash, ctx, nowMs) {
   const doc = ctx.doc;
   const waiting = rowsOf(dash, 'waiting');
   const hb = (rowsOf(dash, 'half_built_summary') || [])[0];
+  const hbc = halfBuiltCounts(dash);
   const att = attentionGroups(attentionRows(dash, doc));
   const cap = capUse(rowsOf(dash, 'eval_allowance'), rowsOf(dash, 'budget'));
   const routines = some(dash, 'routines');
@@ -320,20 +354,20 @@ function needsView(dash, ctx, nowMs) {
       { label: P.colWhere, sort: (r) => r.where, cell: (r) => clean(r.where || '') },
       { label: P.colSince, sort: (r) => r.since, cell: (r) => at(r.since) }], waiting)] : h('p', null, P.waitingNone)) : null,
     panel(P.healthHeading, h('p', { class: 'big' }, healthStrip(doc, rh, staleHours(snap, nowMs, refreshHours(dash))))),
-    panel(P.attentionHeading, [h('p', { class: 'note' }, P.attentionNote), att.length ? table([
+    panel(P.attentionHeading, [h('p', { class: 'note' }, P.attentionNote),
+      hbc && hbc.open > 0 ? h('p', { class: 'note' }, P.hbLine(n(hbc.open), n(hbc.high), n(hbc.needsOwner), n(hbc.fixed)), ' ',
+        hb && hb.checked_at ? P.hbChecked(at(hb.checked_at)) + (hb.incomplete ? P.hbIncomplete : '') : P.hbNever) : null,
+      att.length ? table([
       { label: P.colKind, sort: (r) => r.kind, cell: (r) => r.kind },
-      { label: P.colSeverity, sort: (r) => r.severity, cell: (r) => pill(r.severity) },
+      { label: P.colSeverity, sort: (r) => r.severity, cell: attentionSeverity },
       { label: P.colWhat, sort: (r) => r.what, cell: attentionWhat },
       { label: P.colWhere, sort: (r) => r.where || '', cell: (r) => clean(r.where || '') },
       { label: P.colAge, num: true, sort: (r) => r.age, cell: (r) => (r.age === null || r.age === undefined ? '' : r.age + ' d') }], att)
       : h('p', null, P.attentionNone)]),
     cap ? panel(P.allowanceHeading, allowanceView(cap, snap, 'eval_allowance')) : null,
-    rh ? panel(P.routinesHeading, [h('p', null, P.routinesLine(rh.ok, rh.active, rh.attention, rh.fresh)),
+    rh ? panel(P.routinesHeading, [h('p', null, P.routinesLine(rh.ok, rh.due, rh.attention, rh.fresh)),
       problems.length ? routineTable(problems.slice().sort((x, y) => (x.name < y.name ? -1 : 1))) : null,
-      healthy.length ? h('details', { class: 'history' }, foldSummary(P.showHealthy(healthy.length)), routineTable(healthy)) : null]) : null,
-    hb && Number(hb.open) > 0 ? h('section', { class: 'block banner', 'data-state': hb.status || 'loading' }, h('h2', null, P.hbHeading),
-      h('p', { class: 'big' }, P.hbLine(n(hb.open), n(hb.high), n(hb.broken), n(hb.needs_owner), n(hb.fixed_7d))),
-      h('p', { class: 'note' }, hb.checked_at ? P.hbChecked(at(hb.checked_at)) + (hb.incomplete ? P.hbIncomplete : '') : P.hbNever)) : null);
+      healthy.length ? h('details', { class: 'history' }, foldSummary(P.showHealthy(healthy.length)), routineTable(healthy)) : null]) : null);
 }
 
 function usageGroup(rows, keyOf) {
@@ -381,7 +415,7 @@ export function makeExt(dash, opts) {
       const w = rowsOf(dash, 'waiting');
       if (w) out.push(tile({ label: P.tileWaiting, value: fmtCount(w.length), note: P.tileWaitingNote, href: hashFor('needs'), tip: STRINGS.srcTip(src('waiting'), '') }));
       const rh = routineHealth(some(dash, 'routines'));
-      if (rh) out.push(tile({ label: P.tileRoutines, value: rh.ok + ' of ' + rh.active, note: P.routinesLine(rh.ok, rh.active, rh.attention, rh.fresh), href: hashFor('needs') }));
+      if (rh) out.push(tile({ label: P.tileRoutines, value: rh.ok + ' of ' + rh.due, note: P.routinesLine(rh.ok, rh.due, rh.attention, rh.fresh), href: hashFor('needs') }));
       const cap = capUse(rowsOf(dash, 'eval_allowance'), rowsOf(dash, 'budget'));
       if (cap) out.push(tile({ label: P.tileAllowance, value: cap.spent.toFixed(1) + ' of ' + cap.cap.toFixed(0), note: P.tileAllowanceNote, href: hashFor('needs'),
         tip: STRINGS.srcTip(src('eval_allowance'), isFinite(parseTime(cap.readingAt)) ? fmtDateTime(parseTime(cap.readingAt)) : '') }));
@@ -496,7 +530,7 @@ export function makeExt(dash, opts) {
     opsBottom() {
       return [
         panel(P.ingestsHeading, ok('eval_ingests') ? [h('p', { class: 'note' }, P.ingestsNote), table([
-          { label: P.colRun, sort: (r) => r.run_id || r.message, cell: (r) => plink(r.url, clean(r.run_id || r.message)) },
+          { label: P.colEvalRun, sort: (r) => r.run_id || r.message, cell: (r) => plink(r.url, clean(r.run_id || r.message)) },
           { label: P.colSaved, sort: (r) => r.ingested_at, cell: (r) => at(r.ingested_at) }], some(dash, 'eval_ingests'), { tall: true })] : null),
         panel(P.threadsHeading, ok('threads') ? threadTables(some(dash, 'threads')) : null)];
     },

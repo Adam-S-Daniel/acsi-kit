@@ -534,6 +534,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(REPO_ROOT / "harness"))
 
 import allowance_guard as guard  # noqa: E402
+import guidance_merge_window as merge_window  # noqa: E402
 import improve_outcomes as outcomes_mod  # noqa: E402
 import lesson_evidence  # noqa: E402
 import plan_scheduled_evals as schedule  # noqa: E402
@@ -1912,6 +1913,7 @@ def eval_items(ctx: dict, now: datetime) -> tuple:
         kept = cell.get("verdict") == "keep"
         due = newest is not None and now - newest >= recheck_after(cell)
         provisional = False
+        rechecking = False
         # DEEP BEFORE WIDE: read only by the verdict-seeking bands below.
         depth = depth_order(cell, ctx, item["cost"], started)
         near_order = (rank, *depth, least, price, -item["weight"])
@@ -1930,6 +1932,23 @@ def eval_items(ctx: dict, now: datetime) -> tuple:
                     parked["section"] = cell["section"]
                 work.append(parked)
             band, order = None, None
+        elif cell["class"] == "benefit" and recheck_due_at(cell) is not None:
+            # THE RE-CHECK WINDOW (the owner, 2026-11-15): a kept cell's re-check
+            # is tested on its own pairs, so it is fired every sweep from
+            # when it fell due until it ends (a removal, the early stop at the
+            # margin, or `max_runs_per_cell` pairs; harness/gates.py), its
+            # window cap and its newest run notwithstanding. A guidance cell
+            # goes where an undecided one would, exempt from a batch that
+            # leaves its section out, as a provisional keep is; a skill cell
+            # to the recheck band.
+            rechecking = True
+            if now < recheck_due_at(cell):
+                band, order = None, None
+            elif cell.get("section"):
+                band, order = _guidance_band(cell, focused, near_order)
+                provisional = True
+            else:
+                band, order = "recheck", (rank, recheck_due_at(cell).timestamp())
         elif cell.get("at_cap") is True and cell["class"] == "insufficient":
             # Round 2's C1: `max_runs_per_cell` pairs freeze the window, so
             # another fire cannot change the class. It is blocking instead,
@@ -1980,7 +1999,11 @@ def eval_items(ctx: dict, now: datetime) -> tuple:
             continue
         subject = ("guidance", cell["section"]) if cell.get("section") \
             else ("skill", cell["skill"])
-        if band == "recheck" and _retiring(ctx, subject):
+        block = (ctx.get("guidance_policy") if cell.get("section")
+                 else ctx.get("policy")) or {}
+        if (band == "recheck" or rechecking) and block.get("recheck_window_fire") is False:
+            continue  # re-checks held while the stopping rules are redesigned
+        if (band == "recheck" or rechecking) and _retiring(ctx, subject):
             continue  # a removal is pending: a re-check run would be wasted
         if members is not None and band in BATCH_BANDS and subject not in members \
                 and not provisional:
@@ -2324,7 +2347,15 @@ def pairs_to_verdict(cell: dict, ctx: dict) -> dict | None:
         if remove == 0 and (cell.get("class") in OPEN_CELL_CLASSES or provisional):
             blocked, remove = BLOCKED_CLI_VERSIONS, math.inf
     pairs = min(keep, remove)
-    cap = gate_cap(ctx, "guidance" if guidance else "skill")
+    base = gate_cap(ctx, "guidance" if guidance else "skill")
+    cap = cell["cap"] if isinstance(cell.get("cap"), int) else base
+    # THE CAP EXTENSION (gates `cell_cap`): a cell not yet at its cap that
+    # is projected to decide within the extended cap is planned toward it;
+    # at the cap, the gates' own `cap` for the cell decides.
+    factor = policy_value(policy, "max_runs_extension", guidance)
+    if base is not None and _number(factor) and n >= PROJECTION_MIN_PAIRS \
+            and held < base and held + pairs <= math.floor(base * factor):
+        cap = math.floor(base * factor)
     remaining = None if cap is None else max(0, cap - held)
     return {"pairs": pairs, "keep": keep, "remove": remove, "remaining": remaining,
             "past_cap": remaining is not None and n >= PROJECTION_MIN_PAIRS
@@ -3463,6 +3494,14 @@ def judge_empty_fires(fires: list, since: datetime) -> list:
     return verdicts
 
 
+def recheck_due_at(cell: dict) -> datetime | None:
+    """When a kept cell's open re-check fell due (harness/gates.py, THE
+    RE-CHECK WINDOW: `recheck.due`), or None: no re-check window (the
+    policy's `recheck_window` off, or not a kept cell)."""
+    return _stamp_time((cell.get("recheck") or {}).get("due")) \
+        if isinstance(cell.get("recheck"), dict) else None
+
+
 def provisional_keep(gate_cell: dict | None) -> bool:
     """Whether a gates cell keeps on a pooled keep alone, which is not final
     (harness/gates.py, THE STALE KEEP): `eval_items` fires it until the
@@ -3664,7 +3703,14 @@ def eval_cells_and_outages(evals_dir: Path, gates_doc: dict, fire_runs: list,
                 # it is fired until the current rest's own keep crosses or
                 # its window is full (`eval_items`).
                 "provisional_keep": provisional_keep(cell),
+                # A kept cell's re-check (gates' THE RE-CHECK WINDOW): when
+                # the open one fell due and its pairs so far (`eval_items`).
+                "recheck": (cell or {}).get("recheck")
+                if (cell or {}).get("class") == "benefit" else None,
                 "at_cap": (cell or {}).get("at_cap") is True,
+                # THE CAP EXTENSION (gates `cell_cap`): the cell's own cap
+                # once its first `max_runs_per_cell` pairs earned more.
+                "cap": (cell or {}).get("cap"),
                 # DEEP BEFORE WIDE (`pairs_to_verdict`): the gate's own state
                 # the projection reads, the keep and remove tests so far, the
                 # bet prior its next bet starts from, the keep family, and
@@ -4347,15 +4393,17 @@ def gather(args, now: datetime) -> dict:
                                            now, private_skills(evals_dir)),
             "skill_edit_lessons": lesson_evidence.skill_evidence(args.lessons, "skill-edit"),
             # THE BATCH: only with --batch-policy (the weekly workflow's).
-            **batch_inputs(args, registries, limits, now),
+            **batch_inputs(args, registries, limits, now, state["cap"]),
             "private_skills": private_skills(evals_dir)}
 
 
-def batch_inputs(args, registries: dict, limits: dict, now: datetime) -> dict:
+def batch_inputs(args, registries: dict, limits: dict, now: datetime,
+                 cap: float | None = None) -> dict:
     """THE BATCH's ctx keys: the policy and the previous record, and what a
     new batch is sized and fitted with (the owner's 2026-11-03 decision): the
     measured addition rates, the period's budget (`weekly_cap` x the
-    period's weeks) and each roster model's measured cost per pair. All None
+    period's weeks, the guard's cap less the loop reserve when
+    `cap` is given) and each roster model's measured cost per pair. All None
     without --batch-policy."""
     policy = load_batch_policy(args.batch_policy) if args.batch_policy is not None else None
     if policy is None:
@@ -4373,7 +4421,7 @@ def batch_inputs(args, registries: dict, limits: dict, now: datetime) -> dict:
             print(f"batch: the {kind} addition rate is the policy's constant")
     return {"batch_policy": policy, "previous_batch": read_batch(args.results_tree),
             "batch_rates": rates,
-            "batch_budget": limits["weekly_cap"] * (policy["period"] / timedelta(weeks=1)),
+            "batch_budget": (limits["weekly_cap"] if cap is None else cap) * (policy["period"] / timedelta(weeks=1)),
             "batch_pair_costs": pair_costs(index["runs"] + index["guidance_runs"],
                                            args.results_tree, now, policy["cost_window"])}
 
@@ -4393,6 +4441,8 @@ def summary_lines(plan: dict) -> list:
     """Public-safe lines: counts, bands, public skill and fixture names."""
     lines = [f"### Weekly plan: {len(plan['fires'])} fire(s), room "
              f"{plan['room'] * 100:.1f} points", ""]
+    if plan.get("paused"):
+        lines += [f"Eval pause: {plan['paused']}.", ""]
     for fire in plan["fires"]:
         target = fire["fixture"] or (f"{fire['skill'] or fire.get('section', '')} "
                                      f"(holdout {fire['holdout']})")
@@ -4720,6 +4770,27 @@ def guidance_headroom(section: str, tree: Path, evals_dir: Path, guidance_dir: P
     return True, f"section {section}: train headroom {headroom:.3f}"
 
 
+def hold_for_eval_pause(plan: dict, guidance: Path | None, now: datetime) -> dict:
+    """THE EVAL PAUSE (the owner, 2026-11-13; ADR 0017's addendum): inside
+    _agent-guidance's weekly guidance merge window a sweep plans no fire, so
+    no leg is dispatched only to be refused. The rest of the plan (work
+    items, the ranking, a batch record) stands. Bounds that cannot be read
+    plan no fire either (fail closed). With no `--guidance` checkout at all
+    (a local plan; the sweep always passes one) this check is skipped:
+    routine-eval-fire.yml refuses a fire inside the window on its own."""
+    if guidance is None:
+        return plan
+    try:
+        paused, message = merge_window.eval_pause(guidance, now)
+    except merge_window.WindowError as exc:
+        paused, message = True, f"the eval pause cannot be read ({exc})"
+    if paused:
+        plan["paused"] = message + "; no fire is planned"
+        plan["fires"] = []
+        plan["matrix"] = {"include": []}
+    return plan
+
+
 def _utcnow() -> datetime:
     """The plan's `now` (a seam for the plan command's tests)."""
     return datetime.now(timezone.utc)
@@ -4818,7 +4889,8 @@ def main(argv: list | None = None) -> int:
         if not 1 <= args.max_fires <= MAX_FIRES_CAP:
             raise PlanError(f"the fire cap must be 1 to {MAX_FIRES_CAP}")
         now = _utcnow()
-        plan = build_plan(gather(args, now), now, args.max_fires)
+        plan = hold_for_eval_pause(build_plan(gather(args, now), now, args.max_fires),
+                                   args.guidance, now)
     except (PlanError, outcomes_mod.EvidenceError, guard.GuardError,
             guard.budget_file.BudgetError) as exc:
         print(f"::error::weekly plan: {exc}")

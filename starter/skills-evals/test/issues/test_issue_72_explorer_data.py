@@ -20,6 +20,7 @@ import sys
 import tempfile
 import shutil
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 from pathlib import Path
 
@@ -165,7 +166,7 @@ class ShapeAndMathTests(unittest.TestCase):
                                      "coverage", "discarded_runs", "evals", "fires_without_results",
                                      "fixture_queue", "generated_at",
                                      "guidance", "hooks", "lesson_funnel", "lessons",
-                                     "newest_run", "policy", "removed_skills",
+                                     "newest_run", "policy", "removal_policy", "removed_skills",
                                      "roster", "schema_version",
                                      "skills", "source", "spend", "usage"])
         self.assertIsNone(d["usage"])
@@ -199,8 +200,10 @@ class ShapeAndMathTests(unittest.TestCase):
                                          "decisions", "description", "discarded_runs", "name",
                                          "next_test", "registry", "run_utility", "runs",
                                          "skip_reason",
-                                         "stakes", "status", "usage", "verdict",
+                                         "stakes", "status", "usage", "use_by", "verdict",
                                          "verdict_reason"])
+            # Only acsi-agentskills skills carry a deadline, and there is no checkout.
+            self.assertIsNone(s["use_by"])
             # No evals/stakes.yml row: normal.
             self.assertEqual(s["stakes"], {"level": "normal"})
             # No usage census in the tree: unknown, not zero. No schedule: no test.
@@ -245,6 +248,134 @@ class ShapeAndMathTests(unittest.TestCase):
         explorer_data.finish(doc)  # the dropped @ keeps the safety net quiet
         self.assertIsNone(explorer_data.skill_description({"pub": {"path": reg}}, "pub", ".."))
         self.assertIsNone(explorer_data.skill_description(None, "pub", "alpha"))
+
+    def test_use_by_is_null_off_acsi_agentskills_and_an_object_on_it(self):
+        import jsonschema
+        import skill_usage
+        reg = self.t.root / "agentskills"
+        for skill in ("alpha", "beta"):
+            md = reg / "plugins" / "bundle-one" / "skills" / skill / "SKILL.md"
+            md.parent.mkdir(parents=True)
+            md.write_text(f"---\nname: {skill}\ndescription: Does the {skill} thing.\n---\nbody\n",
+                          encoding="utf-8")
+        (reg / "scripts").mkdir()
+        (reg / "scripts" / "plugin_layout.json").write_text(
+            json.dumps({"plugins": {"bundle-one": {"skills": ["alpha", "beta"]}}}), encoding="utf-8")
+        registries = {"acsi-agentskills": {
+            "path": reg, "layout": "plugins/*/skills/*/SKILL.md",
+            "url": "https://github.com/example-adopter/acsi-agentskills"}}
+        # alpha and beta are listed under acsi-agentskills, gamma under another registry.
+        doc = census(["alpha", "beta"])
+        doc["registries"].insert(1, {**census(["gamma"])["registries"][0]})
+        doc["registries"][0]["name"] = "acsi-agentskills"
+        doc["registries"][1]["skills"] = doc["registries"][1]["skills"][:1]
+        self.t.write_json("coverage/latest.json", doc)
+
+        def built():
+            return explorer_data.build(self.t.tree, self.t.roster, self.t.policy, self.t.evals,
+                                       AS_OF, SHA_A, SHA_B, registries=registries, manifest=[])
+
+        def check(document):
+            schema = json.loads(explorer_data.SCHEMA_PATH.read_text(encoding="utf-8"))
+            jsonschema.validate(document, schema)
+            explorer_data.finish(document)
+            return {s["name"]: s for s in document["skills"]}
+
+        # No usage census: unknown, never a date.
+        by = check(built())
+        self.assertEqual(by["alpha"]["use_by"]["state"], "unknown")
+        self.assertEqual(sorted(by["alpha"]["use_by"]),
+                         ["last_use_week", "projected_usd", "removable_from", "state",
+                          "use_by", "why"])
+        self.assertIsNone(by["alpha"]["use_by"]["use_by"])
+        # gamma is listed under another registry, so it has no deadline.
+        self.assertIsNone(by["gamma"]["use_by"])
+        self.assertEqual(built()["removal_policy"], {"value_per_use_usd": 10, "floor_weeks": 8})
+        # A fresh census, one use in the week of 2026-10-19 and no listings.
+        now = plan_week._stamp_time(explorer_data.compute_gates.parse_as_of(AS_OF))
+        floor = now - timedelta(weeks=20)
+        usage = skill_usage.document(
+            [skill_usage.row("2026-W43", "skill", "alpha", 1, 1)], now, floor, sessions_scanned=1,
+            cloud_guidance={"from": floor, "records_scanned": 1, "listing_recorded": True},
+            skill_keys=["alpha", "beta"])
+        skill_usage.add_rows(usage, [], skill_usage.digest_source(
+            floor, now, 0, surface=skill_usage.SURFACE_CLOUD))
+        self.t.write_json("usage/weekly-local.json", usage)
+        by = check(built())
+        self.assertEqual(by["alpha"]["use_by"]["last_use_week"], "2026-10-19")
+        self.assertEqual(by["alpha"]["use_by"]["state"], "not-at-pace")
+        self.assertIsNone(by["gamma"]["use_by"])
+        # Without the checkout every skill reads null, and the policy is still shown.
+        plain = self.t.build()
+        self.assertTrue(all(s["use_by"] is None for s in plain["skills"]))
+        self.assertEqual(plain["removal_policy"], {"value_per_use_usd": 10, "floor_weeks": 8})
+
+    def test_use_by_reaches_a_date_and_due_end_to_end_and_validates(self):
+        import math
+        import jsonschema
+        import removal_policy
+        import skill_usage
+        reg = self.t.root / "agentskills"
+        text = "---\nname: alpha\ndescription: Does the alpha thing.\n---\nbody\n"
+        md = reg / "plugins" / "bundle-one" / "skills" / "alpha" / "SKILL.md"
+        md.parent.mkdir(parents=True)
+        md.write_text(text, encoding="utf-8")
+        (reg / "scripts").mkdir()
+        (reg / "scripts" / "plugin_layout.json").write_text(
+            json.dumps({"plugins": {"bundle-one": {"skills": ["alpha"]}}}), encoding="utf-8")
+        registries = {"acsi-agentskills": {
+            "path": reg, "layout": "plugins/*/skills/*/SKILL.md",
+            "url": "https://github.com/example-adopter/acsi-agentskills"}}
+        doc = census(["alpha"])
+        doc["registries"][0]["name"] = "acsi-agentskills"
+        self.t.write_json("coverage/latest.json", doc)
+        policy = removal_policy.load()
+        d = removal_policy.description_tokens(text)
+        # AS_OF is Saturday 2026-10-31, in the week of Monday 2026-10-26. Cloud
+        # sessions in each of the 8 weeks before it, none yet in its own week:
+        # W36-W43 at `n` a week. The threshold is `full` sessions a week.
+        full = (policy["value_per_use_usd"] * policy["prefix_tokens"]
+                / (d * policy["reread_usd_per_session"]["cloud"] * policy["floor_weeks"]))
+        now = plan_week._stamp_time(explorer_data.compute_gates.parse_as_of(AS_OF))
+        floor = now - timedelta(weeks=20)
+
+        def use_by_for(per_week):
+            rows = [skill_usage.listing_row(f"2026-W{w}", "full", per_week, skill_usage.SURFACE_CLOUD)
+                    for w in range(36, 44)]
+            usage = skill_usage.document(
+                rows, now, floor, sessions_scanned=1,
+                cloud_guidance={"from": floor, "records_scanned": 1, "listing_recorded": True},
+                skill_keys=["alpha"])
+            skill_usage.add_rows(usage, [], skill_usage.digest_source(
+                floor, now, 0, surface=skill_usage.SURFACE_CLOUD))
+            self.t.write_json("usage/weekly-local.json", usage)
+            built = explorer_data.build(self.t.tree, self.t.roster, self.t.policy, self.t.evals,
+                                        AS_OF, SHA_A, SHA_B, registries=registries, manifest=[])
+            schema = json.loads(explorer_data.SCHEMA_PATH.read_text(encoding="utf-8"))
+            jsonschema.validate(built, schema)
+            explorer_data.finish(built)
+            return next(s for s in built["skills"] if s["name"] == "alpha")["use_by"]
+
+        # Seven actual weeks plus this one at the pace of 1.05 * `full` costs
+        # 9.2 USD so far (not due) and 10.5 USD over the whole week: a date.
+        n = math.ceil(full * 1.05)
+        cost = d * policy["reread_usd_per_session"]["cloud"] / policy["prefix_tokens"]
+        got = use_by_for(n)
+        removable = datetime(2026, 10, 26, tzinfo=timezone.utc)
+        self.assertEqual(got, {
+            "state": "date",
+            "use_by": (removable - timedelta(days=1) - skill_usage.CENSUS_MAX_AGE)
+            .date().isoformat(),
+            "removable_from": "2026-10-26", "last_use_week": None,
+            "projected_usd": 8 * n * cost, "why": "projected at today's session pace"})
+        self.assertLess(7 * n * cost, policy["value_per_use_usd"])
+        # At 1.2 * `full` the seven weeks already cost enough: due now.
+        n = math.ceil(full * 1.2)
+        got = use_by_for(n)
+        self.assertEqual(got["state"], "due")
+        self.assertEqual((got["use_by"], got["removable_from"]), (None, "2026-10-26"))
+        self.assertEqual(got["projected_usd"], 7 * n * cost)
+        self.assertGreaterEqual(got["projected_usd"], policy["value_per_use_usd"])
 
     def test_stakes_rows_reach_the_document(self):
         (self.t.evals / "alpha").mkdir(parents=True, exist_ok=True)
@@ -1131,12 +1262,75 @@ class QueueConfidenceUsageTests(unittest.TestCase):
                          "sessions_scanned": 40}]})
         doc = t.build()
         by = {s["name"]: s for s in doc["skills"]}
-        self.assertEqual(by["alpha"]["usage"], {"invocations": 5})
-        self.assertEqual(by["beta"]["usage"], {"invocations": 0})
+        self.assertEqual(by["alpha"]["usage"], {"invocations": 5, "reads": 0})
+        self.assertEqual(by["beta"]["usage"], {"invocations": 0, "reads": 0})
         self.assertEqual(doc["usage"], {"from": "2026-10-19T00:00:00Z",
                                         "to": "2026-10-31T16:00:00Z",
-                                        "sessions_scanned": 40, "surface": "local"})
+                                        "sessions_scanned": 40, "surface": "local",
+                                        "cloud": None})
         explorer_data.finish(doc)
+
+    def test_usage_counts_add_cloud_uses_and_name_the_cloud_window(self):
+        t = Tree(self)
+        t.pair("alpha", "20261030T100000Z", [Tree.trial(5, 5, 8.0, 0.25)],
+               [Tree.trial(1, 5, 4.0, 0.25)])
+        base = {"repo": None, "blocked": None, "overridden": None, "outcome": None}
+        rows = [{**base, "week": "2026-10-26", "kind": "skill", "name": "alpha",
+                 "surface": "local", "invocations": 2, "sessions": 1},
+                {**base, "week": "2026-10-26", "kind": "skill-digest", "name": "alpha",
+                 "surface": "cloud", "invocations": 3, "sessions": 2,
+                 "repo": "example/skills", "digest": "0123456789ab"},
+                {**base, "week": "2026-10-26", "kind": "skill-digest", "name": "beta",
+                 "surface": "local", "invocations": 9, "sessions": 1,
+                 "repo": "example/skills", "digest": "0123456789ab"}]
+        t.write_json("usage/weekly-local.json", {
+            "generated_at": "2026-10-31T16:00:00Z", "schema": 1, "rows": rows,
+            "sources": [{"surface": "local", "scope": "transcripts",
+                         "from": "2026-10-19T00:00:00Z", "to": "2026-10-31T16:00:00Z",
+                         "sessions_scanned": 40},
+                        {"surface": "cloud", "scope": "skill-records",
+                         "from": "2026-10-26T00:00:00Z", "to": "2026-10-31T16:00:00Z",
+                         "events_scanned": 3}]})
+        doc = t.build()
+        by = {s["name"]: s for s in doc["skills"]}
+        # Local 2 plus cloud 3; a local digest row repeats a skill row, so it never adds.
+        self.assertEqual(by["alpha"]["usage"], {"invocations": 5, "reads": 0})
+        self.assertEqual(by["beta"]["usage"], {"invocations": 0, "reads": 0})
+        self.assertEqual(doc["usage"]["cloud"], {"from": "2026-10-26T00:00:00Z",
+                                                 "to": "2026-10-31T16:00:00Z",
+                                                 "events_scanned": 3})
+        explorer_data.finish(doc)
+
+    def test_usage_counts_reads_apart_from_calls_on_every_surface(self):
+        # The owner, 2026-11-15: a session that read a skill's installed files used
+        # it. Reads stay apart from calls so the page can show both.
+        t = Tree(self)
+        t.pair("alpha", "20261030T100000Z", [Tree.trial(5, 5, 8.0, 0.25)],
+               [Tree.trial(1, 5, 4.0, 0.25)])
+        base = {"repo": None, "blocked": None, "overridden": None, "outcome": None}
+        rows = [{**base, "week": "2026-10-26", "kind": "skill", "name": "alpha",
+                 "surface": "local", "invocations": 2, "sessions": 1},
+                {**base, "week": "2026-10-26", "kind": "skill-read", "name": "alpha",
+                 "surface": "local", "invocations": 1, "sessions": 1},
+                {**base, "week": "2026-10-26", "kind": "skill-read", "name": "alpha",
+                 "surface": "cloud", "invocations": 2, "sessions": 2},
+                {**base, "week": "2026-10-26", "kind": "skill-read", "name": "gamma",
+                 "surface": "local", "invocations": 4, "sessions": 4}]
+        t.write_json("usage/weekly-local.json", {
+            "generated_at": "2026-10-31T16:00:00Z", "schema": 1, "rows": rows,
+            "sources": [{"surface": "local", "scope": "transcripts",
+                         "from": "2026-10-19T00:00:00Z", "to": "2026-10-31T16:00:00Z",
+                         "sessions_scanned": 40}]})
+        doc = t.build()
+        by = {s["name"]: s for s in doc["skills"]}
+        self.assertEqual(by["alpha"]["usage"], {"invocations": 2, "reads": 3})
+        self.assertEqual(by["beta"]["usage"], {"invocations": 0, "reads": 0})
+        explorer_data.finish(doc)
+        explorer_data.validate(doc)
+        # The contract holds `reads` to a count.
+        by["alpha"]["usage"]["reads"] = -1
+        with self.assertRaises(explorer_data.Refused):
+            explorer_data.validate(doc)
 
 
 class FixtureQueueFieldTests(unittest.TestCase):

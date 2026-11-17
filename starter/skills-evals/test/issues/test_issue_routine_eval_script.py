@@ -188,6 +188,15 @@ class CheckoutCase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        # The routine makes its log and branch directories with
+        # tempfile.mkdtemp, which a cloud container throws away; here they
+        # go under self.tmp and leave with it, not into the host's TMPDIR,
+        # where run_eval's arm sandbox lists each one in denyRead.
+        self.temproot = self.tmp / "temp"
+        self.temproot.mkdir()
+        tempdir = mock.patch.object(tempfile, "tempdir", str(self.temproot))
+        tempdir.start()
+        self.addCleanup(tempdir.stop)
         env = mock.patch.dict(os.environ, GIT_ENV)
         env.start()
         self.addCleanup(env.stop)
@@ -429,6 +438,12 @@ class CommandTests(CheckoutCase):
         self.assertIn("pairing: isolation", self.report)
         self.assertIn("harness wrote no summary.json", self.report)
         self.assertTrue(self.report.endswith("RESULT: error\n"))
+
+    def test_the_routines_temp_directories_stay_inside_the_case(self):
+        self.fire(payload(), writes=False)
+        made = sorted(p.name for p in self.temproot.iterdir())
+        self.assertTrue(made, "the fire made no temp directory")
+        self.assertTrue(all(name.startswith("skills-evals-routine-") for name in made), made)
 
     def test_an_in_place_skill_fixture_unshallows_every_sibling_first(self):
         self.fire(payload(fixture="evals/skill-b/deployed"), writes=False,
@@ -812,7 +827,10 @@ class RunnerTests(unittest.TestCase):
     def test_a_run_past_its_timeout_is_stopped_by_the_reviewed_group_stop(self):
         proc = mock.MagicMock(pid=424242)
         proc.wait.side_effect = subprocess.TimeoutExpired("run_eval", 1)
+        env = {k: v for k, v in os.environ.items()
+               if k != "SKILLS_EVALS_TEST_SKIP_SANDBOX_PROBE"}
         with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(routine_eval.subprocess, "Popen", return_value=proc) as popen, \
                 mock.patch("probe_model_defaults._stop") as stop, \
                 mock.patch("os.killpg") as killpg, mock.patch("os.kill") as kill:

@@ -102,7 +102,7 @@ def eval_rows(er, report_base):
 #: Hours between dashboard refreshes (7:29 AM and 7:29 PM ET), the one place the
 #: interval is written: a snapshot dataset's `staleAfterHours` in page/datasets.json
 #: must exceed it, which test_issue_dashboard_build checks.
-REFRESH_INTERVAL_HOURS = 12
+REFRESH_INTERVAL_HOURS = 24
 
 
 def allowance(er, now):
@@ -118,7 +118,7 @@ def allowance(er, now):
     # 0 and `room_points` is what the guard would say with no fire in flight.
     since = g.window_start(now)
     runs = g.ingested_runs(Path(er), now, since)
-    st = g.account(Path(er), limits, now, (len(runs), 0), since=since)
+    st = g.account(Path(er), limits, now, (len(runs), 0), since=since, loop_reserve=False)
     found = g.newest_snapshot(runs)
     # The next scheduled reset (Monday 17:00 UTC), even when a manual reset started this window.
     resets = iso(g.ACCOUNT_WEEK_RESET + ((now - g.ACCOUNT_WEEK_RESET) // g.WINDOW + 1) * g.WINDOW)
@@ -724,7 +724,7 @@ def cost_benefit(er, plan_rows, usage_rows, samples, owner_msgs, prs, explorer, 
 
 
 def half_built(dump, now):
-    """(issue rows, summary rows) for the Overview banner: open half-built or broken findings, plus those fixed in 7 days."""
+    """(issue rows, one check-status row) for Needs attention: open half-built or broken findings, plus those fixed in 7 days."""
     dump = dump if isinstance(dump, dict) else {}
     checked = parse(dump.get("checked_at"))
     order = {"high": 0, "medium": 1, "low": 2, "unknown": 3}
@@ -745,13 +745,10 @@ def half_built(dump, now):
     # High severity first, then what needs the owner, then the rest by severity; oldest first within each.
     rows.sort(key=lambda r: (r["state"] != "open", r["severity"] != "high", not r["needs_owner"],
                              order.get(r["severity"], 3), -(r["age_days"] or 0)))
-    opened_ = [r for r in rows if r["state"] == "open"]
-    count = lambda field, v: sum(1 for r in opened_ if r[field] == v)
-    status = "not-checked" if checked is None else "attention" if opened_ else "clear"
-    summary = [{"key": "all", "open": len(opened_), "high": count("severity", "high"), "broken": count("kind", "broken"),
-                "partial": count("kind", "partial"), "implied_only": count("kind", "implied-only"),
-                "idle": count("kind", "idle"), "needs_owner": count("needs_owner", "needs you"), "fixed_7d": len(rows) - len(opened_),
-                "checked_at": iso(checked) if checked else None, "incomplete": bool(dump.get("incomplete")), "status": status}]
+    status = "not-checked" if checked is None else "attention" if any(r["state"] == "open" for r in rows) else "clear"
+    # No counts here: the page counts the issue rows themselves, so its line and its table cannot disagree.
+    summary = [{"key": "all", "checked_at": iso(checked) if checked else None, "incomplete": bool(dump.get("incomplete")),
+                "status": status}]
     return rows or [{"key": PLACEHOLDER_ID, "repo": None, "number": None, "url": None, "title": None, "state": None,
                      "kind": None, "severity": None, "finding_id": None, "needs_owner": "", "opened": None, "age_days": None,
                      "closed_at": None}], summary
@@ -772,6 +769,62 @@ def spend_file(raw, now, plan=None):
     if plan:
         doc["plan"] = plan
     return doc
+
+
+def loop_jobs(inputs, config, workflows_root, now, ledger=None, window_days=14):
+    """The `loop_jobs` block of spend/weekly.json: the loop's own automatic jobs'
+    weekly meter use, measured by scripts/automatic_spend.py `breakdown` from the
+    build's `triggers.json`, the fire ledger and, for `fired_by`, the scanned
+    workflows. None without a ledger (ROUTINE_FIRES_LEDGER unset or missing), so
+    the block is omitted rather than guessed. `points_per_week` is meter points
+    (percent of the weekly allowance): dollars at the budget's `points_per_usd`,
+    as scripts/forecast_catch_up.py converts them."""
+    import yaml
+    import automatic_spend
+    if not ledger or not os.path.isfile(ledger) or not workflows_root:
+        # Without the workflows, a task fired through `fired_by` (the fleet
+        # worker) has no rate and would read as $0: omit, never undercount.
+        return None
+    wrapped = load(os.path.join(inputs, "triggers.json"), {})
+    rows = wrapped.get("data", wrapped) if isinstance(wrapped, dict) else wrapped
+    if isinstance(rows, dict):
+        rows = [dict(v.get("trigger") or v, id=k) if isinstance(v, dict) else {"id": k}
+                for k, v in rows.items()]
+    names = {(r.get("source") or {}).get("id"): r.get("name")
+             for r in load(os.path.join(config, "routines.json"), [])
+             if (r.get("source") or {}).get("kind") == "trigger"}
+    triggers = {}
+    for row in rows:
+        row = {k: v for k, v in row.items() if v not in (None, "")}
+        row.setdefault("name", names.get(row.get("id")) or row.get("id"))
+        triggers[row["id"]] = row
+    cfg = yaml.safe_load(open(REPO / "evals" / "automatic-spend.yml"))
+    workflows = automatic_spend.scan_workflows(Path(workflows_root))
+    doc = automatic_spend.breakdown(cfg, triggers, automatic_spend.load_fires([ledger]), workflows,
+                                    [], now, window_days)
+    usd = doc["loop_meter_usd_per_week"]
+    # No in-loop job may count as $0. One with a rate but no fire on its current
+    # model is priced at its dearest recorded fire on any model; one never costed
+    # at all (a new task) at the dearest fire of any in-loop task. A rate that
+    # cannot be read (its firing workflow was not scanned) omits the block.
+    fires = automatic_spend.load_fires([ledger])
+    loop_ids = {j["id"] for j in doc["jobs"] if j.get("in_loop")}
+    def dearest(ids):
+        costs = [c for c in (automatic_spend._cost(r) for r in fires
+                             if r.get("trigger_id") in ids) if c is not None]
+        return max(costs) if costs else None
+    for j in doc["jobs"]:
+        if not (j.get("in_loop") and j["lane"] == "meter" and j["usd_per_week"] is None):
+            continue
+        if j["fires_per_week"] is None:
+            return None
+        per_fire = dearest({j["id"]})
+        per_fire = per_fire if per_fire is not None else dearest(loop_ids)
+        if per_fire is None:
+            return None
+        usd += j["fires_per_week"] * per_fire
+    ppu = yaml.safe_load(open(REPO / "evals" / "budget.yml"))["points_per_usd"]
+    return {"as_of": iso(now), "points_per_week": usd * ppu * 100, "usd_per_week": usd}
 
 
 # --- main ----------------------------------------------------------------------
@@ -821,6 +874,8 @@ def main(argv=None):
         ap.add_argument("--" + name, required=True)
     ap.add_argument("--now", help="ISO time to build as of (default: now)")
     ap.add_argument("--spend", help="also write the weekly cost totals here, in spend/weekly.json's shape")
+    ap.add_argument("--workflows-root", help="a folder holding <repo>/.github/workflows checkouts (_agent-guidance), for "
+                    "automatic-spend.yml `fired_by`; only the spend file's loop_jobs reads it")
     a = ap.parse_args(argv)
     now = parse(a.now) if a.now else datetime.now(timezone.utc)
     raw = {}
@@ -834,7 +889,12 @@ def main(argv=None):
     if a.spend:
         site = load(os.path.join(a.config, "site.json"), {})
         with open(a.spend, "w") as f:
-            json.dump(spend_file(raw, now, site.get("plan")), f, indent=1)
+            doc = spend_file(raw, now, site.get("plan"))
+            jobs = loop_jobs(a.inputs, a.config, a.workflows_root, now,
+                             os.environ.get("ROUTINE_FIRES_LEDGER"))
+            if jobs:
+                doc["loop_jobs"] = jobs
+            json.dump(doc, f, indent=1)
     print(" ".join(f"{k}={len(v)}" for k, v in out.items()))
 
 
