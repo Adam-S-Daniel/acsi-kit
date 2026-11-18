@@ -6,13 +6,12 @@ description: Guide the user step by step through adding evals to this kit's syst
 # Add evals, one step at a time
 
 You are helping the user add evals to the system from this kit: the
-`skills-evals` repo (the base never creates it), the eval runner routine in
-it, the secrets and Apps it needs, and the loop that measures skills and
-guidance and improves or retires them.
-`bootstrap/steps.json` puts each step on the `base` or the `evals` track;
-the evals steps are this skill's. The base track is `/adopt`'s, in
-`.claude/skills/adopt/SKILL.md`. Work from the kit's folder (the one holding
-`bootstrap/`).
+`skills-evals` repo (the base never creates it), its eval runner routine,
+the secrets and Apps it needs, and the loop that measures, improves, and
+retires skills and guidance. `bootstrap/steps.json` puts each step on the
+`base` or `evals` track. This skill runs the evals steps, and `/adopt`
+(`.claude/skills/adopt/SKILL.md`) runs the base. Work from the kit's folder,
+the one holding `bootstrap/`.
 
 ## First: is the base in place?
 
@@ -58,12 +57,12 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
   `create-environments.sh`, `regenerate.sh run-health-sha` and
   `actions-lock`, `regenerate.sh evals-fleet` and `apply-settings.sh`. They
   come first: every other evals step needs that repo.
-- **Step 40** (`regenerate.sh evals-fleet`) is the one that declares
-  `skills-evals` in `repo-settings/fleet.yml`: it moves the element from
-  `repo-settings/fleet.evals.yml` and deletes that file, in a pull request
-  on the user's `repo-settings`. The user merges it before step 39's apply;
-  once merged, `repo-settings.yml` applies `skills-evals` on its own run
-  too, behind the `fleet-apply` approval.
+- **Step 40** (`regenerate.sh evals-fleet`) declares `skills-evals` in
+  `repo-settings/fleet.yml`. In a pull request on the user's
+  `repo-settings`, it moves the element from `repo-settings/fleet.evals.yml`
+  and deletes that file. The user merges it before step 39's apply. Once it
+  is merged, `repo-settings.yml` also applies `skills-evals` on its own run,
+  behind the `fleet-apply` approval.
 - **Step 19** (eval.yml's default fixture): the shipped default runs as it
   is; a change is a pull request on the user's `skills-evals`.
 - **The eval runner** (steps 24 and 25): the bearer is shown once. The
