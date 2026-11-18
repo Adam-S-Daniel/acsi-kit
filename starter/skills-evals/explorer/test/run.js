@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as acorn from 'acorn';
 import vm from 'node:vm';
-import { bundle, bundleResult, buildPublicPage, buildPrivatePage, buildArtifactPage } from '../build.js';
+import { bundle, bundleResult, buildPublicPage, buildPrivatePage, buildArtifactPage, singleQuoted } from '../build.js';
 import { readDashboard, dashboardSource, DATASET_ID } from '../src/adapters/dashboard.js';
 import { DEFAULT_DATA_URL, DATA_URL_PREFIX, allowedDataUrl } from '../src/adapters/web.js';
 import * as artifactAdapter from '../src/adapters/artifact.js';
@@ -19,6 +19,7 @@ import { makeExt, attentionRows, attentionGroups, capUse, routineHealth, snapsho
 import { mergePrivate } from '../src/private/merge.js';
 import { rowsOf, some } from '../src/private/datasets.js';
 import { judgeCell } from '../src/views/subject.js';
+import { useByLine, useBySort, useByCell } from '../src/views/cards.js';
 import { renderRoute, usesUtcDays } from '../src/views/page.js';
 import { runName, hasCron } from '../src/views/ops.js';
 import { applyCap, SKIP_OVER, refreshCap, markScroller, skipTarget } from '../src/views/bits.js';
@@ -490,7 +491,7 @@ await test('times line: a subject page dates its own newest run, not the fleet\'
   const d = doc({ generated_at: '2026-11-15T00:37:06Z', newest_run: '2026-11-12T02:26:42Z',
     skills: [{ name: 'demo-skill', status: 'covered', verdict: 'keep', runs: [{ at: '2026-11-03T15:00:00Z' }, { at: '2026-11-05T15:00:00Z' }] }] });
   const text = textOf(renderRoute(d, { name: 'skills', id: 'demo-skill' }, {})).replace(/\s+/g, ' ');
-  ok(text.includes('its newest run Nov 5, 2026, 10:00 AM ET'), text);
+  ok(text.includes('its newest eval run Nov 5, 2026, 10:00 AM ET'), text);
   ok(!text.includes('newest eval run Nov 11'), text);
 });
 await test('C4 guard: no view prints the single document time for a panel (srcLine(STRINGS.srcDoc, refMs))', () => {
@@ -634,6 +635,14 @@ await test('the private page fits an ArtifactData document once JSON-serialized'
   const page = await buildPrivatePage();
   const size = Buffer.byteLength(JSON.stringify({ text: page }), 'utf8');
   ok(size < 262144, 'serialized private page is ' + size + ' bytes, over the 262,144 limit');
+});
+await test('the private page\'s string literals are requoted without changing a value', () => {
+  const src = 'module.exports=["plain","it\'s","say \\"hi\\"","back\\\\slash","line\\nbreak","\\u00e9",`tpl "kept"`,/"re"/.source,{"key-1":"v"}["key-1"]];';
+  const out = singleQuoted(src);
+  const run = (js) => { const sb = { module: { exports: null } }; vm.runInNewContext(js, sb); return JSON.stringify(sb.module.exports); };
+  eq(run(out), run(src), 'the same values');
+  ok(out.includes("'plain'") && out.includes('`tpl "kept"`') && out.includes('/"re"/'), 'only string literals are rewritten: ' + out);
+  ok(JSON.stringify(out).length < JSON.stringify(src).length, 'smaller once JSON-serialized');
 });
 // The shipped private page is minified (syntax, whitespace and identifiers); every
 // other test runs the readable bundle, so run the committed script itself too.
@@ -811,10 +820,10 @@ await test('a subject page shows its discarded runs, their cost and top reasons,
   const text = page({ total: 9, cost_usd: 1.23456, cost_unknown: 1, by_reason: {
     over_cap: { runs: 2, cost_usd: 0.2, cost_unknown: 0 }, fixture_changed: { runs: 5, cost_usd: 1, cost_unknown: 1 },
     unpaired: { runs: 1, cost_usd: 0.03456, cost_unknown: 0 }, duplicate: { runs: 1, cost_usd: 0, cost_unknown: 0 } } });
-  ok(text.includes('Discarded runs: 9 runs not counted toward this decision, $1.23 (1 with no recorded cost)'), text);
-  ok(text.includes('Most often: fixture changed (5), past the run cap (2), duplicate copy (1)'), text);
+  ok(text.includes('Discarded: 9 eval runs not counted toward this decision, $1.23 (1 with no recorded cost)'), text);
+  ok(text.includes('Most often: fixture changed (5), past the eval run cap (2), duplicate copy (1)'), text);
   ok(!text.includes('no partner arm'), 'three reasons at most');
-  for (const d of [null, { total: 0, cost_usd: 0, cost_unknown: 0, by_reason: {} }]) ok(!page(d).includes('Discarded runs'), JSON.stringify(d));
+  for (const d of [null, { total: 0, cost_usd: 0, cost_unknown: 0, by_reason: {} }]) ok(!page(d).includes('not counted toward this decision'), JSON.stringify(d));
 });
 
 // Run usefulness (the owner, 2026-11-07): rows of `run_utility`, summed over a period
@@ -855,25 +864,25 @@ await test('a subject page shows run usefulness for the last 30 days, stranded o
       { fixture: 'task-b', model: 'claude-sonnet-4-5', current: false, from: '2026-10-20', to: '2026-10-21', class: 'insufficient', decided: null, pair: null }] }] });
   const node = renderRoute(d, { name: 'skills', id: 'demo-skill' }, {});
   const text = textOf(node);
-  ok(text.includes('Run usefulness'), text);
-  ok(text.includes('No use: 10 of 23 runs, $2.50 of $5.75.'), text);
+  ok(text.includes('Eval run usefulness'), text);
+  ok(text.includes('No use: 10 of 23 eval runs, $2.50 of $5.75.'), text);
   ok(text.includes('Stranded') && text.includes('fixture changed 6 ($1.50)'), text);
-  ok(text.includes('v1 kept (helps) on 2026-11-02, runs 2026-10-28 to 2026-11-02; v2 (current) building, runs 2026-11-05 to 2026-11-07'), text);
-  ok(text.includes('on task-b: v1 never decided before it changed (stranded), runs 2026-10-20 to 2026-10-21'), text);
+  ok(text.includes('v1 kept (helps) on 2026-11-02, eval runs 2026-10-28 to 2026-11-02; v2 (current) building, eval runs 2026-11-05 to 2026-11-07'), text);
+  ok(text.includes('on task-b: v1 never decided before it changed (stranded), eval runs 2026-10-20 to 2026-10-21'), text);
   const pressed = findAll(node, (n) => n.tag === 'button' && n.attrs['data-period'] && n.attrs['aria-pressed'] === 'true');
   eq(pressed.map((n) => n.attrs['data-period']).join(','), '30');
   ok(findAll(node, (n) => n.tag === 'rect' && n.attrs['data-class'] === 'stranded').length === 1, 'stranded has its own segment');
   const none = textOf(renderRoute(doc({ skills: [{ name: 'demo-skill', status: 'covered', verdict: 'keep', runs: [], run_utility: null }] }), { name: 'skills', id: 'demo-skill' }, {}));
-  ok(!none.includes('Run usefulness'), 'nothing when unknown');
+  ok(!none.includes('Eval run usefulness'), 'nothing when unknown');
 });
 await test('the summary shows run usefulness for every subject, skills and guidance', () => {
   const d = doc({ generated_at: '2026-11-07T20:00:00Z', skills: [{ name: 'a', run_utility: [U('2026-11-07', 'decisive', 2, 0.5)] }],
     guidance: { sections: [{ id: 's', run_utility: [U('2026-11-07', 'stranded', 4, 1, 'rest_changed')] }] } });
   const text = textOf(renderRoute(d, { name: 'summary' }, {}));
-  ok(text.includes('Run usefulness, every subject'), text);
-  ok(text.includes('No use: 4 of 6 runs, $1.00 of $1.50.'), text);
+  ok(text.includes('Eval run usefulness, every subject'), text);
+  ok(text.includes('No use: 4 of 6 eval runs, $1.00 of $1.50.'), text);
   ok(text.includes('All subjects') && text.includes('Skills') && text.includes('Guidance'), text);
-  ok(!textOf(renderRoute(doc({}), { name: 'summary' }, {})).includes('Run usefulness'), 'nothing without a ledger');
+  ok(!textOf(renderRoute(doc({}), { name: 'summary' }, {})).includes('Eval run usefulness'), 'nothing without a ledger');
 });
 
 // Building into decisive (2026-11-08): building runs against decisive ones.
@@ -909,11 +918,11 @@ await test('the summary shows building into decisive with its lead, table, plann
   ok(!textOf(renderRoute(CDOC(), { name: 'summary' }, {})).includes('Building into decisive'), 'public render has no panel');
   const text = textOf(node);
   ok(text.includes('Building into decisive'), text);
-  ok(text.includes('Of 23 runs that have resolved, 15 helped decide keep or remove (65%) and 8 were stranded by a change first: 0.5 stranded for every one that decided. 46 runs ($4.60) are still building.'), text);
+  ok(text.includes('Of 23 eval runs that have resolved, 15 helped decide keep or remove (65%) and 8 were stranded by a change first: 0.5 stranded for every one that decided. 46 eval runs ($4.60) are still building.'), text);
   for (const l of ['Near a verdict (confidence 65% or more)', 'Partway (30% to 65%)', 'Far (under 30%)', 'Never (subject no longer tested)', 'Total']) ok(text.includes(l), l);
   ok(text.includes('~18') && text.includes('~21'), 'expected counts');
   ok(text.includes('Cells that reached a verdict, by day: Nov 5 2, Nov 7 1.'), text);
-  ok(text.includes('Since the deep-before-wide planner change (') && text.includes(', Nov 8): 17 runs, 29% near a verdict, 59% partway, 0% far, 12% never.') && text.includes('Before it: 54 runs, 56% near a verdict, 22% partway, 7% far, 15% never.'), text);
+  ok(text.includes('Since the deep-before-wide planner change (') && text.includes(', Nov 8): 17 eval runs, 29% near a verdict, 59% partway, 0% far, 12% never.') && text.includes('Before it: 54 eval runs, 56% near a verdict, 22% partway, 7% far, 15% never.'), text);
   const a = findAll(node, (n) => n.tag === 'a' && n.attrs.href === PLANNER_CHANGE.url);
   eq(a.length, 1);
   ok(findAll(node, (n) => n.tag === 'rect' && n.attrs['data-group'] === 'stranded').length === 2, 'stranded segments');
@@ -923,11 +932,11 @@ await test('building into decisive toggles between percent and run counts', () =
   const btns = findAll(node, (n) => n.tag === 'button' && n.attrs['data-mode']);
   eq(btns.map((b) => b.attrs['data-mode'] + ':' + b.attrs['aria-pressed']).join(','), 'share:true,count:false');
   const share = textOf(conversionBody(CDOC(), 'share'));
-  ok(share.includes('17 runs, 29% near a verdict, 59% partway'), share);
+  ok(share.includes('17 eval runs, 29% near a verdict, 59% partway'), share);
   const count = textOf(conversionBody(CDOC(), 'count'));
-  ok(count.includes(', Nov 8): 17 runs: 5 near a verdict, 10 partway, 0 far, 2 never.'), count);
-  ok(count.includes('Before it: 54 runs: 30 near a verdict, 12 partway, 4 far, 8 never.'), count);
-  ok(count.includes('Runs by the day they ran, and where they stand now.') && !count.includes('fills from decided'), count);
+  ok(count.includes(', Nov 8): 17 eval runs: 5 near a verdict, 10 partway, 0 far, 2 never.'), count);
+  ok(count.includes('Before it: 54 eval runs: 30 near a verdict, 12 partway, 4 far, 8 never.'), count);
+  ok(count.includes('Eval runs by the day they ran, and where they stand now.') && !count.includes('fills from decided'), count);
   // The busiest day (2026-11-05) has 30 runs, so the axis tops out there.
   const top = findAll(conversionBody(CDOC(), 'count'), (n) => n.tag === 'text' && n.children[0] === '30');
   eq(top.length, 1);
@@ -966,7 +975,7 @@ const SNAP_OK = () => okData([{ measure: 'eval_spend_since_reset', points: 10, p
 const routine = (name, health) => ({ name, health, last_run: '2026-11-12T10:00:00Z', link: null });
 const needsDash = (extra) => fakeDash(Object.assign({ eval_allowance: SNAP_OK(), budget: BUDGET, waiting: okData([{ id: 'none', item: 'Nothing waiting on you' }]),
   routines: okData([routine('R1', 'OK'), routine('R2', 'OK')]),
-  half_built_summary: okData([{ open: 0, high: 0, broken: 0, needs_owner: 0, fixed_7d: 2, checked_at: '2026-11-12T10:00:00Z' }]) }, extra || {}));
+  half_built_summary: okData([{ checked_at: '2026-11-12T10:00:00Z', incomplete: false, status: 'clear' }]) }, extra || {}));
 const needsPage = (dash, d) => renderRoute(d || doc({ newest_run: '2026-11-12T15:00:00Z', generated_at: '2026-11-12T19:00:00Z' }), { name: 'needs', id: null }, { ext: makeExt(dash, { now: () => NOW_ET4PM }) });
 const flat = (node) => textOf(node).replace(/\s+/g, ' ');
 
@@ -988,7 +997,7 @@ await test('R3 recommendation 3: with nothing waiting and every routine on time,
   ok(t.includes('Loop healthy: last test Nov 12, 2026, 10:00 AM ET'), t);
   ok(t.includes('2 of 2 routines on time') && t.includes('data read Nov 12, 2026, 2:00 PM ET'), t);
   ok(t.includes('Show 2 healthy routines'), 'the healthy routines fold');
-  ok(!t.includes(STRINGS.trendingHeading) && !t.includes('Half-built and broken features'), 'no trending table, and no half-built banner at zero');
+  ok(!t.includes(STRINGS.trendingHeading) && !t.includes('Half-built and broken features'), 'no trending table, and no half-built line at zero');
   const at = (x) => t.indexOf(x);
   ok(at('Waiting on you') < at('Loop health') && at('Loop health') < at('Needs attention') && at('Needs attention') < at("This week's test allowance") && at("This week's test allowance") < at('Routine health'), 'the order');
   const hrefs = findAll(node, (n) => n.tag === 'a').map((n) => n.attrs.href);
@@ -999,12 +1008,12 @@ await test('R3 recommendation 3: with nothing waiting and every routine on time,
 await test('R3 recommendation 3: a late routine reads as a problem outside the fold, and a waiting item shows why', () => {
   const dash = needsDash({ routines: okData([routine('Good', 'OK'), routine('Bad', 'Late')]),
     waiting: okData([{ id: 'w', item: 'Review the thing', why: 'Ready for your review', where: 'Thread', link: 'https://claude.ai/code/x', since: '2026-11-12T12:00:00Z' }]),
-    half_built_summary: okData([{ open: 3, high: 1, broken: 0, needs_owner: 1, fixed_7d: 0, checked_at: '2026-11-12T10:00:00Z' }]) });
+    half_built_issues: okData([{ key: 'k1', state: 'open', kind: 'partial', severity: 'high', title: 'One', url: null }]) });
   const node = needsPage(dash);
   const t = flat(node);
   ok(t.includes('Loop needs a look: last test') && t.includes('1 of 2 routines late, failing or to check'), t);
   ok(t.includes('Ready for your review') && t.includes('Review the thing') && !t.includes('Nothing is waiting on you.'), t);
-  ok(t.includes('Half-built and broken features'), 'the banner shows when its count is above 0');
+  ok(t.includes('Half-built and broken features: 1 open'), 'the half-built line shows when an issue is open');
   ok(findAll(node, (n) => n.tag === 'details').every((d) => !textOf(d).includes('Bad')), 'a problem is never inside a fold');
   ok(t.includes('Show 1 healthy routine') && !t.includes('Show 1 healthy routines'), 'singular');
   const unknown = flat(needsPage(needsDash({ routines: { status: 'loading' } })));
@@ -1168,6 +1177,30 @@ await test('PR 984: every folded kind on Needs you says who acts', () => {
   // No inner scroll box: the note and the fold are not cut off.
   const node = needsPage(dash, doc({ alerts: alerts(4) }));
   ok(findAll(node, (n) => n.tag === 'div' && String(n.attrs && n.attrs.class || '').split(' ').includes('tall')).length === 0, 'no tall scroller on the attention table');
+});
+// Owner report 2026-11-17: a folded row showed its worst severity as if all
+// six rows had it, and a second section repeated the list with other counts.
+await test('Needs attention: half-built counts come from the listed rows, a folded row counts each severity, and nothing repeats the list', () => {
+  const issue = (i, kind, severity, extra) => Object.assign({ key: 'h' + i, state: 'open', kind, severity, title: 'T' + i, url: 'https://github.com/example-owner/r/issues/' + i, repo: 'example-owner/r', age_days: 1, needs_owner: '' }, extra || {});
+  const hb = [issue(1, 'broken', 'low'), issue(2, 'broken', 'high'), issue(3, 'broken', 'high'), issue(4, 'broken', 'high'), issue(5, 'broken', 'low', { needs_owner: 'needs you' }), issue(6, 'broken', 'low'),
+    issue(7, 'idle', 'medium'), issue(8, 'idle', 'medium'), issue(9, 'broken', 'high', { state: 'closed' }), issue(10, 'idle', 'low', { state: 'closed' })];
+  const dash = needsDash({ half_built_issues: okData(hb) });
+  const d = doc({ generated_at: '2026-11-12T19:00:00Z' });
+  const groups = attentionGroups(attentionRows(dash, d));
+  const g = groups.find((x) => x.children);
+  eq(JSON.stringify(g.severities), JSON.stringify([{ severity: 'high', count: 3 }, { severity: 'low', count: 3 }]));
+  eq(g.children.map((c) => c.severity).join(','), 'high,high,high,low,low,low', 'the fold lists worst first');
+  const node = needsPage(dash, d);
+  const t = flat(node);
+  ok(t.includes('Half-built and broken features: 8 open, of which 3 high severity and 1 needs you; 2 fixed in the last 7 days. Last checked'), t);
+  ok(t.includes('3 high') && t.includes('3 low'), 'the folded row counts each severity: ' + t);
+  eq(t.split('Half-built and broken features').length - 1, 1, 'named once: no second section');
+  eq(findAll(node, (n) => n.tag === 'section' && /banner/.test(n.attrs && n.attrs.class || '') && textOf(n).includes('Half-built')).length, 0, 'no banner section');
+  // The line's open count is the number of half-built rows the table holds.
+  eq(attentionRows(dash, d).filter((r) => r.family === 'half-built').length, 8);
+  // One severity across a fold stays one plain pill.
+  const same = attentionGroups(attentionRows(needsDash({ half_built_issues: okData([2, 3, 4, 9].map((i) => issue(i, 'broken', 'high'))) }), d)).find((x) => x.children);
+  eq(same.severities.length, 1);
 });
 await test('PR 984: the changes list and the loop filter share one table of kinds; a branch decides when the document has one', () => {
   eq(LOOP_KINDS.map((k) => k.kind).join(','), 'editSkill,editGuidance,newSkill,removeSkill,removeSection');
@@ -1758,6 +1791,39 @@ await test('uses are calls plus reads: the table ranks by the sum and the skill 
   const plain = flat(renderRoute(d, { name: 'skills', id: 'calls-only' }, {}));
   ok(plain.includes('Used 3 times') && !plain.includes('by reading its files'), 'no split without a read: ' + plain.slice(0, 600));
   ok(flat(renderRoute(d, { name: 'skills', id: 'older-data' }, {})).includes('Used 1 time'), 'data without reads still counts its calls');
+});
+await test('the use-by line says each state in plain words, from the policy numbers, and links the removal rule', () => {
+  const ref = Date.parse('2026-11-16T12:00:00Z');
+  const pol = { value_per_use_usd: 10, floor_weeks: 8 };
+  const line = (ub, p) => flat(useByLine(ub, p === undefined ? pol : p, ref)).replace('( ', '(').replace(' ) ', ')');
+  eq(line({ state: 'date', use_by: '2027-01-03' }), 'Use by Sun Jan 3, 2027 or it is removed as unused (removal rule)');
+  eq(line({ state: 'date', use_by: '2026-11-10' }), 'Use it this week or it may be removed as unused (removal rule)');
+  eq(line({ state: 'due' }), 'Due for removal as unused: no use in the last 8 weeks (removal rule)');
+  eq(line({ state: 'not-at-pace' }), 'No use-by date: at today\'s session pace its description never costs the $10.00 a use is worth (removal rule)');
+  eq(line({ state: 'exempt' }), 'Exempt: removed only by its eval verdict (removal rule)');
+  eq(line({ state: 'local-only' }), 'Local-only: never removed for lack of use (removal rule)');
+  eq(line({ state: 'unknown' }), 'Unknown: usage census can\'t say yet (removal rule)');
+  ok(!/\$10|8 weeks/.test(line({ state: 'due' }, null) + line({ state: 'not-at-pace' }, null)), 'a null policy names no number');
+  eq(line({ state: 'not-at-pace' }, null), 'No use-by date: at today\'s session pace its description never costs what a use is worth (removal rule)');
+  eq(useByLine(null, pol, ref), null);
+  const a = findAll(useByLine({ state: 'exempt' }, pol, ref), (n) => n.tag === 'a');
+  eq(a.length, 1);
+  eq(a[0].attrs.href, STRINGS.removalRuleUrl);
+  ok(a[0].attrs.href.endsWith('/docs/rules.md#removal'), a[0].attrs.href);
+});
+await test('the Use by column sorts dated skills by date (due first), then no date, unknown, local-only, exempt, none', () => {
+  const ref = Date.parse('2026-11-16T12:00:00Z');
+  const rows = [null, { state: 'exempt' }, { state: 'local-only' }, { state: 'unknown' }, { state: 'not-at-pace' },
+    { state: 'date', use_by: '2027-01-03' }, { state: 'date', use_by: '2026-12-20' }, { state: 'due' }];
+  const sorted = rows.slice().sort((x, y) => useBySort(x) - useBySort(y)).map((u) => useByCell(u, ref));
+  eq(useByCell({ state: 'date', use_by: '2026-11-10' }, ref), 'use this week');
+  eq(useByCell({ state: 'date', use_by: '2026-11-16' }, ref), 'Nov 16');
+  eq(JSON.stringify(sorted), JSON.stringify(['due', 'Dec 20', 'Jan 3, 2027', 'no date', 'unknown', 'local-only', 'exempt', STRINGS.noValue]));
+  const d = doc({ generated_at: '2026-11-16T16:00:00Z', skills: [
+    { name: 'late', status: 'covered', use_by: { state: 'date', use_by: '2027-01-03' } },
+    { name: 'soon', status: 'covered', use_by: { state: 'date', use_by: '2026-12-20' } }] });
+  const list = flat(renderRoute(d, { name: 'skills', id: null }, {}));
+  ok(list.includes(STRINGS.colUseBy) && list.includes('Dec 20'), list.slice(0, 600));
 });
 await test('the skills page says cloud sessions are counted, and from when, once the census counts them', () => {
   const page = (usage) => flat(renderRoute(doc({ generated_at: '2026-11-15T16:00:00Z', skills: [{ name: 'a', status: 'covered', usage: { invocations: 0 } }], usage }), { name: 'skills', id: null }, {}));

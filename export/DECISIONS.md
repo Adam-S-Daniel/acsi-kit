@@ -2785,3 +2785,19 @@ Reverse: revert this section's commits; the starter then re-exports with the
 - `bootstrap/lib/content.py`'s `regenerate()` rebuilds the file with `scripts/build-contributor-rules.js`, using agent-guidance's two npm devDependencies installed from its lockfile into a temporary directory, and copies it to every starter. Before this change, adding a `contributor` section through `add-content.sh` (security, git-habits and three others) left agent-guidance's copy stale, and that tree's own test failed.
 
 Reverse: drop the five `copy_from_kit` steps and the rebuild in `regenerate()`.
+
+## Re-pin round 16 (2026-11-17): the held-back re-sync, on top of round 15
+
+The daily re-sync (acsi-kit#69) moved `repo-settings`, `skills-evals` and `wsl-automation` to their heads and held `_agent-guidance` and `agentskills` back at their old pins. Round 15 (#74) has since moved those two to newer pins, so this branch keeps those and takes the three moves. No manifest or patch changed: the starters re-export cleanly at these pins, and `export/tests` and the bootstrap tests pass.
+
+- `skills-evals` at `4eb724eb85f9` already includes skills-evals 9dc471490, so the `test_issue_594_late_writer.py` edit stays dropped (see the starter suite repair above). That pin also includes skills-evals#1080 (merged since round 15's pin), so the two `test_issue_routine_eval_script.py` edits that carried it are dropped too: kept, they applied the same change twice and 33 tests failed with `FileExistsError`. The `_agent-guidance`#593 edits stay, as their old text still occurs once.
+- The `guidance-load-record.sh` hook is no longer in the `repo-settings` and `wsl-automation` starters: their sources dropped it.
+- The starters' own suites run in CI (`starter-suites`), not in this change's local checks.
+
+| Source | Before | After |
+|---|---|---|
+| repo-settings | `dc90f3ade2dd` | `5eb0115ff64a` |
+| skills-evals | `0db7977156c0` | `4eb724eb85f9` |
+| wsl-automation | `8f1a0642a2e4` | `9b8e990ceb24` |
+
+Reverse: re-pin the three old shas.

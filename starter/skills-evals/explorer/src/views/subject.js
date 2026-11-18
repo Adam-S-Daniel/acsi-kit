@@ -16,9 +16,9 @@ function newestOf(runs) {
   const times = (Array.isArray(runs) ? runs : []).map((r) => parseTime(r && r.at)).filter((m) => isFinite(m));
   return times.length ? Math.max.apply(null, times) : NaN;
 }
-import { verdictLine, nextLine, stakesLine, usageLine, copiesLine, discardedLine } from './cards.js';
+import { verdictLine, nextLine, stakesLine, usageLine, useByLine, copiesLine, discardedLine } from './cards.js';
 import { modelCharts, legendFor, hasData, hasAlone } from './models.js';
-import { trendChart } from './trend.js';
+import { weekPairsChart } from './wholecharts.js';
 import { confidenceView } from './range.js';
 import { utilityView, decisionsView, utilityTotals } from './utility.js';
 import { lessonItem, lessonIssue, lessonTitle, lessonStatus, lessonIssueTitle } from './lessons.js';
@@ -114,7 +114,7 @@ function fixturesPanel(doc, runs, name, refMs) {
   return table([
     { label: STRINGS.colFixturePath, sort: (f) => f.path, cell: (f) => fixtureTerm(clean(f.path)) },
     { label: STRINGS.colOrigin, sort: (f) => f.origin_kind || '', cell: (f) => clean(f.origin_kind || STRINGS.unknown) },
-    { label: STRINGS.colRuns, num: true, sort: (f) => f.runs, cell: (f) => (f.runs === null || f.runs === undefined ? STRINGS.noValue : fmtCount(f.runs)) }
+    { label: STRINGS.colEvalRuns, num: true, sort: (f) => f.runs, cell: (f) => (f.runs === null || f.runs === undefined ? STRINGS.noValue : fmtCount(f.runs)) }
   ], rows);
 }
 
@@ -171,6 +171,7 @@ export function subjectPage(doc, kind, name, ctx) {
       guidance ? h('p', { class: 'meta' }, STRINGS.size(wordsFor(it.bytes))) : null,
       nextLine(raw.next_test, refMs, guidance ? 'section' : 'skill', raw.verdict, raw.removal),
       guidance ? null : usageLine(raw.usage, doc.usage, refMs),
+      guidance ? null : useByLine(raw.use_by, doc.removal_policy, refMs),
       testCost(raw.run_utility, refMs),
       stakesLine(raw.stakes),
       h('h3', null, defn('verdict', STRINGS.verdictHeading)),
@@ -180,7 +181,7 @@ export function subjectPage(doc, kind, name, ctx) {
       h('p', { class: 'sent' }, termify(clean(it.sentence), SENTENCE_TERMS)),
       guidance && hasAlone(it.pooled) ? h('p', { class: 'meta' }, STRINGS.aloneShown) : null),
     fold(STRINGS.gainHeading, [confidenceView(raw.confidence, doc.policy, subj),
-      hasData(it.pooled) ? h('div', { class: 'cols' }, h('div', null, legendFor(subj, it.pooled), modelCharts(it.pooled, subj)), h('div', null, trendChart(it.trend, refMs, subj))) : null]),
+      hasData(it.pooled) ? h('div', { class: 'cols' }, h('div', null, legendFor(subj, it.pooled), modelCharts(it.pooled, subj)), h('div', null, weekPairsChart(it.weekly, refMs, subj))) : null]),
     Array.isArray(raw.run_utility) && raw.run_utility.length
       ? fold(STRINGS.utilityHeading, [utilityView([{ label: STRINGS.utilityThis, rows: raw.run_utility }], refMs),
         decisionsView(raw.decisions, friendlyModel)]) : null,
