@@ -2790,7 +2790,7 @@ Reverse: drop the five `copy_from_kit` steps and the rebuild in `regenerate()`.
 
 The daily re-sync (acsi-kit#69) moved `repo-settings`, `skills-evals` and `wsl-automation` to their heads and held `_agent-guidance` and `agentskills` back at their old pins. Round 15 (#74) has since moved those two to newer pins, so this branch keeps those and takes the three moves. No manifest or patch changed: the starters re-export cleanly at these pins, and `export/tests` and the bootstrap tests pass.
 
-- `skills-evals` at `4eb724eb85f9` already includes skills-evals 9dc471490, so the `test_issue_594_late_writer.py` edit stays dropped (see the starter suite repair above). The two edits that carry skills-evals#1080 and `_agent-guidance`#593 stay, as their old text still occurs once.
+- `skills-evals` at `4eb724eb85f9` already includes skills-evals 9dc471490, so the `test_issue_594_late_writer.py` edit stays dropped (see the starter suite repair above). That pin also includes skills-evals#1080 (merged since round 15's pin), so the two `test_issue_routine_eval_script.py` edits that carried it are dropped too: kept, they applied the same change twice and 33 tests failed with `FileExistsError`. The `_agent-guidance`#593 edits stay, as their old text still occurs once.
 - The `guidance-load-record.sh` hook is no longer in the `repo-settings` and `wsl-automation` starters: their sources dropped it.
 - The starters' own suites run in CI (`starter-suites`), not in this change's local checks.
 

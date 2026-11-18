@@ -197,15 +197,6 @@ class CheckoutCase(unittest.TestCase):
         tempdir = mock.patch.object(tempfile, "tempdir", str(self.temproot))
         tempdir.start()
         self.addCleanup(tempdir.stop)
-        # The routine makes its log and branch directories with
-        # tempfile.mkdtemp, which a cloud container throws away; here they
-        # go under self.tmp and leave with it, not into the host's TMPDIR,
-        # where run_eval's arm sandbox lists each one in denyRead.
-        self.temproot = self.tmp / "temp"
-        self.temproot.mkdir()
-        tempdir = mock.patch.object(tempfile, "tempdir", str(self.temproot))
-        tempdir.start()
-        self.addCleanup(tempdir.stop)
         env = mock.patch.dict(os.environ, GIT_ENV)
         env.start()
         self.addCleanup(env.stop)
@@ -447,12 +438,6 @@ class CommandTests(CheckoutCase):
         self.assertIn("pairing: isolation", self.report)
         self.assertIn("harness wrote no summary.json", self.report)
         self.assertTrue(self.report.endswith("RESULT: error\n"))
-
-    def test_the_routines_temp_directories_stay_inside_the_case(self):
-        self.fire(payload(), writes=False)
-        made = sorted(p.name for p in self.temproot.iterdir())
-        self.assertTrue(made, "the fire made no temp directory")
-        self.assertTrue(all(name.startswith("skills-evals-routine-") for name in made), made)
 
     def test_the_routines_temp_directories_stay_inside_the_case(self):
         self.fire(payload(), writes=False)
