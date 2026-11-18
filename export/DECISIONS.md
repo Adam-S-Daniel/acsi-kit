@@ -2690,11 +2690,11 @@ Reverse: re-pin the old shas, put back the five excludes and the four `REVIEWED`
 
 ## Re-pin round 15 (2026-11-16): follow two source changes
 
-The daily re-sync held `_agent-guidance` and `adam-agentskills` back. All five public pins move to their heads; `agentskills-private` keeps its pin.
+The daily re-sync held `_agent-guidance` and `agentskills` back. All five public pins move to their heads; `agentskills-private` keeps its pin.
 
 - `_agent-guidance` rewrote the run-log tests in `test/test_agent_check_lane.py` to build the expected list with `expected_checks([...], declared_lessons())`, so lesson checks are spliced in after `skill-shell`. `patches/_agent-guidance/machinery_tests.py` follows: its `LANE_EDITS` and the `rules-dir` library item's replace ops match the new text, keeping what they do (the kit's list has no `rules-dir`, and the library item puts it back), and one more edit covers the new lesson-path test's `want = expected_checks(...)` line.
 - `_agent-guidance`'s `docs/routines/article-lift.md` now names the owner's `rss-inator` repo, which the kit does not ship, so `test_routine_prompts_name_only_kit_repos` (C11) fired. A new `edits` entry rewords the sentence to say a clone of the feed's own repository shows how the feed is built, not its items.
-- `adam-agentskills` fixed the three `synced/manifest.json` wordings in `skills-doctor/SKILL.md` that the prompt-audit sweep edited, so the three edits are dropped.
+- `agentskills` fixed the three `synced/manifest.json` wordings in `skills-doctor/SKILL.md` that the prompt-audit sweep edited, so the three edits are dropped.
 - The `rules-dir` item's `ops.json` in `library/` was updated by hand (the sync does not rewrite `library/`), and `starter/agent-skills-private/.githooks/agent-checks` is a byte copy of the new runner template, as the bootstrap's self-test requires.
 
 | Source | Before | After |
