@@ -35,6 +35,7 @@ library only; needs bash and git for the generated files.
 from __future__ import annotations
 
 import argparse
+import atexit
 import ast
 import json
 import os
@@ -485,6 +486,24 @@ def lock(reg: Path) -> str:
         return read(work / "skills.lock").replace(sha, "0" * 40)
 
 
+CONTRIBUTOR_RULES = Path(".github") / "fleet-contributor-rules.md"
+_node_modules: list = []
+
+
+def node_modules(ag: Path) -> Path:
+    """agent-guidance's two npm devDependencies (yaml, markdown-it), installed
+    once per run from its own lockfile into a temporary directory."""
+    if not _node_modules:
+        tmp = tempfile.TemporaryDirectory()
+        atexit.register(tmp.cleanup)
+        deps = Path(tmp.name)
+        for name in ("package.json", "package-lock.json"):
+            shutil.copyfile(ag / name, deps / name)
+        run(["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--silent"], deps)
+        _node_modules.append(deps / "node_modules")
+    return _node_modules[0]
+
+
 def regenerate(starter: Path) -> None:
     ag = starter / AG
     trees = sorted(p for p in starter.iterdir() if p.is_dir())
@@ -497,6 +516,15 @@ def regenerate(starter: Path) -> None:
         hook = t / ".githooks" / "agent-checks"
         if hook.is_file():
             hook.write_bytes(runner.read_bytes())
+    # The contributor rules are base.md's `contributor` sections (an item's
+    # coverage row says which), and the sync delivers agent-guidance's copy
+    # to every repo byte for byte.
+    run(["node", "scripts/build-contributor-rules.js", "--write"], ag,
+        {"NODE_PATH": str(node_modules(ag))})
+    rules = (ag / CONTRIBUTOR_RULES).read_bytes()
+    for t in trees:
+        if t != ag and (t / CONTRIBUTOR_RULES).is_file():
+            (t / CONTRIBUTOR_RULES).write_bytes(rules)
     build = run(["bash", str(ag / "scripts" / "build-agents-md.sh")], ag)
     for t in trees:
         p = t / "AGENTS.md"
@@ -504,6 +532,11 @@ def regenerate(starter: Path) -> None:
             new = agents_md(build, read(p))
             if new is not None:
                 write(p, new)
+    # skills-evals' docs/rules.md lists the stakes.yml rows, which an
+    # optional item's ops add (its own test checks the page is current).
+    evals = starter / "skills-evals"
+    if (evals / "scripts" / "build_rules.py").is_file():
+        run([sys.executable, "-I", "-B", "scripts/build_rules.py"], evals)
     cov, missing = coverage_with_bytes(ag)
     if missing:
         raise Refused("eval-coverage.yml rows with no section in their file: " + ", ".join(missing))

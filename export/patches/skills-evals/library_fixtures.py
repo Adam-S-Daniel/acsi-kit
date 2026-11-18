@@ -11,6 +11,9 @@ library/<kind>/<id>/skills-evals/:
 - its weekly rows from evals/scheduled.yml, and its rows in
   evals/unscheduled.yml (empty_config.py keeps only the core rows), appended
   again by add-content.sh;
+- its row in evals/stakes.yml, if it has one (empty_config.py keeps only the
+  rows of items in the tree): a skill row goes back before `sections:`, a
+  section row at the end;
 - the test modules that only test those fixtures, whole;
 - the test classes and methods inside shared modules that test them, copied
   here (machinery_tests.py then removes them from the tree), with ops that
@@ -38,13 +41,16 @@ ITEMS = {
     "review-bash-ci-reliability": ("skill", ["evals/review-bash-ci-reliability"],
                                    ["test/issues/test_issue_bash_ci_drift_report_capture.py",
                                     "test/issues/test_issue_bash_ci_empty_repo_discovery.py",
+                                    "test/issues/test_issue_bash_ci_nightly_snapshot.py",
                                     "test/issues/test_issue_bash_ci_test_runner_assertions.py"],
                                    ["TestIssue74"], [], []),
     "disarm-inherited-reach": ("skill", ["evals/disarm-inherited-reach"], [], ["TestIssue77"], [], []),
     "writing-adrs": ("skill", ["evals/writing-adrs"], ["test/issues/test_issue_80_why.py"], ["TestIssue80"], [],
                      [("test/issues/test_issue_80_supersede.py", "TestIssue80Supersede")]),
     "finding-unknowns": ("skill", ["evals/finding-unknowns"], ["test/issues/test_issue_78.py"], [], [], []),
-    "security": ("guidance", [f"{G}/security"], [], [], [("ThirdBatchFixtureTests", "test_search_query")], []),
+    "security": ("guidance", [f"{G}/security"], [], [], [("ThirdBatchFixtureTests", "test_search_query"),
+                                                          ("HarderFixtureSetBTests", "test_staging_tls"),
+                                                          ("HarderFixtureSetBTests", "test_cross_repo_docs_pr")], []),
     "github-404-means-not-authorized": ("guidance", [f"{G}/github-404-means-not-authorized"], [], [],
                                         [("SecondBatchFixtureTests",
                                           "test_a_404_reported_as_deletion_fails_and_a_scope_gap_passes")], []),
@@ -54,7 +60,10 @@ ITEMS = {
                                   [("SecondBatchFixtureTests",
                                     "test_secret_named_entry_fails_and_a_purpose_name_passes")], []),
     "finding-your-unknowns": ("guidance", [f"{G}/finding-your-unknowns"], [], [],
-                              [("FifthBatchFixtureTests", "test_changelog_check")], []),
+                              [("FifthBatchFixtureTests", "test_changelog_check"),
+                               ("HarderFixtureSetBTests", "test_migration_rollback_note"),
+                               ("HarderFixtureSetBTests", "test_staging_reset_fact"),
+                               ("HarderFixtureSetBTests", "test_fleet_wide_crlf_check")], []),
     "anything-you-name-gets-its-link": ("guidance", [f"{G}/anything-you-name-gets-its-link"], [], [],
                                         [("TextFixtureTests", "test_done_summary_needs_every_link"),
                                          ("TextFixtureTests", "test_handoff_with_bare_numbers_fails_and_with_links_passes"),
@@ -62,7 +71,9 @@ ITEMS = {
                                          ("TextFixtureTests", "test_waiting_on_review_is_read_from_the_reply")], []),
     "subagent-delegation": ("guidance", [f"{G}/subagent-delegation"], [], [],
                             [("SecondBatchFixtureTests",
-                              "test_verifier_trap_accepts_the_report_and_the_runner_finds_the_failure")], []),
+                              "test_verifier_trap_accepts_the_report_and_the_runner_finds_the_failure"),
+                             ("HarderFixtureTests", "test_contradicting_report_setup_and_its_failing_test"),
+                             ("HarderFixtureTests", "test_contradicting_report_trap_merges")], []),
     "dependency-updates": ("guidance", [f"{G}/dependency-updates"], [], [],
                            [("ThirdBatchFixtureTests", "test_dependabot_cooldown")], []),
 }
@@ -120,8 +131,17 @@ def _scheduled_rows(root: Path, name: str = "scheduled.yml") -> dict:
     return rows
 
 
+STAKES_ROW = re.compile(r"^  - (skill|section): (\S+)\n(?:    .*\n)*", re.M)
+
+
+def stakes_rows(text: str) -> dict:
+    """{(kind, name): row block} of evals/stakes.yml, kind `skill` or `section`."""
+    return {(m.group(1), m.group(2)): m.group(0) for m in STAKES_ROW.finditer(text)}
+
+
 def apply(root: Path, ctx) -> None:
     lib = ctx["library"]
+    stakes = stakes_rows((root / "evals" / "stakes.yml").read_text(encoding="utf-8"))
     rows = _scheduled_rows(root)
     # evals/unscheduled.yml (new in the source, re-pin 2026-11-03): a skill
     # fixture off the schedule needs its row there, so the item carries it.
@@ -144,6 +164,12 @@ def apply(root: Path, ctx) -> None:
         if off:
             lib.write_fragment(kind, item, TREE, "unscheduled-rows.yml", "".join(off))
             ops.append({"op": "append-lines", "file": "evals/unscheduled.yml", "fragment": "unscheduled-rows.yml"})
+        row = stakes.get(("skill" if kind == "skill" else "section", item))
+        if row:
+            lib.write_fragment(kind, item, TREE, "stakes-row.yml", row)
+            ops.append({"op": "insert-before", "file": "evals/stakes.yml", "anchor": "sections:\n",
+                        "fragment": "stakes-row.yml"} if kind == "skill" else
+                       {"op": "append-lines", "file": "evals/stakes.yml", "fragment": "stakes-row.yml"})
         for module in modules:
             lib.move_tree(kind, item, TREE, root, module)
         for name in rt_cls:

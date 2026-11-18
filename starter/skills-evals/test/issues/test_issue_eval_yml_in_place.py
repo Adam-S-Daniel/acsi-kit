@@ -301,7 +301,8 @@ class EvalWorkflowInPlaceTests(unittest.TestCase):
                 with_ = step.get("with", {})
                 name = str(with_.get("repository", SELF)).rsplit("/", 1)[-1]
                 checkouts[name] = with_
-        for name in sorted(context_repositories()):
+        # The kit's example sites are not checked out (cold-start fixes).
+        for name in sorted(context_repositories() - {"example-site-a", "example-site-platform"}):
             with self.subTest(repository=name):
                 self.assertIn(name, checkouts)
                 with_ = checkouts[name]

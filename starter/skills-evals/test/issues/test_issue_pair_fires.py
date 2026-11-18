@@ -66,6 +66,14 @@ from test_issue_559_empty_fires import (  # noqa: E402
 from test_issue_closed_loop_planner import render_title  # noqa: E402
 from test_issue_routine_eval_ingest import GitCase, REPORT, RUN_ID, STAMP, summary  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import example_evals  # noqa: E402
+
+# The committed fixtures and schedule these tests read are the example
+# checkout's (the kit ships few; test/example_evals.py); the modules above
+# are imported from this repository.
+ROOT = example_evals.checkout()
+
 #: The two roster arms, in evals/roster.yml's order.
 ROSTER = [arm["id"] for arm in yaml.safe_load(
     (ROOT / "evals" / "roster.yml").read_text(encoding="utf-8"))["arms"]]
@@ -201,8 +209,8 @@ class CellReaderTests(unittest.TestCase):
         # own window keeps it pending.
         doc = self.doc()
         landed = stamp(started + timedelta(minutes=5))
-        doc["skills"]["disarm-inherited-reach"] = {"cells": [
-            {"fixture": None, "model": A, "class": "missing",
+        doc["skills"]["workflow-path-audit"] = {"cells": [
+            {"fixture": "required-check-routing", "model": A, "class": "missing",
              "runs": {"with": [], "without": []},
              "newest_on_model": landed, "run_stamps_on_model": [landed]}]}
         pair = self.cells([fire(1, SKILL_FIXTURE, started, PAIR)], doc)
@@ -355,7 +363,7 @@ class PlannerPairTests(unittest.TestCase):
                 plan_week.validate_fire({"MODE": "eval", "ARMS": row["arms"],
                                          "FIXTURE": row["fixture"], "EVAL_KEY": row["eval_key"],
                                          "MODEL": row["model"], "SKILL": row["skill"],
-                                         "HOLDOUT": row["holdout"]})
+                                         "HOLDOUT": row["holdout"]}, ROOT)
 
 
 class PairFiresUnitTests(unittest.TestCase):
@@ -444,12 +452,12 @@ class ValidateFireTests(unittest.TestCase):
             "EVAL_KEY": "writing-adrs/bootstrap", "MODEL": PAIR, "SKILL": "", "HOLDOUT": ""}
 
     def test_a_pair_leg_is_accepted_like_a_lone_one(self):
-        plan_week.validate_fire(self.GOOD)
-        plan_week.validate_fire({**self.GOOD, "MODEL": f"{B},{A}"})
-        plan_week.validate_fire({**self.GOOD, "ARMS": "bare"})
+        plan_week.validate_fire(self.GOOD, ROOT)
+        plan_week.validate_fire({**self.GOOD, "MODEL": f"{B},{A}"}, ROOT)
+        plan_week.validate_fire({**self.GOOD, "ARMS": "bare"}, ROOT)
         plan_week.validate_fire({**self.GOOD, "FIXTURE": GUIDANCE_FIXTURE,
                                  "EVAL_KEY": GUIDANCE_FIXTURE[len("evals/"):],
-                                 "ARMS": "in-situ"})
+                                 "ARMS": "in-situ"}, ROOT)
 
     def test_each_model_of_a_pair_is_checked(self):
         judge = yaml.safe_load((ROOT / "evals" / "roster.yml").read_text())["judge"]["id"]
@@ -458,13 +466,13 @@ class ValidateFireTests(unittest.TestCase):
                       f"{A},{B.upper()}", f"{A};{B}"):
             with self.subTest(model=model):
                 with self.assertRaises(plan_week.PlanError):
-                    plan_week.validate_fire({**self.GOOD, "MODEL": model})
+                    plan_week.validate_fire({**self.GOOD, "MODEL": model}, ROOT)
 
     def test_a_pair_is_an_eval_legs_only(self):
         improve = {"MODE": "improve", "ARMS": "", "FIXTURE": "", "EVAL_KEY": "",
                    "MODEL": PAIR, "SKILL": "writing-adrs", "HOLDOUT": "bootstrap"}
         with self.assertRaises(plan_week.PlanError):
-            plan_week.validate_fire(improve)
+            plan_week.validate_fire(improve, ROOT)
 
     def test_the_weekly_dispatch_passes_the_leg_model_through_env(self):
         doc = yaml.safe_load((ROOT / ".github/workflows/routine-eval-weekly.yml").read_text())
@@ -578,14 +586,12 @@ class FireStepPayloadTests(unittest.TestCase):
         self.log.mkdir()
         self.summary = self.tmp / "summary.md"
         self.script = fire_base.step_script("Fire the eval routine")
-        steps = fire_base.load(fire_base.WORKFLOW)["jobs"]["fire"]["steps"]
-        self.url = next(s for s in steps
-                        if s.get("name") == "Fire the eval routine")["env"]["FIRE_URL"]
+        self.url = "https://api.anthropic.com/v1/claude_code/routines/trig_EXAMPLE/fire"
 
     def fire(self, model):
         self.summary.write_text("", encoding="utf-8")
         env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "HOME": str(self.tmp),
-               "FIRE_URL": self.url, "EVAL_ROUTINE_FIRE_BEARER": "sk-ant-oat01-FAKE-FOR-TESTS",
+               "ROUTINE_TRIGGER_ID": "trig_EXAMPLE", "EVAL_ROUTINE_FIRE_BEARER": "sk-ant-oat01-FAKE-FOR-TESTS",
                "RUN_ID": "20261106T120000Z-a1b2c3", "FIXTURE": fire_base.FIXTURE,
                "ARMS": "both", "TRIALS": "1", "MODE": "eval", "MODEL": model,
                "GITHUB_STEP_SUMMARY": str(self.summary),

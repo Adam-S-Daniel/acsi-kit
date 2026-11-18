@@ -753,8 +753,7 @@ class WorkflowTests(unittest.TestCase):
                      if str(s.get("uses", "")).startswith("actions/checkout")
                      and "repository" in s.get("with", {})}
         run = "\n".join(s.get("run", "") for s in steps)
-        for name, path in (("acsi-agentskills", "registry-agentskills"),
-                           ("example-site-platform", "registry-cms"), ("example-site-a", "registry-site")):
+        for name, path in (("acsi-agentskills", "registry-agentskills"),):
             with self.subTest(name):
                 self.assertEqual(checkouts[f"example-adopter/{name}"]["fetch-depth"], 0)
                 self.assertEqual(checkouts[f"example-adopter/{name}"]["path"], path)

@@ -1,0 +1,3 @@
+  - section: test-that-can-signal-kills-every-session
+    stakes: high
+    reason: a mocked pid once killed every user process on the machine

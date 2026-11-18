@@ -10,6 +10,11 @@ contract) and its one top-level key.
   something to run on day one. The optional items' rows went to the library
   (library_fixtures.py); every other row named a fixture the kit does not
   ship and is dropped.
+- stakes.yml keeps the rows of the skills and sections whose fixtures are in
+  the tree: scripts/stakes.py refuses a row with no fixture directory, so a
+  row for an item the kit does not ship broke the planner and every test
+  that loads the file. The optional items' rows went to the library
+  (library_fixtures.py) and come back with their item.
 - non-coverage.yml ships `skips: []`: its rows named skills the kit does not
   ship.
 
@@ -78,6 +83,23 @@ def apply(root: Path, ctx) -> None:
         raise SystemExit("empty_config: evals/scope-auto.yml has no top-level `rows:` list")
     kept = [b for p, b in _rows(rows) if (root / p / "fixture.yaml").is_file()]
     path.write_text(head + ("\nrows:\n" + "".join(kept) if kept else "\nrows: []\n"), encoding="utf-8")
+
+    # evals/stakes.yml: a `skill:` row needs evals/<name>/, a `section:` row
+    # evals/guidance/<name>/ (scripts/stakes.py). A list left with no rows
+    # stays as its bare key, which loads as empty and still takes the rows
+    # add-content.sh puts back (a skill row goes in before `sections:`).
+    path = root / "evals/stakes.yml"
+    text = path.read_text(encoding="utf-8")
+    row = re.compile(r"^  - (skill|section): (\S+)\n(?:    .*\n)*", re.M)
+
+    def shipped(m):
+        rel = m.group(2) if m.group(1) == "skill" else f"guidance/{m.group(2)}"
+        return m.group(0) if (root / "evals" / rel).is_dir() else ""
+
+    text = row.sub(shipped, text)
+    if "\nskills:\n" not in text or "\nsections:\n" not in text:
+        raise SystemExit("empty_config: evals/stakes.yml lost its `skills:` or `sections:` key")
+    path.write_text(text, encoding="utf-8")
 
     path = root / "evals/non-coverage.yml"
     text = path.read_text(encoding="utf-8")

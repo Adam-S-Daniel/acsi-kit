@@ -364,8 +364,10 @@ class PipelineTests(TriggerPipelineCase):
         rc, out, err, _ = self.run_trigger(loop_output((0, 20, 5, 5), (3, 20, 5, 5)))
         self.assertEqual(rc, 0, out + err)
         record = self.record()
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals  # the committed tree the gate reads (test/example_evals.py)
         found = gate.check_record(json.loads(json.dumps(record)), "summary.json",
-                                  str(REPO_ROOT))
+                                  str(example_evals.checkout()))
         self.assertEqual(found["skill"], SKILL)
         gate.check_patch(self.stem().with_suffix(".patch").read_text(), "skill.patch",
                          found["skill_md"])
@@ -619,6 +621,15 @@ class ImpactEntryTests(unittest.TestCase):
 
 
 class FireCheckTriggerTests(unittest.TestCase):
+
+    def setUp(self):
+        # The committed fixtures are the example checkout's (the kit ships
+        # none of writing-adrs'; test/example_evals.py).
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals
+        patcher = mock.patch.object(pse, "EVALS_DIR", example_evals.checkout() / "evals")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def check(self, skill, holdout=""):
         err = io.StringIO()

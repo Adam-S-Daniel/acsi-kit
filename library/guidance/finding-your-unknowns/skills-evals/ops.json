@@ -11,6 +11,27 @@
       "class": "FifthBatchFixtureTests",
       "method": "test_changelog_check",
       "fragment": "FifthBatchFixtureTests.test_changelog_check.py"
+    },
+    {
+      "op": "insert-method",
+      "file": "test/issues/test_issue_124_guidance_gates.py",
+      "class": "HarderFixtureSetBTests",
+      "method": "test_migration_rollback_note",
+      "fragment": "HarderFixtureSetBTests.test_migration_rollback_note.py"
+    },
+    {
+      "op": "insert-method",
+      "file": "test/issues/test_issue_124_guidance_gates.py",
+      "class": "HarderFixtureSetBTests",
+      "method": "test_staging_reset_fact",
+      "fragment": "HarderFixtureSetBTests.test_staging_reset_fact.py"
+    },
+    {
+      "op": "insert-method",
+      "file": "test/issues/test_issue_124_guidance_gates.py",
+      "class": "HarderFixtureSetBTests",
+      "method": "test_fleet_wide_crlf_check",
+      "fragment": "HarderFixtureSetBTests.test_fleet_wide_crlf_check.py"
     }
   ]
 }

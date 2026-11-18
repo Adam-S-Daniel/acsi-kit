@@ -17,36 +17,6 @@ session.
   cite and list it as on hold without asking again. A held PR stays open.
   Only the owner adds or removes the label, or an agent the owner directs in
   that session.
-- Fix what was asked: no speculative features, premature abstractions or
-  unused helpers. Prefer editing an existing file over creating one.
-- A public interface change updates its tests; new behavior gets a test, a
-  bug fix a regression test. Run the existing suite before calling a task
-  complete and say what you ran.
-- **American English spelling** in all text you add or change, comments and
-  commits included: behavior, color, -ize.
-- Tests are deterministic: no sleeps, network or wall-clock time.
-- **Keep full numeric precision until the final output:** round or truncate
-  only at the display or write.
-- **A lint or check that reasons about code SHAPE** (which functions or
-  `test()` blocks exist, what sits inside what, a call's arguments) **parses
-  a real AST, never a regex or line scan** — regex cannot see a template-literal
-  variable. Use `acorn`/`acorn-walk` for JS, `yaml` for YAML; regex only for a lexical token.
-- Writing that goes out under the owner's name: invoke the
-  `acsi-writing-style` skill.
-- Text to paste: give all of it, never edits.
-
-## Security
-
-- Validate anything crossing a trust boundary — user input, API responses,
-  file contents.
-- **Escape or encode untrusted data for each context it reaches**, just
-  before it is placed there, with a well-established library or built-in
-  (else a thoroughly vetted algorithm): HTML text or attribute, URL, YAML,
-  SQL (parameterized queries), shell (arrays). Rejecting or stripping
-  characters does not replace it.
-- Never commit secrets, credentials or `.env` files, or disable TLS
-  verification, authentication or CSRF protection.
-- **Automation authenticates as a scoped GitHub App, not a PAT.**
 
 ## Data exposure in CI and public repos
 
@@ -135,55 +105,20 @@ CLOSED without `gitleaks` on `PATH`, which a fresh container lacks.
   remote branch: `git merge-base --is-ancestor <sha> origin/<branch>`, after
   every push.
 
-## Dependency updates
-
-Dependabot `cooldown`: `default-days: 7` (example-site-platform `exclude`d);
-`semver-major-days: 30` where supported (not `github-actions`). Version
-updates only (advisories bypass it); unset still waits 3 days; leave
-`semver-minor-days` / `-patch-days` undefined.
-**By hand**, nothing watches: take the newest release past 7 days
-(`npm view <pkg> time --json`), pinned exact. **Harness CLIs are unpinned**
-(Claude Code, Codex; not `uses:` or SDKs): a run installs npm `latest`;
-record its version and the models used.
-
-## A name you choose becomes data a scanner reads
-
-gitleaks' `generic-api-key` rule fires on a keyword next to a
-high-entropy value:
-
-```
-access  auth  api  credential  creds  key  passwd  password  secret  token
-```
-
-Any generated file serializing such a `name: value` beside a hash looks like
-a leak: **`example-site-platform-secrets`** in `skills.lock` turned both consumer sites
-red on every push (PR lane scans `base..head`, push lane full history; the
-name outlives a rename).
-
-- **Check a name against that list** whenever it lands in a generated
-  artifact; name the purpose (`consumer-repo-provisioning`), not the
-  sensitive noun.
-- **Fix it at the source, not with an allowlist.** A `.gitleaksignore`
-  fingerprint is `<commit>:<file>:<rule>:<line>` — repo-unique, unpropagable.
-- **Do not lean on a scanner's internals.** `sha256:<hex>` dodges the rule
-  only because `:` is outside its capture class.
-- **Suppress by value, never by path.** A `paths` entry skips the file before
-  any rule runs.
-
 ## Pinning GitHub Actions
 
 **Two forms while repos migrate** ([ADR 0024](https://github.com/example-adopter/_agent-guidance/blob/main/docs/decisions/0024-actions-pin-through-lockfiles.md)):
 
 - **Lockfile, the target:** `.github/workflows/actions.lock` covers every
   workflow; each `uses:` on its most exact tag, by hand; local actions
-  `$/<path>`, not `./`. Then `gh actions-lock --no-narrow`. Repos where actionlint
+  `$/<path>`. Then `gh actions-lock --no-narrow`. Repos where actionlint
   meets `$/`, or with `./` refs into a runtime checkout (`example-site-platform`),
   stay legacy.
-- **Legacy:** full 40-hex SHA, no trailing version comment.
+- **Legacy:** full 40-character SHA, no trailing version comment.
 - **Cross-repo reusable workflows take a full SHA in both forms**; no lockfile
   covers them.
 - **The runner runs whatever commit the lockfile names**, even off-tag:
-  require `Adam-S-Daniel/verify-actions-lock` (fails on a pin error) and
+  require `Adam-S-Daniel/verify-actions-lock` (fails on any pin finding) and
   the Require lockfile policy. Review `actions.lock` as pins.
 - **Wait 7 days after a third-party release**, else pin the previous.
 - **Dereference annotated tags:** `git ls-remote <url> 'refs/tags/<tag>^{}'`.
@@ -191,42 +126,8 @@ name outlives a rename).
 
 `sha_pinning_required: true` stays on; a locked tag satisfies it.
 
-## A test that can signal can kill every session
-
-A mocked pid became `kill(-1, SIGKILL)`; every user process died
-([evidence](https://github.com/example-adopter/_agent-guidance/blob/main/docs/evidence/2026-10-04-killpg-on-a-mocked-pid.md)).
-
-- **Code that signals refuses any pid or group but an `int` > 1**, before the
-  call.
-- **A test that mocks a spawn patches every signal call** the code can reach.
-- **A sandboxed 137 with no OOM is a finding.** Never escalate out
-  (`require_escalated`, `dangerouslyDisableSandbox`); it contained the
-  kill. Find what sent the signal.
-- **A session that dies mid-verifier is evidence against it.** After a
-  restart, find what killed it (journal, 137, `dmesg`) before re-running:
-  resumed agents re-running the suite made one kill fifteen.
-- **Run spawning or signaling suites in a PID namespace:**
-  `unshare --user --map-current-user --pid --fork --mount-proc -- <cmd>`.
-
 ## Git practices
 
-- Concise commit messages that explain *why*; one logical change per commit.
-  Never amend published commits or force-push shared branches.
 - **Merge with a merge commit — `gh pr merge --merge`.** Squash and rebase
-  are off (`--squash` fails; do not offer it) except the three
-  example-site-platform-managed repos (`example-site-platform`, `example-site-a`,
-  `example-site-b`), kept for Decap publishing. Squash strands commits a
+  are off (`--squash` fails; do not offer it). Squash strands commits a
   lockfile pins by sha (`cannot resolve ref`).
-- **A closing keyword before `#N` or an issue/PR URL, any repo, closes it,
-  PRs too**, from a PR body or any commit message; backticks don't help,
-  and linked issues won't show it. To close: `Closes #N`, not
-  `For #N`; else omit it. After merging, check what should stay open is.
-- **Before a PR, `git log origin/<base>..HEAD --oneline` lists only this
-  task's commits.** A reusable worktree (`.claude/worktrees/<name>/`) carries
-  stale WIP, once a commit that *deleted* files the task edits. Anything
-  extra: `git checkout -b <new> origin/<base>` and redo the work.
-- **One worktree per independent coding session**, pre-authorized: reuse it
-  on resume, not per turn; edit, build, test there, leaving other checkouts
-  untouched. If creation fails, resolve or explain before using the shared
-  checkout. No git: a separate copy. Read-only tasks and requested
-  global-settings changes use targets directly.

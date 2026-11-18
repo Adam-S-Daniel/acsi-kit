@@ -340,7 +340,10 @@ class AtCapTests(unittest.TestCase):
             verdict = gates.retirement({"runs": runs}, [MODEL], skill, POLICY,
                                        expect(fixture))
             doc = {"roster_models": [MODEL], "skills": {skill: verdict}}
-            got = one(plan_week.eval_cells(ROOT / "evals", doc, [], NOW, ROUTINE_GIT), SKILL_FIXTURE)
+            sys.path.insert(0, str(ROOT / "test"))
+            import example_evals  # the example checkout's fixtures (test/example_evals.py)
+            got = one(plan_week.eval_cells(example_evals.checkout() / "evals", doc, [], NOW,
+                                           ROUTINE_GIT), SKILL_FIXTURE)
             self.assertEqual((got["class"], got["at_cap"]), ("insufficient", at_cap))
             plan = plan_week.build_plan(ctx(cells=[got], room=1.0), NOW)
             fired = [(f["fixture"], f["model"]) for f in plan["fires"]]

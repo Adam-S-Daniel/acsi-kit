@@ -45,7 +45,9 @@ def _cases(root: Path, lib) -> None:
     ids = [json.loads(l)["id"] for l in lines]
     if not set(RULES_DIR_CASES) <= set(ids):
         raise SystemExit(f"machinery_tests: the case table lacks a rules-dir case: {RULES_DIR_CASES}")
-    kept = [l for l, i in zip(lines, ids) if i not in RULES_DIR_CASES]
+    # The cases tagged with a lesson belong to the source owner's lesson checks,
+    # which blank_content.py leaves out of the runner (acsi-kit#74).
+    kept = [l for l, i in zip(lines, ids) if i not in RULES_DIR_CASES and "lesson" not in json.loads(l)]
     moved = [l for l, i in zip(lines, ids) if i in RULES_DIR_CASES]
     path.write_text("".join(l + "\n" for l in kept), encoding="utf-8")
     lib.write_fragment("git-hook", "rules-dir", "agent-guidance", "cases.jsonl", "".join(l + "\n" for l in moved))
@@ -60,10 +62,12 @@ def _cases(root: Path, lib) -> None:
 # it now pushes a feature branch whose commit the core secret-file check
 # refuses, which still shows the pre-push event in the log.
 LANE_EDITS = [
-    ('''        self.assertEqual(entry["checks"], ["rules-dir", "secret-file", "skill-shell"])
+    ('''        self.assertEqual(entry["checks"], expected_checks(["rules-dir", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], [])''',
-     '''        self.assertEqual(entry["checks"], ["secret-file", "skill-shell"])
+     '''        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], [])'''),
+    ('''        want = expected_checks(["rules-dir", "secret-file", "skill-shell"], ["lesson-example-path"])''',
+     '''        want = expected_checks(["secret-file", "skill-shell"], ["lesson-example-path"])'''),
     ('''    def test_pre_push_to_default_lists_push_to_default(self):
         self.commit(self.repo, {"README.md": "# Example\\n"})
         head = self.git(self.repo, "rev-parse", "HEAD").strip()
@@ -73,7 +77,8 @@ LANE_EDITS = [
         self.assertIn("refusing to push to main", out.stderr)
         [entry] = self.entries()
         self.assertEqual(entry["event"], "pre-push")
-        self.assertEqual(entry["checks"], ["staged-index", "push-to-default", "persistent-delete", "rules-dir", "secret-file", "skill-shell"])
+        self.assertEqual(entry["checks"], expected_checks(
+            ["staged-index", "push-to-default", "persistent-delete", "rules-dir", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], ["push-to-default"])''',
      '''    def test_refused_pre_push_is_logged_as_pre_push(self):
         self.commit(self.repo, {".env": "A=1\\n"})
@@ -84,10 +89,10 @@ LANE_EDITS = [
         self.assertIn("agent-checks: .env: looks like a secret", out.stderr)
         [entry] = self.entries()
         self.assertEqual(entry["event"], "pre-push")
-        self.assertEqual(entry["checks"], ["secret-file", "skill-shell"])
+        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], ["secret-file"])'''),
-    ('''        self.assertEqual(entry["checks"], ["rules-dir", "secret-file", "skill-shell", "repo-local"])''',
-     '''        self.assertEqual(entry["checks"], ["secret-file", "skill-shell", "repo-local"])'''),
+    ('''        self.assertEqual(entry["checks"], expected_checks(["rules-dir", "secret-file", "skill-shell", "repo-local"], declared_lessons()))''',
+     '''        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell", "repo-local"], declared_lessons()))'''),
     ('''        calls = problem_calls(canonical_runner(RUNNER))
         self.assertGreaterEqual(len(calls), 7)''',
      '''        calls = problem_calls(canonical_runner(RUNNER))
@@ -100,12 +105,15 @@ LANE_EDITS = [
 
 # What the rules-dir library item puts back in the same file.
 LANE_RULES_DIR_OPS = [
-    {"op": "replace", "file": "test/test_agent_check_lane.py", "count": 2,
-     "old": '        self.assertEqual(entry["checks"], ["secret-file", "skill-shell"])\n',
-     "new": '        self.assertEqual(entry["checks"], ["rules-dir", "secret-file", "skill-shell"])\n'},
     {"op": "replace", "file": "test/test_agent_check_lane.py",
-     "old": '        self.assertEqual(entry["checks"], ["secret-file", "skill-shell", "repo-local"])\n',
-     "new": '        self.assertEqual(entry["checks"], ["rules-dir", "secret-file", "skill-shell", "repo-local"])\n'},
+     "old": '        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell"], declared_lessons()))\n        self.assertEqual(entry["failed"], [])',
+     "new": '        self.assertEqual(entry["checks"], expected_checks(["rules-dir", "secret-file", "skill-shell"], declared_lessons()))\n        self.assertEqual(entry["failed"], [])'},
+    {"op": "replace", "file": "test/test_agent_check_lane.py",
+     "old": '        want = expected_checks(["secret-file", "skill-shell"], ["lesson-example-path"])\n',
+     "new": '        want = expected_checks(["rules-dir", "secret-file", "skill-shell"], ["lesson-example-path"])\n'},
+    {"op": "replace", "file": "test/test_agent_check_lane.py",
+     "old": '        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell", "repo-local"], declared_lessons()))\n',
+     "new": '        self.assertEqual(entry["checks"], expected_checks(["rules-dir", "secret-file", "skill-shell", "repo-local"], declared_lessons()))\n'},
     {"op": "replace", "file": "test/test_agent_check_lane.py",
      "old": '        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)\n',
      "new": '        self.assertLessEqual({"rules-dir", "secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)\n'},

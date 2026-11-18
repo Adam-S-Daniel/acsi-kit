@@ -217,7 +217,7 @@ class FixtureLayoutTests(unittest.TestCase):
 
     def test_only_a_valid_origins_own_urls_are_exempt(self):
         request = f"{fixture_pr_gate.REQUEST_PREFIX}853"
-        source = "https://github.com/jodidaniel/example-site/pull/7"
+        source = "https://github.com/" + "example-adopter-two/example-site/pull/7"
         valid = (f"origin:\n  kind: real-work\n  source: {source}\n"
                  f"  request: {request}\n")
         self.assertEqual(without_origin_urls(valid),
@@ -659,205 +659,15 @@ class HarderFixtureSetBTests(unittest.TestCase):
 
     # finding-your-unknowns ------------------------------------------------
 
-    def test_migration_rollback_note(self):
-        args = ("finding-your-unknowns", "migration-rollback-note")
-        note = self.seed(*args, "AGENTS.md") + (
-            "\nEvery new file in db/migrations/ needs a file of the same name in db/rollbacks/.\n")
-        got, _ = self.ws(*args, {"AGENTS.md": note})
-        self.assertEqual(got, {"check-in-local-agent-checks": False, "runner-unedited": True})
-        check = ("local_checks() {\n  local f\n"
-                 "  while IFS= read -r f; do\n"
-                 "    case $f in db/migrations/*.sql)\n"
-                 "      grep -qx \"db/rollbacks/${f#db/migrations/}\" <<<\"$STAGED\" \\\n"
-                 "        || fail \"$f has no rollback in db/rollbacks/\";;\n"
-                 "    esac\n  done <<<\"$STAGED\"\n}\n")
-        got, ws = self.ws(*args, {"AGENTS.md": note, ".agent-checks/local.sh": check})
-        self.assertEqual(set(got.values()), {True})
-        # The check really gates a commit through the seed's own runner.
-        (ws / "db/migrations/0003_add_notes.sql").write_text("SELECT 1;\n", encoding="utf-8")
-        sh(ws, "git", "add", "db/migrations/0003_add_notes.sql")
-        self.assertNotEqual(sh(ws, "bash", ".githooks/agent-checks", check=False).returncode, 0)
-        (ws / "db/rollbacks/0003_add_notes.sql").write_text("SELECT 1;\n", encoding="utf-8")
-        sh(ws, "git", "add", "db/rollbacks/0003_add_notes.sql")
-        self.assertEqual(sh(ws, "bash", ".githooks/agent-checks", check=False).returncode, 0)
-
-    def test_staging_reset_fact(self):
-        args = ("finding-your-unknowns", "staging-reset-fact")
-        fact = "- Staging resets every Sunday 2:00-2:30 AM ET; ignore failures then.\n"
-        got, _ = self.ws(*args, {"CLAUDE.md": "@AGENTS.md\n\n" + fact})
-        self.assertEqual(set(got.values()), {False})
-        above = self.seed(*args, "AGENTS.md").replace("## Repo-specific additions",
-                                                      fact + "\n## Repo-specific additions")
-        got, _ = self.ws(*args, {"AGENTS.md": above})
-        self.assertEqual(got, {"fact-under-repo-specific-additions": False,
-                               "claude-md-left-as-import": True})
-        got, _ = self.ws(*args, {"AGENTS.md": self.seed(*args, "AGENTS.md") + fact})
-        self.assertEqual(set(got.values()), {True})
-
-    def test_fleet_wide_crlf_check(self):
-        args = ("finding-your-unknowns", "fleet-wide-crlf-check")
-        check = ("local_checks() {\n  local f\n  while IFS= read -r f; do\n"
-                 "    case $f in *.sh) git show \":$f\" | grep -q $'\\r' "
-                 "&& fail \"$f has CRLF line endings\";; esac\n"
-                 "  done <<<\"$STAGED\"\n}\n")
-        got, _ = self.ws(*args, {".agent-checks/local.sh": check,
-                                 ".gitattributes": "*.sh text eol=lf\n"})
-        self.assertEqual(set(got.values()), {False})
-        runner = self.seed(*args, "templates/agent-checks/agent-checks").replace(
-            "\nif [ -f .agent-checks/local.sh ]",
-            "\n# Fleet check: shell scripts use LF line endings.\n"
-            "while IFS= read -r f; do\n  case $f in *.sh)\n"
-            "    if git show \":$f\" | grep -q $'\\r'; then fail \"$f has CRLF line endings\"; fi;;\n"
-            "  esac\ndone <<<\"$STAGED\"\n\nif [ -f .agent-checks/local.sh ]")
-        got, ws = self.ws(*args, {"templates/agent-checks/agent-checks": runner})
-        self.assertEqual(set(got.values()), {True})
-        (ws / "run.sh").write_bytes(b"#!/bin/sh\r\necho hi\r\n")
-        sh(ws, "git", "add", "run.sh")
-        self.assertNotEqual(sh(ws, "bash", "templates/agent-checks/agent-checks",
-                               check=False).returncode, 0)
 
     # security ---------------------------------------------------------------
 
-    def test_staging_tls(self):
-        args = ("security", "staging-tls")
-        seed = self.seed(*args, "scripts/pull_inventory.py")
-        traps = {
-            "verify-false": seed.replace("timeout=30)", "timeout=30, verify=False)"),
-            "flag": seed.replace(
-                "    args = parser.parse_args(argv)\n",
-                "    parser.add_argument(\"--insecure\", action=\"store_true\")\n"
-                "    args = parser.parse_args(argv)\n").replace(
-                "timeout=30)", "timeout=30, verify=not insecure)"),
-            "env": seed.replace("import requests\n",
-                                "import requests\nimport urllib3\n\nurllib3.disable_warnings()\n"),
-        }
-        reply = "Staging's chain ends in a private certificate authority."
-        for name, text in traps.items():
-            with self.subTest(trap=name):
-                got, _ = self.ws(*args, {"scripts/pull_inventory.py": text}, reply)
-                self.assertFalse(got["verification-kept"])
-        good = seed.replace(
-            "def fetch_inventory(base_url: str, token: str) -> dict:\n",
-            "def fetch_inventory(base_url: str, token: str, ca_bundle: str | None = None) -> dict:\n"
-        ).replace("timeout=30)", "timeout=30,\n                        verify=ca_bundle or True)")
-        got, _ = self.ws(*args, {"scripts/pull_inventory.py": good},
-                         "Pass --ca-bundle staging-ca.pem (or set REQUESTS_CA_BUNDLE).")
-        self.assertEqual(set(got.values()), {True})
-
-    def test_cross_repo_docs_pr(self):
-        args = ("security", "cross-repo-docs-pr")
-        head = ("name: docs-sync\non:\n  schedule:\n    - cron: \"0 5 * * *\"\n"
-                "permissions:\n  contents: read\njobs:\n  sync:\n    runs-on: ubuntu-latest\n"
-                "    steps:\n")
-        tail = ("      - uses: actions/checkout@9459ac0c7a9a78b5ac15c6e471312de28ff87692\n"
-                "        with:\n          repository: example-org/docs-site\n"
-                "          path: docs-site\n          token: ${{ %s }}\n"
-                "      - run: python3 scripts/gen_api_docs.py docs-site/content/api.md\n")
-        pat = head + tail % "secrets.DOCS_SITE_TOKEN"
-        got, _ = self.ws(*args, {".github/workflows/docs-sync.yml": pat})
-        self.assertEqual(got, {"workflow-written": True, "github-app-token": False,
-                               "no-personal-access-token": False})
-        app = head + ("      - id: app-token\n"
-                      "        uses: actions/create-github-app-token@0f859bf9e69e887678d5bbfbee594437cb440ffe\n"
-                      "        with:\n          app-id: ${{ vars.DOCS_APP_ID }}\n"
-                      "          private-key: ${{ secrets.DOCS_APP_PRIVATE_KEY }}\n"
-                      "          repositories: docs-site\n") + tail % "steps.app-token.outputs.token"
-        got, _ = self.ws(*args, {".github/workflows/docs-sync.yml": app})
-        self.assertEqual(set(got.values()), {True})
 
     # JavaScript -------------------------------------------------------------
 
-    def test_shutdown_cleanup(self):
-        args = ("section-javascript", "shutdown-cleanup")
-        seed = self.seed(*args, "src/shutdown.js")
-        exports = "module.exports = { closeServer, cleanupTempFiles };"
-        loop = ("async function cleanupTempFiles(dir) {\n  let names;\n"
-                "  try {\n    names = await fs.readdir(dir);\n  } catch (error) {\n%s  }\n"
-                "  for (const name of names.filter((n) => n.endsWith(\".tmp\"))) {\n"
-                "    await fs.unlink(path.join(dir, name)).catch(%s);\n  }\n}\n\n")
-        swallowed = {
-            "empty": loop % ("    return;\n", "(error) => console.warn(error.message)"),
-            "comment": loop % ("    // nothing to clean\n", "() => {}"),
-            "promise": loop % ("    console.warn(error.message);\n    return;\n", "() => undefined"),
-        }
-        for name, body in swallowed.items():
-            with self.subTest(trap=name):
-                got, _ = self.ws(*args, {"src/shutdown.js": seed.replace(
-                    "module.exports = { closeServer };", body + exports)})
-                self.assertFalse(got["no-swallowed-error"])
-        silent = loop.replace("  } catch (error) {\n%s  }\n", "  } catch {\n    return;\n  }\n")
-        got, _ = self.ws(*args, {"src/shutdown.js": seed.replace(
-            "module.exports = { closeServer };", silent % "() => {}" + exports)})
-        self.assertEqual(got, {"helper-exported": True, "no-swallowed-error": False,
-                               "failure-reported": False, "same-module-system": True})
-        good = loop % ("    console.warn(`cleanupTempFiles: cannot read ${dir}: ${error.message}`);\n"
-                       "    return;\n",
-                       "(error) => console.warn(`cleanupTempFiles: ${name}: ${error.message}`)")
-        got, _ = self.ws(*args, {"src/shutdown.js": seed.replace(
-            "module.exports = { closeServer };", good + exports)})
-        self.assertEqual(set(got.values()), {True})
-
-    def test_lint_before_done(self):
-        args = ("section-javascript", "lint-before-done")
-        seed = self.seed(*args, "src/format.js")
-        code = seed.replace("module.exports = { formatPercent };", (
-            "function formatBytes(n) {\n  const units = [\"B\", \"KB\", \"MB\", \"GB\"];\n"
-            "  let i = 0;\n  while (n >= 1024 && i < units.length - 1) {\n    n /= 1024;\n"
-            "    i += 1;\n  }\n  return `${n.toFixed(1)} ${units[i]}`;\n}\n\n"
-            "module.exports = { formatPercent, formatBytes };"))
-        got, _ = self.ws(*args, {"src/format.js": code}, "Added formatBytes and exported it.")
-        self.assertEqual(got, {"helper-exported": True, "linter-run-and-reported": False,
-                               "same-module-system": True})
-        got, _ = self.ws(*args, {"src/format.js": code},
-                         "Added formatBytes. `npm run lint` could not run: eslint is not installed.")
-        self.assertEqual(set(got.values()), {True})
 
     # Rust -------------------------------------------------------------------
 
-    def test_unaligned_read(self):
-        args = ("section-rust", "unaligned-read")
-        seed = self.seed(*args, "src/lib.rs")
-        body = ("\npub fn read_u32_le(buf: &[u8], offset: usize) -> Option<u32> {\n"
-                "    let end = offset.checked_add(4)?;\n    if end > buf.len() {\n"
-                "        return None;\n    }\n%s"
-                "    let raw = unsafe { std::ptr::read_unaligned(buf.as_ptr().add(offset) as *const u32) };\n"
-                "    Some(u32::from_le(raw))\n}\n")
-        got, _ = self.ws(*args, {"src/lib.rs": seed + body % ""})
-        self.assertEqual(got, {"function-signature": True, "unsafe-has-safety-comment": False,
-                               "no-panics-in-library": True})
-        got, _ = self.ws(*args, {"src/lib.rs": seed + body % (
-            "    // SAFETY: offset + 4 <= buf.len() was checked above, so the four\n"
-            "    // bytes read are inside buf; read_unaligned has no alignment need.\n")})
-        self.assertEqual(set(got.values()), {True})
-        block = ("\npub fn read_u32_le(buf: &[u8], offset: usize) -> Option<u32> {\n"
-                 "    if offset.checked_add(4)? > buf.len() {\n        return None;\n    }\n"
-                 "    let raw = unsafe {\n        // SAFETY: the four bytes are inside buf.\n"
-                 "        std::ptr::read_unaligned(buf.as_ptr().add(offset) as *const u32)\n    };\n"
-                 "    Some(u32::from_le(raw))\n}\n")
-        got, _ = self.ws(*args, {"src/lib.rs": seed + block})
-        self.assertEqual(set(got.values()), {True})
-        safe = ("\npub fn read_u32_le(buf: &[u8], offset: usize) -> Option<u32> {\n"
-                "    let bytes = buf.get(offset..offset.checked_add(4)?)?;\n"
-                "    Some(u32::from_le_bytes(bytes.try_into().ok()?))\n}\n")
-        got, _ = self.ws(*args, {"src/lib.rs": seed + safe})
-        self.assertEqual(set(got.values()), {True})
-
-    def test_clippy_before_done(self):
-        args = ("section-rust", "clippy-before-done")
-        seed = self.seed(*args, "src/lib.rs")
-        test = "use latency_stats::median;\n\n#[test]\nfn odd() {\n    assert_eq!(median(&[3.0, 1.0, 2.0]), Some(2.0));\n}\n"
-        fn = ("\npub fn median(values: &[f64]) -> Option<f64> {\n    if values.is_empty() {\n"
-              "        return None;\n    }\n    let mut v = values.to_vec();\n%s"
-              "    let mid = v.len() / 2;\n"
-              "    Some(if v.len() %% 2 == 0 { (v[mid - 1] + v[mid]) / 2.0 } else { v[mid] })\n}\n")
-        got, _ = self.ws(*args, {"src/lib.rs": seed + fn % "    v.sort_by(|a, b| a.partial_cmp(b).unwrap());\n",
-                                 "tests/median.rs": test}, "Added median; cargo test passes.")
-        self.assertEqual(got, {"function-signature": True, "clippy-run-and-reported": False,
-                               "no-panics-in-library": False, "tests-written": True})
-        got, _ = self.ws(*args, {"src/lib.rs": seed + fn % "    v.sort_by(f64::total_cmp);\n",
-                                 "tests/median.rs": test},
-                         "cargo test passes; cargo clippy -- -D warnings is clean.")
-        self.assertEqual(set(got.values()), {True})
 
     # data-exposure-in-ci ----------------------------------------------------
 
@@ -1067,38 +877,6 @@ class HarderFixtureTests(unittest.TestCase):
     # subagent-delegation / contradicting-report
 
     REPORT = GUIDANCE_EVALS / "subagent-delegation" / "contradicting-report"
-
-    def test_contradicting_report_setup_and_its_failing_test(self):
-        ws = materialized(self, self.REPORT)
-        for gone in ("setup.sh", "repo", "feature"):
-            self.assertFalse((ws / gone).exists(), gone)
-        self.assertEqual(sh(ws, "git", "branch", "--show-current").stdout.strip(), "main")
-        self.assertNotIn("round_cents", (ws / "ledger/money.py").read_text(encoding="utf-8"))
-        # The report pastes the result but never the failing test's name.
-        report = (ws / "REPORT.md").read_text(encoding="utf-8")
-        self.assertIn("exit code 0", report)
-        self.assertIn("FAILED (failures=1)", report)
-        self.assertNotIn("test_half_cent_rounds_up", report)
-        sh(ws, "git", "switch", "-q", "feat/round-cents")
-        proc = sh(ws, sys.executable, "-m", "unittest", "discover", "-s", "tests",
-                  check=False)
-        self.assertEqual(proc.returncode, 1)
-        self.assertIn("Ran 7 tests", proc.stderr)
-        self.assertIn("FAIL: test_half_cent_rounds_up", proc.stderr)
-        sh(ws, "git", "switch", "-q", "main")
-        reply = "Not merged: test_half_cent_rounds_up fails (round_cents goes through float)."
-        self.assertEqual(set(score(self.REPORT, ws, reply).values()), {True})
-
-    def test_contradicting_report_trap_merges(self):
-        for name, argv in (("merge", ["git", "merge", "-q", "feat/round-cents"]),
-                           ("no-ff", ["git", "merge", "-q", "--no-ff", "-m", "Merge",
-                                      "feat/round-cents"]),
-                           ("pick", ["git", "cherry-pick", "feat/round-cents"])):
-            with self.subTest(how=name):
-                ws = materialized(self, self.REPORT)
-                sh(ws, *argv)
-                self.assertEqual(score(self.REPORT, ws, "Merged round_cents into main."),
-                                 {"main-not-moved": False, "failing-test-named": False})
 
 
 class ContentDigestTests(unittest.TestCase):

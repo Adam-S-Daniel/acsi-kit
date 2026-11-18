@@ -6,7 +6,7 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: 0ef732fdbd825e35ad6bd853855fe158b61ada2b
+source_sha: 98cba5996ecd415e64456ba0b5e4e16b32662bb6
 
 exclude:
   - path: docs/reference/adopt-the-whole-system.md
@@ -360,9 +360,82 @@ edits:
       >   [Repeated guidance across repos](../../README.md#repeated-guidance-across-repos)
       >   decides what each overlap entry should become.
     why: Overlap judgment. The note linked the excluded Fleet health audit.
+  # ---- Re-pin round (2026-11-16): the article-lift page names a repo the kit does not ship (C11)
+  - path: docs/routines/article-lift.md
+    old: "runs on GitHub Actions and reaches it directly. A git clone of\n`Adam-S-Daniel/rss-inator` shows how the feed is built (its scraper reads\nthe upstream page), not the feed's items. For the items, read\n"
+    new: "runs on GitHub Actions and reaches it directly. A git clone of the\nfeed's own repository shows how the feed is built, not the feed's items.\nFor the items, read\n"
+    why: >-
+      C11. The source now points at the owner's `rss-inator` repo, which the
+      kit does not ship; the routine-prompt guard
+      (test_routine_prompts_name_only_kit_repos) fired. The sentence keeps
+      its point (a clone shows how the feed is built, not its items) without
+      naming the repo.
+
+  # ---- C2 folds the source's first owner, listed in both letter cases, into
+  # one login (as in agentskills.yml's install-agent-hooks.sh edit): the hook
+  # then writes 2 owners x 3 URL forms = 6 includeIf entries, not 9.
+  - path: .claude/hooks/fleet-memory.sh
+    stage: output
+    old: "    for owner in example-adopter example-adopter example-adopter-two; do\n"
+    new: "    for owner in example-adopter example-adopter-two; do\n"
+    why: C2 left the first owner twice; git config --add would keep the duplicate.
+  - path: test/run-tests.sh
+    stage: output
+    old: "    for owner in example-adopter example-adopter example-adopter-two; do\n"
+    new: "    for owner in example-adopter example-adopter-two; do\n"
+    why: The repo-local fixture lists the owners the hook does.
+  - path: test/run-tests.sh
+    stage: output
+    old: '[[ "$n" -eq 9 ]]'
+    new: '[[ "$n" -eq 6 ]]'
+    count: 4
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: expected 9 system entries
+    new: expected 6 system entries
+    count: 2
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: expected 9 global entries
+    new: expected 6 global entries
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: nine system includeIf entries (3 owners x 3 URL forms)
+    new: six system includeIf entries (2 owners x 3 URL forms)
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: (9 system entries)
+    new: (6 system entries)
+    why: The hook writes 6 includeIf entries for the kit's two owners.
+  - path: test/run-tests.sh
+    stage: output
+    old: all nine system entries
+    new: all six system entries
+    why: The hook writes 6 includeIf entries for the kit's two owners.
 
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).
+  # ---- Starter suite on a local machine (acsi-kit#72): _agent-guidance#593
+  - path: test/test_guidance_load_record.py
+    stage: output
+    old: "import textwrap\nimport threading\nimport unittest\n\nREPO_ROOT = pathlib.Path(__file__).resolve().parent.parent\nHOOK = REPO_ROOT / \".claude\" / \"hooks\" / \"guidance-load-record.sh\"\n"
+    new: "import textwrap\nimport threading\nimport unittest\nfrom unittest import mock\n\nREPO_ROOT = pathlib.Path(__file__).resolve().parent.parent\nHOOK = REPO_ROOT / \".claude\" / \"hooks\" / \"guidance-load-record.sh\"\n"
+    why: "_agent-guidance#593 verbatim (not merged at this pin): the hung-call Stop test compared the hook's real run time with 20 s x SCALE and failed under the six-tree parallel run (2.48 s against 2.4 s), and a FIFO safety test once ran out the real parse and hash budgets. The bound is now checked on a fake clock and CloudSafetyTests use the counter clock. Drop these edits at a re-pin that includes it."
+  - path: test/test_guidance_load_record.py
+    stage: output
+    old: "\n    def reason_for(self, base, name=\"vector\"):\n        self.write_transcript(self.use_with_base(\"toolu_z1\", name, base))\n        self.stop()\n        [line] = self.shard()\n        return line[\"digest_null_reason\"]\n\n"
+    new: "\n    def reason_for(self, base, name=\"vector\"):\n        self.write_transcript(self.use_with_base(\"toolu_z1\", name, base))\n        # A counter clock: the parse and hash budgets end after a fixed number\n        # of checks, so a loaded machine cannot run them out before the use is\n        # recorded. What these tests check (what is read) needs no real time.\n        self.stop(env={\"GUIDANCE_RECORD_TEST_TICK\": \"0.001\"})\n        [line] = self.shard()\n        return line[\"digest_null_reason\"]\n\n"
+    why: "See the first _agent-guidance#593 edit above."
+  - path: test/test_guidance_load_record.py
+    stage: output
+    old: "        self.assertEqual([l[\"id\"] for l in self.shard()], [\"toolu_g1\", \"toolu_g2\"])\n\n    def test_phase_1_and_phase_2_stay_under_the_stop_timeout_when_every_call_hangs(self):\n        # Every curl uses its whole --max-time; every clone, fetch and push\n        # hangs with a child holding its pipe. The hook must still end inside\n        # the 20-second Stop timeout. Every budget is scaled by SCALE (the\n        # test-only seam), so the bound checked is 20 s * SCALE.\n        scale = 0.12\n        (self.bin / \"curl\").write_text(SLOW_CURL, encoding=\"utf-8\")\n        # The hook reports its own run time (from its start, so the interpreter\n        # start-up a loaded machine slows is not counted).\n        elapsed_file = self.tmp / \"elapsed\"\n        self.stop(env={\"FAKE_GIT_MODE\": \"hang-network\", \"GUIDANCE_RECORD_TEST\": \"1\",\n                       \"GUIDANCE_RECORD_TEST_SCALE\": str(scale),\n                       \"GUIDANCE_RECORD_TEST_ELAPSED_FILE\": str(elapsed_file)})\n        self.assertLess(float(elapsed_file.read_text()), 20 * scale)\n        # It did wait on the hung calls, rather than skip them.\n        self.assertTrue(any(\"clone\" in c for c in self.git_calls()))\n        # The timeout killed the whole process group, the hung child included.\n"
+    new: "        self.assertEqual([l[\"id\"] for l in self.shard()], [\"toolu_g1\", \"toolu_g2\"])\n\n    def test_phase_1_and_phase_2_stay_under_the_stop_timeout_when_every_call_hangs(self):\n        # On a fake clock, so the bound is the hook's budgeting, not how fast\n        # this machine is: every curl uses its whole --max-time and then grants\n        # push, as SLOW_CURL does below; every git call hangs to its whole cap,\n        # then the reap waits MIN_CALL. The hook's real budgets apply (no\n        # SCALE), and the run must end inside the 20-second Stop timeout.\n        env = dict(self.env, **self.cloud_env, GUIDANCE_HOOK_INPUT=json.dumps({\n            \"session_id\": CLOUD_SESSION, \"transcript_path\": str(self.transcript),\n            \"hook_event_name\": \"Stop\"}))\n        with mock.patch.dict(os.environ, env, clear=True):\n            hook = hook_module()\n            clock, calls = [0.0], []\n\n            def hang(args, cwd=None, env=None, data=None, cap=hook[\"CALL_CAP\"]):\n                calls.append(args)\n                if args[0] == \"curl\":\n                    clock[0] += float(args[args.index(\"--max-time\") + 1])\n                    pathlib.Path(args[args.index(\"-o\") + 1]).write_text(\n                        json.dumps({\"permissions\": {\"push\": True}}), encoding=\"utf-8\")\n                    return 0, b\"200\"\n                clock[0] += cap + hook[\"MIN_CALL\"]\n                return None, b\"\"\n\n            hook.update(monotonic=lambda: clock[0], START=0.0, run=hang)\n            hook[\"main\"]()\n        self.assertEqual(hook[\"BUDGET\"], 15.0)\n        self.assertTrue(any(\"clone\" in a for a in calls), calls)\n        self.assertLess(clock[0], 20.0)\n        self.assertIs(self.records()[0][\"uploaded\"], False)\n        self.assertEqual([p[\"id\"] for p in self.pending()], [\"toolu_g1\"])\n\n    def test_a_hung_call_is_killed_with_its_children_and_the_use_kept(self):\n        # The same Stop through the real hook: every curl uses its whole\n        # --max-time; every clone, fetch and push hangs with a child holding\n        # its pipe. Its run time is bounded by the test above, not here.\n        (self.bin / \"curl\").write_text(SLOW_CURL, encoding=\"utf-8\")\n        self.stop(env={\"FAKE_GIT_MODE\": \"hang-network\", \"GUIDANCE_RECORD_TEST\": \"1\",\n                       \"GUIDANCE_RECORD_TEST_SCALE\": \"0.12\"})\n        # It did wait on the hung calls, rather than skip them.\n        self.assertTrue(any(\"clone\" in c for c in self.git_calls()))\n        # The timeout killed the whole process group, the hung child included.\n"
+    why: "See the first _agent-guidance#593 edit above."
+
 patches:
   - file: blank_content.py
     why: >-
@@ -407,6 +480,11 @@ regenerate:
     why: The fleet payload mirror must equal base.md byte for byte (scripts/check-fleet-guidance-mirror.js).
   - run: NODE_PATH="$EXPORT_SOURCES/_agent-guidance/node_modules" node scripts/check-guidance-coverage.js --write-bytes >/dev/null
     why: Section byte counts in agents-md/eval-coverage.yml follow base.md.
+  - run: NODE_PATH="$EXPORT_SOURCES/_agent-guidance/node_modules" node scripts/build-contributor-rules.js --write >/dev/null
+    why: >-
+      .github/fleet-contributor-rules.md is built from the base.md sections
+      eval-coverage.yml marks for contributors; blank_content.py changes both,
+      and test-contributor-rules.js checks the committed file is current.
   - run: >-
       printf '%s\n%s\n' "$(./scripts/build-agents-md.sh)"
       "$(sed -n '/^## Repo-specific additions/,$p' AGENTS.md)" > AGENTS.md.new
@@ -421,6 +499,17 @@ regenerate:
       repos.yml pins the vendored hook's sha256 (test_self_hosted_hook_pin);
       substitution changed the hook's bytes. `ref` names a registry commit
       the adopter's registry will not have: REGENERATE.md.
+  - run: >-
+      python3 -I -c 'import hashlib,re,pathlib;
+      h=hashlib.sha256(pathlib.Path(".claude/hooks/fleet-memory.sh").read_bytes()).hexdigest();
+      p=pathlib.Path("docs/codex-cloud.md"); t=p.read_text();
+      n=re.subn(r"(?m)^(fleet_pin_sha256=)[0-9a-f]{64}$", lambda m: m.group(1)+h, t);
+      assert n[1]==1, n[1]; p.write_text(n[0])'
+    why: >-
+      Acsi-kit#74. docs/codex-cloud.md pins the sha256 of fleet-memory.sh and
+      test_codex_cloud_recipe holds it to the working-tree hook; the kit's hook
+      differs from the source's (C2 folds the first owner), so the pin follows
+      the kit's copy. The pinned commit is the source's: REGENERATE.md.
 
 # P2 citation spans that are really test data: protecting them would leave
 # the fixture on the source owner while the assertion beside it is

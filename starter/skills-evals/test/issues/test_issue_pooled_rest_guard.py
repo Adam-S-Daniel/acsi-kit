@@ -1068,8 +1068,8 @@ class PlannerTests(unittest.TestCase):
     def test_the_plans_cells_carry_the_provisional_keep(self):
         # eval_cells_and_outages, on the committed evals/ and a gates
         # document whose one cell keeps on a pooled keep alone.
-        section = "anything-you-name-gets-its-link"
-        fixture = f"evals/guidance/{section}/handoff"
+        section = "data-exposure-in-ci"
+        fixture = f"evals/guidance/{section}/http-error-body"
         real = plan_week.schedule.scheduled_fixtures
 
         def scheduled(path, committed):
@@ -1079,7 +1079,7 @@ class PlannerTests(unittest.TestCase):
                            (cell_of(strat(MAIN, GAIN, LOSS)), False)):
             doc = {"roster_models": ["model-a"], "skills": {}, "guidance": {section: {
                 "verdict": "keep",
-                "cells": [{**gate, "fixture": "handoff", "model": "model-a"}]}}}
+                "cells": [{**gate, "fixture": "http-error-body", "model": "model-a"}]}}}
             with self.subTest(want=want), \
                     mock.patch.object(plan_week.schedule, "scheduled_fixtures", scheduled):
                 cells, _, _ = plan_week.eval_cells_and_outages(ROOT / "evals", doc, [], NOW)

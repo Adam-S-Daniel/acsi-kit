@@ -26,8 +26,7 @@ name: Publish explorer data
 # * #544/#545 (2026-11-02): the `broken` and `context-drift` alerts read each
 #   in-place fixture's consumer `skills.lock` at its pin and along the
 #   consumer's first-parent history, so every `--context-repo` checkout is
-#   full history (`fetch-depth: 0`; example-site-a also `filter: blob:none`,
-#   its media blobs are large and only lock blobs are read). A shallow
+#   full history (`fetch-depth: 0`). A shallow
 #   checkout makes both alerts "unknown", never silently clean. Measured
 #   locally on 2026-11-02 (18 in-scope fixtures, full clones): the build took
 #   10 to 15 s, the alerts about 2 s of it, so the job's timeout stays.
@@ -40,11 +39,10 @@ name: Publish explorer data
 #   and only explorer_data.py's scope filter may decide what is public. The
 #   window start and the fetch time come from the runner's clock, never from
 #   `${{ }}` context. `publish` keeps `contents: write` alone.
-# * #562 (2026-11-02): the three registry checkouts' full history also feeds
+# * #562 (2026-11-02): the registry checkout's full history also feeds
 #   each skill's `copies` and the report-only `loaded-copy` alert: main's
 #   digest at every first-parent commit in the last 2 weeks, read with
-#   `git archive` (example-site-a's few skill blobs are fetched lazily from the
-#   public origin). A shallow one makes the alert unknown (null), never clean.
+#   `git archive`. A shallow one makes the alert unknown (null), never clean.
 # * The fixture queue (the owner, 2026-11-03: requesting harder fixtures, building
 #   them from real fleet work and putting them to use is tracked, acted on
 #   when broken, and on the dashboard). `build` lists the `agent-ready`
@@ -161,23 +159,6 @@ jobs:
           repository: example-adopter/acsi-agentskills
           path: registry-agentskills
           fetch-depth: 0
-          persist-credentials: false
-
-      - name: Check out example-site-platform
-        uses: actions/checkout@v7.0.1
-        with:
-          repository: example-adopter/example-site-platform
-          path: registry-cms
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Check out example-site-a
-        uses: actions/checkout@v7.0.1
-        with:
-          repository: example-adopter/example-site-a
-          path: registry-site
-          fetch-depth: 0
-          filter: blob:none
           persist-credentials: false
 
       - name: Check out _agent-guidance
@@ -398,8 +379,7 @@ jobs:
           part="$RUNNER_TEMP/removal-part.tmp"
           rc=0
           : > "$prs"; : > "$issues"
-          for repo in example-adopter/acsi-agentskills example-adopter/example-site-platform \
-                      example-adopter/example-site-a example-adopter/_agent-guidance; do
+          for repo in example-adopter/acsi-agentskills example-adopter/_agent-guidance; do
             for page in 1 2 3; do
               if gh api --method GET "repos/$repo/pulls" -f state=all -f per_page=100 \
                    -f sort=created -f direction=desc -f page="$page" \
@@ -634,15 +614,11 @@ jobs:
             --repository-commit "$(git rev-parse HEAD)" \
             --results-commit "$(git -C "$GITHUB_WORKSPACE/eval-results" rev-parse HEAD)" \
             --registry "acsi-agentskills=$GITHUB_WORKSPACE/registry-agentskills" \
-            --registry "example-site-platform=$GITHUB_WORKSPACE/registry-cms" \
-            --registry "example-site-a=$GITHUB_WORKSPACE/registry-site" \
             --guidance "$GITHUB_WORKSPACE/agent-guidance" \
             --guidance-manifest "$GITHUB_WORKSPACE/agent-guidance/agents-md/eval-coverage.yml" \
             --regression-issues "$RUNNER_TEMP/regression-issues.json" \
             --context-repo "example-adopter/skills-evals=$GITHUB_WORKSPACE/skills-evals" \
             --context-repo "example-adopter/acsi-agentskills=$GITHUB_WORKSPACE/registry-agentskills" \
-            --context-repo "example-adopter/example-site-platform=$GITHUB_WORKSPACE/registry-cms" \
-            --context-repo "example-adopter/example-site-a=$GITHUB_WORKSPACE/registry-site" \
             --context-repo "example-adopter/_agent-guidance=$GITHUB_WORKSPACE/agent-guidance" \
             --context-repo "example-adopter/repo-settings=$GITHUB_WORKSPACE/context-repo-settings" \
             --context-repo "example-adopter/wsl-automation=$GITHUB_WORKSPACE/context-wsl-automation" \

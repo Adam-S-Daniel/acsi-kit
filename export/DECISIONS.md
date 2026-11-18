@@ -2687,3 +2687,117 @@ All five public pins move to their heads; `agentskills-private` keeps its pin. T
 | wsl-automation | `19c8232e6d67` | `4aa4768aadb6` |
 
 Reverse: re-pin the old shas, put back the five excludes and the four `REVIEWED` lines, and drop the "Eval rules" row from `blank_content.py`.
+
+## Re-pin round 15 (2026-11-16): follow two source changes
+
+The daily re-sync held `_agent-guidance` and `agentskills` back. All five public pins move to their heads; `agentskills-private` keeps its pin.
+
+- `_agent-guidance` rewrote the run-log tests in `test/test_agent_check_lane.py` to build the expected list with `expected_checks([...], declared_lessons())`, so lesson checks are spliced in after `skill-shell`. `patches/_agent-guidance/machinery_tests.py` follows: its `LANE_EDITS` and the `rules-dir` library item's replace ops match the new text, keeping what they do (the kit's list has no `rules-dir`, and the library item puts it back), and one more edit covers the new lesson-path test's `want = expected_checks(...)` line.
+- `_agent-guidance`'s `docs/routines/article-lift.md` now names the owner's `rss-inator` repo, which the kit does not ship, so `test_routine_prompts_name_only_kit_repos` (C11) fired. A new `edits` entry rewords the sentence to say a clone of the feed's own repository shows how the feed is built, not its items.
+- `agentskills` fixed the three `synced/manifest.json` wordings in `skills-doctor/SKILL.md` that the prompt-audit sweep edited, so the three edits are dropped.
+- The `rules-dir` item's `ops.json` in `library/` was updated by hand (the sync does not rewrite `library/`), and `starter/agent-skills-private/.githooks/agent-checks` is a byte copy of the new runner template, as the bootstrap's self-test requires.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `0ef732fdbd82` | `98cba5996ecd` |
+| agentskills | `bc0b75555d52` | `7bad3acd94d8` |
+| repo-settings | `bcd342771667` | `dc90f3ade2dd` |
+| skills-evals | `b93d1d9a79f6` | `0db7977156c0` |
+| wsl-automation | `4aa4768aadb6` | `8f1a0642a2e4` |
+
+- The `starter-suites` check (acsi-kit#72) found two more breaks at these pins, fixed in the manifests:
+  - `_agent-guidance`'s runner template now carries its owner's first lesson check (`lesson-memory-485-1`, a `case` arm in `check_lessons`). `blank_content.py` blanks `lesson_checks` and the `check_lessons` body back to the empty slot, as the kit ships no lessons, and `agentskills`' own `test_agent_checks.py` splices its fixture into exactly that text. `test_runner_ships_no_lessons.py` locks it, and `starter/agent-skills-private`'s runner is again a byte copy. `machinery_tests.py` drops the four case lines tagged with that lesson from `test/fixtures/agent-checks-cases.jsonl`, which the lane test would otherwise run against the blank slot.
+  - `docs/codex-cloud.md` (agent-guidance) and `scripts/cloud-env-setup.sh` (agent-skills) pin the sha256 of `fleet-memory.sh`, and their tests hold the pin to the tree's own hook. The kit's hook differs from the source's (C2 folds the first owner), so a `regenerate` step in each manifest rewrites the pin to the kit's copy. The pinned commit stays the source's; `REGENERATE.md` covers it like `repos.yml`'s `ref`.
+
+Reverse: re-pin the old shas, restore the three `skills-doctor` edits and the old `LANE_EDITS` and library ops, and drop the `article-lift.md` edit.
+
+## Starter suite repair (2026-11-16, acsi-kit#72)
+
+The re-pin rounds since the kit's first commit never ran the exported tree's own
+suite, and `starter/skills-evals` had drifted to 258 failures (the source at its pin
+fails 9, all environmental). Each cause below is fixed in the manifest or its
+patches, and the starter re-exported:
+
+- **`evals/stakes.yml` named skills and sections the kit does not ship**
+  (`github-actions-sha-pinning`, `consumer-repo-provisioning`, and four library
+  items), and `scripts/stakes.py` refuses a row with no fixture directory, so the
+  planner and every test that loads the file failed. `empty_config.py` keeps only
+  the rows whose fixtures are in the tree; `library_fixtures.py` carries a library
+  item's row (a skill's goes back before `sections:`, a section's at the end). A
+  `regenerate` step rebuilds `docs/rules.md` and `docs/rules.json` from the
+  policy files, and `bootstrap/lib/content.py`'s `regenerate()` does too after
+  `add-content.sh`.
+- **Tests that read a checkout's committed fixtures named library or left-out
+  ones** (`writing-adrs/bootstrap`, `anything-you-name-gets-its-link/handoff`,
+  `disarm-inherited-reach`, the source's six outage fixtures). As in C8,
+  `retargets.txt` points them at the example checkout (`test/example_evals.py`)
+  or at fixtures the kit ships. The example checkout's ROOT is set after the
+  module's imports, so `plan_week` and its siblings are always this
+  repository's; the tests that relied on the planner's own default checkout pin
+  it (`_pin_planner_root`). The example `writing-adrs` gains an invented reviewed
+  `trigger-eval-set.json` for the trigger-only fire check.
+- **Library items' tests stayed in the tree**: the whole
+  `test_issue_bash_ci_nightly_snapshot.py` and seven `test_issue_124` Harder*
+  methods move into their items; four more lock the left-out `section-javascript`
+  and `section-rust` fixtures and are removed (`removed_tests.txt`).
+- **The invented example sites (C3) were still named** by `eval-scope.yml`'s
+  checkouts and flags, `routine_eval.py`'s `PUBLIC_REGISTRIES` and `SIBLINGS`,
+  and the routine's cloned-repo list; `cold_start_registries.py` drops them as it
+  does elsewhere, and `cold_start_tests.py` and `retargets.txt` move the tests to
+  the registries the kit lists. Six `AgentRouteTests` tests lock the agent route for
+  a skill whose one copy is in an example-site registry, which the kit cannot
+  reach, and are removed.
+- **Citation-shaped URLs (P2) kept the source owner's name** where the code
+  builds the same URL from the substituted owner:
+  `test_issue_72_explorer_data.py` and `test_issue_fixture_queue.py` join
+  `protect_except`, and one `test_issue_124` literal is split as in Round 10.
+- **`scripts/checker_call_names.js` loads Acorn from
+  `evals/browser-testing/seed`**, which the kit left out whole, so the real-work
+  scaffold's interface check always failed closed (and `routine-scaffold-gate.yml`
+  installed from a missing folder). The kit now ships that seed's `package.json`,
+  lockfile and `.gitignore` only, and drops the three X9 edits that stopped
+  `ci.yml` and `dev_setup.sh` installing it.
+- **The overlay's invented `github-actions-repo-settings` fixtures** (C8) predate
+  Content tiers, which ships the real ones as core; copied into the example
+  checkout they replaced them. They are removed.
+- Smaller: `test_issue_pair_fires.py` reads `ROUTINE_TRIGGER_ID` (C7, as
+  `test_issue_68_model_input.py`); a test that needed a fixture listed in
+  `evals/unscheduled.yml`, an isolation fixture, or the committed tree's own
+  schedule reads one the kit ships; the source's `acsi-writing-style` scope
+  decision test is removed (X2, X9).
+
+What stays failing is environmental and fails the same way on the source at its
+pin, on the machine where this was measured (WSL2): 8
+`test_issue_adr0012_delivery` `EndToEndTests` (each arm stops with
+`settings_too_large`, its sandbox `--settings` over the 64 KiB cap) and
+`test_issue_594_late_writer::test_each_followup_call_ends_its_own_group`
+(4 spawned children where it expects 2). Neither is listed in
+`known-failures.txt`.
+
+Reverse: revert this section's commits; the starter then re-exports with the
+258 failures.
+
+## Contributor rules in every starter (2026-11-17, acsi-kit#72)
+
+`_agent-guidance`'s `sync.sh` delivers its `.github/fleet-contributor-rules.md` to every synced repo byte for byte, and the export rebuilds agent-guidance's copy from the kit's `base.md`. Before this change, the other five starters kept the source owner's longer copy. That copy holds sections the kit leaves out (Security, Dependency updates, the signal rule and others), so an adopter's repos started with rules their own guidance repo lacks, and the drift report flagged all five until the first sync. Round 14's hand-written copy in `agent-skills-private` also disappeared on every full export.
+
+- Each of the five manifests gains a `copy_from_kit` step that copies agent-guidance's rebuilt file, so all six copies are identical and the private one is exported.
+- `bootstrap/lib/content.py`'s `regenerate()` rebuilds the file with `scripts/build-contributor-rules.js`, using agent-guidance's two npm devDependencies installed from its lockfile into a temporary directory, and copies it to every starter. Before this change, adding a `contributor` section through `add-content.sh` (security, git-habits and three others) left agent-guidance's copy stale, and that tree's own test failed.
+
+Reverse: drop the five `copy_from_kit` steps and the rebuild in `regenerate()`.
+
+## Re-pin round 16 (2026-11-17): the held-back re-sync, on top of round 15
+
+The daily re-sync (acsi-kit#69) moved `repo-settings`, `skills-evals` and `wsl-automation` to their heads and held `_agent-guidance` and `agentskills` back at their old pins. Round 15 (#74) has since moved those two to newer pins, so this branch keeps those and takes the three moves. No manifest or patch changed: the starters re-export cleanly at these pins, and `export/tests` and the bootstrap tests pass.
+
+- `skills-evals` at `4eb724eb85f9` already includes skills-evals 9dc471490, so the `test_issue_594_late_writer.py` edit stays dropped (see the starter suite repair above). The two edits that carry skills-evals#1080 and `_agent-guidance`#593 stay, as their old text still occurs once.
+- The `guidance-load-record.sh` hook is no longer in the `repo-settings` and `wsl-automation` starters: their sources dropped it.
+- The starters' own suites run in CI (`starter-suites`), not in this change's local checks.
+
+| Source | Before | After |
+|---|---|---|
+| repo-settings | `dc90f3ade2dd` | `5eb0115ff64a` |
+| skills-evals | `0db7977156c0` | `4eb724eb85f9` |
+| wsl-automation | `8f1a0642a2e4` | `9b8e990ceb24` |
+
+Reverse: re-pin the three old shas.

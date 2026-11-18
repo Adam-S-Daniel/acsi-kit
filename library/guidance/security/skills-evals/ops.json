@@ -6,11 +6,30 @@
       "fragment": "scheduled-rows.yml"
     },
     {
+      "op": "append-lines",
+      "file": "evals/stakes.yml",
+      "fragment": "stakes-row.yml"
+    },
+    {
       "op": "insert-method",
       "file": "test/issues/test_issue_124_guidance_gates.py",
       "class": "ThirdBatchFixtureTests",
       "method": "test_search_query",
       "fragment": "ThirdBatchFixtureTests.test_search_query.py"
+    },
+    {
+      "op": "insert-method",
+      "file": "test/issues/test_issue_124_guidance_gates.py",
+      "class": "HarderFixtureSetBTests",
+      "method": "test_staging_tls",
+      "fragment": "HarderFixtureSetBTests.test_staging_tls.py"
+    },
+    {
+      "op": "insert-method",
+      "file": "test/issues/test_issue_124_guidance_gates.py",
+      "class": "HarderFixtureSetBTests",
+      "method": "test_cross_repo_docs_pr",
+      "fragment": "HarderFixtureSetBTests.test_cross_repo_docs_pr.py"
     }
   ]
 }

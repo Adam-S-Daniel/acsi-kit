@@ -1,6 +1,6 @@
 {
   "name": "acsi-coding-anywhere",
-  "version": "2.0.0",
+  "version": "2.0.2",
   "description": "Coding skills for Claude Code terminals and Claude Code cloud sessions.",
   "author": { "name": "<your name>" }
 }

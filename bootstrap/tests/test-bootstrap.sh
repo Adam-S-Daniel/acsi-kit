@@ -561,6 +561,8 @@ assert "the private registry's lock is the registry's" cmp -s "$KC/starter/agent
 assert "the section is in base.md" grep -qx '## Security' "$KC/starter/agent-guidance/agents-md/base.md"
 assert "the section has its eval-coverage row" grep -qx -- '- id: security' "$KC/starter/agent-guidance/agents-md/eval-coverage.yml"
 assert "every repo's guidance mirror is the new base.md" bash -c 'for t in "$1"/*/; do [ ! -e "$t.claude/hooks/fleet-guidance.md" ] || cmp -s "$t.claude/hooks/fleet-guidance.md" "$1/agent-guidance/agents-md/base.md" || exit 1; done' _ "$KC/starter"
+assert "the contributor rules carry the new contributor section" grep -qx '## Security' "$KC/starter/agent-guidance/.github/fleet-contributor-rules.md"
+assert "every repo's contributor rules are agent-guidance's" bash -c 'n=0; for t in "$1"/*/; do [ -e "$t.github/fleet-contributor-rules.md" ] || continue; cmp -s "$t.github/fleet-contributor-rules.md" "$1/agent-guidance/.github/fleet-contributor-rules.md" || exit 1; n=$((n+1)); done; [ "$n" = 6 ]' _ "$KC/starter"
 assert "the section's fixture is in skills-evals" test -f "$KC/starter/skills-evals/evals/guidance/security/search-query/fixture.yaml"
 assert "its weekly row is in scheduled.yml" grep -qx '  - path: evals/guidance/security/search-query' "$KC/starter/skills-evals/evals/scheduled.yml"
 assert "the existing repos are told to get a pull request" has "$OUT" "acme-example/_agent-guidance already exists, so this reached only starter/agent-guidance"

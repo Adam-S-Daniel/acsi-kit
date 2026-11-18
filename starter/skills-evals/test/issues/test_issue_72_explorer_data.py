@@ -522,20 +522,11 @@ class RemovedSectionsTests(unittest.TestCase):
             return {"path": root}
         found = explorer_data.removed_skills({
             "acsi-agentskills": registry("2026-11-10 — acsi-coding-anywhere/old-one"),
-            "example-site-platform": registry(
-                "2026-11-13 — example-site-platform/consumer-repo-provisioning",
-                "- PR: https://github.com/Adam-S-Daniel/cms-platform/pull/1016\n"),
-            "example-site-a": registry("2026-11-12 — example-site-a-ai/site-skill"),
             # A private registry is never read: the explorer is public.
             "acsi-agentskills-private": registry("2026-11-14 — private-plugin/secret-one")})
         self.assertEqual([(r["name"], r["registry"], r["plugin"]) for r in found],
-                         [("consumer-repo-provisioning", "example-site-platform", "example-site-platform"),
-                          ("site-skill", "example-site-a", "example-site-a-ai"),
-                          ("old-one", "acsi-agentskills", "acsi-coding-anywhere")])
-        self.assertEqual(found[0]["reverse_url"],
-                         "https://github.com/Adam-S-Daniel/cms-platform/pull/1016")
-        self.assertIn("/example-site-a/pulls?q=", found[1]["reverse_url"])
-        self.assertIn("/acsi-agentskills/pulls?q=", found[2]["reverse_url"])
+                         [("old-one", "acsi-agentskills", "acsi-coding-anywhere")])
+        self.assertIn("/acsi-agentskills/pulls?q=", found[0]["reverse_url"])
 
     def test_removed_skills_come_from_the_registrys_impact_file(self):
         root = Path(tempfile.mkdtemp(prefix="removed-skills-"))
@@ -573,32 +564,32 @@ class RemovedSectionsTests(unittest.TestCase):
 
     def test_a_linked_pull_request_beats_an_issue_link(self):
         urls = self._skill_urls(
-            "- Motivation: [issue #23](https://github.com/Adam-S-Daniel/adam-agentskills/issues/23)"
+            "- Motivation: [issue #23](https://github.com/example-adopter/acsi-agentskills/issues/23)"
             " step 2\n- Change: skill deleted ([#34](https://github.com/example-adopter/"
             "acsi-agentskills/pull/34))\n")
         self.assertEqual(urls["gamma-skill"],
-                         "https://github.com/Adam-S-Daniel/adam-agentskills/pull/34")
+                         "https://github.com/example-adopter/acsi-agentskills/pull/34")
 
     def test_a_bare_pr_number_names_the_guidance_pull_request(self):
         urls = self._section_urls(
             "- Change: removed the section and its eval-coverage.yml row (PR #213).\n")
         self.assertEqual(urls["delta-section"],
-                         "https://github.com/Adam-S-Daniel/_agent-guidance/pull/213")
+                         "https://github.com/example-adopter/_agent-guidance/pull/213")
         self.assertEqual(self._skill_urls("- Change: gone (PR #7).\n")["gamma-skill"],
-                         "https://github.com/Adam-S-Daniel/adam-agentskills/pull/7")
+                         "https://github.com/example-adopter/acsi-agentskills/pull/7")
 
     def test_the_first_pull_request_in_body_order_wins(self):
         urls = self._skill_urls(
-            "- Change: see PR #5, then https://github.com/Adam-S-Daniel/adam-agentskills/pull/6\n")
+            "- Change: see PR #5, then https://github.com/example-adopter/acsi-agentskills/pull/6\n")
         self.assertEqual(urls["gamma-skill"],
-                         "https://github.com/Adam-S-Daniel/adam-agentskills/pull/5")
+                         "https://github.com/example-adopter/acsi-agentskills/pull/5")
 
     def test_an_issue_link_only_falls_back_to_the_search(self):
         urls = self._skill_urls(
-            "- Motivation: https://github.com/Adam-S-Daniel/adam-agentskills/issues/23\n")
+            "- Motivation: https://github.com/example-adopter/acsi-agentskills/issues/23\n")
         self.assertIn("pulls?q=is%3Apr+head%3Aretire-skill%2Fgamma-skill", urls["gamma-skill"])
         urls = self._section_urls(
-            "- Motivation: [#9](https://github.com/Adam-S-Daniel/_agent-guidance/issues/9)\n")
+            "- Motivation: [#9](https://github.com/example-adopter/_agent-guidance/issues/9)\n")
         self.assertIn("pulls?q=is%3Apr+head%3Aretire-guidance%2Fdelta-section",
                       urls["delta-section"])
 
@@ -808,7 +799,7 @@ class RemovalStateTests(unittest.TestCase):
         explorer_data.mark_removed(out, removed, {"example-site-platform": {"path": root}})
         explorer_data.without_test(out)
         self.assertEqual(out[0]["removal"], {"state": "removed", "since": "2026-11-13",
-                                             "url": "https://github.com/Adam-S-Daniel/cms-platform/pull/1016"})
+                                             "url": "https://github.com/example-adopter/example-site-platform/pull/1016"})
         self.assertEqual(out[0]["next_test"], {"position": None, "band": None, "due": None,
                                                "scheduled": False})
         # Back in the registry, or never listed: untouched.
@@ -843,7 +834,7 @@ class RemovalStateTests(unittest.TestCase):
         explorer_data.validate(doc)
         by = {s["name"]: s for s in doc["skills"]}
         self.assertEqual(by["alpha"]["removal"]["state"], "removed")
-        self.assertEqual(by["alpha"]["removal"]["url"], "https://github.com/Adam-S-Daniel/pub-repo/pull/7")
+        self.assertEqual(by["alpha"]["removal"]["url"], "https://github.com/example-adopter/pub-repo/pull/7")
         self.assertEqual(by["alpha"]["next_test"],
                          {"position": None, "band": None, "due": None, "scheduled": False})
         self.assertEqual([(r["name"], r["registry"]) for r in doc["removed_skills"]],
@@ -899,11 +890,11 @@ class RemovalStateTests(unittest.TestCase):
         legacy = self.issue("a", 21, kind="legacy")
         self.assertEqual(self.status("skill", "a", "retire", issues=[legacy]),
                          {"state": "owner", "reason": "proposal",
-                          "url": "https://github.com/Adam-S-Daniel/skills-evals/issues/21"})
+                          "url": "https://github.com/example-adopter/skills-evals/issues/21"})
         held = self.issue("a", 22, kind="agent", labels=["agent-ready", "on-hold"])
         self.assertEqual(self.status("skill", "a", "retire", issues=[held]),
                          {"state": "owner", "reason": "on-hold",
-                          "url": "https://github.com/Adam-S-Daniel/skills-evals/issues/22"})
+                          "url": "https://github.com/example-adopter/skills-evals/issues/22"})
         self.assertEqual(self.status("skill", "a", "retire", issues=[
             self.issue("a", 23, kind="agent", labels=["agent-ready"])])["state"], "worker")
         # The built document validates against the schema with a reason.
@@ -929,13 +920,13 @@ class RemovalStateTests(unittest.TestCase):
         doc = self.build_with(state)
         by = {s["name"]: s for s in doc["skills"]}
         self.assertEqual(by["alpha"]["removal"], {
-            "state": "pr-open", "url": "https://github.com/Adam-S-Daniel/adam-agentskills/pull/7",
+            "state": "pr-open", "url": "https://github.com/example-adopter/acsi-agentskills/pull/7",
             "since": "2026-11-10T01:02:03Z"})
         self.assertEqual(by["beta"]["removal"], {"state": "waiting-turn"})
         sec = {s["id"]: s for s in doc["guidance"]["sections"]}
         self.assertEqual(sec["sec-one"]["removal"]["state"], "worker")
         self.assertEqual(sec["sec-one"]["removal"]["url"],
-                         "https://github.com/Adam-S-Daniel/skills-evals/issues/9")
+                         "https://github.com/example-adopter/skills-evals/issues/9")
         for subject in (*by.values(), *sec.values()):
             if subject.get("verdict") in ("retire", "retire-pending"):
                 self.assertEqual((subject["next_test"]["position"], subject["next_test"]["due"]),
@@ -946,14 +937,14 @@ class RemovalStateTests(unittest.TestCase):
         merged = self.pr("retire-skill/a", 5, state="closed", merged=True,
                          merged_at="2026-11-12T12:00:00Z")
         self.assertEqual(s("skill", "a", "retire", [merged]),
-                         {"state": "removed", "url": "https://github.com/Adam-S-Daniel/adam-agentskills/pull/5",
+                         {"state": "removed", "url": "https://github.com/example-adopter/acsi-agentskills/pull/5",
                           "since": "2026-11-12T12:00:00Z"})
         # A merged removal of a skill whose verdict is no longer retire is not "removed".
         self.assertIsNone(s("skill", "a", "retain", [merged]))
         self.assertEqual(s("skill", "a", "retire", [self.pr("retire-skill/a", 6, repo="example-adopter/example-site-platform")])["state"], "pr-open")
         owner = self.issue("a", 11, labels=["agent-blocked"])
         self.assertEqual(s("skill", "a", "retire", issues=[owner]),
-                         {"state": "owner", "reason": "proposal", "url": "https://github.com/Adam-S-Daniel/skills-evals/issues/11"})
+                         {"state": "owner", "reason": "proposal", "url": "https://github.com/example-adopter/skills-evals/issues/11"})
         self.assertEqual(s("skill", "a", "retire", issues=[self.issue("a", 12, labels=["agent-blocked"], kind="agent")])["state"], "blocked")
         for label in ("agent-ready", "agent-working"):
             self.assertEqual(s("skill", "a", "retire", issues=[self.issue("a", 13, labels=[label])])["state"], "worker")
@@ -984,7 +975,7 @@ class RemovalStateTests(unittest.TestCase):
         guidance = self.load({"prs": [self.pr("retire-guidance/s", 3, repo="example-adopter/_agent-guidance")],
                               "issues": []})
         self.assertEqual(explorer_data.removal_of("guidance", "s", "retire", guidance)["url"],
-                         "https://github.com/Adam-S-Daniel/_agent-guidance/pull/3")
+                         "https://github.com/example-adopter/_agent-guidance/pull/3")
 
 
 class AlertTests(unittest.TestCase):
@@ -1060,8 +1051,8 @@ class AlertTests(unittest.TestCase):
         self.assertFalse([a for a in self.alerts() if a["name"] == "hidden"])
 
     def test_issue_urls_fill_the_regression_alerts_only(self):
-        url = "https://github.com/Adam-S-Daniel/skills-evals/issues/7"
-        guidance_url = "https://github.com/Adam-S-Daniel/skills-evals/issues/8"
+        url = "https://github.com/example-adopter/skills-evals/issues/7"
+        guidance_url = "https://github.com/example-adopter/skills-evals/issues/8"
         alerts = self.alerts({"skills-evals:regression:alpha": url,
                               "skills-evals:regression:guidance:sec-one": guidance_url,
                               "skills-evals:regression:beta": "https://example.com/not-github"})
@@ -1086,7 +1077,7 @@ class AlertTests(unittest.TestCase):
         t.pair("alpha", "20261030T100000Z", [Tree.trial(5, 5, 8.0, 0.1)],
                [Tree.trial(1, 5, 4.0, 0.1)])
         t.write_json("regressions/latest.json", self.ROWS)
-        url = "https://github.com/Adam-S-Daniel/skills-evals/issues/7"
+        url = "https://github.com/example-adopter/skills-evals/issues/7"
         doc = t.build(issues={"skills-evals:regression:alpha": url})
         found = [a for a in doc["alerts"] if a["kind"] == "regression"]
         self.assertEqual([(a["name"], a["url"]) for a in found], [("alpha", url)])
