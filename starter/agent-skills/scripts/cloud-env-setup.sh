@@ -110,7 +110,7 @@ done
 #   git -C <checkout> show origin/main:.claude/hooks/fleet-memory.sh | sha256sum
 # Merge the bump; environments pick it up when their setup snapshot expires.
 fleet_pin_commit=0ef732fdbd825e35ad6bd853855fe158b61ada2b
-fleet_pin_sha256=cfc01078b9d06990c2e458bade9aebffe10e7e25a97eaec23a59e2d3f28a2241
+fleet_pin_sha256=2a51a5dc7a097ca68bd72c3399f283eb54f89727ed52a353eaba179b2a79588d
 # The verified installer stays here: it re-reads its own file after it exits
 # (to write a delivery receipt), so it must outlive this script's temp dir.
 fleet_hook_dir=/opt/fleet-guidance

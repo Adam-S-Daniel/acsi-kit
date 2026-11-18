@@ -66,7 +66,7 @@ fails closed rather than launching without the guidance):
 #   git show origin/main:.claude/hooks/fleet-memory.sh | sha256sum
 # Then re-paste this block into every environment's setup AND maintenance script.
 fleet_pin_commit=0ef732fdbd825e35ad6bd853855fe158b61ada2b
-fleet_pin_sha256=cfc01078b9d06990c2e458bade9aebffe10e7e25a97eaec23a59e2d3f28a2241
+fleet_pin_sha256=2a51a5dc7a097ca68bd72c3399f283eb54f89727ed52a353eaba179b2a79588d
 fleet_guidance_install() (
   set -euo pipefail
   raw=https://raw.githubusercontent.com/example-adopter/_agent-guidance

@@ -499,6 +499,17 @@ regenerate:
       repos.yml pins the vendored hook's sha256 (test_self_hosted_hook_pin);
       substitution changed the hook's bytes. `ref` names a registry commit
       the adopter's registry will not have: REGENERATE.md.
+  - run: >-
+      python3 -I -c 'import hashlib,re,pathlib;
+      h=hashlib.sha256(pathlib.Path(".claude/hooks/fleet-memory.sh").read_bytes()).hexdigest();
+      p=pathlib.Path("docs/codex-cloud.md"); t=p.read_text();
+      n=re.subn(r"(?m)^(fleet_pin_sha256=)[0-9a-f]{64}$", lambda m: m.group(1)+h, t);
+      assert n[1]==1, n[1]; p.write_text(n[0])'
+    why: >-
+      Acsi-kit#74. docs/codex-cloud.md pins the sha256 of fleet-memory.sh and
+      test_codex_cloud_recipe holds it to the working-tree hook; the kit's hook
+      differs from the source's (C2 folds the first owner), so the pin follows
+      the kit's copy. The pinned commit is the source's: REGENERATE.md.
 
 # P2 citation spans that are really test data: protecting them would leave
 # the fixture on the source owner while the assertion beside it is
