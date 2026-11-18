@@ -1,13 +1,13 @@
 # The content library
 
-The optional skills, guidance sections and git hooks of the kit: the
-**recommended** and **opinionated** tiers of
+This folder holds the kit's optional skills, guidance sections, and git
+hooks: the **recommended** and **opinionated** tiers of
 [`bootstrap/content-catalog.json`](../bootstrap/content-catalog.json). The
-**core** items are already in [`starter/`](../starter/); items that are not
-shipped are in neither place.
+**core** items are already in [`starter/`](../starter/), and items the kit
+doesn't ship are in neither place.
 
-Nothing here is used until you choose it. Choose with the `/adopt` skill's
-content step, or run
+Nothing here is used until you choose it, either in the `/adopt` skill's
+content step or by running
 [`bootstrap/add-content.sh`](../bootstrap/add-content.sh) yourself:
 
 ```bash
@@ -15,17 +15,18 @@ bootstrap/add-content.sh --items recommended --dry-run   # see what would change
 bootstrap/add-content.sh --items recommended,writing-adrs
 ```
 
-It copies each chosen item into your copy of `starter/`, with everything the
-item needs to be tested and measured (its eval fixtures, its eval-coverage
-row, its impact-log entry, its tests), and rebuilds the files generated from
-them. Do not edit this folder by hand: `export/export.py` writes it, and
+It copies each chosen item into your copy of `starter/`, with everything
+needed to test and measure it (its eval fixtures, eval-coverage row,
+impact-log entry, and tests), and rebuilds the files generated from them.
+Don't edit this folder by hand: `export/export.py` writes it, and
 `export.py --check` compares it with a fresh export, like the starter trees.
 
 ## Layout
 
-One folder per item, `<kind>/<id>/` (`skills/`, `guidance/`, `git-hooks/`),
-and in it one folder per starter tree the item touches, named like the
-starter folder (`agent-guidance`, `agent-skills`, `skills-evals`):
+Each item has a folder, `<kind>/<id>/` (`skills/`, `guidance/`,
+`git-hooks/`). Inside it is one folder per starter tree the item touches,
+named after the starter folder (`agent-guidance`, `agent-skills`,
+`skills-evals`):
 
 | Path | What it is |
 |---|---|
@@ -35,9 +36,9 @@ starter folder (`agent-guidance`, `agent-skills`, `skills-evals`):
 
 ## Ops
 
-Each op names a `file` in the tree. Every op is idempotent: one that finds
-its change already made does nothing, so running `add-content.sh` twice
-changes nothing the second time.
+Each op names a `file` in the tree. Ops are idempotent: one that finds its
+change already made does nothing, so a second `add-content.sh` run changes
+nothing.
 
 | `op` | What it does |
 |---|---|
@@ -52,9 +53,9 @@ changes nothing the second time.
 | `insert-method` | adds the fragment, a method named `method`, at the end of class `class` (found by parsing the file) |
 | `copy-if` | copies the fragment to `to` once every item in `requires` is installed (a test module that tests two items' fixtures) |
 
-After the ops, `add-content.sh` rebuilds what is generated from the files it
-changed, as the export does: the fleet payload mirror
+After the ops, `add-content.sh` rebuilds what is generated from the changed
+files, as the export does: the fleet payload mirror
 (`.claude/hooks/fleet-guidance.md`) and the agent-checks runner
 (`.githooks/agent-checks`) in every starter tree, each tree's `AGENTS.md`,
-the section byte counts, the registry's README table and `skills.lock` (and
-the private registry's copy of it).
+the section byte counts, the registry's README table, and `skills.lock`,
+including the private registry's copy.

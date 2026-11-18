@@ -2,34 +2,34 @@
 
 ## What _agent-guidance holds
 
-[`_agent-guidance`](../starter/agent-guidance/README.md) is the guidance
-layer: the always-on rules, the machinery that delivers them to every repo
-and every session, and the specs the standing routines follow.
+[`_agent-guidance`](../starter/agent-guidance/README.md) holds the always-on
+rules, the machinery that delivers them to every repo and session, and the
+specs the standing routines follow.
 
 - `agents-md/base.md` is the fleet guidance. It ships the core sections,
   copied unchanged from the owner's guidance (their fixtures are in
-  `skills-evals`), the recommended and opinionated sections you chose with
-  `bootstrap/add-content.sh` ([choosing optional
-  content](skills.md#choosing-optional-content)), and an HTML-commented
-  template of a section above them (DECISIONS X9; a new
-  section also needs a row in `agents-md/eval-coverage.yml`, with its
-  `audience`, and an entry in `docs/guidance-impact.md`).
-  `agents-md/sections/` holds per-stack sections
-  (python, javascript, typescript, go, dotnet, rust, docker), each empty; a
-  repo asks for one in its `.agents-sync.yml`.
-- `agents-md/stub.md` is the short floor each consumer's `AGENTS.md` gets:
-  where the guidance comes from and what to read when it did not load, the
-  check value a session's first reply opens with, and one sentence of rules
-  that cannot be undone (no push to a default branch, no force-push, no
-  secret, no personal data in a CI log).
+  `skills-evals`), plus the recommended and opinionated sections you chose
+  with `bootstrap/add-content.sh` ([choosing optional
+  content](skills.md#choosing-optional-content)). An HTML-commented section
+  template sits above them (DECISIONS X9). A new section also needs a row in
+  `agents-md/eval-coverage.yml`, with its `audience`, and an entry in
+  `docs/guidance-impact.md`. `agents-md/sections/` holds empty per-stack
+  sections (python, javascript, typescript, go, dotnet, rust, docker), and a
+  repo requests one in its `.agents-sync.yml`.
+- `agents-md/stub.md` is the short minimum each consumer's `AGENTS.md` gets.
+  It says where the guidance comes from, what to read if it didn't load, and
+  which check value to open a session's first reply with. It also gives one
+  sentence of rules that protect against what can't be undone: no push to a
+  default branch, no force-push, no secrets, and no personal data in a CI
+  log.
 - `.github/fleet-contributor-rules.md` is the part of `base.md` an outside
-  contributor's agent needs, generated from the sections whose
-  `eval-coverage.yml` row says `audience: contributor`
+  contributor's agent needs. It is generated from the sections marked
+  `audience: contributor` in `eval-coverage.yml`
   (`scripts/build-contributor-rules.js`; ADR 0043).
-- `repos.yml` lists repos excluded from the sync, default sections, the
-  skills-bootstrap pin with the repos that receive that hook (each must
-  commit its own `skills.lock`), the switches for the agent-checks and
-  Dependabot deliveries, and `cron_coverage.fleet`, the repos the routines
+- `repos.yml` lists the repos excluded from the sync, the default sections,
+  the skills-bootstrap pin and the repos that receive that hook (each must
+  commit its own `skills.lock`), the switches for agent-checks and
+  Dependabot delivery, and `cron_coverage.fleet`, the repos the routines
   visit.
 - `.claude/hooks/` holds the hooks. The sync delivers `fleet-memory.sh` (the
   session-start delivery) with its payload `fleet-guidance.md`,
@@ -47,13 +47,13 @@ and every session, and the specs the standing routines follow.
 ## The sync
 
 On every merge that changes the guidance, `sync.yml` runs `scripts/sync.sh`
-over every repo of both owners in `SYNC_OWNERS`: it rebuilds each repo's
-managed `AGENTS.md` (everything under `## Repo-specific additions` is kept),
-writes the `CLAUDE.md` bridge (`@AGENTS.md`) where there is none, delivers
-the contributor rules, the hooks and the templates, and pushes straight to
-the default branch with a `guidance-sync` token. That push works on a
-protected branch because `fleet.yml` names the App as the ruleset's one
-bypass actor; where protection still rejects it, the sync opens a pull
+over every repo of both owners in `SYNC_OWNERS`. It rebuilds each repo's
+managed `AGENTS.md`, keeping everything under `## Repo-specific additions`.
+It writes the `CLAUDE.md` bridge (`@AGENTS.md`) where none exists, delivers
+the contributor rules, hooks, and templates, and pushes straight to the
+default branch with a `guidance-sync` token. The push works on a protected
+branch because `fleet.yml` lists that App as the ruleset's only bypass
+actor. Where protection still rejects the push, the sync opens a pull
 request with auto-merge instead. The nightly `drift-report.yml` writes
 `drift-report.md` to `persistent/drift-report`.
 
@@ -65,9 +65,9 @@ hook that installs it into user memory (`~/.claude/CLAUDE.md`, and
 instead, it once took 332.3k tokens in one multi-repo session.
 
 - **It delivers only to you** (ADR 0042): in a cloud session, or on a
-  machine that carries the owner marker `install-machine.sh` writes
+  machine with the owner marker that `install-machine.sh` writes
   ([machines](machine.md#install-on-each-durable-machine)). In anyone else's
-  clone the hook exits before it reads or writes anything, and their agent
+  clone, the hook exits before reading or writing anything, and their agent
   works from the stub and the contributor rules.
 - **A session with no fleet repo attached** runs no repo hook, so the
   `acsi-anything-anywhere` plugin's own session-start hook fetches `base.md`
@@ -75,35 +75,38 @@ instead, it once took 332.3k tokens in one multi-repo session.
 - **Proof it loaded** (ADR 0035): the installed guidance ends with a
   `fleet-guidance check value:` line, and the stub tells the agent to open
   its first reply with it, or with `none`.
-- **A repo that cannot take the hook** (`.claude/` ignored, or a
-  `settings.json` the sync cannot parse) gets `AGENTS_MD_MODE=full`: the
-  stub followed by the contributor rules, never `base.md`.
+- **A repo that can't take the hook** (`.claude/` is ignored, or the sync
+  can't parse its `settings.json`) gets `AGENTS_MD_MODE=full`: the stub plus
+  the contributor rules, never `base.md`.
 
-**Changing guidance.** Edit `base.md` (or a section) in a pull request on
-`_agent-guidance`. In the same pull request: copy `base.md` byte for byte
-to `.claude/hooks/fleet-guidance.md` (CI checks the mirror), give a new
-`##` heading a row in `agents-md/eval-coverage.yml` with its `audience`,
-add an entry to `docs/guidance-impact.md` for a changed section, and
-regenerate the contributor rules and this repo's own `AGENTS.md`. The
-repo's `AGENTS.md`, "Repo-specific additions", has the commands; CI fails on
-each one you miss. Two gates apply to these pull requests:
+**Changing guidance.** Edit `base.md` or a section in a pull request on
+`_agent-guidance`. In the same pull request, copy `base.md` byte for byte to
+`.claude/hooks/fleet-guidance.md` (CI checks the mirror), give any new `##`
+heading a row in `agents-md/eval-coverage.yml` with its `audience`, add a
+`docs/guidance-impact.md` entry for a changed section, and regenerate the
+contributor rules and this repo's `AGENTS.md`. The commands are in that
+`AGENTS.md`, under "Repo-specific additions", and CI fails on anything you
+miss. Two gates apply:
 
 - **The eval-protection gate** (`scripts/eval-protected.js`, in required
-  CI): a section or skill with eval evidence for its current text may
-  change only as a marked correctness fix, because any edit resets that
-  evidence (ADR 0033 and 0034).
-- **The weekly merge window** (ADR 0039): automation merges a change to
-  `base.md` or `agents-md/sections/` only on Monday from 17:00 to 19:00 UTC
-  (`scripts/base-md-merge-window.yml`), because every such merge restarts
-  each section's eval evidence. You may merge at any time, at that cost.
+  CI): any edit resets a section's or skill's eval evidence, so one with
+  evidence for its current text can change only through a marked correctness
+  fix (ADR 0033 and 0034).
+- **The weekly merge window** (ADR 0039): every merge to `base.md` or
+  `agents-md/sections/` restarts each section's eval evidence, so automation
+  merges those changes only on Monday from 17:00 to 19:00 UTC
+  (`scripts/base-md-merge-window.yml`). You can merge at any time, at that
+  cost.
 
 ## Checks before skills, skills before guidance
 
-A rule that a commit can show is broken becomes a check, not text:
+If a commit can show that a rule was broken, the rule becomes a check
+instead of text:
 
-- **agent-checks** is one runner, `templates/agent-checks/agent-checks`,
-  delivered to every fleet repo as `.githooks/agent-checks` with its CI
-  workflow `agent-checks.yml` (added once, never overwritten). Its checks:
+- **agent-checks** is a single runner,
+  `templates/agent-checks/agent-checks`, delivered to every fleet repo as
+  `.githooks/agent-checks`, along with its CI workflow `agent-checks.yml`
+  (added once, never overwritten). Its checks:
 
   | Check | Refuses |
   |---|---|
@@ -114,37 +117,37 @@ A rule that a commit can show is broken becomes a check, not text:
   | `gha-template-injection` | a workflow expression that zizmor's template-injection audit flags |
   | `pr-tldr` | a pull request whose description does not open with `## TLDR` (CI only) |
 
-  `rules-dir` is added when you choose it, a commented-out template shows
-  how to write another, and the `dated-phrasing` pass only warns. A repo's
-  own checks go in `.agent-checks/local.sh`, and fleet-wide ones in the
+  `rules-dir` is added if you choose it, a commented-out template shows how
+  to write another check, and the `dated-phrasing` pass only warns. A repo's
+  own checks go in `.agent-checks/local.sh`, and fleet-wide ones go in the
   template. Each refusal says what is wrong, why, and how to fix it, so the
-  rule does not need to sit in always-on guidance. Every run is logged
-  (`~/.local/state/agent-checks/runs.jsonl`), which is how a check's use is
+  rule doesn't need to sit in always-on guidance. Every run is logged to
+  `~/.local/state/agent-checks/runs.jsonl`, which is how a check's use is
   measured ([rules](../starter/skills-evals/docs/rules.md)).
-- **On your machine** a config-based git hook (Git 2.54+) runs it on every
-  commit and push, in clones of your two owners' repos only
+- **On your machine**, a config-based git hook (Git 2.54+) runs it on every
+  commit and push, but only in clones of your two owners' repos
   ([machines](machine.md#install-on-each-durable-machine)).
-- **In CI** the required `agent-checks` job runs it over a pull request's
-  commits. A hook can be skipped with `--no-verify`; the required check
-  cannot.
+- **In CI**, the required `agent-checks` job runs it over a pull request's
+  commits. `--no-verify` can skip a hook, but not the required check.
 - `templates/agent-checks/agent-checks-guard.sh` is a PreToolUse hook that
   stops an agent from skipping the hooks, repointing or editing them, or
   deleting a remote `persistent/*` branch.
 
-The order of preference for any new rule: a check that a commit can fail;
-then a skill; then a line of guidance. The fleet worker turns lessons into
-checks this way ([routines](routines.md#fleet-worker)).
+For any new rule, prefer a check that a commit can fail, then a skill, then
+a line of guidance. The fleet worker follows the same order when it turns
+lessons into checks ([routines](routines.md#fleet-worker)).
 
 ## Memory that points at its home
 
-A Claude Code memory note outside a repo must name the repo file that holds
-the fact (`metadata.home` as `<owner>/<repo>:<path>`); the note is a pointer
-([ADR 0013](../starter/agent-guidance/docs/decisions/0013-a-memory-note-outside-a-repo-names-its-home.md)).
-`memory-home.sh`, registered once per machine at user level by
-`install-machine.sh`, nudges at session start and blocks a session's stop
+A Claude Code memory note outside a repo is only a pointer, so it must name
+the repo file that holds the fact (`metadata.home` as
+`<owner>/<repo>:<path>`; [ADR
+0013](../starter/agent-guidance/docs/decisions/0013-a-memory-note-outside-a-repo-names-its-home.md)).
+`install-machine.sh` registers `memory-home.sh` once per machine at user
+level. The hook nudges at session start and blocks a session from stopping
 while a note it wrote has no home. A weekly routine curates the notes and
-promotes facts into issues the fleet worker picks up
-([memory curation](routines.md#memory-curation)).
+promotes facts into issues the fleet worker picks up ([memory
+curation](routines.md#memory-curation)).
 
 ## Where to read more
 

@@ -1,36 +1,39 @@
 # Quick start
 
-The easiest path is the guided one: clone this repo to a place outside any
-other git repository (the [README](../README.md#start-here) says why), run
-`claude` in the clone and type `/adopt`. It reads the real state of your account with
-[`bootstrap/status.sh`](../bootstrap/status.sh), explains the next step and
-runs each script with you, dry run first. To see where you are without it,
+The easiest path is the guided one. Clone this repo outside any other git
+repository (the [README](../README.md#start-here) says why), run `claude` in
+the clone, and type `/adopt`. It checks your account with
+[`bootstrap/status.sh`](../bootstrap/status.sh), explains the next step, and
+runs each script with you, dry run first. To see where you stand without it,
 run `bash bootstrap/status.sh` yourself. The table below is the same list
 ([`bootstrap/steps.json`](../bootstrap/steps.json)).
 
-Each step has a track. `/adopt` runs the **base** steps: guidance, the
-skills registries, repo settings, git hooks, machines and the routines that
-keep them. `/adopt-evals` adds the **evals** steps: the eval runner, its
-secrets and Apps, and the loop that measures, improves and retires skills
-and guidance. Run it later, or from the start for the whole system in one
-command: it runs the base steps first. Without evals, nothing measures your
-skills and guidance, and nothing improves or retires them automatically
-([with or without evals](before-you-start.md#with-or-without-evals)). The
-base never creates `skills-evals`: its first evals steps do
-([adding skills-evals](evals-and-loop.md#adding-skills-evals)), and every
-check runs on its own step's track, so the base reaches done without that
-repo and adding evals later undoes no base step.
+Each step belongs to a track. `/adopt` runs the **base** steps: guidance,
+the skills registries, repo settings, git hooks, machines, and the routines
+that maintain them. `/adopt-evals` adds the **evals** steps: the eval
+runner, its secrets and Apps, and the loop that measures, improves, and
+retires skills and guidance. Run it later, or run it from the start to set
+up everything with one command, since it runs the base steps first. Without
+evals, nothing measures, improves, or retires your skills and guidance
+automatically ([with or without
+evals](before-you-start.md#with-or-without-evals)).
 
-Every command runs from the kit's folder, with your config at `./fleet.env`.
-`<you>` is your `OWNER`. Each script takes `--dry-run`; run it first every
-time. Each is idempotent: a second run prints `Nothing to change`.
+The base never creates `skills-evals`. The first evals steps do ([adding
+skills-evals](evals-and-loop.md#adding-skills-evals)). Each check runs on
+its own step's track, so the base can finish without that repo, and adding
+evals later doesn't undo any base step.
 
-A starter pull request carries the export's whole tree, including workflows
-that run as soon as it merges. Review it, above all `.github/workflows/`,
-before you merge. Nothing is protected until step 20 applies `fleet.yml`, so
-a check that cannot pass yet does not block a merge;
-[merging the starter pull requests](settings-and-apps.md#merging-the-starter-pull-requests)
-lists the failures to expect. Do not add collaborators before step 20.
+Run every command from the kit's folder, with your config at `./fleet.env`.
+`<you>` is your `OWNER`. Every script takes `--dry-run`, so use it first
+each time. Scripts are idempotent: a second run prints `Nothing to change`.
+
+A starter pull request contains the export's whole tree, including workflows
+that run as soon as it merges. Review it before you merge, especially
+`.github/workflows/`. Nothing is protected until step 20 applies
+`fleet.yml`, so a check that can't pass yet won't block a merge. [Merging
+the starter pull
+requests](settings-and-apps.md#merging-the-starter-pull-requests) lists the
+failures to expect. Don't add collaborators before step 20.
 
 <!-- quickstart:begin -->
 <!-- generated from bootstrap/steps.json by bootstrap/render-quickstart.py: edit steps.json, then rerun it -->
@@ -84,9 +87,9 @@ lists the failures to expect. Do not add collaborators before step 20.
 
 `bash bootstrap/status.sh` prints one line per step: `done`, `next`, `todo`,
 `optional`, or `asked: done`. Steps marked `files` or `verify` in
-`steps.json` are checked against GitHub every time. Steps nothing can see
-from here (an App installation is visible, but a routine saved at claude.ai,
-a pasted setup script or another machine are not) are `ask` steps:
+`steps.json` are checked against GitHub every time. Anything the script
+can't see, such as a routine saved at claude.ai, a pasted setup script, or
+another machine, is an `ask` step:
 
 ```bash
 bash bootstrap/status.sh --mark 24     # after you saved the eval runner routine
@@ -94,15 +97,14 @@ bash bootstrap/status.sh --unmark 24   # if you marked it by mistake
 ```
 
 Your answers live in a state file outside every repo
-(`~/.local/state/adopt-the-whole-system/<owner>.json`).
-`--track base` or `--track evals` lists one track's steps and picks the
-next among them; every run also prints how many steps of each track are
-done.
+(`~/.local/state/adopt-the-whole-system/<owner>.json`). `--track base` or
+`--track evals` lists one track's steps and picks the next step from them.
+Every run also prints how many steps of each track are done.
 
-`bash bootstrap/verify.sh` checks the fast groups (repos, labels, branches,
-environments, variables, Apps and their installations, secrets by name);
-`--only settings` and `--only regen:<task>` clone repos to check the
-settings engine's drift and the regenerated files. Without evals, its
-`apps:` and `installs:` checks for `eval-improve` and `registry-read` and
-its `values:routine-fire` check fail by design; `status.sh --track base`
-is the base's check.
+`bash bootstrap/verify.sh` checks the fast groups: repos, labels, branches,
+environments, variables, Apps and their installations, and secrets by name.
+`--only settings` and `--only regen:<task>` clone repos to check for
+settings drift and the regenerated files. Without evals, its `apps:` and
+`installs:` checks for `eval-improve` and `registry-read` and its
+`values:routine-fire` check are expected to fail. Use
+`status.sh --track base` to check the base.
