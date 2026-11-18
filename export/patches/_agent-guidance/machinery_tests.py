@@ -45,7 +45,9 @@ def _cases(root: Path, lib) -> None:
     ids = [json.loads(l)["id"] for l in lines]
     if not set(RULES_DIR_CASES) <= set(ids):
         raise SystemExit(f"machinery_tests: the case table lacks a rules-dir case: {RULES_DIR_CASES}")
-    kept = [l for l, i in zip(lines, ids) if i not in RULES_DIR_CASES]
+    # The cases tagged with a lesson belong to the source owner's lesson checks,
+    # which blank_content.py leaves out of the runner (acsi-kit#74).
+    kept = [l for l, i in zip(lines, ids) if i not in RULES_DIR_CASES and "lesson" not in json.loads(l)]
     moved = [l for l, i in zip(lines, ids) if i in RULES_DIR_CASES]
     path.write_text("".join(l + "\n" for l in kept), encoding="utf-8")
     lib.write_fragment("git-hook", "rules-dir", "agent-guidance", "cases.jsonl", "".join(l + "\n" for l in moved))
