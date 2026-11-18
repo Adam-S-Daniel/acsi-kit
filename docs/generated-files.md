@@ -97,7 +97,12 @@ has created it (step 38).
 
 `wsl-automation`'s `scripts/sync-codex-cloud-environments.sh` downloads your
 registry's skills-bootstrap hook at a reviewed commit and checks its digest;
-both ship as zeros, which fail closed (setup reports skills `DEGRADED`).
+both ship as zeros, which fail closed (setup reports skills `DEGRADED`). The
+same script downloads the fleet-guidance installer from `_agent-guidance` at
+its own pin (`fleet_pin_commit`, `fleet_pin_sha256`) and fails setup if the
+download or digest check fails; the pin ships as placeholders too, so set both
+before you use Codex Cloud, by hand: `codex-pin` does not set them, and the
+commands to run are in the script's comments.
 `bash bootstrap/regenerate.sh codex-pin` sets them to your `acsi-agentskills`
 HEAD and its hook's sha256, runs the script's own test with the new pin,
 and proposes the change. Skip it if you do not use Codex.

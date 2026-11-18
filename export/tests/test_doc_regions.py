@@ -61,6 +61,8 @@ def kit(tmp_path, monkeypatch):
     """A kit with one region, the fleet worker's, and the others dropped."""
     name = "fleet-worker-prompt"
     monkeypatch.setattr(doc_regions, "REGIONS", {name: doc_regions.REGIONS[name]})
+    # The test spec has one prompt, under the default anchor.
+    monkeypatch.setattr(doc_regions, "ANCHORS", {})
     page, spec = doc_regions.REGIONS[name]
     (tmp_path / page).parent.mkdir(parents=True)
     (tmp_path / spec).parent.mkdir(parents=True)
@@ -297,3 +299,13 @@ def test_the_routines_page_names_the_by_hand_variables_and_secrets():
     assert source, "bootstrap/README.md lists no by-hand name with a site, article, sweep or worker prefix"
     agree("docs/routines.md", routines_page_names(), "bootstrap/README.md 'set by hand' (or a bootstrap script)",
           source, allowed_extra=script_set_names())
+
+
+def test_a_spec_with_two_prompts_gives_each_region_its_own():
+    spec = (
+        "- **Fleet prompt, exactly:**\n\n  > one\n\n"
+        "- **Loop prompt, exactly:**\n\n  > two\n"
+    )
+    assert doc_regions.extract_prompt(spec, "s.md", "Fleet prompt, exactly") == ["one"]
+    assert doc_regions.extract_prompt(spec, "s.md", "Loop prompt, exactly") == ["two"]
+    assert {"fleet-worker-prompt", "loop-worker-prompt"} <= set(doc_regions.ANCHORS)

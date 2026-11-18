@@ -16,7 +16,7 @@
 repo: wsl-automation
 kit_name: wsl-automation
 source: wsl-automation
-source_sha: 9b8e990ceb241f1781746b89a81b9e0882d53ab9
+source_sha: ea9a6d8f0ba196659d0c5162f95512a893b4df11
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror,
 # the agent-checks runner) are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -246,6 +246,18 @@ edits:
     why: >-
       notes Q6. A pin of the source registry's file cannot be substituted;
       zeros fail closed and the test stubs both the download and sha256sum.
+
+  # ---- Codex Cloud fleet-guidance installer pin (_agent-guidance ADR 0043): the
+  # same shape as Q6. It names the source owner's _agent-guidance commit and
+  # digest, which an adopter's repository will not have.
+  - path: scripts/sync-codex-cloud-environments.sh
+    old: "readonly fleet_pin_commit='0ef732fdbd825e35ad6bd853855fe158b61ada2b'\nreadonly fleet_pin_sha256='cfc01078b9d06990c2e458bade9aebffe10e7e25a97eaec23a59e2d3f28a2241'\n"
+    new: "# These placeholders fail closed: the download 404s or the digest mismatches,\n# and setup fails. Set both from your _agent-guidance main (commands above) before the\n# first sync.\nreadonly fleet_pin_commit='1111111111111111111111111111111111111111'\nreadonly fleet_pin_sha256='1111111111111111111111111111111111111111111111111111111111111111'\n"
+    why: >-
+      A pin of the source owner's file cannot be substituted; placeholders
+      fail closed, as the bootstrap pin's zeros do (the test's fake sha256sum
+      tells the two digests apart, so they cannot both be zeros). No regenerate.sh task sets this pin
+      yet (see DECISIONS, re-pin round).
 
   # ---- X10: comments in kept code that named the left-out tasks.
   - path: src/WslAutomation/Private/Get-WslAutomationDefaultPwshPath.ps1

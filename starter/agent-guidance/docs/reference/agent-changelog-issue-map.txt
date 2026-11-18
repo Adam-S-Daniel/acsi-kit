@@ -35,3 +35,10 @@ claude-code/2026-11-10/1 example-adopter/_agent-guidance#501
 claude-code/2026-11-13/1 example-adopter/acsi-agentskills#155
 claude-code/2026-11-14/1 example-adopter/skills-evals#1023
 claude-code/2026-11-14/2 example-adopter/skills-evals#1024
+claude-code/2026-11-17/1 example-adopter/skills-evals#1082
+claude-code/2026-11-17/2 example-adopter/wsl-automation#119
+claude-code/2026-11-17/3 example-adopter/_agent-guidance#589
+claude-code/2026-11-17/4 example-adopter/_agent-guidance#590
+claude-code/2026-11-18/1 example-adopter/skills-evals#1091
+claude-code/2026-11-18/1 example-adopter/wsl-automation#123
+claude-code/2026-11-18/2 example-adopter/_agent-guidance#596

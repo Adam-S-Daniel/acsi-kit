@@ -211,7 +211,7 @@ TEST_EDITS = {
         ('        "example-adopter/claude-memory-map": ["test", "agent-checks"],\n', ""),
         ('        "example-adopter/fastmail-actions": ["pester", "agent-checks"],\n        "example-adopter/GHA-bench": ["test"],\n', ""),
         ('        "example-adopter/ai-usage-dashboard": ["node-test", "pester", "agent-checks"],\n', ""),
-        ('        "example-adopter/verify-actions-lock": ["test", "self-verify", "agent-checks"],\n        "example-adopter/acsi-kit": ["test", "agent-checks"],\n        "example-adopter/security-alerts": ["agent-checks", "unit"],\n', ""),
+        ('        "example-adopter/verify-actions-lock": ["test", "self-verify", "agent-checks"],\n        "example-adopter/acsi-kit": ["test", "agent-checks", "starter-suites"],\n        "example-adopter/security-alerts": ["agent-checks", "unit"],\n', ""),
         ('        "example-adopter/retired-agentskills": ["pytest-windows"],\n', ""),
         ('                "example-adopter/_agent-guidance",\n                "example-adopter/GHA-bench",\n                "example-adopter/security-alerts",\n',
          '                "example-adopter/_agent-guidance",\n'),

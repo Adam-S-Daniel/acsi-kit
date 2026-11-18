@@ -2801,3 +2801,23 @@ The daily re-sync (acsi-kit#69) moved `repo-settings`, `skills-evals` and `wsl-a
 | wsl-automation | `8f1a0642a2e4` | `9b8e990ceb24` |
 
 Reverse: re-pin the three old shas.
+
+## Re-pin round 17 (2026-11-18): the held-back re-sync, `_agent-guidance` and `repo-settings`
+
+The daily re-sync (acsi-kit#70) held `_agent-guidance` and `repo-settings` back. The fix moves every source to its head.
+
+- `_agent-guidance` merged its `_agent-guidance#593` test changes, so the three `test/test_guidance_load_record.py` edits (which carried them "verbatim, not merged") are dropped.
+- `_agent-guidance` split the fleet worker into a Fleet worker and a Loop worker, each with its own prompt in `docs/routines/fleet-worker.md`. `export/doc_regions.py` takes a per-region anchor (`ANCHORS`) so the spec's two prompts each have a generated region; `docs/routines.md` and `docs/quick-start.md` name both tasks and the Loop worker's variables.
+- `_agent-guidance` ADR 0043: consumer repos no longer carry `fleet-memory.sh`, `fleet-guidance.md` or `guidance-load-record.sh`. `docs/guidance.md` and `docs/machine.md` say so.
+- `repo-settings` added `starter-suites` to the `acsi-kit` required checks in its test; the `kit_config.py` patch's old text follows it.
+- `wsl-automation`'s Codex Cloud setup now downloads the fleet-memory installer at `fleet_pin_commit` and `fleet_pin_sha256`, the source owner's. A new `edits` entry replaces them with placeholders of ones (zeros would collide with the bootstrap pin's zeros in the script's test, whose fake `sha256sum` tells the two apart), which fail closed. No `regenerate.sh` task sets this pin yet: an adopter sets it by hand (`docs/generated-files.md`). Follow-up for a maintainer.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `98cba5996ecd` | `48a8c0bd9266` |
+| agentskills | `7bad3acd94d8` | `6d059b7f2684` |
+| repo-settings | `5eb0115ff64a` | `ef50cf20847f` |
+| skills-evals | `4eb724eb85f9` | `a82931b42475` |
+| wsl-automation | `9b8e990ceb24` | `ea9a6d8f0ba1` |
+
+Reverse: re-pin the five old shas, restore the three `test_guidance_load_record.py` edits, the old `kit_config.py` anchor, the `ANCHORS` table and the pages' wording.
