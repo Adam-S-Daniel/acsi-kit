@@ -183,6 +183,7 @@ class Base(unittest.TestCase):
         self.source_profile = tree(self.home / ".claude")
         self.version_log = self.root / "versions.log"
         self.env = {"PATH": str(self.bin) + os.pathsep + os.defpath,
+                    run_eval.SANDBOX_PROBE_SKIP_ENV: "1",
                     "HOME": str(self.home), "GIT_CONFIG_NOSYSTEM": "1",
                     "GIT_CONFIG_GLOBAL": "/dev/null",
                     "GIT_AUTHOR_NAME": "Fixture", "GIT_COMMITTER_NAME": "Fixture",
@@ -1110,6 +1111,7 @@ class EndToEndTests(Base):
         self.assertIs(sandbox["enabled"], True)
         self.assertIs(sandbox["failIfUnavailable"], True)
         self.assertIs(sandbox["allowUnsandboxedCommands"], False)
+        self.assertIs(sandbox["autoAllowBashIfSandboxed"], True)
         self.assertEqual(sandbox["network"], run_eval.arm_sandbox_settings()["sandbox"]["network"])
         denied = sandbox["filesystem"]["denyRead"]
         scratch_home = Path(call["env"]["HOME"])

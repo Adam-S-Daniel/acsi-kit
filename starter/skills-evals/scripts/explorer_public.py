@@ -28,8 +28,9 @@ field again before the document is written.
     `private: false`; every other one, and the producers' own `other` and
     `private` folds, become PRIVATE_BUCKET, whose rows are published only when
     at least `min_private_repos` distinct named non-public repositories fed it
-    (so with the producers' folds alone it never shows). The verdicts follow
-    evals/hook-policy.yml.
+    (so with the producers' folds alone it never shows). A hidden bucket still
+    counts in each check's `window_totals` and verdict, which name no
+    repository. The verdicts follow evals/hook-policy.yml.
   * `lesson_funnel`: how lessons ended (a check, a skill, guidance, nothing,
     still open), counted over public issues and pull requests only.
   * `activity`: the last ACTIVITY_DAYS of pull requests (open, or merged in the
@@ -233,17 +234,31 @@ def build_evals(tree: Path, report_base: str, skill_names: set, section_ids: set
 # --- hooks -------------------------------------------------------------------------
 
 def fleet_checks(agent_checks_dir: Path | None) -> list | None:
-    """The fleet runner's check ids, from its source parsed as Bash (never a
-    line scan): the literal first argument of every `note_ran` call, and the
-    words of the `lesson_checks` assignment. None without a readable runner
-    or the parser, or when the source does not parse."""
+    """The fleet runner's check ids (`fleet_check_ids`) as catalog entries.
+    None without a readable runner or the parser, or when the source does not
+    parse."""
     if agent_checks_dir is None:
         return None
     try:
         source = (Path(agent_checks_dir) / "agent-checks").read_bytes()
+    except OSError:
+        return None
+    ids = fleet_check_ids(source)
+    if ids is None:
+        return None
+    return [{"name": i, "where": "fleet", "repo": None, "source_url": RUNNER_URL}
+            for i in sorted(ids)]
+
+
+def fleet_check_ids(source: bytes) -> set | None:
+    """The check ids in the fleet runner's source, parsed as Bash (never a
+    line scan): the literal first argument of every `note_ran` call, and the
+    words of the `lesson_checks` assignment, less `repo-local`. None without
+    the parser or when the source does not parse."""
+    try:
         from scorers import bash_ast  # harness/scorers
         root = bash_ast.parse_bash(source)
-    except (OSError, ValueError, ImportError):
+    except (ValueError, ImportError):
         return None
     ids: set = set()
     pending = [root]
@@ -261,9 +276,7 @@ def fleet_checks(agent_checks_dir: Path | None) -> list | None:
                     and not any(c.type in ("expansion", "simple_expansion", "command_substitution")
                                 for c in value.named_children):
                 ids.update(value.text.decode("utf-8", "replace").strip("\"'").split())
-    ids = {i for i in ids if _CHECK_ID_RE.fullmatch(i)} - {REPO_LOCAL}
-    return [{"name": i, "where": "fleet", "repo": None, "source_url": RUNNER_URL}
-            for i in sorted(ids)]
+    return {i for i in ids if _CHECK_ID_RE.fullmatch(i)} - {REPO_LOCAL}
 
 
 def repo_checks(context_repos: dict | None, public: frozenset | None) -> list:
@@ -394,8 +407,11 @@ def build_hooks(tree: Path, now: datetime, agent_checks_dir: Path | None,
     if not shown:
         checks.pop((REPO_LOCAL, PRIVATE_BUCKET), None)
 
-    def rows_of(cells: dict) -> list:
-        out = [c for c in cells.values() if shown or c["repo"] != PRIVATE_BUCKET]
+    def rows_of(cells: dict, hidden: bool = False) -> list:
+        """The cells, newest first; the private bucket only when it is shown,
+        or when `hidden` asks for every cell (a verdict's input, never
+        published row by row)."""
+        out = [c for c in cells.values() if shown or hidden or c["repo"] != PRIVATE_BUCKET]
         return sorted(out, key=lambda c: (c["week"], c["surface"], c["repo"] or ""), reverse=True)
 
     start = min(timeweeks.week_monday(label)
@@ -403,7 +419,11 @@ def build_hooks(tree: Path, now: datetime, agent_checks_dir: Path | None,
     entries = []
     for key, entry in sorted(checks.items(), key=lambda kv: (kv[0][1] or "", kv[0][0])):
         mine = rows_of(use.get(key, {})) if rows is not None else None
-        entry.update(use=mine, **verdict(mine, start, policy))
+        # The verdict and its window totals count the hidden private bucket
+        # too: like `totals`, they are sums that name no repository. Leaving
+        # it out read every block in a private repository as no block at all.
+        every = rows_of(use.get(key, {}), hidden=True) if rows is not None else None
+        entry.update(use=mine, **verdict(every, start, policy))
         entries.append(entry)
     out = {"window": {"weeks": policy["window_weeks"], "from": start,
                        "to": now.date().isoformat()},
@@ -416,7 +436,24 @@ def build_hooks(tree: Path, now: datetime, agent_checks_dir: Path | None,
     # cloud record exists.
     if cloud_source is not None:
         out["cloud_from"] = _stamp(cloud_source["from"])[:10]
+    # When each count file was written, so the page dates the hook counts by
+    # their own files rather than by the document (2026-11-15: the page's one
+    # read range left them out).
+    read_at = {surface: _hook_file_time(tree, name)
+               for surface, name in (("local", "weekly-local.json"), ("ci", "weekly-ci.json"))}
+    if cloud_source is not None:
+        read_at["cloud"] = _stamp(cloud_source.get("to"))
+    out["read_at"] = read_at
     return out
+
+
+def _hook_file_time(tree: Path, name: str) -> str | None:
+    """A weekly usage file's `generated_at`, or None when it is unreadable
+    or not of this schema."""
+    doc = _read_json(tree / "usage" / name)
+    if not isinstance(doc, dict) or doc.get("schema") != skill_usage.SCHEMA:
+        return None
+    return _stamp(doc.get("generated_at"))
 
 
 def verdict(rows: list | None, start: str, policy: dict) -> dict:

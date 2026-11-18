@@ -2688,6 +2688,29 @@ All five public pins move to their heads; `agentskills-private` keeps its pin. T
 
 Reverse: re-pin the old shas, put back the five excludes and the four `REVIEWED` lines, and drop the "Eval rules" row from `blank_content.py`.
 
+## Re-pin round 15 (2026-11-16): follow two source changes
+
+The daily re-sync held `_agent-guidance` and `agentskills` back. All five public pins move to their heads; `agentskills-private` keeps its pin.
+
+- `_agent-guidance` rewrote the run-log tests in `test/test_agent_check_lane.py` to build the expected list with `expected_checks([...], declared_lessons())`, so lesson checks are spliced in after `skill-shell`. `patches/_agent-guidance/machinery_tests.py` follows: its `LANE_EDITS` and the `rules-dir` library item's replace ops match the new text, keeping what they do (the kit's list has no `rules-dir`, and the library item puts it back), and one more edit covers the new lesson-path test's `want = expected_checks(...)` line.
+- `_agent-guidance`'s `docs/routines/article-lift.md` now names the owner's `rss-inator` repo, which the kit does not ship, so `test_routine_prompts_name_only_kit_repos` (C11) fired. A new `edits` entry rewords the sentence to say a clone of the feed's own repository shows how the feed is built, not its items.
+- `agentskills` fixed the three `synced/manifest.json` wordings in `skills-doctor/SKILL.md` that the prompt-audit sweep edited, so the three edits are dropped.
+- The `rules-dir` item's `ops.json` in `library/` was updated by hand (the sync does not rewrite `library/`), and `starter/agent-skills-private/.githooks/agent-checks` is a byte copy of the new runner template, as the bootstrap's self-test requires.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `0ef732fdbd82` | `98cba5996ecd` |
+| agentskills | `bc0b75555d52` | `7bad3acd94d8` |
+| repo-settings | `bcd342771667` | `dc90f3ade2dd` |
+| skills-evals | `b93d1d9a79f6` | `0db7977156c0` |
+| wsl-automation | `4aa4768aadb6` | `8f1a0642a2e4` |
+
+- The `starter-suites` check (acsi-kit#72) found two more breaks at these pins, fixed in the manifests:
+  - `_agent-guidance`'s runner template now carries its owner's first lesson check (`lesson-memory-485-1`, a `case` arm in `check_lessons`). `blank_content.py` blanks `lesson_checks` and the `check_lessons` body back to the empty slot, as the kit ships no lessons, and `agentskills`' own `test_agent_checks.py` splices its fixture into exactly that text. `test_runner_ships_no_lessons.py` locks it, and `starter/agent-skills-private`'s runner is again a byte copy. `machinery_tests.py` drops the four case lines tagged with that lesson from `test/fixtures/agent-checks-cases.jsonl`, which the lane test would otherwise run against the blank slot.
+  - `docs/codex-cloud.md` (agent-guidance) and `scripts/cloud-env-setup.sh` (agent-skills) pin the sha256 of `fleet-memory.sh`, and their tests hold the pin to the tree's own hook. The kit's hook differs from the source's (C2 folds the first owner), so a `regenerate` step in each manifest rewrites the pin to the kit's copy. The pinned commit stays the source's; `REGENERATE.md` covers it like `repos.yml`'s `ref`.
+
+Reverse: re-pin the old shas, restore the three `skills-doctor` edits and the old `LANE_EDITS` and library ops, and drop the `article-lift.md` edit.
+
 ## Starter suite repair (2026-11-16, acsi-kit#72)
 
 The re-pin rounds since the kit's first commit never ran the exported tree's own

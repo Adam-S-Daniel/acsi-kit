@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write `explorer/latest.json`: the public data behind the Evals Explorer (#72).
+"""Write `explorer/latest.json`: the public data behind the Improvement Loop Explorer (#72).
 
   explorer_data.py --results-tree DIR --roster evals/roster.yml
                    --policy evals/gate-policy.yml --as-of TIME
@@ -187,7 +187,7 @@ only the issues, its `date`, `items` and `left_out` are None (unknown, not
 empty). `finish` holds every item and issue to its keys.
 
 THE PUBLIC DATA CONTRACT (2026-11-04) makes this document the single public data contract
-of the Evals Explorer and the project dashboard, still `schema_version` 1:
+of the Improvement Loop Explorer and the project dashboard, still `schema_version` 1:
 the change only adds fields, so a reader of the earlier document keeps
 working. `explorer/schema.json`
 describes all of it, and `main` validates the document against it after
@@ -1885,7 +1885,11 @@ def test_queue(cells: list, model_weights: dict, now,
         if newest is None or cell.get("stakes") == "none" \
                 or (cell["class"] in ("missing", "insufficient") and cell.get("verdict") != "keep"):
             continue
-        due = plan_week._iso(newest + plan_week.recheck_after(cell))
+        # A kept cell's re-check window is timed by the gate, as the planner
+        # reads it (`recheck_due_at`).
+        standing = plan_week.recheck_due_at(cell)
+        due = plan_week._iso(standing if standing is not None
+                             else newest + plan_week.recheck_after(cell))
         if entry["due"] is None or due < entry["due"]:
             entry["due"] = due
     return out
@@ -1902,21 +1906,52 @@ def renumber(subjects: list) -> None:
 
 
 def usage_counts(tree: Path) -> tuple:
-    """({skill: invocations}, the window) from `usage/weekly-local.json`:
+    """({skill: {"invocations": calls, "reads": read uses}}, the window) from
+    `usage/weekly-local.json`:
     every week of the file summed, so a skill the census never saw is 0 while
     the file exists. ({}, None) without a readable file (unknown, not zero).
     The census already folds every non-public name into `other`; the caller
-    attaches a count only to a listed skill."""
+    attaches a count only to a listed skill.
+
+    A count adds the cloud uses too: the cloud `skill-digest` rows, one per
+    skill use a cloud session uploaded. The census counts a use seen both
+    locally and in the cloud once, as local, so the two never overlap (the
+    same sum `skill_usage` reads for removal). The window's `cloud` names the
+    cloud `skill-records` source ({from, to, events_scanned}), or is None when
+    the census has none (cloud uses not counted).
+
+    `reads` sums the `skill-read` rows on every surface: sessions that used
+    the skill only by reading its installed files (the owner, 2026-11-15). The
+    census writes one only for a session that never called the skill, so
+    calls plus reads is the use count `skill_usage.weight` reads too."""
     doc = skill_usage.load(tree / "usage" / "weekly-local.json")
     if doc is None:
         return {}, None
     counts = {}
     for row in doc["rows"]:
-        if row["kind"] == "skill" and isinstance(row.get("invocations"), int):
-            counts[row["name"]] = counts.get(row["name"], 0) + row["invocations"]
+        if not isinstance(row.get("invocations"), int):
+            continue
+        field = "invocations"
+        if row["kind"] == "skill":
+            name = row["name"]
+        elif row["kind"] == skill_usage.READ_KIND and isinstance(row.get("name"), str):
+            name, field = skill_usage.skill_basename(row["name"]), "reads"
+        elif (row["kind"] == skill_usage.DIGEST_KIND
+              and row.get("surface") == skill_usage.SURFACE_CLOUD
+              and isinstance(row.get("name"), str)):
+            name = skill_usage.skill_basename(row["name"])
+        else:
+            continue
+        count = counts.setdefault(name, {"invocations": 0, "reads": 0})
+        count[field] += row["invocations"]
     source = next((s for s in doc["sources"] if s.get("scope") == "transcripts"), {})
+    cloud = next((s for s in doc["sources"] if s.get("scope") == skill_usage.DIGEST_SCOPE
+                  and s.get("surface") == skill_usage.SURFACE_CLOUD), None)
     window = {"from": source.get("from"), "to": source.get("to"),
-              "sessions_scanned": source.get("sessions_scanned"), "surface": source.get("surface")}
+              "sessions_scanned": source.get("sessions_scanned"), "surface": source.get("surface"),
+              "cloud": None if cloud is None else {
+                  "from": cloud.get("from"), "to": cloud.get("to"),
+                  "events_scanned": cloud.get("events_scanned")}}
     return counts, window
 
 
@@ -2193,7 +2228,7 @@ def build(tree: Path, roster_path: Path, policy_path: Path, evals_dir: Path, as_
                        "next_test": queue.get(("skill", name), unqueued),
                        "stakes": stakes_of("skill", name),
                        "usage": None if usage_window is None
-                       else {"invocations": counts.get(name, 0)},
+                       else counts.get(name, {"invocations": 0, "reads": 0}),
                        "copies": copies,
                        "discarded_runs": discarded_runs(verdict),
                        "run_utility": run_utility(verdict),

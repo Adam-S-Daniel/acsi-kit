@@ -4,7 +4,7 @@
 repo: agentskills
 kit_name: agent-skills
 source: adam-agentskills
-source_sha: bc0b75555d5205c69311b9f4a1e1c618dfb69a50
+source_sha: 7bad3acd94d87550c1be44c1ba7f0e82423e0232
 after: [_agent-guidance]
 
 exclude:
@@ -86,83 +86,6 @@ edits:
       the kit does not ship, so it fails on a missing SKILL.md. The gate it
       exercises (a body edit to a skill granting Bash) stays covered by the
       synthetic-skill tests above it.
-  - path: scripts/test_fleet_guidance_hook.py
-    stage: output
-    old: |+
-      def tool_farm(directory: Path, leave_out) -> Path:
-          """A directory of symlinks to every tool on the clean PATH except `leave_out`."""
-          directory.mkdir(parents=True, exist_ok=True)
-          for entry in clean_path().split(os.pathsep):
-              folder = Path(entry)
-              if not folder.is_dir():
-                  continue
-              for tool in folder.iterdir():
-                  if leave_out(tool.name) or (directory / tool.name).exists() \
-                          or (directory / tool.name).is_symlink():
-                      continue
-                  (directory / tool.name).symlink_to(tool)
-          return directory
-
-
-    new: |+
-      def tool_farm(directory: Path, leave_out) -> Path:
-          """A directory of symlinks to every tool on the clean PATH except `leave_out`.
-
-          Only executable files count, as in a PATH lookup: a non-executable file that
-          shares a tool's name earlier on PATH (a sourced `env` script in a shell
-          tool's bin directory) must not shadow the real tool."""
-          directory.mkdir(parents=True, exist_ok=True)
-          for entry in clean_path().split(os.pathsep):
-              folder = Path(entry)
-              if not folder.is_dir():
-                  continue
-              for tool in folder.iterdir():
-                  if leave_out(tool.name) or (directory / tool.name).exists() \
-                          or (directory / tool.name).is_symlink() \
-                          or not (tool.is_file() and os.access(tool, os.X_OK)):
-                      continue
-                  (directory / tool.name).symlink_to(tool)
-          return directory
-
-
-      @posix_only
-      def test_tool_farm_skips_a_non_executable_file_that_shadows_a_tool(tmp_path, monkeypatch):
-          shadow = tmp_path / "shadow"
-          shadow.mkdir()
-          (shadow / "env").write_text("# sourced, not run\n", encoding="utf-8")
-          (shadow / "env").chmod(0o644)
-          monkeypatch.setenv("PATH", os.pathsep.join([str(shadow), "/usr/bin", "/bin"]))
-          farm = tool_farm(tmp_path / "farm", lambda name: False)
-          assert os.access(farm / "env", os.X_OK)
-          assert (farm / "env").resolve() != (shadow / "env").resolve()
-
-
-    why: >-
-      Hermeticity, adam-agentskills cb4f17e verbatim (2026-11-14, after this
-      pin). tool_farm linked the first file of each name on PATH, executable
-      or not; with atuin installed, its non-executable ~/.atuin/bin/env
-      shadowed /usr/bin/env, the hook's `env` failed and
-      test_a_missing_curl_falls_back saw no verdict line. Its old text is
-      the pre-fix function, so this edit stops matching once the pin
-      includes cb4f17e: drop it then.
-  # ---- Prompt-audit sweep (issue 37): skills-doctor contradicts itself on the account store path
-  - path: plugins/adam-coding-anywhere/skills/skills-doctor/SKILL.md
-    old: "  `synced/manifest.json`, `claude plugin list`), attribute every skill to the\n"
-    new: "  `synced/<bucket>/manifest.json`, `claude plugin list`), attribute every skill to the\n"
-    why: >-
-      The skill's own trap section says current CLIs write
-      `synced/<bucket>/manifest.json` (the flat file is the older layout), and
-      its commands glob the bucket, but its description and channel table named
-      the flat path. Fixed here so adopters get the consistent text; the source
-      registry carries the same wording and needs the same fix upstream.
-  - path: plugins/adam-coding-anywhere/skills/skills-doctor/SKILL.md
-    old: "| `foo` (bare) | account store | `foo` has a record in `synced/manifest.json` |\n"
-    new: "| `foo` (bare) | account store | `foo` has a record in `synced/<bucket>/manifest.json` |\n"
-    why: Same contradiction as above (channel table).
-  - path: plugins/adam-coding-anywhere/skills/skills-doctor/SKILL.md
-    old: "is what separates them. A skill in `synced/manifest.json` came from the\n"
-    new: "is what separates them. A skill in `synced/<bucket>/manifest.json` came from the\n"
-    why: Same contradiction as above (the paragraph under the table).
   # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
     old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"
@@ -436,6 +359,18 @@ regenerate:
       owner's full guidance (re-pin 2026-11-03).
   - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/fleet-memory.sh, to: plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh}
     why: The plugin hook's bundled installer, a verbatim copy of _agent-guidance's (byte-identical in the sources).
+  - run: >-
+      python3 -I -c 'import hashlib,re,pathlib;
+      h=hashlib.sha256(pathlib.Path(".claude/hooks/fleet-memory.sh").read_bytes()).hexdigest();
+      p=pathlib.Path("scripts/cloud-env-setup.sh"); t=p.read_text();
+      n=re.subn(r"(?m)^(fleet_pin_sha256=)[0-9a-f]{64}$", lambda m: m.group(1)+h, t);
+      assert n[1]==1, n[1]; p.write_text(n[0])'
+    why: >-
+      Acsi-kit#74. The owner block pins the sha256 of the fleet-memory.sh the
+      source holds, and test_owner_block_pin_is_the_bundled_fleet_memory_digest
+      holds it to the bundled copy; the kit's copy differs (C2 folds the
+      source's first owner), so the pin follows the kit's copy. The pinned
+      commit is the source's, as in repos.yml's `ref`: REGENERATE.md.
   - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/github-write-marker.sh, to: plugins/acsi-anything-anywhere/hooks/github-write-marker/github-write-marker.sh}
     why: >-
       The plugin's write-marker hook, a verbatim copy of _agent-guidance's

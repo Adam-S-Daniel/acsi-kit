@@ -14,7 +14,8 @@ GitHub starts scheduled runs one to two hours late. This repository has it set
 to 6 (seen in the fire job logs on 2026-11-12), so the worker fires every 6 hours. Why it exists, and why it may merge the
 kinds of PR its merge rule allows: [ADR 0025](../decisions/0025-a-cloud-fleet-worker-merges-narrow-instruction-fixes.md),
 widened to skill text, fleet guidance and partial fixes by [ADR 0028](../decisions/0028-the-fleet-worker-merges-skill-guidance-and-partial-fixes.md),
-and to reviewed agent-made changes and the hook pin bump by [ADR 0041](../decisions/0041-the-fleet-worker-merges-reviewed-agent-made-changes.md).
+to reviewed agent-made changes and the hook pin bump by [ADR 0041](../decisions/0041-the-fleet-worker-merges-reviewed-agent-made-changes.md),
+and to the issue worker's own reviewed fixes by [ADR 0045](../decisions/0045-the-fleet-worker-merges-its-reviewed-issue-fixes.md).
 
 This file is the spec. The scheduled task's prompt is short and points here,
 so the procedure is reviewed as a pull request rather than as an edit to a
@@ -380,8 +381,14 @@ here holds, each read fresh:
      `agent-authored`, in a fleet repo other than the three
      example-site-platform-managed repos (`example-site-platform`, `example-site-a`,
      `example-site-b`), where a merge publishes the live site. A PR on an
-     `agent/issue-<n>-<slug>` branch is never this kind: only the narrow
-     rule above may merge it. Nor is a PR on a `retire-skill/*` branch:
+     `agent/issue-<n>-<slug>` branch is this kind only when its issue is
+     neither a sweep nor a memory-promotion issue (the titles in merge rule
+     item 1): those stay under the narrow rule alone
+     ([ADR 0045](../decisions/0045-the-fleet-worker-merges-its-reviewed-issue-fixes.md)).
+     Its issue is issue `<n>` from the branch name, in the PR's own repo,
+     and the first line of the body after the `## TLDR` section must be
+     `Closes <owner>/<repo>#<n>` or `Refs <owner>/<repo>#<n>` naming that
+     same issue; any other first line, issue or repo goes to the owner. Nor is a PR on a `retire-skill/*` branch:
      only step 2e may merge it. Nor is a PR from a `persistent/*` branch,
      whose routine's own merge gate decides it. Nor is an `agent/lesson-check-<id>` PR or any
      PR with auto-merge armed (`auto_merge` not null): those merge themselves
@@ -406,7 +413,7 @@ here holds, each read fresh:
      `main` by its own PR. Any mismatch goes to the owner.
 2. It is not a draft. A thread that wants the owner's call on a PR leaves it
    a draft or labels it `on-hold`; this pass never touches either.
-3. Neither the PR nor any issue it closes carries `on-hold`.
+3. Neither the PR nor any issue it closes or refers to carries `on-hold`.
 4. Its head was pushed at least 1 hour before the run's start, read from the
    `created_at` of the head's earliest check suite
    (`GET /repos/<owner>/<repo>/commits/<sha>/check-suites`), never from the
@@ -491,7 +498,11 @@ fleet guidance waits for the window like any other. Then, for a PR meeting
 all seven items, merge it in the same run with `expected_head_sha` set to
 the reviewed head, as a merge commit, and comment `Merged by the fleet
 worker: an agent-made change that passed CI and an independent review (ADR
-0041).` A merge the API refuses, a `FINDINGS` review, a hook pin bump
+0041).` (for an `agent/issue-*` PR, `(ADR 0045)` instead). After merging an
+`agent/issue-*` PR, handle its issue as step 2b does: for `Closes`, confirm
+the issue closed; for `Refs`, unless it carries `on-hold`, swap
+`agent-working` for `agent-ready` and comment which findings the merged PR
+fixed. A merge the API refuses, a `FINDINGS` review, a hook pin bump
 that fails item 1's checks, a failed item 5, or item 6's exit 2 goes to
 the owner under step 3.
 
@@ -645,8 +656,16 @@ closed as not planned, with that comment.
 ### Tell the owner which issues are blocked
 
 An `agent-blocked` issue waits on the owner: the worker stopped on it (an
-outage, a revoked secret, a setting only he can change, an ambiguity) and
-said why in a comment. Nothing else reports it: the PR pass's list covers
+outage, a revoked secret, a setting only he can change, tests it could not
+fix) and said why in a comment. An ambiguity is never a reason: the worker
+decides it ([`agent-issue-worker.md`](../reference/agent-issue-worker.md),
+step 7). An `agent-blocked` issue whose blocking comment gives only an
+ambiguity or a choice between fixes as its reason, and that has no earlier
+`<!-- fleet-worker: requeued -->` comment, is the worker's again: before
+labeling it `needs-owner`, swap `agent-blocked` for `agent-ready` and comment
+that the worker decides such choices, with that marker. An issue requeued
+once that blocks again goes to the owner as below, so no issue bounces
+between the two labels. Nothing else reports it: the PR pass's list covers
 PRs only, so a health-audit `ci` issue that is not the repo's to fix would
 otherwise stay blocked with no one told.
 

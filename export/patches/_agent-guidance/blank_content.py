@@ -423,6 +423,12 @@ def apply(root: Path, ctx) -> None:
     text = runner.read_text(encoding="utf-8")
     for old, new in RUNNER_EDITS:
         text = _sub_once(text, old, new, runner_rel)
+    # The kit ships no lessons: the source's lesson-check lane adds `case` arms
+    # to check_lessons and ids to lesson_checks, which belong to its owner.
+    text, n_ids = re.subn(r'(?m)^lesson_checks="[^"]*"\n', 'lesson_checks=""\n', text)
+    text, n_body = re.subn(r"(?ms)^check_lessons\(\) \{\n.*?^\}\n", "check_lessons() {\n  :\n}\n", text)
+    if n_ids != 1 or n_body != 1:
+        raise SystemExit(f"blank_content: expected one lesson_checks line and one check_lessons body in the runner, found {n_ids} and {n_body}")
     if text.count(RULES_DIR_ANCHOR) != 1 or text.count("  note_ran secret-file\n") != 1:
         raise SystemExit("blank_content: the rules-dir item's anchors are not each once in the runner")
     runner.write_text(text, encoding="utf-8")

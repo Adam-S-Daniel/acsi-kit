@@ -62,6 +62,21 @@ read; only in replies to the user.
   scorers fail closed there. Wrap any run in
   `unshare --user --map-current-user --pid --fork --mount-proc --`.
 
+- **The full suite in a cloud container fails tens of tests on clean `main`
+  too** (tests that need `bwrap` where it is missing, or a local machine). Judge a change by
+  comparing the failing test IDs with a run on `main`, never by the failure
+  count: a real failure can hide inside an unchanged count.
+
+- **A routine eval run that ends in about two minutes with no results branch**
+  usually never ran a trial. Read the eval runner routine session's final
+  message first, for a sandbox-unavailable error or a config-guard refusal,
+  before suspecting the fixture or the planner.
+
+- **Two fixture pull requests that both append rows to `evals/scheduled.yml`
+  conflict** once the first merges. Merge `main` into the second and keep
+  `main`'s rows first, then the new row: the fixture PR gate accepts appends
+  only.
+
 - **`tool/index.html` is built from `explorer/src`**: edit there, run
   `npm run build` in `explorer/`, commit both; CI fails on drift.
 
@@ -70,13 +85,16 @@ read; only in replies to the user.
   (`test/run_tests.py`) fails CI otherwise.
 
 - **Guidance loop merges wait for _agent-guidance's weekly window** (Monday
-  17:00 to 19:00 UTC; the bounds live only in its
+  noon to 2 PM US Eastern, DST included; the bounds live only in its
   `scripts/base-md-merge-window.yml`; [ADR 0017](docs/decisions/0017-guidance-loop-merges-wait-for-the-weekly-window.md)).
   Outside it the improvement gate queues its pull request unarmed and
   `guidance-merge-window.yml` arms it on Mondays; `retire_skill.py --target
   guidance` opens no removal. A new path that merges `agents-md/` changes by
   automation must ask `scripts/guidance_merge_window.py` first. A manual merge
-  outside the window restarts every guidance section's eval evidence.
+  outside the window restarts every guidance section's eval evidence. **No
+  eval run starts inside the window** (the eval pause): a new automated eval
+  launcher must ask `guidance_merge_window.py eval-pause` before it runs
+  anything, as `routine-eval-fire.yml`, `eval.yml` and `plan_week.py` do.
 
 - **The keep, remove, pause and re-check rules live in `evals/*-policy.yml`**
   (plus `usage-unknown.yml` and `stakes.yml`). [`docs/rules.md`](docs/rules.md)
