@@ -2753,3 +2753,12 @@ pin, on the machine where this was measured (WSL2): 8
 
 Reverse: revert this section's commits; the starter then re-exports with the
 258 failures.
+
+## Contributor rules in every starter (2026-11-17, acsi-kit#72)
+
+`_agent-guidance`'s `sync.sh` delivers its `.github/fleet-contributor-rules.md` to every synced repo byte for byte, and the export rebuilds agent-guidance's copy from the kit's `base.md`. Before this change, the other five starters kept the source owner's longer copy. That copy holds sections the kit leaves out (Security, Dependency updates, the signal rule and others), so an adopter's repos started with rules their own guidance repo lacks, and the drift report flagged all five until the first sync. Round 14's hand-written copy in `agent-skills-private` also disappeared on every full export.
+
+- Each of the five manifests gains a `copy_from_kit` step that copies agent-guidance's rebuilt file, so all six copies are identical and the private one is exported.
+- `bootstrap/lib/content.py`'s `regenerate()` rebuilds the file with `scripts/build-contributor-rules.js`, using agent-guidance's two npm devDependencies installed from its lockfile into a temporary directory, and copies it to every starter. Before this change, adding a `contributor` section through `add-content.sh` (security, git-habits and three others) left agent-guidance's copy stale, and that tree's own test failed.
+
+Reverse: drop the five `copy_from_kit` steps and the rebuild in `regenerate()`.
