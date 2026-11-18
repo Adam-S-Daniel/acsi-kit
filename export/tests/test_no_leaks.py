@@ -81,6 +81,15 @@ ALLOWED: dict[str, dict[str, int]] = {
 _SOURCE_OWNER = _COMMON["source_owners"][0]
 ALLOWED[".github/workflows/scheduled-run-health.yml"] = {
     name: len(rx.findall(_SOURCE_OWNER)) for name, rx in TOKENS if rx.search(_SOURCE_OWNER)}
+# The kit's own Dependabot config: its cooldown `exclude` and the comment above
+# it name the source owners' own actions (two logins, each spelled twice), so
+# those actions skip the third-party cooldown. Like the health caller it is
+# this repo's CI config, not kit content. The hits are computed from the two
+# logins so that this file need not spell them.
+_OWN_ACTIONS = " ".join(f"{owner}/*" for owner in _COMMON["source_owners"][:2])
+_DEPENDABOT_TEXT = "\n".join([_OWN_ACTIONS] * 2)
+ALLOWED[".github/dependabot.yml"] = {
+    name: len(rx.findall(_DEPENDABOT_TEXT)) for name, rx in TOKENS if rx.search(_DEPENDABOT_TEXT)}
 MANIFESTS_DIR = "export/manifests/"
 
 SKIP_PARTS = {"__pycache__", ".pytest_cache", "node_modules", ".git"}
