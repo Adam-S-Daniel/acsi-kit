@@ -1,0 +1,18 @@
+# Paths a page names that are real but live outside the kit.
+# Format: <page>: <span>  # reason. An entry no page misses any more fails
+# test_docs_paths.py, so delete it when the page changes.
+docs/before-you-start.md: app-manifests/  # folder create-apps.sh writes in the adopter's checkout at run time
+docs/evals-and-loop.md: eval-results/  # lane directory on the claude/eval-* branch, not in the kit
+docs/evals-and-loop.md: eval-improve/  # lane directory on the claude/eval-improve-* branch
+docs/evals-and-loop.md: eval-guidance-improve/  # lane directory on the claude/eval-guidance-improve-* branch
+docs/evals-and-loop.md: improve-cost/  # lane directory on its claude/ branch
+docs/evals-and-loop.md: draft-skill/  # lane directory on the claude/draft-skill-* branch
+docs/evals-and-loop.md: spend/  # lane directory on the claude/spend-* branch
+docs/evals-and-loop.md: spend/weekly.json  # file the spend lane commits on its branch
+docs/guidance.md: .agents-sync.yml  # the adopter's own per-repo file (the kit ships only .agents-sync.example.yml)
+docs/guidance.md: drift-report.md  # written to the persistent/drift-report branch at run time
+docs/guidance.md: .env  # example of a committed secret file the scan flags, not a kit file
+docs/quick-start.md: latest.json  # public document written to persistent/eval-results at run time
+docs/routines.md: explorer/latest.json  # public document written to persistent/eval-results at run time
+docs/routines.md: latest.json  # public document written to persistent/eval-results at run time
+README.md: .claude/settings.local.json  # a file the kit deliberately does not carry, on the adopter's machine

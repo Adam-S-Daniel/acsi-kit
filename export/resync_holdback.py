@@ -90,7 +90,7 @@ class GitRunner:
 
     def reset(self) -> None:
         for args in (("reset", "-q", "--", "starter", "export/manifests"),
-                     ("checkout", "--", "starter"),
+                     ("checkout", "--", "starter", "docs"),
                      ("clean", "-fdq", "--", "starter")):
             done = self._git(*args)
             if done.returncode != 0:
@@ -132,6 +132,11 @@ class GitRunner:
             return False, tail(f"npm install failed:\n{exc}")
         out = self._run([sys.executable, str(HERE / "export.py"), "--sources", str(self.sources),
                          "--skip", *self.skip])
+        if out.returncode != 0:
+            return False, tail(out.stdout + out.stderr)
+        # A stale generated region in docs/ is fixed by --write, not a broken
+        # export, so refresh the regions before the tests judge the source.
+        out = self._run([sys.executable, str(HERE / "doc_regions.py"), "--write"])
         if out.returncode != 0:
             return False, tail(out.stdout + out.stderr)
         # Stage new starter files now: export/tests checks every kit file is

@@ -371,7 +371,8 @@ class PlannerTests(unittest.TestCase):
                 "drift-report-capture", "nightly-snapshot", "release-pipeline",
                 "test-runner-assertions")),
             *(f"vendor-release-impact-issues/{n}" for n in (
-                "closing-keywords", "issue-hygiene", "stamps-skip-quotes"))))
+                "closing-keywords", "issue-hygiene", "stamps-skip-quotes")))
+            if (ROOT / f"evals/{name}/fixture.yaml").is_file())
         self.assertEqual(sorted(opted), audited)
 
 

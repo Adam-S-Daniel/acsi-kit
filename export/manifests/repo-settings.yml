@@ -62,6 +62,11 @@ patches:
       merges; the tests read both files while the fragment exists.
 
 regenerate:
+  - copy_from_kit: {repo: _agent-guidance, from: .github/fleet-contributor-rules.md, to: .github/fleet-contributor-rules.md}
+    why: >-
+      The sync delivers _agent-guidance's contributor rules here byte for
+      byte, and that repo's copy is rebuilt from the kit's base.md; the
+      source copy holds the owner's sections the kit leaves out (acsi-kit#72).
   - copy_from_kit: {repo: _agent-guidance, from: agents-md/base.md, to: .claude/hooks/fleet-guidance.md}
     why: The sync delivers _agent-guidance's base.md here byte for byte; it carries that repo's X9 blanking.
   - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/agent-checks, to: .githooks/agent-checks}

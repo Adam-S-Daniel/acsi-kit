@@ -133,7 +133,7 @@ class ReportTests(unittest.TestCase):
         r = self.w.repo
         r.add("evals/writing-adrs/old", SKILL, 1)  # no origin: not in the queue
         r.add("evals/writing-adrs/harder", SKILL + origin(
-            "real-work", "https://github.com/jodidaniel/example-site/pull/12", 1), 2)
+            "real-work", "https://github.com/example-adopter-two/example-site/pull/12", 1), 2)
         r.add("evals/writing-adrs/invented-one", SKILL + origin(issue=2), 18)  # 2 days
         r.add("evals/writing-adrs/never-ran", SKILL + origin(issue=2), 3)
         r.add("evals/writing-adrs/bad-origin", SKILL + origin("scraped"), 3)
@@ -186,7 +186,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(harder, {
             "path": "evals/writing-adrs/harder", "subject": "writing-adrs",
             "origin_kind": "real-work",
-            "source": "https://github.com/jodidaniel/example-site/pull/12",
+            "source": "https://github.com/example-adopter-two/example-site/pull/12",
             "request": f"{REQ}1", "added_at": iso(2), "runs": 1,
             "with_pass_rate": 0.75, "without_pass_rate": 0.25,
             "cost_points": 0.25, "cost_usd": 1.5})
@@ -212,7 +212,7 @@ class ReportTests(unittest.TestCase):
             "severity": "medium", "subject": "guidance/example-section",
             "url": f"{REQ}3"})
         self.assertEqual(by["skills-evals/fixture-queue-stuck-pr-102"]["url"],
-                         "https://github.com/Adam-S-Daniel/skills-evals/pull/102")
+                         "https://github.com/example-adopter/skills-evals/pull/102")
         self.assertEqual(
             by["skills-evals/fixture-queue-unused-fixture-writing-adrs-never-ran"]["url"],
             "https://github.com/example-adopter/skills-evals/tree/main/evals/writing-adrs/never-ran")
@@ -361,7 +361,7 @@ class FakeGh:
 
 STALE = fq.finding("stale-request", 3, "guidance/example-section", f"{REQ}3")
 STUCK = fq.finding("stuck-pr", 102, "writing-adrs",
-                   "https://github.com/Adam-S-Daniel/skills-evals/pull/102")
+                   "https://github.com/example-adopter/skills-evals/pull/102")
 UNUSED = fq.finding("unused-fixture", "writing-adrs-never-ran", "writing-adrs",
                     "https://github.com/example-adopter/skills-evals/tree/main/"
                     "evals/writing-adrs/never-ran")

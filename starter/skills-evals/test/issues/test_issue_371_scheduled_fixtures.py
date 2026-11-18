@@ -390,7 +390,7 @@ def schedule_problems(root: Path) -> list[str]:
 
 class EveryFixtureIsScheduledOrExplained(unittest.TestCase):
     def test_the_committed_tree_follows_the_rule(self):
-        self.assertEqual(schedule_problems(ROOT), [])
+        self.assertEqual(schedule_problems(Path(__file__).resolve().parents[2]), [])
 
     def _tree(self, scheduled, unscheduled, fixtures):
         tmp = Path(tempfile.mkdtemp())

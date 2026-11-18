@@ -48,7 +48,20 @@ comment on them or open pull requests on them.
    - A new owner URL in a test (`https://github.com/<owner>/...`) is kept
      as a citation, so the renames miss it: add an `edits` entry that splits
      the literal, as earlier rounds did.
-5. **Tests.** Stage new files (`git add -A -- export/manifests starter`),
+5. **Pages.** The hand-written pages under `docs/` describe the starters,
+   and tests in `export/tests` hold them to it, so a source change can hold
+   its source back with nothing wrong in the export. Run
+   `python3 export/doc_regions.py --write` (it rewrites the regions quoted
+   from a spec), then `python3 export/doc_review.py --base HEAD`, and read
+   each page it lists against the changed files. Edit a page only where the
+   change made a statement wrong or left out something an adopter must set
+   up, and say in the pull request which statement and which starter file.
+   A page test that fails names what to fix: a path that no longer exists
+   (`test_docs_paths.py`: correct the page, or the allowlist if the path was
+   never in the kit), a list that lost or gained an item
+   (`test_doc_regions.py`), a quoted budget number (`test_docs_budget.py`).
+   Never add an entry to `docs_paths_known_misses.txt` to get green.
+6. **Tests.** Stage new files (`git add -A -- export/manifests starter docs`),
    then run, and get exit 0 from each:
    - `python3 -m pytest export/tests -q -p no:cacheprovider`
    - `bash bootstrap/tests/test-bootstrap.sh`
@@ -59,11 +72,11 @@ comment on them or open pull requests on them.
    (see `run-all-tests.sh`). PowerShell (Pester) cannot run in a cloud
    session: if a held source changed any `.ps1` file the kit ships, say so
    in the pull request so the owner runs Pester on Windows.
-6. **Record.** Add a "Re-pin round N (<date>)" section to
+7. **Record.** Add a "Re-pin round N (<date>)" section to
    `export/DECISIONS.md`, after the last round: one bullet per source change
    the kit follows (what changed, what the kit now does), the old and new
    pins table, and a "Reverse:" paragraph.
-7. **Commit and push.** Commit as the owner's GitHub noreply address
+8. **Commit and push.** Commit as the owner's GitHub noreply address
    (`<id>+<owner>@users.noreply.github.com`, with `<id>` from
    `gh api users/<owner> --jq .id`). You cannot open a pull request or
    comment: `.github/workflows/resync-fix-pr.yml` does both when the branch
@@ -79,7 +92,7 @@ comment on them or open pull requests on them.
    which carries the pull request text. Push the branch and verify the push
    (`git ls-remote origin refs/heads/<branch>` equals `git rev-parse HEAD`).
    Do not open a pull request, label it or comment on the issue.
-8. **Confirm.** If you can, look at
+9. **Confirm.** If you can, look at
    `https://github.com/<owner>/acsi-kit/pulls` to see that the workflow
    opened the pull request. If you cannot, end.
 

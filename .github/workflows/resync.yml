@@ -75,7 +75,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3
+          python3 -m pip install --quiet pytest==9.1.1 pyyaml==6.0.3 markdown-it-py==4.2.0
           summary="$RUNNER_TEMP/resync-summary.md"
           python3 export/resync.py --owner "$SOURCE_OWNER" --summary "$summary"
           if git diff --quiet; then
@@ -114,6 +114,20 @@ jobs:
           python3 export/resync_holdback.py --owner "$SOURCE_OWNER" --sources "$sources" \
             --summary "$RUNNER_TEMP/resync-summary.md" --tails "$RUNNER_TEMP/holdback-tails.txt"
           echo "files changed: $(git status --porcelain | wc -l)"
+
+      # Which hand-written pages describe a source this re-sync changed
+      # (export/doc-sources.yml). After hold-back, so it sees the tree that
+      # will be committed, and before the summary is shown and the pull
+      # request body is built, so both carry it. Advisory: a failure here
+      # warns and never blocks the re-sync. No expression is interpolated
+      # into the script.
+      - name: List the pages a changed source makes stale
+        if: steps.resync.outputs.changed == 'true'
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 export/doc_review.py --base HEAD --summary "$RUNNER_TEMP/resync-summary.md" \
+            || echo "::warning::export/doc_review.py failed, so the pull request has no Pages to review section"
 
       - name: Show the summary
         if: steps.resync.outputs.changed == 'true'
@@ -164,9 +178,9 @@ jobs:
           git config user.email "${bot_id}+${bot}@users.noreply.github.com"
           gh auth setup-git
           git switch -c "$branch"
-          git add -A -- export/manifests starter
+          git add -A -- export/manifests starter docs
           git commit -q -m "Re-sync the kit from its source repos" \
-            -m "Moves each manifest's source_sha to its source's default-branch head and regenerates starter/ (export/resync.py), except any source the run held back (export/resync_holdback.py)."
+            -m "Moves each manifest's source_sha to its source's default-branch head and regenerates starter/ (export/resync.py) and the docs regions quoted from it (export/doc_regions.py), except any source the run held back (export/resync_holdback.py)."
           echo "commit: $(git rev-parse HEAD)"
           # The job owns this branch, so it may overwrite it, but only from the
           # commit it saw: a lease on the remote's current sha (empty when the

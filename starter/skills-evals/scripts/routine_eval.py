@@ -99,13 +99,13 @@ RUN_EVAL = "harness/run_eval.py"
 SANDBOX_PROBE_SKIP_ENV = "SKILLS_EVALS_TEST_SKIP_SANDBOX_PROBE"
 RESULTS_ROOT = "eval-results"
 
-PUBLIC_REGISTRIES = ("acsi-agentskills", "example-site-platform", "example-site-a")
+PUBLIC_REGISTRIES = ("acsi-agentskills",)
 PRIVATE_REGISTRY = "acsi-agentskills-private"
 PRIVATE_REGISTRY_URL = "https://github.com/example-adopter/acsi-agentskills-private"
 GUIDANCE_CHECKOUT = "_agent-guidance"
 #: The routine's cloned repositories beside skills-evals (the RULES list).
 SIBLINGS = ("_agent-guidance", "acsi-agentskills", "acsi-agentskills-private",
-            "example-site-platform", "example-site-a", "wsl-automation", "repo-settings")
+            "wsl-automation", "repo-settings")
 REPOSITORY = {"skills-evals": "example-adopter/skills-evals",
               PRIVATE_REGISTRY: "example-adopter/acsi-agentskills-private"}
 BRANCH_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}")

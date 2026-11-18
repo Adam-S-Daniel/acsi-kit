@@ -39,6 +39,85 @@ def apply(root: Path, ctx) -> None:
          '        for name in ("example-site-platform", "example-site-a", "acsi-agentskills-private"):\n',
          '        for name in ("acsi-agentskills-private",):\n')
 
+    # --- test/issues/test_issue_535_fleet_hooks.py: the same empty sibling
+    # registries as test_issue_adr0012_delivery.py (acsi-kit#72)
+    _sub(root, "test/issues/test_issue_535_fleet_hooks.py",
+         '        self.registry_env = ",".join(f"{name}={registries / name}" for name in (\n'
+         '            "example-site-platform", "example-site-a", "acsi-agentskills-private"))\n'
+         '        for name in ("example-site-platform", "example-site-a", "acsi-agentskills-private"):\n',
+         '        self.registry_env = ",".join(f"{name}={registries / name}" for name in (\n'
+         '            "acsi-agentskills-private",))\n'
+         '        for name in ("acsi-agentskills-private",):\n')
+
+    # --- test/issues/test_issue_routine_eval_script.py: the routine reads one
+    # public registry, acsi-agentskills (cold_start_registries.py drops the
+    # example sites from routine_eval.py's lists too; acsi-kit#72)
+    tre = "test/issues/test_issue_routine_eval_script.py"
+    _sub(root, tre,
+         '        for name in ("acsi-agentskills", "example-site-platform", "example-site-a"):\n',
+         '        for name in ("acsi-agentskills",):\n', count=3)
+    _sub(root, tre,
+         '                  shallow={"example-site-a", "repo-settings"})\n',
+         '                  shallow={"wsl-automation", "repo-settings"})\n')
+    _sub(root, tre,
+         '            if name in ("example-site-a", "repo-settings"):\n',
+         '            if name in ("wsl-automation", "repo-settings"):\n')
+    # A missing registry clone is noted and left out: the kit's one public
+    # registry is the missing one, so no --registry flag is left.
+    _sub(root, tre,
+         '        shutil.rmtree(self.tmp / "example-site-platform")\n'
+         '        self.fire(payload(fixture="evals/skill-b/deployed"), writes=False)\n'
+         '        touched = {Path(call[1]).name for call in self.git_calls()}\n'
+         '        self.assertNotIn("wsl-automation", touched)\n'
+         '        self.assertNotIn("example-site-platform", touched)\n'
+         '        self.assertEqual([self.eval_argv()[i + 1] for i, a in enumerate(self.eval_argv())\n'
+         '                          if a == "--registry"],\n'
+         '                         [f"acsi-agentskills={self.sibling(\'acsi-agentskills\')}",\n'
+         '                          f"example-site-a={self.sibling(\'example-site-a\')}"])\n'
+         '        self.assertIn("note: registry clone example-site-platform is not checked out", self.report)\n',
+         '        shutil.rmtree(self.tmp / "acsi-agentskills")\n'
+         '        self.fire(payload(fixture="evals/skill-b/deployed"), writes=False)\n'
+         '        touched = {Path(call[1]).name for call in self.git_calls()}\n'
+         '        self.assertNotIn("wsl-automation", touched)\n'
+         '        self.assertNotIn("acsi-agentskills", touched)\n'
+         '        self.assertEqual([self.eval_argv()[i + 1] for i, a in enumerate(self.eval_argv())\n'
+         '                          if a == "--registry"], [])\n'
+         '        self.assertIn("note: registry clone acsi-agentskills is not checked out", self.report)\n')
+    # A bare fire fetches each registry clone once: one, not three.
+    _sub(root, tre,
+         '                  writes=False, shallow={"example-site-a"})\n'
+         '        calls = self.git_calls()\n'
+         '        self.assertFalse([c for c in calls if "--unshallow" in c or "rev-parse" in c])\n'
+         '        self.assertEqual(len([c for c in calls if c[2:] == ["fetch", "origin", "main"]]), 3)\n',
+         '                  writes=False, shallow={"wsl-automation"})\n'
+         '        calls = self.git_calls()\n'
+         '        self.assertFalse([c for c in calls if "--unshallow" in c or "rev-parse" in c])\n'
+         '        self.assertEqual(len([c for c in calls if c[2:] == ["fetch", "origin", "main"]]), 1)\n')
+
+    # Two models fetch and detach the one registry once: 2 git calls, not 6.
+    _sub(root, tre,
+         '        self.assertEqual(len(self.git_calls()), 6)\n',
+         '        self.assertEqual(len(self.git_calls()), 2)\n')
+
+    # --- test/issues/test_issue_eval_scope.py: eval-scope.yml checks out the
+    # one public registry the kit lists (acsi-kit#72)
+    tes = "test/issues/test_issue_eval_scope.py"
+    _sub(root, tes,
+         '    def test_the_removed_rule_sees_all_three_public_registries(self):\n',
+         '    def test_the_removed_rule_sees_every_public_registry(self):\n')
+    _sub(root, tes,
+         '        for name in ("acsi-agentskills", "example-site-platform", "example-site-a"):\n'
+         '            self.assertIn(f"example-adopter/{name}", repos)\n',
+         '        public = [r["name"] for r in yaml.safe_load(\n'
+         '            (ROOT / "harness/registries.yml").read_text())["registries"] if not r["private"]]\n'
+         '        self.assertEqual(public, ["acsi-agentskills"])\n'
+         '        for name in public:\n'
+         '            self.assertIn(f"example-adopter/{name}", repos)\n')
+    _sub(root, tes,
+         '        for name, path in (("acsi-agentskills", "registry-agentskills"), ("example-site-platform", "registry-cms"),\n'
+         '                           ("example-site-a", "registry-site")):\n',
+         '        for name, path in (("acsi-agentskills", "registry-agentskills"),):\n')
+
     # --- test/issues/test_issue_60.py: one public registry, so 5 public gaps
     t60 = "test/issues/test_issue_60.py"
     _sub(root, t60, "        self.assertEqual(len(gaps.public_gaps(census)), 7)\n",
@@ -211,3 +290,16 @@ def apply(root: Path, ctx) -> None:
     _sub(root, t70,
          'registries=[f"example-site-platform={self.make_flat(self.tmp / \'e\')}"])',
          'registries=[f"acsi-agentskills-private={self.make_flat(self.tmp / \'e\')}"])')
+
+    # --- explorer-data.yml loses both example-site checkouts and their flags
+    # (cold_start_registries.py, acsi-kit#72)
+    _sub(root, "test/issues/test_issue_562_loaded_copies.py",
+         '        for name, path in (("acsi-agentskills", "registry-agentskills"),\n'
+         '                           ("example-site-platform", "registry-cms"), ("example-site-a", "registry-site")):\n',
+         '        for name, path in (("acsi-agentskills", "registry-agentskills"),):\n')
+    hx = "test/issues/test_issue_544_545_health_alerts.py"
+    _sub(root, hx,
+         '        self.assertEqual(checkouts["registry-site"].get("filter"), "blob:none")\n', "")
+    _sub(root, hx,
+         '            "example-adopter/example-site-platform": "registry-cms",\n'
+         '            "example-adopter/example-site-a": "registry-site",\n', "")

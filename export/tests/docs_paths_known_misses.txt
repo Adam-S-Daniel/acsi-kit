@@ -1,0 +1,3 @@
+# Genuine misses awaiting a page fix (relative to a subfolder, name the full path).
+# Format: <page>: <span>  # what is wrong. Stale-checked like docs_paths_allow.txt:
+# delete the entry when the page is fixed.

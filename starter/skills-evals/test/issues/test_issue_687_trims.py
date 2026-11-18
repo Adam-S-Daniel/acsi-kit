@@ -326,8 +326,10 @@ class PipelineTests(TrimPipelineCase):
     def test_the_accepted_record_passes_the_gate(self):
         rc, out, err = self.run_main(TrimRunner())
         self.assertEqual(rc, 0, out + err)
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals  # the committed tree the gate reads (test/example_evals.py)
         found = gate.check_record(json.loads(json.dumps(self.record())), "summary.json",
-                                  str(REPO_ROOT))
+                                  str(example_evals.checkout()))
         self.assertEqual(found["skill"], SKILL)
         gate.check_patch(self.stem().with_suffix(".patch").read_text(), "skill.patch",
                          found["skill_md"])
@@ -764,6 +766,15 @@ class ImpactEntryTests(unittest.TestCase):
 
 class FireCheckTrimTests(unittest.TestCase):
 
+    def setUp(self):
+        # The committed fixtures are the example checkout's (the kit ships
+        # none of writing-adrs'; test/example_evals.py).
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals
+        patcher = mock.patch.object(pse, "EVALS_DIR", example_evals.checkout() / "evals")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def check(self, *argv):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
@@ -1034,6 +1045,14 @@ class TrimContextTests(unittest.TestCase):
 
 
 class ValidateFireTests(unittest.TestCase):
+
+    def setUp(self):
+        # The committed fixtures are the example checkout's (test/example_evals.py).
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals
+        patcher = mock.patch.object(pse, "EVALS_DIR", example_evals.checkout() / "evals")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def leg(self, **env):
         base = {"MODE": "improve", "SKILL": "writing-adrs", "HOLDOUT": "",

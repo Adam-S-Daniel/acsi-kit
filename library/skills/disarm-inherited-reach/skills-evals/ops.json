@@ -6,6 +6,12 @@
       "fragment": "scheduled-rows.yml"
     },
     {
+      "op": "insert-before",
+      "file": "evals/stakes.yml",
+      "anchor": "sections:\n",
+      "fragment": "stakes-row.yml"
+    },
+    {
       "op": "insert-class",
       "file": "test/run_tests.py",
       "class": "TestIssue77",

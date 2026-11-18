@@ -1,0 +1,82 @@
+[
+  {
+    "query": "record why we picked the message queue over polling as a decision",
+    "should_trigger": true
+  },
+  {
+    "query": "write down the decision to drop the in-memory cache, with the alternatives",
+    "should_trigger": true
+  },
+  {
+    "query": "we chose Postgres over the document store; capture that choice for the repo",
+    "should_trigger": true
+  },
+  {
+    "query": "add a decision record for moving auth to the identity provider",
+    "should_trigger": true
+  },
+  {
+    "query": "document the deploy-freeze decision so the next maintainer knows why",
+    "should_trigger": true
+  },
+  {
+    "query": "set up a decisions folder and record the billing-retry choice",
+    "should_trigger": true
+  },
+  {
+    "query": "supersede the old logging decision with the new structured-logging one",
+    "should_trigger": true
+  },
+  {
+    "query": "why did we pick nightly builds instead of per-commit ones? record it properly",
+    "should_trigger": true
+  },
+  {
+    "query": "capture the trade-off behind the search index rebuild schedule",
+    "should_trigger": true
+  },
+  {
+    "query": "this PR description keeps growing to justify one config flag; record the decision instead",
+    "should_trigger": true
+  },
+  {
+    "query": "fix the flaky login test",
+    "should_trigger": false
+  },
+  {
+    "query": "rename the upload helper to match the style guide",
+    "should_trigger": false
+  },
+  {
+    "query": "bump the lint tool to the latest patch release",
+    "should_trigger": false
+  },
+  {
+    "query": "add a unit test for the CSV export edge case",
+    "should_trigger": false
+  },
+  {
+    "query": "make the email template render on narrow screens",
+    "should_trigger": false
+  },
+  {
+    "query": "why is the cron job failing with exit 137?",
+    "should_trigger": false
+  },
+  {
+    "query": "speed up the webhook handler's JSON parsing",
+    "should_trigger": false
+  },
+  {
+    "query": "write a README section on running the dev server",
+    "should_trigger": false
+  },
+  {
+    "query": "convert the settings loader to async",
+    "should_trigger": false
+  },
+  {
+    "query": "reformat the changelog headings",
+    "should_trigger": false
+  }
+]

@@ -464,6 +464,11 @@ GATE = WORKFLOWS / "routine-guidance-improve-gate.yml"
 @@@ new
                     gate.fire_check(section, holdout, evals_dir=EXAMPLE_EVALS)
 @@@ end
+@@@ old
+                  (Path(__file__).resolve().parents[2] / "evals" / "guidance" / SECTION)
+@@@ new
+                  (EXAMPLE_EVALS / "guidance" / SECTION)
+@@@ end
 === test/issues/test_issue_routine_improve.py
 # why: fire-check reads the example checkout's evals.
 @@@ old
@@ -842,4 +847,467 @@ if __name__ == "__main__":
         skill = ROOT / "evals" / "writing-adrs" / "bootstrap"
 @@@ new
         skill = ROOT / "test" / "fixtures" / "evals" / "writing-adrs" / "bootstrap"
+@@@ end
+=== test/issues/test_issue_559_empty_fires.py
+# why: the planner tests read a checkout's committed fixtures and schedule (writing-adrs/bootstrap and anything-you-name-gets-its-link/handoff, which the kit ships only in the library): they read the example checkout, as test_issue_scheduled_fixtures.py does, and the outage tests' six skill fixtures, which the kit does not ship, become six it does, one per skill as the source's are (acsi-kit#72).
+@@@ old
+#: Over RETRY_AFTER past EMPTY_FIRES_SINCE, so only the rule under test excludes a fire.
+@@@ new
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import example_evals  # noqa: E402
+
+# The committed fixtures and schedule these tests read are the example
+# checkout's (the kit ships few; test/example_evals.py); the modules above
+# are imported from this repository.
+ROOT = example_evals.checkout()
+
+#: Over RETRY_AFTER past EMPTY_FIRES_SINCE, so only the rule under test excludes a fire.
+@@@ end
+@@@ old
+    FIXTURES = ["evals/github-actions-sha-pinning", "evals/writing-adrs/bootstrap",
+                "evals/disarm-inherited-reach", "evals/consumer-repo-provisioning",
+                "evals/embeddable-tool-pages", "evals/review-bash-ci-reliability/release-pipeline"]
+@@@ new
+    FIXTURES = ["evals/workflow-path-audit/required-check-routing",
+                "evals/vendor-release-impact-issues/closed-duplicate",
+                "evals/skills-doctor/bucketed-account-store", "evals/fan-out-triage/single-file",
+                "evals/tool-powershell/silent-exit-one", "evals/github-actions-repo-settings/onboarding"]
+@@@ end
+@@@ old
+        # Every cell settled: the eval bands are empty, improve and bare are not.
+        def settle(cells):
+            for c in cells:
+                c["class"] = "no-benefit"
+        fires = self.outage()
+@@@ new
+        # Every cell settled: the eval bands are empty, improve and bare are not.
+        def settle(cells):
+            for c in cells:
+                c["class"] = "no-benefit"
+        # Equal-cost probes tie-break on the fixture path, so the source's
+        # schedule probes a never-fired skill cell that sorts before
+        # evals/guidance/; the example schedule has none, so one is added.
+        listed = plan_week.schedule.scheduled_fixtures
+        patcher = mock.patch.object(plan_week.schedule, "scheduled_fixtures",
+                                    lambda path, committed: listed(path, committed)
+                                    + ["evals/fan-out-triage/three-files"])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        fires = self.outage()
+@@@ end
+=== test/issues/test_issue_pair_fires.py
+# why: the planner, cell and fire-validation tests read a checkout's committed writing-adrs/bootstrap and anything-you-name-gets-its-link/handoff fixtures and schedule, which the kit ships only in the library: they read the example checkout (acsi-kit#72).
+@@@ old
+#: The two roster arms, in evals/roster.yml's order.
+@@@ new
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import example_evals  # noqa: E402
+
+# The committed fixtures and schedule these tests read are the example
+# checkout's (the kit ships few; test/example_evals.py); the modules above
+# are imported from this repository.
+ROOT = example_evals.checkout()
+
+#: The two roster arms, in evals/roster.yml's order.
+@@@ end
+@@@ old
+        doc["skills"]["disarm-inherited-reach"] = {"cells": [
+            {"fixture": None, "model": A, "class": "missing",
+@@@ new
+        doc["skills"]["workflow-path-audit"] = {"cells": [
+            {"fixture": "required-check-routing", "model": A, "class": "missing",
+@@@ end
+@@@ old
+                                         "HOLDOUT": row["holdout"]})
+@@@ new
+                                         "HOLDOUT": row["holdout"]}, ROOT)
+@@@ end
+@@@ old
+        plan_week.validate_fire(self.GOOD)
+        plan_week.validate_fire({**self.GOOD, "MODEL": f"{B},{A}"})
+        plan_week.validate_fire({**self.GOOD, "ARMS": "bare"})
+        plan_week.validate_fire({**self.GOOD, "FIXTURE": GUIDANCE_FIXTURE,
+                                 "EVAL_KEY": GUIDANCE_FIXTURE[len("evals/"):],
+                                 "ARMS": "in-situ"})
+@@@ new
+        plan_week.validate_fire(self.GOOD, ROOT)
+        plan_week.validate_fire({**self.GOOD, "MODEL": f"{B},{A}"}, ROOT)
+        plan_week.validate_fire({**self.GOOD, "ARMS": "bare"}, ROOT)
+        plan_week.validate_fire({**self.GOOD, "FIXTURE": GUIDANCE_FIXTURE,
+                                 "EVAL_KEY": GUIDANCE_FIXTURE[len("evals/"):],
+                                 "ARMS": "in-situ"}, ROOT)
+@@@ end
+@@@ old
+                    plan_week.validate_fire({**self.GOOD, "MODEL": model})
+@@@ new
+                    plan_week.validate_fire({**self.GOOD, "MODEL": model}, ROOT)
+@@@ end
+@@@ old
+            plan_week.validate_fire(improve)
+@@@ new
+            plan_week.validate_fire(improve, ROOT)
+@@@ end
+=== test/issues/test_issue_72_explorer_data.py
+# why: removed_skills reads the public registries harness/registries.yml lists; the kit lists one, acsi-agentskills (cold_start_registries.py drops the example sites), so the two example-site registries' removals are not read and the test keeps that one and the private one it must skip (acsi-kit#72).
+@@@ old
+            "acsi-agentskills": registry("2026-11-10 — acsi-coding-anywhere/old-one"),
+            "example-site-platform": registry(
+                "2026-11-13 — example-site-platform/consumer-repo-provisioning",
+                "- PR: https://github.com/example-adopter/example-site-platform/pull/1016\n"),
+            "example-site-a": registry("2026-11-12 — example-site-a-ai/site-skill"),
+            # A private registry is never read: the explorer is public.
+            "acsi-agentskills-private": registry("2026-11-14 — private-plugin/secret-one")})
+        self.assertEqual([(r["name"], r["registry"], r["plugin"]) for r in found],
+                         [("consumer-repo-provisioning", "example-site-platform", "example-site-platform"),
+                          ("site-skill", "example-site-a", "example-site-a-ai"),
+                          ("old-one", "acsi-agentskills", "acsi-coding-anywhere")])
+        self.assertEqual(found[0]["reverse_url"],
+                         "https://github.com/example-adopter/example-site-platform/pull/1016")
+        self.assertIn("/example-site-a/pulls?q=", found[1]["reverse_url"])
+        self.assertIn("/acsi-agentskills/pulls?q=", found[2]["reverse_url"])
+@@@ new
+            "acsi-agentskills": registry("2026-11-10 — acsi-coding-anywhere/old-one"),
+            # A private registry is never read: the explorer is public.
+            "acsi-agentskills-private": registry("2026-11-14 — private-plugin/secret-one")})
+        self.assertEqual([(r["name"], r["registry"], r["plugin"]) for r in found],
+                         [("old-one", "acsi-agentskills", "acsi-coding-anywhere")])
+        self.assertIn("/acsi-agentskills/pulls?q=", found[0]["reverse_url"])
+@@@ end
+=== test/issues/test_issue_eval_scope.py
+# why: the two removed-rule tests that resolve a registry through harness/registries.yml (a fixture's registry URL, the command line's --registry name) named example-site-platform, which the kit does not list (cold_start_registries.py); they use acsi-agentskills, the public registry it does list, in its plugin layout (acsi-kit#72).
+@@@ old
+        for path in ("evals/alpha/one", "evals/alpha/two"):
+            write(self.root, f"{path}/fixture.yaml",
+                  "draft: false\nregistry: https://github.com/example-adopter/example-site-platform\n")
+        gone = {**self.exp, "skills": [s for s in self.exp["skills"] if s["name"] != "alpha"]}
+        self.assertEqual(self.removed(self.plan(exp=gone)), ["evals/alpha/one", "evals/alpha/two"])
+        # Back in the registry, the same fixtures resume with no explorer entry.
+        plan = self.plan(exp=gone)
+        eval_scope.apply_plan(self.root, plan)
+        write(self.cms, "skills/alpha/SKILL.md", "---\nname: alpha\n---\n")
+        self.assertEqual(sorted(r["path"] for r in self.plan(exp=gone)["resume"]),
+                         ["evals/alpha/one", "evals/alpha/two"])
+        # A registry URL harness/registries.yml does not know is unknown.
+        write(self.root, "evals/alpha/one/fixture.yaml",
+              "draft: false\nregistry: https://example.com/nope\n")
+        (self.cms / "skills/alpha/SKILL.md").unlink()
+        self.assertNotIn("evals/alpha/one", self.removed(self.plan(exp=gone)))
+@@@ new
+        ag = Path(self._tmp.name) / "agentskills"
+        write(ag, "plugins/p/skills/beta/SKILL.md", "---\nname: beta\n---\n")
+        checkouts = {"acsi-agentskills": ag}
+        for path in ("evals/alpha/one", "evals/alpha/two"):
+            write(self.root, f"{path}/fixture.yaml",
+                  "draft: false\nregistry: https://github.com/example-adopter/acsi-agentskills\n")
+        gone = {**self.exp, "skills": [s for s in self.exp["skills"] if s["name"] != "alpha"]}
+        self.assertEqual(self.removed(self.plan(checkouts, exp=gone)),
+                         ["evals/alpha/one", "evals/alpha/two"])
+        # Back in the registry, the same fixtures resume with no explorer entry.
+        plan = self.plan(checkouts, exp=gone)
+        eval_scope.apply_plan(self.root, plan)
+        write(ag, "plugins/p/skills/alpha/SKILL.md", "---\nname: alpha\n---\n")
+        self.assertEqual(sorted(r["path"] for r in self.plan(checkouts, exp=gone)["resume"]),
+                         ["evals/alpha/one", "evals/alpha/two"])
+        # A registry URL harness/registries.yml does not know is unknown.
+        write(self.root, "evals/alpha/one/fixture.yaml",
+              "draft: false\nregistry: https://example.com/nope\n")
+        (ag / "plugins/p/skills/alpha/SKILL.md").unlink()
+        self.assertNotIn("evals/alpha/one", self.removed(self.plan(checkouts, exp=gone)))
+@@@ end
+@@@ old
+        exp.write_text(json.dumps(self.exp), encoding="utf-8")
+        with redirect_stdout(io.StringIO()):
+            code = eval_scope.main(["plan", "--repo-root", str(self.root), "--explorer", str(exp),
+                                    "--registry", f"example-site-platform={self.cms}", "--now", NOW,
+                                    "--out", str(out)])
+@@@ new
+        ag = Path(self._tmp.name) / "agentskills"
+        write(ag, "plugins/p/skills/beta/SKILL.md", "---\nname: beta\n---\n")
+        doc = {**self.exp, "skills": [{**s, "registry": "acsi-agentskills"}
+                                      for s in self.exp["skills"]]}
+        exp.write_text(json.dumps(doc), encoding="utf-8")
+        with redirect_stdout(io.StringIO()):
+            code = eval_scope.main(["plan", "--repo-root", str(self.root), "--explorer", str(exp),
+                                    "--registry", f"acsi-agentskills={ag}", "--now", NOW,
+                                    "--out", str(out)])
+@@@ end
+=== test/issues/test_issue_eval_yml_in_place.py
+# why: cold_start_registries.py drops eval.yml's checkouts of the two invented example sites (C3), repositories an adopter does not have, whose checkout would fail the job; the kit's in-place fixtures that name them as context run only where those repositories exist, so the test checks every other context repository (acsi-kit#72).
+@@@ old
+        for name in sorted(context_repositories()):
+            with self.subTest(repository=name):
+                self.assertIn(name, checkouts)
+@@@ new
+        # The kit's example sites are not checked out (cold-start fixes).
+        for name in sorted(context_repositories() - {"example-site-a", "example-site-platform"}):
+            with self.subTest(repository=name):
+                self.assertIn(name, checkouts)
+@@@ end
+=== test/issues/test_issue_fire_deadlines.py
+# why: the lost-fire tests read a checkout's committed writing-adrs/bootstrap fixture and schedule and another delivering cell, disarm-inherited-reach; the kit ships both only in the library, so they read the example checkout and its workflow-path-audit/required-check-routing cell (acsi-kit#72).
+@@@ old
+PROMPT = ROOT / "docs" / "routine" / "eval-runner-instructions.md"
+@@@ new
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import example_evals  # noqa: E402
+
+# The committed fixtures and schedule these tests read are the example
+# checkout's (the kit ships few; test/example_evals.py); the modules above
+# are imported from this repository.
+ROOT = example_evals.checkout()
+
+PROMPT = ROOT / "docs" / "routine" / "eval-runner-instructions.md"
+@@@ end
+@@@ old
+            "disarm-inherited-reach": {"cells": [row(None, other_runs)]}}}
+@@@ new
+            "workflow-path-audit": {"cells": [row("required-check-routing", other_runs)]}}}
+@@@ end
+=== test/issues/test_issue_planner_leaks.py
+# why: the high-cell planner test reads a checkout's committed writing-adrs/bootstrap fixture, which the kit ships only in the library: it reads the example checkout (acsi-kit#72).
+@@@ old
+NOW = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+@@@ new
+sys.path.insert(0, str(ISSUES.parent))
+import example_evals  # noqa: E402
+
+# The committed fixtures and schedule these tests read are the example
+# checkout's (the kit ships few; test/example_evals.py); the modules above
+# are imported from this repository.
+ROOT = example_evals.checkout()
+
+NOW = datetime(2026, 11, 8, 12, 0, 0, tzinfo=timezone.utc)
+@@@ end
+=== test/issues/test_issue_guidance_focus.py
+# why: the focus-field cell test reads a checkout's committed anything-you-name-gets-its-link/handoff fixture and schedule, which the kit ships only in the library: it reads the example checkout (acsi-kit#72). The planner tests keep the kit's own schedule, whose guidance sections fill the focus.
+@@@ old
+ROOT = Path(__file__).resolve().parents[2]
+@@@ new
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "test"))
+import example_evals  # noqa: E402
+@@@ end
+@@@ old
+        cells = plan_week.eval_cells(ROOT / "evals", gates_doc, [], NOW)
+@@@ new
+        # The example checkout's committed fixtures (test/example_evals.py).
+        cells = plan_week.eval_cells(example_evals.checkout() / "evals", gates_doc, [], NOW)
+@@@ end
+=== test/issues/test_issue_81_private_results.py
+# why: the planner test needs a private skill's committed fixtures (acsi-writing-style, from the private registry) beside a public one's; the kit ships neither (X2, X9), so it reads the example checkout, whose invented acsi-writing-style fixtures name the private registry, and checks the public workflow-path-audit gets a context instead of the left-out rename-pdfs (acsi-kit#72).
+@@@ old
+            out = plan_week.skill_contexts(
+                ROOT / "evals", Path(tree), "20261031T235959Z", {},
+@@@ new
+            sys.path.insert(0, str(ROOT / "test"))
+            import example_evals
+            out = plan_week.skill_contexts(
+                example_evals.checkout() / "evals", Path(tree), "20261031T235959Z", {},
+@@@ end
+@@@ old
+        self.assertIn("rename-pdfs", out)
+@@@ new
+        self.assertIn("workflow-path-audit", out)
+@@@ end
+=== test/issues/test_issue_local_eval.py
+# why: the nested-fixture run reads the invented writing-adrs fixtures under test/fixtures/evals/, which are the four the kit wrote; the source's own writing-adrs gained a fifth, pr-body-outgrows-itself, that the kit ships only in the library (acsi-kit#72).
+@@@ old
+        aggregate = self._assert_clean(
+            proc, 2, ["bootstrap", "existing-convention", "pr-body-outgrows-itself",
+                      "supersede", "why-no-comment-trail"])
+        self.assertNotIn("arms", aggregate, "several fixtures: no single `arms`")
+        self.assertEqual(
+            [f["name"] for f in self._json("manifest.json")["fixtures"]],
+            ["bootstrap", "existing-convention", "pr-body-outgrows-itself",
+             "supersede", "why-no-comment-trail"])
+@@@ new
+        aggregate = self._assert_clean(
+            proc, 2, ["bootstrap", "existing-convention", "supersede", "why-no-comment-trail"])
+        self.assertNotIn("arms", aggregate, "several fixtures: no single `arms`")
+        self.assertEqual(
+            [f["name"] for f in self._json("manifest.json")["fixtures"]],
+            ["bootstrap", "existing-convention", "supersede", "why-no-comment-trail"])
+@@@ end
+=== test/issues/test_issue_gate_round3.py
+# why: the at-cap planner test reads a checkout's committed writing-adrs/bootstrap fixture, which the kit ships only in the library: it reads the example checkout (acsi-kit#72).
+@@@ old
+            got = one(plan_week.eval_cells(ROOT / "evals", doc, [], NOW, ROUTINE_GIT), SKILL_FIXTURE)
+@@@ new
+            sys.path.insert(0, str(ROOT / "test"))
+            import example_evals  # the example checkout's fixtures (test/example_evals.py)
+            got = one(plan_week.eval_cells(example_evals.checkout() / "evals", doc, [], NOW,
+                                           ROUTINE_GIT), SKILL_FIXTURE)
+@@@ end
+=== test/issues/test_issue_pooled_rest_guard.py
+# why: the provisional-keep planner test reads the committed anything-you-name-gets-its-link/handoff fixture, which the kit ships only in the library; it uses a section fixture the kit ships, data-exposure-in-ci/http-error-body (acsi-kit#72).
+@@@ old
+        section = "anything-you-name-gets-its-link"
+        fixture = f"evals/guidance/{section}/handoff"
+@@@ new
+        section = "data-exposure-in-ci"
+        fixture = f"evals/guidance/{section}/http-error-body"
+@@@ end
+@@@ old
+                "cells": [{**gate, "fixture": "handoff", "model": "model-a"}]}}}
+@@@ new
+                "cells": [{**gate, "fixture": "http-error-body", "model": "model-a"}]}}}
+@@@ end
+=== test/issues/test_issue_eval_batch_dispatch.py
+# why: eval.yml runs isolation fixtures only (an in-place one is refused for the routine); the source's first three committed fixtures are isolation ones, the kit's first three (fan-out-triage's) declare a context, so the legs are the first three isolation fixtures (acsi-kit#72).
+@@@ old
+        for fixture in planner.committed_fixtures(ROOT)[:3]:
+@@@ new
+        isolation = [f for f in planner.committed_fixtures(ROOT)
+                     if not planner.declares_context(ROOT / f)]
+        for fixture in isolation[:3]:
+@@@ end
+=== test/issues/test_issue_662_trigger_only.py
+# why: the trigger-only fire check and the record gate read writing-adrs' committed fixtures and reviewed trigger-eval-set.json, which the kit ships only in the library: they read the example checkout, whose invented writing-adrs carries an invented reviewed set (acsi-kit#72).
+@@@ old
+class FireCheckTriggerTests(unittest.TestCase):
+
+    def check(self, skill, holdout=""):
+@@@ new
+class FireCheckTriggerTests(unittest.TestCase):
+
+    def setUp(self):
+        # The committed fixtures are the example checkout's (the kit ships
+        # none of writing-adrs'; test/example_evals.py).
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals
+        patcher = mock.patch.object(pse, "EVALS_DIR", example_evals.checkout() / "evals")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def check(self, skill, holdout=""):
+@@@ end
+@@@ old
+        rc, out, err, _ = self.run_trigger(loop_output((0, 20, 5, 5), (3, 20, 5, 5)))
+        self.assertEqual(rc, 0, out + err)
+        record = self.record()
+        found = gate.check_record(json.loads(json.dumps(record)), "summary.json",
+                                  str(REPO_ROOT))
+@@@ new
+        rc, out, err, _ = self.run_trigger(loop_output((0, 20, 5, 5), (3, 20, 5, 5)))
+        self.assertEqual(rc, 0, out + err)
+        record = self.record()
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals  # the committed tree the gate reads (test/example_evals.py)
+        found = gate.check_record(json.loads(json.dumps(record)), "summary.json",
+                                  str(example_evals.checkout()))
+@@@ end
+=== test/issues/test_issue_687_trims.py
+# why: the trim fire check, the trim leg's validation and the record gate read writing-adrs' committed fixtures, which the kit ships only in the library: they read the example checkout (acsi-kit#72).
+@@@ old
+class FireCheckTrimTests(unittest.TestCase):
+
+    def check(self, *argv):
+@@@ new
+class FireCheckTrimTests(unittest.TestCase):
+
+    def setUp(self):
+        # The committed fixtures are the example checkout's (the kit ships
+        # none of writing-adrs'; test/example_evals.py).
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals
+        patcher = mock.patch.object(pse, "EVALS_DIR", example_evals.checkout() / "evals")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def check(self, *argv):
+@@@ end
+@@@ old
+class ValidateFireTests(unittest.TestCase):
+
+    def leg(self, **env):
+@@@ new
+class ValidateFireTests(unittest.TestCase):
+
+    def setUp(self):
+        # The committed fixtures are the example checkout's (test/example_evals.py).
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals
+        patcher = mock.patch.object(pse, "EVALS_DIR", example_evals.checkout() / "evals")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def leg(self, **env):
+@@@ end
+@@@ old
+        rc, out, err = self.run_main(TrimRunner())
+        self.assertEqual(rc, 0, out + err)
+        found = gate.check_record(json.loads(json.dumps(self.record())), "summary.json",
+                                  str(REPO_ROOT))
+@@@ new
+        rc, out, err = self.run_main(TrimRunner())
+        self.assertEqual(rc, 0, out + err)
+        sys.path.insert(0, str(REPO_ROOT / "test"))
+        import example_evals  # the committed tree the gate reads (test/example_evals.py)
+        found = gate.check_record(json.loads(json.dumps(self.record())), "summary.json",
+                                  str(example_evals.checkout()))
+@@@ end
+=== test/issues/test_issue_535_git_provisioning.py
+# why: the audited opt-in list names fixtures the kit does not ship (excluded, or library items until add-content.sh puts them back); the comparison keeps the audited ones present in the tree, so a fixture that opts in without being audited still fails, and so does an audited one that loses its opt-in (acsi-kit#72).
+@@@ old
+                "closing-keywords", "issue-hygiene", "stamps-skip-quotes"))))
+        self.assertEqual(sorted(opted), audited)
+@@@ new
+                "closing-keywords", "issue-hygiene", "stamps-skip-quotes")))
+            if (ROOT / f"evals/{name}/fixture.yaml").is_file())
+        self.assertEqual(sorted(opted), audited)
+@@@ end
+=== test/issues/test_issue_371_scheduled_fixtures.py
+# why: "the committed tree follows the rule" is about this repository's own evals/scheduled.yml and unscheduled.yml; the module's ROOT is the example checkout, whose four-row example schedule beside the kit's unscheduled.yml breaks the rule by construction, so this one test reads the repository itself (acsi-kit#72).
+@@@ old
+        self.assertEqual(schedule_problems(ROOT), [])
+@@@ new
+        self.assertEqual(schedule_problems(Path(__file__).resolve().parents[2]), [])
+@@@ end
+=== test/issues/test_issue_closed_loop_planner.py
+# why: the stale-leg test needs a committed fixture listed in evals/unscheduled.yml; the source's, browser-testing, is left out (X4, X9), so it uses a kit fixture listed there (acsi-kit#72).
+@@@ old
+    UNSCHEDULED_LEG = {"FIXTURE": "evals/browser-testing", "EVAL_KEY": "browser-testing"}
+@@@ new
+    UNSCHEDULED_LEG = {"FIXTURE": "evals/tool-powershell/whatever-works-pressure",
+                       "EVAL_KEY": "tool-powershell/whatever-works-pressure"}
+@@@ end
+# why: plan_week reads its default checkout (REPO_ROOT, validate_fire's default root) from the copy it was imported from, which is this repository when another module imported it first; the dispatch and plan-command tests pin both to the example checkout they mean (acsi-kit#72).
+@@@ old
+class DispatchLegTests(unittest.TestCase):
+
+@@@ new
+def _pin_planner_root(test):
+    """Point plan_week's default checkout, and the improve loop's committed
+    evals/ its fire checks read, at the example checkout (ROOT)."""
+    import propose_skill_edit
+    for patcher in (mock.patch.object(plan_week, "REPO_ROOT", ROOT),
+                    mock.patch.object(plan_week.validate_fire, "__defaults__", (ROOT,)),
+                    mock.patch.object(propose_skill_edit, "EVALS_DIR", ROOT / "evals")):
+        patcher.start()
+        test.addCleanup(patcher.stop)
+
+
+class DispatchLegTests(unittest.TestCase):
+
+    def setUp(self):
+        _pin_planner_root(self)
+
+@@@ end
+@@@ old
+    tree and recorded evidence: every planned leg passes its revalidation."""
+
+@@@ new
+    tree and recorded evidence: every planned leg passes its revalidation."""
+
+    def setUp(self):
+        _pin_planner_root(self)
+
+@@@ end
+# why: the example checkout schedules three eval legs, so the planner's default room of 30 fires leaves space for the bare legs the test expects to stay unplanned; the source's full schedule fills the room with eval legs first. A room of three, what the eval bands use here, restores that order (acsi-kit#72).
+@@@ old
+                    "2026-10-26T12:00:00+00:00", "--evidence", str(evidence),
+                    "--out", str(plan_file)]
+@@@ new
+                    "2026-10-26T12:00:00+00:00", "--evidence", str(evidence),
+                    "--max-fires", "3", "--out", str(plan_file)]
 @@@ end

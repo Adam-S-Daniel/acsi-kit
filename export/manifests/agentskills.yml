@@ -64,6 +64,28 @@ edits:
       Locks the deduplicated owner list above. Read from the script, since
       git's config keeps one entry per includeIf condition however often the
       installer writes it, so the installed config cannot show a duplicate.
+  # ---- Starter suite on a local machine (acsi-kit#72)
+  - path: scripts/test_plugin_runtime_gate.py
+    stage: output
+    old: |+
+      def test_the_shipped_bash_skills_are_gated_on_a_body_edit():
+          """The three skills the issue names ship with allowed-tools granting Bash."""
+          skills = REPO_ROOT / "plugins" / "acsi-non-coding-local" / "skills"
+          for name in ("add-from-address", "add-received-from-addresses", "rename-pdfs"):
+              data = (skills / name / "SKILL.md").read_bytes()
+              key = f"plugins/acsi-non-coding-local/skills/{name}/SKILL.md"
+              base = {".claude-plugin/marketplace.json": marketplace("acsi-non-coding-local"),
+                      key: data}
+              head = dict(base, **{key: data + b"one more sentence\n"})
+              assert_gated(run(base, head), "skill-body-bash")
+
+
+    new: ""
+    why: >-
+      X9. The test reads three of the source owner's personal skills, which
+      the kit does not ship, so it fails on a missing SKILL.md. The gate it
+      exercises (a body edit to a skill granting Bash) stays covered by the
+      synthetic-skill tests above it.
   # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
     old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"
@@ -314,6 +336,11 @@ patches:
 
 # P3 and the files the sync delivers.
 regenerate:
+  - copy_from_kit: {repo: _agent-guidance, from: .github/fleet-contributor-rules.md, to: .github/fleet-contributor-rules.md}
+    why: >-
+      The sync delivers _agent-guidance's contributor rules here byte for
+      byte, and that repo's copy is rebuilt from the kit's base.md; the
+      source copy holds the owner's sections the kit leaves out (acsi-kit#72).
   - copy_from_kit: {repo: _agent-guidance, from: agents-md/base.md, to: .claude/hooks/fleet-guidance.md}
     why: The sync delivers _agent-guidance's base.md here byte for byte; it carries that repo's X9 blanking.
   - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/agent-checks, to: .githooks/agent-checks}
@@ -365,11 +392,14 @@ regenerate:
 
 # The repo's own suite, as its AGENTS.md and ci.yml run it. The two plugin
 # globs match nothing while no skill ships tests, so the command sets
-# nullglob (ci.yml carries the same edit).
+# nullglob (ci.yml carries the same edit). The setup probe runs the python3
+# the command runs, with -P (no cwd on sys.path) rather than -I: -I also drops
+# the user site, so it checked other packages than the suite imports, and a
+# user-site install of the pins (pip --user) always failed the probe.
 suite:
   git_init: true
   setup: >-
-    python3 -I -c 'import yaml, markdown_it, bashlex, jsonschema, xdist; assert yaml.__version__ == "6.0.3", yaml.__version__';
+    python3 -P -c 'import yaml, markdown_it, bashlex, jsonschema, xdist; assert yaml.__version__ == "6.0.3", yaml.__version__';
     if [ "$(id -u)" = 0 ]; then chmod o+rx "$PWD" "$(dirname "$PWD")"; fi
   command: shopt -s nullglob; python3 -m pytest scripts/ plugins/*/skills/*/tests/ plugins/*/skills/*/scripts/ -q -rfEs -n auto -p no:cacheprovider
   needs: >-

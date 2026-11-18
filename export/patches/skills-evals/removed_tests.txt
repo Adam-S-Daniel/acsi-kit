@@ -57,11 +57,25 @@
 # listed, so the starter leaves them out, and library_fixtures.py copies each into
 # its item first (TestIssue74, TestIssue77, TestIssue80, TestIssue80Supersede and
 # twelve test_issue_124 methods); add-content.sh puts them back with their item.
-# That makes 607 entries, one a whole class.
+# That makes 607 entries, one a whole class. acsi-kit#72 (2026-11-16) adds 18:
+# eleven test_issue_124 Harder* methods (seven of them library items' tests, four
+# for the left-out section-javascript and section-rust fixtures) and the seven
+# listed at the end of this file.
 test/issues/test_issue_124_guidance_gates.py::FifthBatchFixtureTests::test_changelog_check
 test/issues/test_issue_124_guidance_gates.py::FifthBatchFixtureTests::test_new_config_key
 test/issues/test_issue_124_guidance_gates.py::FifthBatchFixtureTests::test_org_connector_ci
 test/issues/test_issue_124_guidance_gates.py::FixtureLayoutTests::test_each_covered_section_has_fixtures_and_one_has_four
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureSetBTests::test_clippy_before_done
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureSetBTests::test_cross_repo_docs_pr
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureSetBTests::test_fleet_wide_crlf_check
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureSetBTests::test_lint_before_done
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureSetBTests::test_migration_rollback_note
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureSetBTests::test_shutdown_cleanup
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureSetBTests::test_staging_reset_fact
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureSetBTests::test_staging_tls
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureSetBTests::test_unaligned_read
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureTests::test_contradicting_report_setup_and_its_failing_test
+test/issues/test_issue_124_guidance_gates.py::HarderFixtureTests::test_contradicting_report_trap_merges
 test/issues/test_issue_124_guidance_gates.py::FourthBatchFixtureTests::test_clone_all
 test/issues/test_issue_124_guidance_gates.py::FourthBatchFixtureTests::test_fetch_user
 test/issues/test_issue_124_guidance_gates.py::FourthBatchFixtureTests::test_load_settings_async
@@ -679,3 +693,23 @@ test/run_tests.py::TestIssue81::test_every_brief_asks_for_the_text_alone
 test/run_tests.py::TestIssue81::test_every_reference_is_written_in_a_voice_that_contracts
 test/run_tests.py::TestIssue81::test_fixture_rubrics_ask_for_the_three_pairwise_dimensions
 test/run_tests.py::TestIssue81::test_quoted_seed_material_is_not_the_agents_writing
+
+# acsi-kit#72 (2026-11-16): the agent route for a skill whose one copy is in
+# another public registry. retire_skill.py names example-site-platform and
+# example-site-a as those registries (AGENT_REGISTRIES); the kit's
+# harness/registries.yml lists neither (cold_start_registries.py), so the
+# route cannot be reached in the kit and every one of these runs was refused
+# at the --registry flag. The agent route for a skill acsi-agentskills itself
+# holds stays tested (test_no_credential_files_the_agent_issue and the
+# AgentFixable cases), and so does the refusal of an unlocated copy.
+test/issues/test_issue_70_retire.py::AgentRouteTests::test_a_closed_agent_issue_decides_the_skill
+test/issues/test_issue_70_retire.py::AgentRouteTests::test_a_example_site_platform_skill_files_the_agent_issue
+test/issues/test_issue_70_retire.py::AgentRouteTests::test_a_example_site_platform_skill_is_planned_as_the_agent_issue
+test/issues/test_issue_70_retire.py::AgentRouteTests::test_an_open_proposal_issue_is_converted_in_place
+test/issues/test_issue_70_retire.py::AgentRouteTests::test_no_credential_files_the_agent_issue_for_a_example_site_platform_skill
+test/issues/test_issue_70_retire.py::AgentRouteTests::test_the_label_is_not_added_over_a_worker_or_a_hold
+
+# acsi-kit#72: the source's 2026-11-03 scope decision for acsi-writing-style
+# (its three fixtures unscheduled, each with a reason). The kit ships neither
+# that skill's fixtures (X2, X9) nor their rows.
+test/issues/test_issue_81_private_results.py::PlannerKeepsPrivateSkillsOutOfPublicOutputs::test_its_fixtures_are_off_the_schedule_with_a_reason

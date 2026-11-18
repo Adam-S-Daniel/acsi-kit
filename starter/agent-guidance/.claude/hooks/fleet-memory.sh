@@ -849,7 +849,7 @@ fleet_git_hooks() {
     # Git expands the ~ itself when it reads the include.
     # shellcheck disable=SC2088
     local inc_value='~/.config/git/agent-hooks.inc' owner prefix cond have
-    for owner in example-adopter example-adopter example-adopter-two; do
+    for owner in example-adopter example-adopter-two; do
         for prefix in https://github.com/ git@github.com: ssh://git@github.com/; do
             cond="hasconfig:remote.*.url:${prefix}${owner}/**"
             # Same scope as the write below: an unscoped read also sees the

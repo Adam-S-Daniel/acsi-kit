@@ -42,8 +42,8 @@ session.
   work. `skills-evals`' `evals/budget.yml` gives all automated evals 30% of
   the weekly allowance (`weekly_cap: 0.30`), and reserves 0.0105 for one
   eval fire (`per_run_cap` plus `per_run_overrun`) until it is measured. An
-  improve fire is charged eight eval fires at their measured mean, or eight
-  full reservations (0.084) while nothing is measured, so an improve fire
+  improve fire is charged about twelve eval fires at their measured mean, or
+  that many full reservations while nothing is measured, so an improve fire
   can go in the first week, one of each kind a week at least. The weekly
   planner runs on Tuesdays at 07:00 UTC, after the
   allowance week turns over (Monday 17:00 UTC). An improve fire needs four

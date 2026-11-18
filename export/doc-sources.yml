@@ -1,0 +1,188 @@
+# Which starter files each hand-written page under docs/ describes.
+#
+# export/doc_review.py reads this after a re-sync and lists, in the pull
+# request, every page whose sources changed, so a reviewer knows which pages
+# the new pins may have made stale. Keep each list to the sources that would
+# make the page wrong if they changed, not whole trees. `**` crosses
+# directories; `*` does not cross `/`.
+#
+# required: false means a routine spec or scheduled workflow that no page
+# names is only a warning in export/tests/test_doc_review.py; true makes it a
+# failure. Flip it once `not_documented` is settled.
+required: false
+
+pages:
+  docs/before-you-start.md:
+    - starter/skills-evals/evals/budget.yml
+    - starter/skills-evals/evals/roster-policy.yml
+    - starter/agent-guidance/.github/workflows/fleet-worker-fire.yml
+    - starter/agent-guidance/repos.yml
+    - starter/repo-settings/repo-settings/fleet.yml
+    - starter/repo-settings/.github/workflows/repo-settings.yml
+    - starter/repo-settings/scripts/repo_settings.py
+
+  docs/evals-and-loop.md:
+    - starter/skills-evals/README.md
+    - starter/skills-evals/DESIGN.md
+    - starter/skills-evals/AGENTS.md
+    - starter/skills-evals/docs/how-it-works.md
+    - starter/skills-evals/docs/rules.md
+    - starter/skills-evals/docs/decisions/0010-run-ai-eval-steps-in-a-routine-fired-by-actions.md
+    - starter/skills-evals/harness/run_eval.py
+    - starter/skills-evals/harness/scorers/**
+    - starter/skills-evals/evals/budget.yml
+    - starter/skills-evals/evals/scheduled.yml
+    - starter/skills-evals/evals/roster.yml
+    - starter/skills-evals/evals/gate-policy.yml
+    - starter/skills-evals/evals/improve-policy.yml
+    - starter/skills-evals/evals/retirement-exempt.yml
+    - starter/skills-evals/scripts/plan_week.py
+    - starter/skills-evals/scripts/allowance_guard.py
+    - starter/skills-evals/.github/workflows/routine-*.yml
+    - starter/skills-evals/.github/workflows/eval.yml
+    - starter/skills-evals/.github/workflows/roster-refresh.yml
+    - starter/skills-evals/.github/workflows/skill-coverage.yml
+    - starter/agent-skills/docs/decisions/0021-automated-skill-changes-merge-without-review.md
+
+  docs/generated-files.md:
+    - starter/agent-guidance/skills.lock
+    - starter/agent-guidance/repos.yml
+    - starter/agent-guidance/.github/workflows/actions.lock
+    - starter/agent-guidance/.github/workflows/skills-lock-bump.yml
+    - starter/agent-guidance/scripts/bump-hook-pin.sh
+    - starter/repo-settings/repo-settings/fleet.yml
+    - starter/repo-settings/repo-settings/fleet.evals.yml
+    - starter/repo-settings/.github/workflows/scheduled-run-health.yml
+    - starter/repo-settings/tests/test_repo_settings.py
+    - starter/wsl-automation/.github/workflows/scheduled-run-health.yml
+    - starter/wsl-automation/scripts/sync-codex-cloud-environments.sh
+    - starter/wsl-automation/scripts/publish-waiting-feed.sh
+    - starter/skills-evals/.github/workflows/eval.yml
+    - starter/skills-evals/.github/workflows/scheduled-run-health.yml
+    - starter/skills-evals/harness/registries.yml
+    - starter/agent-skills/scripts/generate_skills_lock.py
+    - starter/agent-skills/skills.lock
+
+  docs/guidance.md:
+    - starter/agent-guidance/README.md
+    - starter/agent-guidance/AGENTS.md
+    - starter/agent-guidance/agents-md/base.md
+    - starter/agent-guidance/agents-md/stub.md
+    - starter/agent-guidance/agents-md/eval-coverage.yml
+    - starter/agent-guidance/agents-md/sections/**
+    - starter/agent-guidance/repos.yml
+    - starter/agent-guidance/.claude/hooks/**
+    - starter/agent-guidance/templates/**
+    - starter/agent-guidance/scripts/sync.sh
+    - starter/agent-guidance/.github/workflows/sync.yml
+    - starter/agent-guidance/.github/workflows/drift-report.yml
+    - starter/agent-guidance/.github/workflows/agent-checks.yml
+    - starter/agent-guidance/docs/guidance-impact.md
+    - starter/agent-guidance/docs/decisions/0013-a-memory-note-outside-a-repo-names-its-home.md
+    - starter/agent-skills/scripts/codex-session-start.sh
+
+  docs/how-it-works.md:
+    - starter/*/README.md
+    - starter/agent-guidance/agents-md/base.md
+    - starter/agent-guidance/.github/workflows/sync.yml
+    - starter/agent-guidance/repos.yml
+    - starter/repo-settings/repo-settings/fleet.yml
+    - starter/repo-settings/scripts/repo_settings.py
+    - starter/skills-evals/docs/how-it-works.md
+    - starter/agent-guidance/docs/routines/**
+
+  docs/machine.md:
+    - starter/agent-skills/setup.sh
+    - starter/agent-skills/scripts/install-agent-hooks.sh
+    - starter/agent-skills/docs/multi-repo-delivery.md
+    - starter/agent-guidance/scripts/register-memory-home-hook.sh
+    - starter/agent-guidance/scripts/register-codex-hook.sh
+    - starter/agent-guidance/docs/reference/network-allowlist-claude-environments.txt
+    - starter/wsl-automation/README.md
+    - starter/wsl-automation/config/settings.env.example
+    - starter/wsl-automation/scripts/register-tasks.ps1
+    - starter/wsl-automation/scripts/grant-keeper-batch-logon.ps1
+    - starter/wsl-automation/scripts/install-ccstatusline.ps1
+    - starter/wsl-automation/scripts/run-session-miner.sh
+    - starter/wsl-automation/scripts/sync-codex-cloud-environments.sh
+    - starter/wsl-automation/scripts/unix/**
+
+  docs/quick-start.md:
+    - starter/*/README.md
+    - starter/agent-guidance/repos.yml
+    - starter/repo-settings/repo-settings/fleet.yml
+    - starter/repo-settings/repo-settings/fleet.evals.yml
+    - starter/repo-settings/tests/test_repo_settings.py
+    - starter/agent-guidance/docs/reference/network-allowlist-claude-environments.txt
+    - starter/agent-skills/docs/multi-repo-delivery.md
+    - starter/skills-evals/docs/routine/eval-runner-prompt.md
+    - starter/skills-evals/explorer/dist/artifact/index.html
+    - starter/skills-evals/dashboard/README.md
+    - starter/skills-evals/.github/workflows/eval.yml
+    - starter/wsl-automation/config/settings.env.example
+    - starter/wsl-automation/scripts/register-tasks.ps1
+    - starter/wsl-automation/scripts/unix/**
+
+  docs/routines.md:
+    - starter/agent-guidance/docs/routines/**
+    - starter/agent-guidance/docs/reference/agent-changelog-routine.md
+    - starter/agent-guidance/docs/reference/network-allowlist-claude-environments.txt
+    - starter/agent-guidance/repos.yml
+    - starter/agent-guidance/.github/workflows/fleet-worker-fire.yml
+    - starter/agent-guidance/.github/workflows/prompt-audit-fire.yml
+    - starter/agent-guidance/.github/workflows/vendor-changelog-merge.yml
+    - starter/agent-guidance/.github/workflows/scheduled-run-health.yml
+    - starter/skills-evals/docs/routine/eval-runner-prompt.md
+    - starter/skills-evals/docs/routine/eval-runner-instructions.md
+    - starter/skills-evals/.github/workflows/routine-eval-fire.yml
+    - starter/skills-evals/.github/workflows/explorer-data.yml
+    - starter/skills-evals/.github/workflows/site-sync.yml
+    - starter/skills-evals/.github/workflows/site-freshness.yml
+    - starter/skills-evals/explorer/src/**
+    - starter/skills-evals/tool/index.html
+    - starter/skills-evals/explorer/dist/artifact/index.html
+    - starter/skills-evals/dashboard/page/**
+    - starter/skills-evals/dashboard/README.md
+    - starter/skills-evals/dashboard/tasks/**
+    - starter/skills-evals/evals/public-export.yml
+
+  docs/settings-and-apps.md:
+    - starter/repo-settings/README.md
+    - starter/repo-settings/repo-settings/fleet.yml
+    - starter/repo-settings/repo-settings/fleet.evals.yml
+    - starter/repo-settings/scripts/repo_settings.py
+    - starter/repo-settings/.github/workflows/repo-settings.yml
+    - starter/agent-skills/.github/workflows/plugin-runtime-review.yml
+    - starter/agent-skills/docs/decisions/0016-open-plugin-folders-and-gate-runtime-changes-on-owner-approval.md
+    - starter/agent-guidance/repos.yml
+
+  docs/skills.md:
+    - starter/agent-skills/README.md
+    - starter/agent-skills/AGENTS.md
+    - starter/agent-skills/.claude-plugin/marketplace.json
+    - starter/agent-skills/scripts/plugin_layout.json
+    - starter/agent-skills/scripts/check_privacy_denylist.py
+    - starter/agent-skills/scripts/generate_skills_lock.py
+    - starter/agent-skills/docs/skill-impact.md
+    - starter/agent-skills/templates/skill/**
+    - starter/agent-skills/.github/workflows/plugin-runtime-review.yml
+    - starter/agent-skills/docs/decisions/0016-open-plugin-folders-and-gate-runtime-changes-on-owner-approval.md
+    - starter/agent-guidance/.claude/hooks/skills-bootstrap.sh
+    - starter/agent-guidance/.github/workflows/skills-lock-bump.yml
+    - starter/agent-skills-private/README.md
+
+  docs/traps.md:
+    - starter/agent-guidance/agents-md/base.md
+    - starter/agent-guidance/.claude/hooks/skills-bootstrap.sh
+    - starter/agent-guidance/templates/agent-checks/agent-checks
+    - starter/repo-settings/repo-settings/fleet.yml
+
+  docs/week-to-week.md:
+    - starter/agent-guidance/README.md
+    - starter/skills-evals/evals/budget.yml
+    - starter/skills-evals/.github/workflows/routine-eval-fire.yml
+    - starter/skills-evals/.github/workflows/routine-eval-ingest.yml
+    - starter/repo-settings/repo-settings/fleet.yml
+    - starter/repo-settings/.github/workflows/repo-settings.yml
+
+not_documented: []

@@ -132,22 +132,6 @@ jobs:
           path: ctx/acsi-agentskills
           fetch-depth: 0
           persist-credentials: false
-      - name: Check out example-site-platform
-        uses: actions/checkout@v7.0.1
-        with:
-          repository: example-adopter/example-site-platform
-          path: ctx/example-site-platform
-          fetch-depth: 0
-          filter: blob:none
-          persist-credentials: false
-      - name: Check out example-site-a
-        uses: actions/checkout@v7.0.1
-        with:
-          repository: example-adopter/example-site-a
-          path: ctx/example-site-a
-          fetch-depth: 0
-          filter: blob:none
-          persist-credentials: false
       - name: Check out wsl-automation
         uses: actions/checkout@v7.0.1
         with:
@@ -168,13 +152,11 @@ jobs:
           set -euo pipefail
           as_of="$(git -C eval-results-branch log -1 --format=%cI)"
           args=()
-          for repo in _agent-guidance acsi-agentskills example-site-platform example-site-a wsl-automation; do
+          for repo in _agent-guidance acsi-agentskills wsl-automation; do
             args+=(--context-repo "example-adopter/${repo}=ctx/${repo}")
           done
           python3 scripts/contextualize_fixtures.py "${args[@]}" \
             --registry acsi-agentskills=ctx/acsi-agentskills \
-            --registry example-site-platform=ctx/example-site-platform \
-            --registry example-site-a=ctx/example-site-a \
             --as-of "$as_of" --apply > "$RUNNER_TEMP/contextualize.out"
           cat "$RUNNER_TEMP/contextualize.out" >> "$GITHUB_OUTPUT"
       - name: Re-pin drifted fixtures whose evidence is not in use
@@ -183,13 +165,11 @@ jobs:
           set -euo pipefail
           as_of="$(git -C eval-results-branch log -1 --format=%cI)"
           args=()
-          for repo in _agent-guidance acsi-agentskills example-site-platform example-site-a wsl-automation repo-settings; do
+          for repo in _agent-guidance acsi-agentskills wsl-automation repo-settings; do
             args+=(--context-repo "example-adopter/${repo}=ctx/${repo}")
           done
           python3 scripts/repin_drifted_fixtures.py "${args[@]}" \
             --registry acsi-agentskills=ctx/acsi-agentskills \
-            --registry example-site-platform=ctx/example-site-platform \
-            --registry example-site-a=ctx/example-site-a \
             --results-tree eval-results-branch \
             --as-of "$as_of" --apply > "$RUNNER_TEMP/repin.out" || {
             # A refusal writes nothing (every text is checked before any is

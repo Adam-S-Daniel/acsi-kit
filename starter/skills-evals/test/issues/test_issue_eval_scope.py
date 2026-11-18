@@ -529,22 +529,26 @@ class RemovedTests(unittest.TestCase):
         # The review of #1016's F1: the explorer's skill list comes from the
         # coverage census, which drops a removed skill the next day. The
         # fixture's own `registry:` field still names where it lived.
+        ag = Path(self._tmp.name) / "agentskills"
+        write(ag, "plugins/p/skills/beta/SKILL.md", "---\nname: beta\n---\n")
+        checkouts = {"acsi-agentskills": ag}
         for path in ("evals/alpha/one", "evals/alpha/two"):
             write(self.root, f"{path}/fixture.yaml",
-                  "draft: false\nregistry: https://github.com/example-adopter/example-site-platform\n")
+                  "draft: false\nregistry: https://github.com/example-adopter/acsi-agentskills\n")
         gone = {**self.exp, "skills": [s for s in self.exp["skills"] if s["name"] != "alpha"]}
-        self.assertEqual(self.removed(self.plan(exp=gone)), ["evals/alpha/one", "evals/alpha/two"])
+        self.assertEqual(self.removed(self.plan(checkouts, exp=gone)),
+                         ["evals/alpha/one", "evals/alpha/two"])
         # Back in the registry, the same fixtures resume with no explorer entry.
-        plan = self.plan(exp=gone)
+        plan = self.plan(checkouts, exp=gone)
         eval_scope.apply_plan(self.root, plan)
-        write(self.cms, "skills/alpha/SKILL.md", "---\nname: alpha\n---\n")
-        self.assertEqual(sorted(r["path"] for r in self.plan(exp=gone)["resume"]),
+        write(ag, "plugins/p/skills/alpha/SKILL.md", "---\nname: alpha\n---\n")
+        self.assertEqual(sorted(r["path"] for r in self.plan(checkouts, exp=gone)["resume"]),
                          ["evals/alpha/one", "evals/alpha/two"])
         # A registry URL harness/registries.yml does not know is unknown.
         write(self.root, "evals/alpha/one/fixture.yaml",
               "draft: false\nregistry: https://example.com/nope\n")
-        (self.cms / "skills/alpha/SKILL.md").unlink()
-        self.assertNotIn("evals/alpha/one", self.removed(self.plan(exp=gone)))
+        (ag / "plugins/p/skills/alpha/SKILL.md").unlink()
+        self.assertNotIn("evals/alpha/one", self.removed(self.plan(checkouts, exp=gone)))
 
     def test_a_skill_present_in_its_registry_or_another_visible_one_is_kept(self):
         write(self.cms, "skills/alpha/SKILL.md", "---\nname: alpha\n---\n")
@@ -579,10 +583,14 @@ class RemovedTests(unittest.TestCase):
     def test_the_command_line_takes_registry_checkouts(self):
         out = Path(self._tmp.name) / "plan.json"
         exp = Path(self._tmp.name) / "exp.json"
-        exp.write_text(json.dumps(self.exp), encoding="utf-8")
+        ag = Path(self._tmp.name) / "agentskills"
+        write(ag, "plugins/p/skills/beta/SKILL.md", "---\nname: beta\n---\n")
+        doc = {**self.exp, "skills": [{**s, "registry": "acsi-agentskills"}
+                                      for s in self.exp["skills"]]}
+        exp.write_text(json.dumps(doc), encoding="utf-8")
         with redirect_stdout(io.StringIO()):
             code = eval_scope.main(["plan", "--repo-root", str(self.root), "--explorer", str(exp),
-                                    "--registry", f"example-site-platform={self.cms}", "--now", NOW,
+                                    "--registry", f"acsi-agentskills={ag}", "--now", NOW,
                                     "--out", str(out)])
         self.assertEqual(code, 0)
         self.assertEqual(self.removed(json.loads(out.read_text())),
@@ -829,18 +837,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("evals/scheduled.yml|evals/unscheduled.yml|evals/scope-auto.yml", scope)
         self.assertNotIn("app_token", scope)
 
-    def test_the_removed_rule_sees_all_three_public_registries(self):
+    def test_the_removed_rule_sees_every_public_registry(self):
         steps = self.doc["jobs"]["plan"]["steps"]
         repos = {s["with"]["repository"]: s["with"] for s in steps
                  if str(s.get("uses", "")).startswith("actions/checkout")
                  and "repository" in s.get("with", {})}
-        for name in ("acsi-agentskills", "example-site-platform", "example-site-a"):
+        public = [r["name"] for r in yaml.safe_load(
+            (ROOT / "harness/registries.yml").read_text())["registries"] if not r["private"]]
+        self.assertEqual(public, ["acsi-agentskills"])
+        for name in public:
             self.assertIn(f"example-adopter/{name}", repos)
         layouts = {r["name"]: r["layout"]
                    for r in yaml.safe_load((ROOT / "harness/registries.yml").read_text())["registries"]}
         run = next(s["run"] for s in steps if s.get("id") == "plan")
-        for name, path in (("acsi-agentskills", "registry-agentskills"), ("example-site-platform", "registry-cms"),
-                           ("example-site-a", "registry-site")):
+        for name, path in (("acsi-agentskills", "registry-agentskills"),):
             self.assertIn(f'--registry "{name}=$GITHUB_WORKSPACE/ctx/{path}"', run)
             sparse = repos[f"example-adopter/{name}"]
             # Sparse and read-only, and the sparse pattern is the layout.

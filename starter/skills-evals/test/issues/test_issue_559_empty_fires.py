@@ -39,6 +39,14 @@ sys.path.insert(0, str(ROOT / "harness"))
 import gates  # noqa: E402
 import plan_week  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import example_evals  # noqa: E402
+
+# The committed fixtures and schedule these tests read are the example
+# checkout's (the kit ships few; test/example_evals.py); the modules above
+# are imported from this repository.
+ROOT = example_evals.checkout()
+
 #: Over RETRY_AFTER past EMPTY_FIRES_SINCE, so only the rule under test excludes a fire.
 NOW = plan_week.EMPTY_FIRES_SINCE + timedelta(days=20)
 SKILL_FIXTURE = "evals/writing-adrs/bootstrap"
@@ -336,9 +344,10 @@ class PendingTests(unittest.TestCase):
 class OutageFixture:
     """Fixtures, clock and verdict-document helpers the outage tests share."""
 
-    FIXTURES = ["evals/github-actions-sha-pinning", "evals/writing-adrs/bootstrap",
-                "evals/disarm-inherited-reach", "evals/consumer-repo-provisioning",
-                "evals/embeddable-tool-pages", "evals/review-bash-ci-reliability/release-pipeline"]
+    FIXTURES = ["evals/workflow-path-audit/required-check-routing",
+                "evals/vendor-release-impact-issues/closed-duplicate",
+                "evals/skills-doctor/bucketed-account-store", "evals/fan-out-triage/single-file",
+                "evals/tool-powershell/silent-exit-one", "evals/github-actions-repo-settings/onboarding"]
     DAY = plan_week.EMPTY_FIRES_SINCE + timedelta(days=2)  # 2026-11-05
     LATER = DAY + timedelta(days=3)  # inside RETRY_AFTER, past FIRE_RESULT_WINDOW
     # The 2026-11-01 burst's clock times, shifted past EMPTY_FIRES_SINCE.
@@ -757,6 +766,15 @@ class BreakerTests(OutageFixture, unittest.TestCase):
         def settle(cells):
             for c in cells:
                 c["class"] = "no-benefit"
+        # Equal-cost probes tie-break on the fixture path, so the source's
+        # schedule probes a never-fired skill cell that sorts before
+        # evals/guidance/; the example schedule has none, so one is added.
+        listed = plan_week.schedule.scheduled_fixtures
+        patcher = mock.patch.object(plan_week.schedule, "scheduled_fixtures",
+                                    lambda path, committed: listed(path, committed)
+                                    + ["evals/fan-out-triage/three-files"])
+        patcher.start()
+        self.addCleanup(patcher.stop)
         fires = self.outage()
         up, _, _ = self.plan([], self.BURST_AT, edit=settle)
         self.assertEqual(self.kinds(up), {("eval", "bare"), ("improve", "")})
