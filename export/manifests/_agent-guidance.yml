@@ -460,8 +460,6 @@ patches:
 
 # P3: generated files rebuilt from the edited sources, in this order.
 regenerate:
-  - copy: {from: agents-md/base.md, to: .claude/hooks/fleet-guidance.md}
-    why: The fleet payload mirror must equal base.md byte for byte (scripts/check-fleet-guidance-mirror.js).
   - run: NODE_PATH="$EXPORT_SOURCES/_agent-guidance/node_modules" node scripts/check-guidance-coverage.js --write-bytes >/dev/null
     why: Section byte counts in agents-md/eval-coverage.yml follow base.md.
   - run: NODE_PATH="$EXPORT_SOURCES/_agent-guidance/node_modules" node scripts/build-contributor-rules.js --write >/dev/null

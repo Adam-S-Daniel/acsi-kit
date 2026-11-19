@@ -2834,3 +2834,11 @@ The `starter-suites` check on the re-sync branch failed two `agent-skills` tests
 - `test_an_own_entry_not_in_gh_actions_locks_shape_gates`: the source's first case is a key naming the source owner's login in its own mixed case, which the gate must refuse because `gh actions-lock` writes lowercase. C2 folds both cases of the first owner into one login, so the case became the valid key and the gate accepted it. An `edits` entry makes it `EXAMPLE_ADOPTER/tool@v1.1.0`, a non-lowercase form `bootstrap/copy-starter.sh` knows how to rename (a mixed-case `Example-Adopter` failed its leftover-owner check).
 
 Reverse: drop the `edits` entry, and restore the `copy_from_kit` line and the pin step's path.
+
+## Starter-suites repair for `agent-guidance` (2026-11-19)
+
+The `starter-suites` check on the re-sync branch failed one `agent-guidance` assertion in the `self_hosted` group: "self-hosted payload: .claude/hooks/fleet-guidance.md must not exist (ADR 0043 retired the mirror)". `_agent-guidance` now keeps no `.claude/hooks/fleet-guidance.md` of its own, and its test asserts the file is absent, but the manifest's `regenerate` step still copied `agents-md/base.md` there. The step is dropped and the starter's copy deleted.
+
+The three `test_codex_cloud` entries in `starter/known-failures.txt` stay. CI reports them "listed as known but did not fail" because its runner is not root, which is only a notice; in a root cloud container they still fail (re-measured 2026-11-19), so removing them would fail the tree where maintainers run it.
+
+Reverse: restore the `copy` entry and the file.
