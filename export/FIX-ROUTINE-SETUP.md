@@ -1,25 +1,26 @@
 # Set up the re-sync fix routine
 
 The daily re-sync fires this routine when it holds a source back
-(`MAINTAINING.md`, "Fix routine"). What the routine does lives in
-[`FIX-ROUTINE.md`](FIX-ROUTINE.md), read from this repo on every run, so a
-change to its behavior is a pull request to that file. Only the settings
-below live on claude.ai, and the prompt stays short so it rarely needs
-pasting again. Below, `<owner>` is the GitHub account that owns this repo.
+(`MAINTAINING.md`, "Fix routine"). The routine's instructions live in
+[`FIX-ROUTINE.md`](FIX-ROUTINE.md), which it reads from this repo on every
+run, so you change its behavior with a pull request to that file. Only the
+settings below live on claude.ai, and the prompt is short so you rarely need
+to paste it again. Below, `<owner>` is the GitHub account that owns this
+repo.
 
 ## 1. Create the routine
 
-Make it on the claude.ai Routines page (https://claude.ai/code/routines),
-not from a project thread: a routine made from a project thread runs as a
-full project thread, with the project's model, all its repos and its
-context, and costs more per run.
+Create it on the claude.ai Routines page (https://claude.ai/code/routines),
+not from a project thread. A routine made from a project thread runs as a
+full project thread, with the project's model, repos, and context, so each
+run costs more.
 
 - **Name:** `acsi-kit re-sync fixer`
-- **Model:** a Sonnet model. Pick it by name: "Default" follows the
-  account's default model, which may be a costlier one.
+- **Model:** a Sonnet model, chosen by name. "Default" follows the account's
+  default model, which may cost more.
 - **Repository:** `<owner>/acsi-kit` only.
-- **Environment:** a slim one that skips any fleet guidance load and whose
-  network allows github.com and the package registries.
+- **Environment:** a slim one that skips loading the fleet guidance and
+  whose network allows github.com and the package registries.
 - **Schedule:** none. **Connectors:** none.
 - **Trigger:** an **API trigger**. Copy its URL and generate its token for
   step 2.
@@ -44,5 +45,5 @@ In this repo's **Settings → Secrets and variables → Actions**:
 - **Variable** `RESYNC_FIXER_FIRE_URL`: the API trigger's URL.
 - **Secret** `RESYNC_FIXER_FIRE_BEARER`: the trigger's token.
 
-Until both are set, a run that holds a source back fails, naming whichever
-one is missing.
+Until both are set, a run that holds a source back fails and names the
+missing one.

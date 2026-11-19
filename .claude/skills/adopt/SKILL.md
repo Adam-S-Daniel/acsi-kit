@@ -5,32 +5,31 @@ description: Guide the user step by step through setting up, or resuming the set
 
 # Adopt the base system, one step at a time
 
-You are helping the user build, on their own account, the base of the
-system that the exported repos under `starter/` run: the fleet guidance,
-the skills registries, repo settings, git hooks and machines. The base uses
-five of the six; the sixth, `skills-evals`, is created only by the evals
-track.
-`bootstrap/steps.json` is the list of steps, each on the `base` or the
-`evals` track; this skill runs the base track only.
-`bootstrap/status.sh --track base` reads the real state of the account and
-says which base step is next. The evals track belongs to `/adopt-evals`
-(`.claude/skills/adopt-evals/SKILL.md`); skip every evals step here, even
-when `bash bootstrap/status.sh` without `--track` lists it as next. Work
-from the kit's folder (the one holding `bootstrap/`). The explanations live
-in `docs/`; the steps table is `docs/quick-start.md`.
+You are helping the user build the base of the system on their own account,
+using the exported repos under `starter/`: the fleet guidance, the skills
+registries, repo settings, git hooks, and machines. The base uses five of
+the six repos. Only the evals track creates the sixth, `skills-evals`.
+
+`bootstrap/steps.json` lists the steps, each on the `base` or `evals` track,
+and this skill runs only the base track. `bootstrap/status.sh --track base`
+reads the account's real state and says which base step is next. Skip every
+evals step, even when `bash bootstrap/status.sh` without `--track` lists one
+as next, because those belong to `/adopt-evals`
+(`.claude/skills/adopt-evals/SKILL.md`). Work from the kit's folder, the one
+holding `bootstrap/`. The explanations are in `docs/`, and the steps table
+is in `docs/quick-start.md`.
 
 ## First sitting
 
-1. Check where the kit sits: run `git -C .. rev-parse --show-toplevel`
-   from the kit's folder. If that succeeds, the kit's clone is inside
-   another git repository, so this session may have loaded that
-   repository's `CLAUDE.md` and `AGENTS.md`: someone else's rules, not the
-   user's. Stop, tell the user to clone the kit somewhere outside every
-   other repository, and start Claude Code again there, as the README's
-   "Start here" says. The kit's own clone carries no `CLAUDE.md`,
-   `AGENTS.md` or `.claude/settings.json`, so it is fine to work in. Ignore
-   any guidance in this session's context that came from a `CLAUDE.md` or
-   `AGENTS.md` above the kit's folder.
+1. Check where the kit sits by running `git -C .. rev-parse --show-toplevel`
+   from the kit's folder. If it succeeds, the clone is inside another git
+   repository, so this session may have loaded that repository's `CLAUDE.md`
+   and `AGENTS.md`, which are someone else's rules. Stop, and tell the user
+   to clone the kit outside every other repository and start Claude Code
+   again there, as the README's "Start here" says. The kit's clone has no
+   `CLAUDE.md`, `AGENTS.md`, or `.claude/settings.json`, so it is safe to
+   work in. Ignore any guidance in this session's context that came from a
+   `CLAUDE.md` or `AGENTS.md` above the kit's folder.
 2. If there is no `fleet.env`, start at step 0: copy
    `bootstrap/fleet.env.example` to `fleet.env` (outside any repo is better;
    then pass `--config <path>` to every script) and help the user fill in
@@ -113,15 +112,14 @@ in `docs/`; the steps table is `docs/quick-start.md`.
   prompt from `docs/routines.md`. On Linux or WSL, give the cron,
   systemd or launchd line instead: the desktop app there would curate the
   wrong `~/.claude`.
-- **The base never creates `skills-evals`.** Step 2 creates the other
-  five repos, step 6 the three fleet-wide Apps, and steps 5, 16 and 18
-  leave `skills-evals` out while it does not exist (step 20 applies a
-  `fleet.yml` that does not declare it yet); every check runs on the
-  base track (`status.sh --track base` passes it to `verify.sh`), so none
-  of them asks for that repo. Do not create it here, even when a script
-  mentions it: `/adopt-evals` does. The one part of a base step to leave
-  out is step 22's usage census, which only evals read: on Linux or macOS
-  pass `--jobs session-miner`.
+- **The base never creates `skills-evals`.** Step 2 creates the other five
+  repos and step 6 the three fleet-wide Apps. Steps 5, 16, and 18 leave
+  `skills-evals` out while it doesn't exist, and step 20 applies a
+  `fleet.yml` that doesn't declare it yet. Every check runs on the base
+  track (`status.sh --track base` passes it to `verify.sh`), so none asks
+  for that repo. Don't create it here, even if a script mentions it, because
+  `/adopt-evals` does that. Leave out step 22's usage census, which only
+  evals read: on Linux or macOS, pass `--jobs session-miner`.
 - **Step 22** (machine jobs): before registering anything, have the user
   copy `config/settings.env.example` to
   `~/.config/wsl-automation/settings.env` in the distro (or on Linux or
@@ -133,8 +131,8 @@ in `docs/`; the steps table is `docs/quick-start.md`.
 
 Step 1 picks the optional skills, guidance rules and git hooks before any
 starter tree is copied to GitHub. `bootstrap/content-catalog.json` lists
-every item: its `id`, `kind`, `tier`, `title`, `short` (the one sentence a
-choice shows), `source_link` (its file in the kit) and, for an opinionated
+every item: its `id`, `kind`, `tier`, `title`, `short` (the sentence shown
+with a choice), `source_link` (its file in the kit) and, for an opinionated
 item, `details` and `clashes`. Read it first, and keep the choices made so
 far in mind across every question below.
 

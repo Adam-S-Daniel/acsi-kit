@@ -2274,8 +2274,8 @@ Two sources moved between round 5's pin and the first re-sync after it:
 
 | Source | Round 5 | Round 6 |
 |---|---|---|
-| skills-evals | `508181f9da3b` | `f6f16f835d4e` |
-| wsl-automation | `3f973eec89b5` | `5118c58b887e` |
+| skills-evals | `508181f9da3b` | `48f470e58881` |
+| wsl-automation | `3f973eec89b5` | `0d54e508ac91` |
 
 - skills-evals' `AGENTS.md` now says the live operational state is
   `HANDOFF.md`'s "Current state" section and that the old status board issue
@@ -2299,7 +2299,7 @@ sync's `exclude` entry for the kit (C11).
 
 | Source | Round 6 | Round 7 |
 |---|---|---|
-| _agent-guidance | `4e3f70c7a88f` | `1e72504f1fd5` |
+| _agent-guidance | `4e3f70c7a88f` | `e81aa0a5abb2` |
 | acsi-agentskills | `bf7aa5a022a6` | `24f7a7b63b47` |
 | skills-evals | `c77f08cdedec` | `3482456d9f26` |
 
@@ -2346,7 +2346,7 @@ source changes needed the kit to follow them:
 |---|---|---|
 | _agent-guidance | `9f42f9e69b1b` | `6026fa78be2c` |
 | acsi-agentskills | `e4a64b9f0bb9` | `60d805ca926c` |
-| repo-settings | `c3574f28da69` | `a890dbc58797` |
+| repo-settings | `c3574f28da69` | `2057c0b5ce77` |
 | skills-evals | `5e50a24020ab` | `a50f114e26b9` |
 | wsl-automation | `0a438429236f` | `460f6c77fe5e` |
 
@@ -2681,7 +2681,7 @@ All five public pins move to their heads; `agentskills-private` keeps its pin. T
 | Source | Before | After |
 |---|---|---|
 | _agent-guidance | `35c62e01891c` | `0ef732fdbd82` |
-| agentskills | `c25ca77a9c8a` | `bc0b75555d52` |
+| agentskills | `c25ca77a9c8a` | `7bfa661065fe` |
 | repo-settings | `e64fc208cdce` | `bcd342771667` |
 | skills-evals | `8b578f31ce49` | `b93d1d9a79f6` |
 | wsl-automation | `19c8232e6d67` | `4aa4768aadb6` |
@@ -2811,13 +2811,26 @@ The daily re-sync (acsi-kit#70) held `_agent-guidance` and `repo-settings` back.
 - `_agent-guidance` ADR 0043: consumer repos no longer carry `fleet-memory.sh`, `fleet-guidance.md` or `guidance-load-record.sh`. `docs/guidance.md` and `docs/machine.md` say so.
 - `repo-settings` added `starter-suites` to the `acsi-kit` required checks in its test; the `kit_config.py` patch's old text follows it.
 - `wsl-automation`'s Codex Cloud setup now downloads the fleet-memory installer at `fleet_pin_commit` and `fleet_pin_sha256`, the source owner's. A new `edits` entry replaces them with placeholders of ones (zeros would collide with the bootstrap pin's zeros in the script's test, whose fake `sha256sum` tells the two apart), which fail closed. No `regenerate.sh` task sets this pin yet: an adopter sets it by hand (`docs/generated-files.md`). Follow-up for a maintainer.
+- Bootstrap checker (`bootstrap/tests/check-refs.py`): `fleet-worker-fire.yml` now reads its variables through `vars[matrix.url_var]` and `vars[matrix.every_var]`, which the checker's lexical token missed. It now resolves a `vars[matrix.KEY]` or `secrets[matrix.KEY]` index against the job's `strategy.matrix.include` entries (an unresolvable index fails), so the Fleet and Loop workers' names are checked like any other; nothing was loosened.
+- The Loop worker's `LOOP_WORKER_FIRE_URL`, `LOOP_WORKER_FIRE_BEARER` and `LOOP_WORKER_EVERY_HOURS` are listed as set by hand in `bootstrap/README.md`. The kit sets no loop cadence: its spend must fit the adopter's weekly eval cap, the source gives it no default, and no plan mapping exists, so `create-environments.sh` keeps setting only `FLEET_WORKER_EVERY_HOURS`.
+- `repo-settings` added an optional `fleet-apply-auto` environment (its ADR 0019) that holds the same `REPO_SETTINGS_APP_PRIVATE_KEY` as `fleet-apply`. The kit does not create it: without it the `apply-auto` job applies nothing and changes wait for the reviewed apply, which is the safe default. The checker maps its reads to `fleet-apply` (`OPTIONAL_COMPANIONS`), and `bootstrap/README.md` says how to create it by hand, with a check that it does.
+- The 2026-11-19 `starter-suites` repair below was merged from main; the pins table follows the sources' heads on 2026-11-19.
 
 | Source | Before | After |
 |---|---|---|
-| _agent-guidance | `98cba5996ecd` | `48a8c0bd9266` |
-| agentskills | `7bad3acd94d8` | `6d059b7f2684` |
-| repo-settings | `5eb0115ff64a` | `ef50cf20847f` |
-| skills-evals | `4eb724eb85f9` | `a82931b42475` |
-| wsl-automation | `9b8e990ceb24` | `ea9a6d8f0ba1` |
+| _agent-guidance | `98cba5996ecd` | `e81aa0a5abb2` |
+| agentskills | `72e900f2670b` | `7bfa661065fe` |
+| repo-settings | `5eb0115ff64a` | `2057c0b5ce77` |
+| skills-evals | `39d03754c6c1` | `48f470e58881` |
+| wsl-automation | `e8f549498f52` | `0d54e508ac91` |
 
 Reverse: re-pin the five old shas, restore the three `test_guidance_load_record.py` edits, the old `kit_config.py` anchor, the `ANCHORS` table and the pages' wording.
+
+## Starter-suites repair for `agent-skills` (2026-11-19)
+
+The `starter-suites` check on the re-sync branch failed two `agent-skills` tests at the agent-skills source `72e900f2670b`.
+
+- `test_every_test_this_repo_cites_by_name_exists`: the starter still carried `.claude/hooks/fleet-memory.sh`, copied from `_agent-guidance`, whose comments cite `test_fleet_memory_git_hooks`. The source dropped that copy (`_agent-guidance` ADR 0043) and its exemption. The manifest no longer copies it, and the `fleet_pin_sha256` step (acsi-kit#74) hashes the plugin's bundled `fleet-memory.sh` instead, which is the same bytes and is still exempt. `skills-evals`' source never carried the file at its pin and `agentskills-private` was not readable here, so their copies are unchanged.
+- `test_an_own_entry_not_in_gh_actions_locks_shape_gates`: the source's first case is a key naming the source owner's login in its own mixed case, which the gate must refuse because `gh actions-lock` writes lowercase. C2 folds both cases of the first owner into one login, so the case became the valid key and the gate accepted it. An `edits` entry makes it `EXAMPLE_ADOPTER/tool@v1.1.0`, a non-lowercase form `bootstrap/copy-starter.sh` knows how to rename (a mixed-case `Example-Adopter` failed its leftover-owner check).
+
+Reverse: drop the `edits` entry, and restore the `copy_from_kit` line and the pin step's path.

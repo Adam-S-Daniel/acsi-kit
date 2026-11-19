@@ -1,17 +1,17 @@
 # Bootstrap scripts
 
-These scripts do the part of adopting the system that can be scripted, on
-your own account, with the GitHub CLI (`gh`). The order is
-[`steps.json`](steps.json), rendered in
-[the quick start](../docs/quick-start.md); `status.sh` says where you are
-and the [`/adopt` skill](../.claude/skills/adopt/SKILL.md) walks you
-through it (and [`/adopt-evals`](../.claude/skills/adopt-evals/SKILL.md)
-through the eval steps).
+These scripts automate what can be automated when you adopt the system on
+your own account, using the GitHub CLI (`gh`). [`steps.json`](steps.json)
+sets the order, and [the quick start](../docs/quick-start.md) shows it.
+`status.sh` says where you are, the [`/adopt`
+skill](../.claude/skills/adopt/SKILL.md) walks you through the base, and
+[`/adopt-evals`](../.claude/skills/adopt-evals/SKILL.md) walks you through
+the eval steps.
 
 Every script:
 
 - reads one config file, `fleet.env` (`--config <path>`, default
-  `./fleet.env`), parsed, never sourced;
+  `./fleet.env`), which it parses and never sources;
 - has `--dry-run`, which makes the same reads and prints each write call
   instead of making it;
 - is idempotent: it reads first and writes only what differs, so a second
@@ -19,18 +19,17 @@ Every script:
 - prints an HTTP status or a fixed message on error, never a response body;
 - has a usage header (`<script> --help`).
 
-You need bash 4.4 or newer, `gh` (signed in as the owner, with the
-`workflow` scope so pushes can add workflow files:
-`gh auth refresh -s workflow`), `jq`, `git` and `python3` with PyYAML.
-`regenerate.sh actions-lock` also needs the `gh actions-lock` extension, and
-Claude Code installs the plugins `install-machine.sh` enables in its next
-session.
+You need bash 4.4 or newer, `jq`, `git`, `python3` with PyYAML, and `gh`,
+signed in as the owner with the `workflow` scope so pushes can add workflow
+files (`gh auth refresh -s workflow`). `regenerate.sh actions-lock` also
+needs the `gh actions-lock` extension. Claude Code installs the plugins
+`install-machine.sh` enables in its next session.
 
 ## The scripts
 
 | Script | Does | Cannot |
 |---|---|---|
-| `fleet.env.example` | The one file you fill in: owners, plan, visibility, `REPOS_DIR`, and the App ids `create-apps.sh` records. No secrets, ever. | |
+| `fleet.env.example` | The only file you fill in: owners, plan, visibility, `REPOS_DIR`, and the App ids `create-apps.sh` records. No secrets, ever. | |
 | `add-content.sh` | Adds the recommended and opinionated items you name (`--items <ids\|recommended\|none>`, from `content-catalog.json`) to the kit copy's `../starter/` from `../library/`, rebuilds the generated files they feed (through `lib/content.py`), and records your choices beside `status.sh`'s state file. Idempotent; `--dry-run` lists the files it would add or change. | Write to GitHub: once the repos exist it lists the repos that need a pull request. Run inside a git work tree. |
 | `create-repos.sh` | The five base repos, and `skills-evals` only when named (the evals track's first step) or once it exists (`FLEET_REPOS` and `EVALS_REPO` in `lib/common.sh`), with the owner's visibility, a generated README as the first commit, the labels `agent-ready` and `on-hold`, and, in `skills-evals`, the orphan branch `persistent/eval-results` (a README only) that the eval loop's workflows fetch and nothing else creates. `--with-optional` adds the private `waiting-feed`. | Change an existing repo's visibility (it reports the mismatch and exits 1). Every other setting is `fleet.yml`'s, applied by `apply-settings.sh`. |
 | `copy-starter.sh` | Clones one of your repos, copies an export from `../starter/` into it with your names (every form of the invented owners, and `<your name>`, through `lib/substitute.py`), commits on `starter/<folder>`, pushes, checks the commit is on the remote branch, and opens a pull request. Refuses to overwrite a file that differs unless `--force`, except the README `create-repos.sh` generated. | Merge it: review it yourself, above all `.github/workflows/`. |
@@ -44,34 +43,37 @@ session.
 | `status.sh` | Read-only: one line per step (done, next, todo, optional, asked: done), how many steps of each track (base, evals) are done, then the next step with its time, kind, what to run and the section to read. `--track base\|evals` limits it to one track. `--mark`/`--unmark` record the steps nothing can see, in a state file outside every repo. | Decide an ask step for you. |
 | `render-quickstart.py` | Writes the steps table, with each step's track, into `../docs/quick-start.md`; `--check` fails when it is stale. | |
 
-The libraries: `lib/common.sh` (config parsing, the registries of repos,
-environments, Apps, values and variables, and the `gh` wrappers that honor
-`--dry-run`), `lib/pr.sh` (branch, commit, push, verify and open a pull
-request; never a default branch, never a force push),
-`lib/substitute.py` (the owner names) and `lib/content.py` (the library
+The libraries are `lib/common.sh` (config parsing, the registries of repos,
+environments, Apps, values, and variables, and the `gh` wrappers that honor
+`--dry-run`), `lib/pr.sh` (branch, commit, push, verify, and open a pull
+request, never on a default branch and never with a force push),
+`lib/substitute.py` (the owner names), and `lib/content.py` (the library
 installer `add-content.sh` runs).
 
 ## Variables and secrets set by hand
 
-Every `vars.NAME` and `secrets.NAME` an exported workflow reads is set by a
-script: App client ids and keys by `create-apps.sh`, `PRIVACY_DENYLIST`,
-`EVAL_ROUTINE_FIRE_BEARER` and `ROUTINE_TRIGGER_ID` by `set-secrets.sh`,
-and the repository variables by `create-environments.sh` (`SITE_REPO`
-included, from `fleet.env`), except the site ones below. If you add a workflow that reads a value no script
-sets, list it here as a list item, "- `NAME`: where it lives and how to set
-it"; `tests/check-refs.py` fails on any name that is neither set by a script
-nor listed here, and on a name listed here that a script already sets or
-nothing reads.
+A script sets every `vars.NAME` and `secrets.NAME` an exported workflow
+reads, except the ones listed below. `create-apps.sh` sets App client ids
+and keys. `set-secrets.sh` sets `PRIVACY_DENYLIST`,
+`EVAL_ROUTINE_FIRE_BEARER`, and `ROUTINE_TRIGGER_ID`.
+`create-environments.sh` sets the repository variables, including
+`SITE_REPO` from `fleet.env`.
 
-The site ones are for publishing the Evals Explorer to a website of your own
+If you add a workflow that reads a value no script sets, add it here as a
+list item: "- `NAME`: where it lives and how to set it".
+`tests/check-refs.py` fails on any name that is neither set by a script nor
+listed here, and on a listed name that a script already sets or nothing
+reads.
+
+These first values publish the Evals Explorer to your own website
 (`skills-evals`' `site-sync.yml` and `site-freshness.yml`,
 [routines](../docs/routines.md#dashboard-refresh)). Neither workflow has a
-default for any of them. Which site, if any, is `SITE_REPO` in `fleet.env`,
-and it is required: `none` (what `fleet.env.example` ships) means no
-website, and both workflows skip; `owner/name` names your site repo; left
-empty, `create-environments.sh` skips it and says so, and the workflows then
-fail naming it. The four below are needed only with a site; with
-`SITE_REPO=none`, leave them unset.
+default for any of them. `SITE_REPO` in `fleet.env` is required and says
+which site to use, if any. `none`, which `fleet.env.example` ships, means no
+website, and both workflows skip. `owner/name` names your site repo. If it
+is empty, `create-environments.sh` skips it and says so, and the workflows
+then fail and name it. The values below matter only with a site, so leave
+them unset with `SITE_REPO=none`.
 
 - `SITE_PAGE_URL`: a repository variable on `<you>/skills-evals`, the live
   page's URL that `site-freshness.yml` loads. Set it with
@@ -93,9 +95,9 @@ fail naming it. The four below are needed only with a site; with
 
 The prompt-audit sweep's fire values live on `_agent-guidance`, where
 `prompt-audit-fire.yml` fires the sweep for each trigger issue the changelog
-watcher files ([routines](../docs/routines.md#prompt-audit-sweep)). Unset,
-the workflow comments on the issue that the fire is not configured, and you
-start the sweep by hand.
+watcher files ([routines](../docs/routines.md#prompt-audit-sweep)). If they
+are unset, the workflow comments on the issue that the fire isn't
+configured, and you start the sweep by hand.
 
 - `PROMPT_AUDIT_SWEEP_FIRE_URL`: a repository variable on
   `<you>/_agent-guidance`, the sweep routine's fire URL
@@ -107,10 +109,10 @@ start the sweep by hand.
   `gh secret set PROMPT_AUDIT_SWEEP_FIRE_BEARER --repo <you>/_agent-guidance`
   and type the value at its prompt.
 
-The fleet worker is fired every 3 hours by `_agent-guidance`'s
-`fleet-worker-fire.yml` ([routines](../docs/routines.md#fleet-worker)). The
-workflow has no default for either value: unset, each scheduled run fails
-naming the missing one.
+`_agent-guidance`'s `fleet-worker-fire.yml` fires the fleet worker every 3
+hours ([routines](../docs/routines.md#fleet-worker)). The workflow has no
+default for either value, so if one is unset, each scheduled run fails and
+names it.
 
 - `FLEET_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
   the fleet worker routine's fire URL. Set it like
@@ -118,12 +120,36 @@ naming the missing one.
 - `FLEET_WORKER_FIRE_BEARER`: a repository secret on `<you>/_agent-guidance`,
   that routine's bearer. Set it like `PROMPT_AUDIT_SWEEP_FIRE_BEARER`.
 
+The same workflow fires a second task, the Loop worker
+([routines](../docs/routines.md#fleet-worker)), with its own values. Unlike the
+fleet worker's cadence, which `create-environments.sh` sets from `CLAUDE_PLAN`,
+the loop's has no default and no plan mapping, because its spend must fit your
+weekly eval cap: if any of these is unset, its fire fails and names it.
+
+- `LOOP_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
+  the Loop worker routine's fire URL. Set it like `PROMPT_AUDIT_SWEEP_FIRE_URL`.
+- `LOOP_WORKER_FIRE_BEARER`: a repository secret on `<you>/_agent-guidance`,
+  that routine's bearer. Set it like `PROMPT_AUDIT_SWEEP_FIRE_BEARER`.
+- `LOOP_WORKER_EVERY_HOURS`: a repository variable on `<you>/_agent-guidance`,
+  how often the loop fires: `3`, `6`, `12`, `24` or `168`. Set it with
+  `gh variable set LOOP_WORKER_EVERY_HOURS --repo <you>/_agent-guidance --body 24`.
+
+`repo-settings`' `repo-settings.yml` can also apply tightening changes with no
+approval, through an optional second environment, `fleet-apply-auto`. The kit
+does not create it: `fleet-apply` is the one `create-environments.sh` makes. To
+turn it on, create `fleet-apply-auto` on `<you>/repo-settings` with no required
+reviewer, limit its deployment branches to `main`, and add the same
+`REPO_SETTINGS_APP_PRIVATE_KEY` to it as an environment secret. Until all three
+are true the `apply-auto` job applies nothing and every change waits for the
+reviewed apply.
+
 `_agent-guidance`'s `article-watch.yml` polls a feed of Anthropic
 engineering articles hourly and fires an article-lift routine
 (`docs/routines/article-lift.md` there) for each new one about agents. It is
-optional, and the kit does not set it up: unset, each hourly run fails
-naming the missing value, so either set the three below or disable the
-workflow (`gh workflow disable article-watch.yml --repo <you>/_agent-guidance`).
+optional, and the kit doesn't set it up. If these are unset, each hourly run
+fails and names the missing value, so either set the three below or disable
+the workflow
+(`gh workflow disable article-watch.yml --repo <you>/_agent-guidance`).
 
 - `ARTICLE_WATCH_FEED_URL`: a repository variable on `<you>/_agent-guidance`,
   the feed's URL.
@@ -153,20 +179,24 @@ workflow (`gh workflow disable article-watch.yml --repo <you>/_agent-guidance`).
 bash tests/test-bootstrap.sh
 ```
 
-No network, no sleeps, no wall clock. `tests/stubs/gh` is a stateful `gh`
-stand-in that logs every argv (it stores secrets only as SHA-256). The git
-remotes are local bare repos (`BOOTSTRAP_GIT_BASE`), with a scratch `HOME`
-and `GIT_CONFIG_GLOBAL`: the real `copy-starter.sh` copies all six exports
-in, the test merges them, and the real `regenerate.sh` runs each repo's own
-generator on them. `apply-settings.sh` and `install-machine.sh` run against
-repos holding a fake engine and fake installers that log their arguments;
-the real engine's `--help` is checked for every flag the script passes. Run
-it in a PID namespace (`unshare --pid --fork --mount-proc --`, or with
-`--user --map-current-user` when not root). The suite also runs the
-checkers: `tests/check-refs.py` holds every workflow's variables and secrets
-to the scripts that set them; `tests/check-branch-prefixes.py` holds the
-routine prompt, the gates and the docs to one set of loop branch lanes;
-`tests/check-guide-lists.py` holds the docs to the workflows, Apps,
-environments and `REGENERATE.md`; `tests/check-steps.py` checks
-`steps.json`; `tests/check-links.py` resolves every relative link and anchor
-in the kit's own pages.
+The tests use no network, sleeps, or wall clock. `tests/stubs/gh` is a
+stateful stand-in for `gh` that logs every argv and stores secrets only as
+SHA-256. The git remotes are local bare repos (`BOOTSTRAP_GIT_BASE`), with a
+scratch `HOME` and `GIT_CONFIG_GLOBAL`. The real `copy-starter.sh` copies
+all six exports in, the test merges them, and the real `regenerate.sh` runs
+each repo's generator on them. `apply-settings.sh` and `install-machine.sh`
+run against repos holding a fake engine and fake installers that log their
+arguments, and the real engine's `--help` is checked for every flag the
+script passes. Run the tests in a PID namespace
+(`unshare --pid --fork --mount-proc --`, adding `--user --map-current-user`
+when not root).
+
+The suite also runs these checkers:
+
+- `tests/check-refs.py` compares every workflow's variables and secrets with
+  the scripts that set them. - `tests/check-branch-prefixes.py` keeps the
+  routine prompt, the gates, and the docs on one set of loop branch lanes. -
+  `tests/check-guide-lists.py` compares the docs with the workflows, Apps,
+  environments, and `REGENERATE.md`. - `tests/check-steps.py` checks
+  `steps.json`. - `tests/check-links.py` resolves every relative link and
+  anchor in the kit's own pages.

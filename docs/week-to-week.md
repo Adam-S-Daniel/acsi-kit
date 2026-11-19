@@ -11,24 +11,24 @@
 ## Changing settings
 
 Every repo setting lives in `repo-settings/fleet.yml`. Change it in a pull
-request on `repo-settings`; on merge `repo-settings.yml` applies it to both
-owners once you approve its `fleet-apply` deployment, and the daily drift
-check opens an issue when a repo drifts from it. Never change a ruleset by
-hand in the GitHub UI: the next apply puts it back.
+request on `repo-settings`. On merge, `repo-settings.yml` applies it to both
+owners once you approve the `fleet-apply` deployment, and a daily drift
+check opens an issue if a repo no longer matches. Don't change a ruleset by
+hand in the GitHub UI, because the next apply will put it back.
 
 ## When the allowance runs short
 
-When a week has room left near its end, raise `weekly_cap` in
-`skills-evals`' `evals/budget.yml` for that week in a pull request and lower
-it after the reset; do not remove the guard.
+If a week still has room near its end, raise `weekly_cap` in `skills-evals`'
+`evals/budget.yml` in a pull request, then lower it after the reset. Don't
+remove the guard.
 
 ## When an eval does not arrive
 
-Check in this order: did `routine-eval-fire.yml` start the routine (its run
+Check these in order. Did `routine-eval-fire.yml` start the routine (its run
 log says the trigger accepted the request, and a `claude/eval-*` branch
 appears)? Did the routine session report a guard refusal? Did
-`routine-eval-ingest.yml` reject the branch? A green fire workflow means
-only that the API accepted the request.
+`routine-eval-ingest.yml` reject the branch? A green fire workflow only
+means the API accepted the request.
 
 ## Rotating a leaked key or bearer
 

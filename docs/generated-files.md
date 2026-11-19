@@ -1,20 +1,23 @@
 # Generated files and placeholders
 
 The export rebuilt every generated file it could offline. A few need a
-GitHub API, a commit that exists only once you have pushed, or your own
-Apps, so they arrive holding a placeholder or the owner's value, and
+GitHub API, a commit that exists only after you push, or your own Apps, so
+they arrive with a placeholder or the owner's value.
 [`export/REGENERATE.md`](../export/REGENERATE.md) lists them.
-`bootstrap/regenerate.sh <task>` rebuilds each with the repo's own tooling
-and proposes the result as a pull request on `regenerate/<task>`;
-`--check` reads your default branches and says whether it is done (that is
-what `status.sh` asks), `--dry-run` changes nothing, and `--track base` or
-`--track evals` limits a task to one track's repos. The tasks are
-`skills-locks`, `hook-pin`, `run-health-sha`, `codex-pin`, `actions-lock`
-and, for evals, `evals-fleet`, which merges `fleet.evals.yml` into
-`fleet.yml` ([the first apply](settings-and-apps.md#the-first-apply)). The steps below run after the starter pull requests
-are merged, before the first settings apply.
 
-Every item `REGENERATE.md` lists, and the quick start step that handles it:
+`bootstrap/regenerate.sh <task>` rebuilds each one with the repo's own
+tooling and proposes the result as a pull request on `regenerate/<task>`.
+`--check` reads your default branches and says whether the task is done
+(this is what `status.sh` asks), `--dry-run` changes nothing, and
+`--track base` or `--track evals` limits a task to one track's repos. The
+tasks are `skills-locks`, `hook-pin`, `run-health-sha`, `codex-pin`,
+`actions-lock`, and, for evals, `evals-fleet`, which merges
+`fleet.evals.yml` into `fleet.yml` ([the first
+apply](settings-and-apps.md#the-first-apply)). Run these steps after you
+merge the starter pull requests and before the first settings apply.
+
+This table shows every item in `REGENERATE.md` and the quick start step that
+handles it:
 
 | Repo | Item | Step |
 |---|---|---|
@@ -47,51 +50,52 @@ Every item `REGENERATE.md` lists, and the quick start step that handles it:
 | `acsi-agentskills` | `<your name>` | 12 |
 | `acsi-agentskills-private` | `<your name>` | 12 |
 
-(The table has a row for every item `REGENERATE.md` lists, and that file
-puts the two registries under one heading: `acsi-agentskills-private` has no
-`scheduled-run-health.yml`, so step 16 does nothing there. Step 2 creates
-the waiting feed's repository only with `--with-optional`.)
+`REGENERATE.md` puts the two registries under one heading, but
+`acsi-agentskills-private` has no `scheduled-run-health.yml`, so step 16
+does nothing there. Step 2 creates the waiting feed's repository only with
+`--with-optional`.
 
 ## The skills locks
 
 `bash bootstrap/regenerate.sh skills-locks`, twice:
 
-1. The first run finds `acsi-agentskills`' `skills.lock` still pinning forty
-   zeros, and proposes the registry's own generator's output
+1. The first run finds forty zeros still pinned in `acsi-agentskills`'
+   `skills.lock` and proposes the output of the registry's generator
    (`python3 scripts/generate_skills_lock.py`, which pins the registry's
    HEAD). Merge that pull request.
-2. The second run checks it (`--check` and `--check-current`), copies the
-   same file into `acsi-agentskills-private`, and re-pins `_agent-guidance`,
-   `repo-settings` and `wsl-automation` with the registry's generator run on
-   a clone of your registry (`--repo`), keeping each lock's bundles. Merge
-   the four pull requests.
+2. The second run checks that lock (`--check` and `--check-current`) and
+   copies it into `acsi-agentskills-private`. It then re-pins
+   `_agent-guidance`, `repo-settings`, and `wsl-automation` by running the
+   registry's generator on a clone of your registry (`--repo`), keeping each
+   lock's bundles. Merge the four pull requests.
 
-Your registry starts with the core skills and the optional ones you added
-in step 1, so each lock names them (the exported consumer locks name the source registry's longer
-list until this step replaces them). From then on `skills-lock-bump.yml` in
-`_agent-guidance` keeps the consumers current, four times a day and on a
-registry change.
+Your registry starts with the core skills and the optional ones you added in
+step 1, so each lock names those. The exported consumer locks name the
+source registry's longer list until this step replaces them. After that,
+`skills-lock-bump.yml` in `_agent-guidance` keeps the consumers current,
+four times a day and whenever the registry changes.
 
 ## The skills-bootstrap hook pin
 
 `_agent-guidance`'s `repos.yml` `skills_bootstrap.ref` names the registry
-commit the delivered `.claude/hooks/skills-bootstrap.sh` comes from; its
-`sha256` the export already computed from the exported hook.
-`bash bootstrap/regenerate.sh hook-pin` sets `ref` to your `acsi-agentskills`
-HEAD after checking that the hook there has exactly that sha256, and refuses
-if the two copies have drifted (then review the hook and run
-`_agent-guidance`'s own `scripts/bump-hook-pin.sh`, which re-pins both and
-opens its own pull request; the bumper runs it from then on).
+commit that the delivered `.claude/hooks/skills-bootstrap.sh` comes from.
+The export already computed its `sha256` from the exported hook.
+`bash bootstrap/regenerate.sh hook-pin` sets `ref` to your
+`acsi-agentskills` HEAD after confirming that the hook there has exactly
+that sha256. If the two copies have drifted, it refuses. In that case,
+review the hook and run `_agent-guidance`'s `scripts/bump-hook-pin.sh`,
+which re-pins both and opens its own pull request. The bumper runs it from
+then on.
 
 ## The scheduled-run-health pin
 
 `scheduled-run-health.yml` in `repo-settings`, `skills-evals`,
-`acsi-agentskills` and `wsl-automation` calls `_agent-guidance`'s reusable
-workflow, and a cross-repo reusable takes a full sha; the export ships forty
-zeros. `bash bootstrap/regenerate.sh run-health-sha` writes your
-`_agent-guidance` default branch's commit into each of them that exists:
-the three base repos in step 16, and `skills-evals` once the evals track
-has created it (step 38).
+`acsi-agentskills`, and `wsl-automation` calls `_agent-guidance`'s reusable
+workflow. A cross-repo reusable workflow needs a full sha, and the export
+ships forty zeros. `bash bootstrap/regenerate.sh run-health-sha` writes your
+`_agent-guidance` default branch's commit into each repo that exists: the
+three base repos in step 16, and `skills-evals` once the evals track creates
+it (step 38).
 
 ## The Codex Cloud pin
 
@@ -109,53 +113,53 @@ and proposes the change. Skip it if you do not use Codex.
 
 ## The action lockfiles
 
-Every repo pins its actions through `.github/workflows/actions.lock`
-(an exact tag per `uses:`, each locked to a commit). The export changed
-only owner names in them, but confirm each with the tool that writes them:
+Every repo pins its actions through `.github/workflows/actions.lock`, with
+an exact tag per `uses:`, each locked to a commit. The export changed only
+the owner names, but confirm each file with the tool that writes it:
 
 ```bash
 gh extension install github/gh-actions-lock
 bash bootstrap/regenerate.sh actions-lock
 ```
 
-It runs `gh actions-lock --no-narrow` in each repo (`skills-evals` once it
-exists: step 38 runs it again) and proposes any change;
+This runs `gh actions-lock --no-narrow` in each repo and proposes any
+change. `skills-evals` joins once it exists, when step 38 runs it again.
 `--check` runs `gh actions-lock --verify`. Review an `actions.lock` diff as
 you would a sha pin.
 
 ## Example repos in fleet.yml
 
-The owner's fleet includes a site platform and two sites, so
+The owner's fleet includes a site platform and two sites. So
 `repo-settings/fleet.yml` declares `example-site-platform`,
-`example-site-a` and `<OWNER_TWO>/example-site-b`, `tests/test_repo_settings.py`
-has rows for them, and `_agent-guidance`'s `repos.yml` lists them under
-`cron_coverage.fleet` and under `skills_bootstrap.repos`. Unless you have those repos, remove them in a pull
-request on each repo before the first apply: `apply-settings.sh` refuses
-while `fleet.yml` names a repo that does not exist, and a missing
+`example-site-a`, and `<OWNER_TWO>/example-site-b`,
+`tests/test_repo_settings.py` has rows for them, and `_agent-guidance`'s
+`repos.yml` lists them under `cron_coverage.fleet` and
+`skills_bootstrap.repos`. Unless you have those repos, remove them in a pull
+request on each repo before the first apply. `apply-settings.sh` refuses
+while `fleet.yml` names a repo that doesn't exist, and a missing
 `cron_coverage.fleet` repo is an error for the coverage check. Add your own
 consumers the same way later.
 
-Those are the places the invented example repos remain in live config,
-besides `acsi-agentskills`' federated marketplace entry
-([the registry](skills.md#the-registry)) and the eval runner's RULES line
-([routines](routines.md#the-eval-runner)).
-`skills-evals` does not check them out, pass them to the coverage census or
-list them in `harness/registries.yml`, which names only your two registries;
-the private one may be empty (`may_be_empty: true`), so the census runs on day
-one.
+The invented example repos appear in live config only in those places, in
+`acsi-agentskills`' federated marketplace entry ([the
+registry](skills.md#the-registry)), and in the eval runner's RULES line
+([routines](routines.md#the-eval-runner)). `skills-evals` doesn't check them
+out, pass them to the coverage census, or list them in
+`harness/registries.yml`, which names only your two registries. The private
+registry may be empty (`may_be_empty: true`), so the census runs on day one.
 
 ## The eval.yml fixture default
 
-`skills-evals`' `.github/workflows/eval.yml` takes a `fixture` input whose
-default, `evals/workflow-path-audit/required-check-routing`, is a fixture
-the kit ships (a core skill's), so a dispatch that keeps
-the default runs. Keep it, or change the default to a fixture of your own in
-a pull request, and mark the step done.
+`skills-evals`' `.github/workflows/eval.yml` takes a `fixture` input. Its
+default, `evals/workflow-path-audit/required-check-routing`, is a core
+skill's fixture that ships with the kit, so a dispatch that keeps the
+default will run. Keep it, or change it to one of your own fixtures in a
+pull request, then mark the step done.
 
 ## Filled in by copy-starter.sh
 
-Two items need no step of their own: `copy-starter.sh` writes `OWNER_NAME`
-for `<your name>` in the plugin and marketplace manifests, and your own
-`<id>+<login>@users.noreply.github.com` (the id read from GitHub) for the
-waiting feed's placeholder commit identity, in
-`scripts/publish-waiting-feed.sh` and its test.
+Two items need no step of their own. `copy-starter.sh` replaces
+`<your name>` in the plugin and marketplace manifests with `OWNER_NAME`. It
+also replaces the waiting feed's placeholder commit identity, in
+`scripts/publish-waiting-feed.sh` and its test, with your
+`<id>+<login>@users.noreply.github.com` address, reading the id from GitHub.

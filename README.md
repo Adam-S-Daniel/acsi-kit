@@ -1,12 +1,15 @@
 # Adopt the whole self-improvement system
 
-A kit for building, on your own GitHub account and Claude plan, the system
-I run: fleet guidance delivered to any surface and deduplicated in multi-rep sessions, a skills registry, git-hook checks, centralized memory, evals, the
-loop that improves and retires skills and guidance and public and private dashboards.
+This kit builds the system I run on your own GitHub account and Claude plan:
+fleet guidance delivered to every surface and deduplicated in multi-repo
+sessions, a skills registry, git-hook checks, centralized memory, evals, a
+loop that improves and retires skills and guidance, and public and private
+dashboards.
 
-**In one sentence:** the kit holds working exports of the six real repos
-that run that system, with every owner name replaced, plus scripts that
-create your repos, settings, environments and GitHub Apps and copy each export in through a pull request.
+It contains working exports of the six repos that run the system, with every
+owner name replaced, plus scripts that create your repos, settings,
+environments, and GitHub Apps and copy each export in through a pull
+request.
 
 ## Start here
 
@@ -20,40 +23,41 @@ claude
 /adopt
 ```
 
-Clone it somewhere that is not inside another git repository. Claude Code
-loads every `CLAUDE.md` from the folder it starts in and from each folder
-above it, and a `.claude/settings.local.json` at the root of the git
-repository it starts in. This repo carries none of those on purpose, so
-only the `/adopt` skill and your own `~/.claude/` apply. Inside another
-repository, that repository's rules would load too. (Checked with Claude
-Code 2.1.312 on 2026-10-29, and against its memory and settings docs.)
+Clone it outside any other git repository. Claude Code loads every
+`CLAUDE.md` from the folder it starts in and each folder above it, plus
+`.claude/settings.local.json` at the root of the repository it starts in.
+This repo deliberately has none of those, so only the `/adopt` skill and
+your own `~/.claude/` apply. Inside another repository, that repository's
+rules would load too. (Checked with Claude Code 2.1.312 on 2026-10-29, and
+against its memory and settings docs.)
 
-The [`/adopt` skill](.claude/skills/adopt/SKILL.md) reads where your account
-stands, explains the next step, and runs each script with you, dry run
-first. It sets up the base: guidance, the skills registries, repo settings,
-git hooks and your machines. The
-[`/adopt-evals` skill](.claude/skills/adopt-evals/SKILL.md) adds evals, then
-or later; from a fresh start it runs the base first, so the whole system is
-still one command. Without evals, nothing measures your skills and guidance,
-improves them or retires them automatically
-([with or without evals](docs/before-you-start.md#with-or-without-evals)).
+The [`/adopt` skill](.claude/skills/adopt/SKILL.md) checks where your
+account stands, explains the next step, and runs each script with you, dry
+run first. It sets up the base: guidance, the skills registries, repo
+settings, git hooks, and your machines. The [`/adopt-evals`
+skill](.claude/skills/adopt-evals/SKILL.md) adds evals, now or later. From a
+fresh start it runs the base first, so one command can set up everything.
+Without evals, nothing measures, improves, or retires your skills and
+guidance automatically ([with or without
+evals](docs/before-you-start.md#with-or-without-evals)).
 
 ## Without Claude
 
-`bootstrap/status.sh` says the same thing in a terminal: every step, which
-are done (it checks GitHub, not a list you keep), and the next one with what
-to run.
+`bootstrap/status.sh` gives you the same walkthrough in a terminal: every
+step, which ones are done (it checks GitHub rather than a list you keep),
+and what to run next.
 
 ```bash
 cp bootstrap/fleet.env.example fleet.env   # fill in OWNER, OWNER_TWO, PLAN
 bash bootstrap/status.sh
 ```
 
-Add `--track base` to see only the steps without evals. The steps are in
-[docs/quick-start.md](docs/quick-start.md). Hands-on setup
-is one to two days, most of it browser steps; the loop's first merged
-improvement, with evals, comes one to two weeks later, because it waits on
-the eval budget, not on you ([what it costs](docs/before-you-start.md#what-it-costs)).
+Add `--track base` to see only the steps without evals.
+[docs/quick-start.md](docs/quick-start.md) lists every step. Hands-on setup
+takes one to two days, mostly in the browser. With evals, the loop's first
+merged improvement comes one to two weeks later, because it waits on the
+eval budget rather than on you ([what it
+costs](docs/before-you-start.md#what-it-costs)).
 
 ## Read more
 
@@ -84,15 +88,15 @@ unshare --user --map-current-user --pid --fork --mount-proc -- bash run-all-test
 unshare --pid --fork --mount-proc -- bash run-all-tests.sh
 ```
 
-`starter/known-failures.txt` is calibrated for the root form; run as an
-ordinary user, a few ids differ. It runs every export's own test suite, the bootstrap tests, the export's
-own tests (the leak scan, and that git tracks every kit file) and
-`export/export.py --check`, and prints one PASS or FAIL line each. The
-export check needs the source repos checked out beside the repo the kit
-came in, so in a copy of the kit it prints SKIP. Read the exit code
-directly, not through a pipe.
-The [starter README](starter/README.md#running-the-tests) says what each
-suite needs, how to run one on its own, and which failures are known.
+`run-all-tests.sh` runs every export's test suite, the bootstrap tests, the
+export's own tests (the leak scan, and a check that git tracks every kit
+file), and `export/export.py --check`, printing one PASS or FAIL line for
+each. `starter/known-failures.txt` is calibrated for the root form, so a few
+ids differ when you run as an ordinary user. The export check needs the
+source repos checked out beside the kit's repo, so a copy of the kit prints
+SKIP. Read the exit code directly, not through a pipe. The [starter
+README](starter/README.md#running-the-tests) says what each suite needs, how
+to run one on its own, and which failures are known.
 
 ## License
 

@@ -1,7 +1,7 @@
 # Traps that cost real outages
 
-Each of these happened on the owner's account. The rule beside it is what
-the system now does, or what you should do.
+Each of these happened on the owner's account. The rule says what the system
+now does, or what you should do.
 
 | Trap | What happened | The rule |
 |---|---|---|

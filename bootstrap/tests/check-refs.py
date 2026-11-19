@@ -17,6 +17,16 @@ which may land in any fleet repo). Each workflow is parsed with PyYAML, so a
 name in a comment does not count; a name is a lexical token in the parsed
 job (vars|secrets).NAME.
 
+A name read through a matrix entry, `vars[matrix.KEY]` (or `secrets[...]`),
+is resolved against the job's `strategy.matrix.include` entries, so each
+value the entry names counts as read and must be set or listed as by hand.
+An unresolvable index fails.
+
+`repo-settings`' `fleet-apply-auto` is an optional companion of `fleet-apply`
+(ADR 0019 there): an environment the adopter creates by hand, holding the same
+key, which no script creates. Its reads count as `fleet-apply`'s
+(OPTIONAL_COMPANIONS), and the README must say how to set it up.
+
 Also checked: an environment's value is read only in a job that runs in that
 environment, in the repo that holds it; a repository-level value only in its
 own repo; and the README lists no name a script already sets, nor one
@@ -32,6 +42,8 @@ import yaml
 B = Path(__file__).resolve().parent.parent
 KIT = B.parent
 TOKEN = re.compile(r"\b(vars|secrets)\.([A-Z][A-Z0-9_]*)\b")
+MATRIX_TOKEN = re.compile(r"\b(vars|secrets)\[\s*matrix\.([A-Za-z_][A-Za-z0-9_]*)\s*\]")
+OPTIONAL_COMPANIONS = {("repo-settings", "fleet-apply-auto"): "fleet-apply"}
 passed = failed = 0
 
 
@@ -95,7 +107,18 @@ for repo, path in workflows():
     for env, node in scopes:
         if isinstance(env, dict):
             env = env.get("name")
-        for kind, name in TOKEN.findall(yaml.safe_dump(node)):
+        text = yaml.safe_dump(node)
+        found = list(TOKEN.findall(text))
+        strategy = node.get("strategy")
+        matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+        include = matrix.get("include") if isinstance(matrix, dict) else None
+        include = include if isinstance(include, list) else []
+        for kind, key in MATRIX_TOKEN.findall(text):
+            values = [e[key] for e in include if isinstance(e, dict) and key in e]
+            check(f"{rel}: {kind}[matrix.{key}] resolves through strategy.matrix.include", bool(values))
+            found += [(kind, v) for v in values if re.fullmatch(r"[A-Z][A-Z0-9_]*", str(v))]
+        env = OPTIONAL_COMPANIONS.get((repo, env), env)
+        for kind, name in found:
             if name == "GITHUB_TOKEN":
                 continue
             used.add((kind, name))
@@ -107,6 +130,7 @@ for repo, path in workflows():
             check(f"{rel}: {kind}.{name} is read where a script puts it "
                   f"({', '.join(f'{r}/{e or 'repository'}' for r, e in sorted(where, key=str))}; "
                   f"this job: {repo}/{env or 'no environment'})", bool(fits))
+check("README says how to set up the optional fleet-apply-auto environment", "fleet-apply-auto" in readme)
 check(f"the scan read the exported workflows ({n_files} files)", n_files >= 40)
 for key in sorted(SET_BY):
     check(f"a script sets {key[0]}.{key[1]}, and some workflow reads it", key in used)
