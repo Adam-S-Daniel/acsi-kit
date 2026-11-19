@@ -264,11 +264,11 @@ hardcoded user name) and passes both to the headless session.
 `New-ScheduledTaskTrigger` in pwsh 7 writes `StartBoundary` in UTC, and Task
 Scheduler stores it with the offset in effect at registration
 (`...-04:00`). Such a trigger fires at a fixed UTC instant, so every daily task
-registered during daylight time ran an hour early after the November 2026
-clock change. Every trigger therefore goes through the private
+registered during daylight time ran an hour early once standard time
+began. Every trigger therefore goes through the private
 `ConvertTo-WslLocalTimeTrigger`, which writes the boundary back as local time
 with no offset; Task Scheduler then keeps the wall-clock time across the
-change. A new trigger must go through it too; `tests/Tasks.Tests.ps1` fails
+clock change. A new trigger must go through it too; `tests/Tasks.Tests.ps1` fails
 otherwise.
 
 ### Docker Desktop WSL integration breaks after reboot; the watchdog repairs it

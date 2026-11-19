@@ -2801,3 +2801,12 @@ The daily re-sync (acsi-kit#69) moved `repo-settings`, `skills-evals` and `wsl-a
 | wsl-automation | `8f1a0642a2e4` | `9b8e990ceb24` |
 
 Reverse: re-pin the three old shas.
+
+## Starter-suites repair for `agent-skills` (2026-11-19)
+
+The `starter-suites` check on the re-sync branch failed two `agent-skills` tests at adam-agentskills `72e900f2670b`.
+
+- `test_every_test_this_repo_cites_by_name_exists`: the starter still carried `.claude/hooks/fleet-memory.sh`, copied from `_agent-guidance`, whose comments cite `test_fleet_memory_git_hooks`. The source dropped that copy (`_agent-guidance` ADR 0043) and its exemption. The manifest no longer copies it, and the `fleet_pin_sha256` step (acsi-kit#74) hashes the plugin's bundled `fleet-memory.sh` instead, which is the same bytes and is still exempt. `skills-evals`' source never carried the file at its pin and `agentskills-private` was not readable here, so their copies are unchanged.
+- `test_an_own_entry_not_in_gh_actions_locks_shape_gates`: the source's first case is the mixed-case key `Adam-S-Daniel/tool@v1.1.0`, which the gate must refuse because `gh actions-lock` writes lowercase. C2 folds both cases of the first owner into one login, so the case became the valid key and the gate accepted it. An `edits` entry restores the mixed-case key as `Example-Adopter/tool@v1.1.0`.
+
+Reverse: drop the `edits` entry, and restore the `copy_from_kit` line and the pin step's path.

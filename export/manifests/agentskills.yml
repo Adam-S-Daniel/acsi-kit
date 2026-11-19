@@ -4,7 +4,7 @@
 repo: agentskills
 kit_name: agent-skills
 source: adam-agentskills
-source_sha: 7bad3acd94d87550c1be44c1ba7f0e82423e0232
+source_sha: 72e900f2670b9ff39cfdc7b894ac86b13eab0902
 after: [_agent-guidance]
 
 exclude:
@@ -86,6 +86,18 @@ edits:
       the kit does not ship, so it fails on a missing SKILL.md. The gate it
       exercises (a body edit to a skill granting Bash) stays covered by the
       synthetic-skill tests above it.
+  # ---- Own-action key case (2026-11-19)
+  - path: scripts/test_plugin_runtime_gate.py
+    stage: output
+    old: "    (\"example-adopter/tool@v1.1.0\", own_entry(), \"is not example-adopter/<repo>@<tag>\"),\n    (\"example-adopter/tool/sub@v1.1.0\""
+    new: "    (\"Example-Adopter/tool@v1.1.0\", own_entry(), \"is not example-adopter/<repo>@<tag>\"),\n    (\"example-adopter/tool/sub@v1.1.0\""
+    why: >-
+      The source's first parametrized case is the mixed-case key
+      `Adam-S-Daniel/tool@v1.1.0`, which the gate must refuse because
+      gh actions-lock writes the lowercase form. C2 folds both letter cases of
+      the first owner into one login, so the kit's case became the valid key
+      and the gate correctly accepted it. The case keeps its meaning with the
+      placeholder's own mixed case.
   # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
     old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"
@@ -349,8 +361,6 @@ regenerate:
     why: The sync delivers the dated-phrasing allowlist from _agent-guidance's templates; it carries that repo's C11 trim.
   - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/agent-checks-guard.sh, to: .claude/hooks/agent-checks-guard.sh}
     why: The sync delivers the guard from _agent-guidance's templates (byte-identical in the sources).
-  - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/fleet-memory.sh, to: .claude/hooks/fleet-memory.sh}
-    why: The sync delivers the fleet-memory hook (byte-identical in the sources).
   - copy_from_kit: {repo: _agent-guidance, from: agents-md/base.md, to: plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-guidance.md}
     why: >-
       The anything-anywhere plugin's SessionStart hook installs this bundled
@@ -361,7 +371,7 @@ regenerate:
     why: The plugin hook's bundled installer, a verbatim copy of _agent-guidance's (byte-identical in the sources).
   - run: >-
       python3 -I -c 'import hashlib,re,pathlib;
-      h=hashlib.sha256(pathlib.Path(".claude/hooks/fleet-memory.sh").read_bytes()).hexdigest();
+      h=hashlib.sha256(pathlib.Path("plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh").read_bytes()).hexdigest();
       p=pathlib.Path("scripts/cloud-env-setup.sh"); t=p.read_text();
       n=re.subn(r"(?m)^(fleet_pin_sha256=)[0-9a-f]{64}$", lambda m: m.group(1)+h, t);
       assert n[1]==1, n[1]; p.write_text(n[0])'
@@ -369,7 +379,11 @@ regenerate:
       Acsi-kit#74. The owner block pins the sha256 of the fleet-memory.sh the
       source holds, and test_owner_block_pin_is_the_bundled_fleet_memory_digest
       holds it to the bundled copy; the kit's copy differs (C2 folds the
-      source's first owner), so the pin follows the kit's copy. The pinned
+      source's first owner), so the pin follows the kit's bundled copy. The
+      starter no longer carries a `.claude/hooks/fleet-memory.sh` of its own:
+      the source dropped it (_agent-guidance ADR 0043) and its
+      test_fleet_memory_git_hooks citation fails
+      test_every_test_this_repo_cites_by_name_exists. The pinned
       commit is the source's, as in repos.yml's `ref`: REGENERATE.md.
   - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/github-write-marker.sh, to: plugins/acsi-anything-anywhere/hooks/github-write-marker/github-write-marker.sh}
     why: >-
