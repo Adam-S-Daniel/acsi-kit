@@ -90,14 +90,15 @@ edits:
   - path: scripts/test_plugin_runtime_gate.py
     stage: output
     old: "    (\"example-adopter/tool@v1.1.0\", own_entry(), \"is not example-adopter/<repo>@<tag>\"),\n    (\"example-adopter/tool/sub@v1.1.0\""
-    new: "    (\"Example-Adopter/tool@v1.1.0\", own_entry(), \"is not example-adopter/<repo>@<tag>\"),\n    (\"example-adopter/tool/sub@v1.1.0\""
+    new: "    (\"EXAMPLE_ADOPTER/tool@v1.1.0\", own_entry(), \"is not example-adopter/<repo>@<tag>\"),\n    (\"example-adopter/tool/sub@v1.1.0\""
     why: >-
       The source's first parametrized case is the mixed-case key
       `Adam-S-Daniel/tool@v1.1.0`, which the gate must refuse because
       gh actions-lock writes the lowercase form. C2 folds both letter cases of
       the first owner into one login, so the kit's case became the valid key
       and the gate correctly accepted it. The case keeps its meaning with the
-      placeholder's own mixed case.
+      placeholder's upper-case form, which bootstrap/copy-starter.sh renames
+      (a mixed-case Example-Adopter fails its leftover-owner check).
   # ---- C4: the scheduled-run-health caller names a placeholder commit of _agent-guidance's copy
   - path: .github/workflows/scheduled-run-health.yml
     old: "    uses: Adam-S-Daniel/_agent-guidance/.github/workflows/scheduled-run-health-reusable.yml@725400664dd84021b3fcd717e213e5994d0b20ff\n"

@@ -791,7 +791,7 @@ def test_a_third_party_bump_asks_github_nothing_and_does_not_gate():
 
 
 @pytest.mark.parametrize("key,entry,message", [
-    ("Example-Adopter/tool@v1.1.0", own_entry(), "is not example-adopter/<repo>@<tag>"),
+    ("EXAMPLE_ADOPTER/tool@v1.1.0", own_entry(), "is not example-adopter/<repo>@<tag>"),
     ("example-adopter/tool/sub@v1.1.0", own_entry(), "is not example-adopter/<repo>@<tag>"),
     # Another key, but the owner's id: still an own pin, and still refused.
     ("example-owner/tool@v1.1.0", own_entry(), "is not example-adopter/<repo>@<tag>"),
