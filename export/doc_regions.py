@@ -40,9 +40,17 @@ ANCHOR = "Prompt, exactly"
 #: region name -> (page, spec)
 REGIONS = {
     "fleet-worker-prompt": ("docs/routines.md", GUIDANCE + "docs/routines/fleet-worker.md"),
+    "loop-worker-prompt": ("docs/routines.md", GUIDANCE + "docs/routines/fleet-worker.md"),
     "prompt-audit-sweep-prompt": ("docs/routines.md", GUIDANCE + "docs/routines/prompt-audit-sweep.md"),
     "changelog-watcher-prompt": ("docs/routines.md", GUIDANCE + "docs/reference/agent-changelog-routine.md"),
     "memory-curation-prompt": ("docs/routines.md", GUIDANCE + "docs/routines/memory-curation.md"),
+}
+
+#: A spec that holds more than one prompt names which one a region quotes by
+#: the text that introduces it (default: ANCHOR).
+ANCHORS = {
+    "fleet-worker-prompt": "Fleet worker prompt (maintenance role), exactly",
+    "loop-worker-prompt": "Loop worker prompt (loop role), exactly",
 }
 
 # The markers are lexical tokens on a line of their own.
@@ -55,15 +63,15 @@ class RegionError(Exception):
     """Something the tool cannot decide (exit 2), as opposed to a stale region (exit 1)."""
 
 
-def extract_prompt(spec_text: str, spec_name: str) -> list[str]:
+def extract_prompt(spec_text: str, spec_name: str, anchor: str = ANCHOR) -> list[str]:
     """The paragraphs of the one blockquote after the "Prompt, exactly" text."""
     tokens = MarkdownIt("commonmark").parse(spec_text)
-    anchors = [i for i, t in enumerate(tokens) if t.type == "inline" and ANCHOR in t.content]
+    anchors = [i for i, t in enumerate(tokens) if t.type == "inline" and anchor in t.content]
     if len(anchors) != 1:
-        raise RegionError(f"{spec_name}: expected exactly one '{ANCHOR}' block, found {len(anchors)}")
+        raise RegionError(f"{spec_name}: expected exactly one '{anchor}' block, found {len(anchors)}")
     start = next((i for i in range(anchors[0], len(tokens)) if tokens[i].type == "blockquote_open"), None)
     if start is None:
-        raise RegionError(f"{spec_name}: no blockquote follows '{ANCHOR}'")
+        raise RegionError(f"{spec_name}: no blockquote follows '{anchor}'")
     depth, paragraphs = 0, []
     for t in tokens[start:]:
         if t.type == "blockquote_open":
@@ -75,7 +83,7 @@ def extract_prompt(spec_text: str, spec_name: str) -> list[str]:
         elif t.type == "inline":
             paragraphs.append(" ".join(t.content.split()))
     if not paragraphs:
-        raise RegionError(f"{spec_name}: the blockquote after '{ANCHOR}' is empty")
+        raise RegionError(f"{spec_name}: the blockquote after '{anchor}' is empty")
     return paragraphs
 
 
@@ -141,7 +149,7 @@ def process(root: Path, write: bool) -> list[str]:
             spec_path = root / spec
             if not spec_path.is_file():
                 raise RegionError(f"{spec}: the source of region '{name}' does not exist")
-            want = render(extract_prompt(spec_path.read_text(encoding="utf-8"), spec), indent)
+            want = render(extract_prompt(spec_path.read_text(encoding="utf-8"), spec, ANCHORS.get(name, ANCHOR)), indent)
             have = lines[first:end]
             if have == want:
                 continue

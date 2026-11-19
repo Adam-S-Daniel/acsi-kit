@@ -120,6 +120,29 @@ names it.
 - `FLEET_WORKER_FIRE_BEARER`: a repository secret on `<you>/_agent-guidance`,
   that routine's bearer. Set it like `PROMPT_AUDIT_SWEEP_FIRE_BEARER`.
 
+The same workflow fires a second task, the Loop worker
+([routines](../docs/routines.md#fleet-worker)), with its own values. Unlike the
+fleet worker's cadence, which `create-environments.sh` sets from `CLAUDE_PLAN`,
+the loop's has no default and no plan mapping, because its spend must fit your
+weekly eval cap: if any of these is unset, its fire fails and names it.
+
+- `LOOP_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
+  the Loop worker routine's fire URL. Set it like `PROMPT_AUDIT_SWEEP_FIRE_URL`.
+- `LOOP_WORKER_FIRE_BEARER`: a repository secret on `<you>/_agent-guidance`,
+  that routine's bearer. Set it like `PROMPT_AUDIT_SWEEP_FIRE_BEARER`.
+- `LOOP_WORKER_EVERY_HOURS`: a repository variable on `<you>/_agent-guidance`,
+  how often the loop fires: `3`, `6`, `12`, `24` or `168`. Set it with
+  `gh variable set LOOP_WORKER_EVERY_HOURS --repo <you>/_agent-guidance --body 24`.
+
+`repo-settings`' `repo-settings.yml` can also apply tightening changes with no
+approval, through an optional second environment, `fleet-apply-auto`. The kit
+does not create it: `fleet-apply` is the one `create-environments.sh` makes. To
+turn it on, create `fleet-apply-auto` on `<you>/repo-settings` with no required
+reviewer, limit its deployment branches to `main`, and add the same
+`REPO_SETTINGS_APP_PRIVATE_KEY` to it as an environment secret. Until all three
+are true the `apply-auto` job applies nothing and every change waits for the
+reviewed apply.
+
 `_agent-guidance`'s `article-watch.yml` polls a feed of Anthropic
 engineering articles hourly and fires an article-lift routine
 (`docs/routines/article-lift.md` there) for each new one about agents. It is

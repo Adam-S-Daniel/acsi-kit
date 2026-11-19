@@ -40,7 +40,7 @@ runs each repo's installer:
 Every installer is idempotent, so run it again after a plugin is added or
 moved. The fleet guidance itself needs nothing more: step 1 also writes the
 owner marker (`~/.config/fleet-guidance/owner`), and with it the
-`fleet-memory` hook each repo carries installs the guidance into
+`fleet-memory` hook (delivered by the plugin, not carried by each repo) installs the guidance into
 `~/.claude/CLAUDE.md` at the first session in any fleet repo. Without the
 marker the hook does nothing on a durable machine
 ([guidance](guidance.md#the-sync)).

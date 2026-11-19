@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: 39d03754c6c1f3a0dfe3469c4e43956f700f29a5
+source_sha: 48f470e588818e41191f8d6f11f4905b0522ca54
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]

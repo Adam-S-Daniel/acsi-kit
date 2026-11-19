@@ -157,7 +157,7 @@ python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["jobs"]
   "$B/../starter/agent-guidance/.github/workflows/fleet-worker-fire.yml" > "$T/fire-step.sh"
 for plan in pro max5x max20x; do
   hours=$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")
-  EVERY_HOURS=$hours GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL= FIRE_BEARER= bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
+  WORKER=fleet EVERY_REQUIRED=false EVERY_VAR=FLEET_WORKER_EVERY_HOURS URL_VAR=FLEET_WORKER_FIRE_URL BEARER_VAR=FLEET_WORKER_FIRE_BEARER FLEET_BEARER= LOOP_BEARER= EVERY_HOURS=$hours GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL= bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
   assert "the starter's fire workflow accepts $plan's $hours hours" has "$T/fire-step.out" "not configured"
 done
 

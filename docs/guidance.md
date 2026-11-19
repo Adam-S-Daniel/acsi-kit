@@ -31,10 +31,12 @@ specs the standing routines follow.
   commit its own `skills.lock`), the switches for agent-checks and
   Dependabot delivery, and `cron_coverage.fleet`, the repos the routines
   visit.
-- `.claude/hooks/` holds the hooks. The sync delivers `fleet-memory.sh` (the
-  session-start delivery) with its payload `fleet-guidance.md`,
-  `guidance-load-record.sh` (a Stop hook that records whether a session
-  loaded the full guidance or only the stub) and `skills-bootstrap.sh`.
+- `.claude/hooks/` holds the hooks. The sync delivers `skills-bootstrap.sh`;
+  `fleet-memory.sh` (the session-start delivery), its payload
+  `fleet-guidance.md` and `guidance-load-record.sh` (a Stop hook that records
+  whether a session loaded the full guidance or only the stub) stay in
+  `_agent-guidance`, which the owner's own routes download, and the sync
+  removes any leftover copy from a consumer (ADR 0043).
   `memory-home.sh` is registered per machine instead, and
   `github-write-marker.sh` reaches sessions through the `acsi-anything-anywhere`
   plugin.
@@ -59,7 +61,8 @@ request with auto-merge instead. The nightly `drift-report.yml` writes
 
 **Delivered once per session.** A consumer's `AGENTS.md` carries only the
 stub. The full guidance arrives through `fleet-memory.sh`, a SessionStart
-hook that installs it into user memory (`~/.claude/CLAUDE.md`, and
+hook that no consumer repo carries (ADR 0043): the plugin's SessionStart hook
+and the Codex Cloud setup script download it from `_agent-guidance`. It installs it into user memory (`~/.claude/CLAUDE.md`, and
 `~/.codex/AGENTS.md` when `~/.codex` exists) and prints one verdict line:
 `installed`, `current`, `DEGRADED` or `skipped`. Inlined in every repo
 instead, it once took 332.3k tokens in one multi-repo session.

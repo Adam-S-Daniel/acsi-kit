@@ -28,8 +28,11 @@ readonly bootstrap_sha256='00000000000000000000000000000000000000000000000000000
 # bump both values together from that repository's main:
 #   git rev-parse origin/main
 #   git show origin/main:.claude/hooks/fleet-memory.sh | sha256sum
-readonly fleet_pin_commit='0ef732fdbd825e35ad6bd853855fe158b61ada2b'
-readonly fleet_pin_sha256='cfc01078b9d06990c2e458bade9aebffe10e7e25a97eaec23a59e2d3f28a2241'
+# These placeholders fail closed: the download 404s or the digest mismatches,
+# and setup fails. Set both from your _agent-guidance main (commands above) before the
+# first sync.
+readonly fleet_pin_commit='1111111111111111111111111111111111111111'
+readonly fleet_pin_sha256='1111111111111111111111111111111111111111111111111111111111111111'
 
 dry_run=false
 connector_override="${CODEX_CLOUD_GITHUB_CONNECTOR_ID:-}"
