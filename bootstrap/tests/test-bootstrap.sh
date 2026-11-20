@@ -146,9 +146,9 @@ assert "the refusal names CLAUDE_PLAN" has "$ERR" "CLAUDE_PLAN is required"
 sed 's/^CLAUDE_PLAN=.*/CLAUDE_PLAN=max/' "$CFG" > "$T/badplan.env"
 assert_not "an invalid CLAUDE_PLAN is refused" bash "$B/create-repos.sh" --config "$T/badplan.env" --dry-run
 assert_eq "fleet.env.example leaves CLAUDE_PLAN for the adopter" "$(grep -c '^CLAUDE_PLAN=$' "$B/fleet.env.example")" 1
-for plan in pro max5x max20x; do
+for plan in pro max5x ultra max20x; do
   assert_eq "fleet_worker_hours $plan" "$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
-    "$(case $plan in pro) echo 168;; max5x) echo 12;; max20x) echo 3;; esac)"
+    "$(case $plan in pro) echo 168;; max5x) echo 12;; ultra|max20x) echo 3;; esac)"
 done
 # The starter's fire workflow must accept each plan's value: run its step by
 # hand with nothing configured, so it stops at "not configured", after the
@@ -179,7 +179,26 @@ assert_eq "Max 5x: the judge is left alone" "$(sized max5x judge_exclude_tiers r
 assert_eq "Max 20x: the exported rate stays" "$(sized max20x points_per_usd budget.yml)" \
   "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["points_per_usd"])' "$B/../starter/skills-evals/evals/budget.yml")"
 assert_eq "Max 20x: no 5-hour stop" "$(sized max20x stop_when_session_above budget.yml)" null
-for plan in pro max5x max20x; do
+assert_eq "Ultra: no 5-hour stop" "$(sized ultra stop_when_session_above budget.yml)" null
+# skills-evals#1113's budget names the plan (Ultra is Max 20x's new name):
+# an exported claude_plan line is replaced once, never doubled, and an older
+# export that lacks the key is not given one its skills-evals would refuse.
+plan_of() { # plan: claude_plan lines in a budget that exports the owner's, sized for plan
+  rm -rf "$T/size" && mkdir -p "$T/size/evals"
+  cp "$B/../starter/skills-evals/evals/roster-policy.yml" "$T/size/evals/"
+  grep -v '^claude_plan:' "$B/../starter/skills-evals/evals/budget.yml" > "$T/size/evals/budget.yml"
+  printf 'claude_plan: ultra\n' >> "$T/size/evals/budget.yml"
+  python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan "$1" >/dev/null || return 1
+  grep '^claude_plan:' "$T/size/evals/budget.yml" | sed 's/ *#.*//'
+}
+for plan in pro max5x ultra; do
+  assert_eq "$plan: claude_plan names it" "$(plan_of $plan)" "claude_plan: $plan"
+done
+assert_eq "max20x is sized as Ultra" "$(plan_of max20x)" "claude_plan: ultra"
+if ! grep -q '^claude_plan:' "$B/../starter/skills-evals/evals/budget.yml"; then
+  assert_eq "an export without claude_plan gets none" "$(sized pro claude_plan budget.yml)" null
+fi
+for plan in pro max5x ultra; do
   assert_eq "$plan: the weekly cap stays" "$(sized $plan weekly_cap budget.yml)" \
     "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["weekly_cap"])' "$B/../starter/skills-evals/evals/budget.yml")"
   assert_eq "$plan: the account stop stays" "$(sized $plan stop_when_account_above budget.yml)" \

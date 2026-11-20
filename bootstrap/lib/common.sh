@@ -141,7 +141,7 @@ _valid_value() { # key value
     OWNER|OWNER_TWO|REVIEWER) [[ $v =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ ]] ;;
     OWNER_TYPE) [[ $v == user || $v == org ]] ;;
     PLAN) [[ $v == free || $v == paid ]] ;;
-    CLAUDE_PLAN) [[ $v == pro || $v == max5x || $v == max20x ]] ;;
+    CLAUDE_PLAN) [[ $v == pro || $v == max5x || $v == ultra || $v == max20x ]] ;;
     # No apostrophe: the name lands inside single-quoted shell and PowerShell strings.
     OWNER_NAME) [[ $v =~ ^[A-Za-z0-9\ .-]{0,80}$ ]] ;;
     VISIBILITY_*) [[ $v == public || $v == private ]] ;;
@@ -179,7 +179,7 @@ load_config() { # path
   done < "$path"
   [ -n "$CFG_OWNER" ] || die "$path: OWNER is required"
   [ -n "$CFG_PLAN" ] || die "$path: PLAN is required (free or paid)"
-  [ -n "$CFG_CLAUDE_PLAN" ] || die "$path: CLAUDE_PLAN is required (pro, max5x or max20x): it sizes the eval budget and the fleet worker's schedule; docs/before-you-start.md#which-plan"
+  [ -n "$CFG_CLAUDE_PLAN" ] || die "$path: CLAUDE_PLAN is required (pro, max5x or ultra): it sizes the eval budget and the fleet worker's schedule; docs/before-you-start.md#which-plan"
   : "${CFG_OWNER_TYPE:=user}" "${CFG_REVIEWER:=$CFG_OWNER}"
   # <your name> and "Example Adopter" land in public repos: default to the
   # public handle, never a legal name.
@@ -545,7 +545,7 @@ fleet_worker_hours() {
   case $1 in
     pro) echo 168 ;;
     max5x) echo 12 ;;
-    max20x) echo 3 ;;
+    ultra|max20x) echo 3 ;;
     *) die "unknown CLAUDE_PLAN: $1" ;;
   esac
 }
