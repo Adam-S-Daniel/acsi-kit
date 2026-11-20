@@ -179,20 +179,25 @@ assert_eq "Max 5x: the judge is left alone" "$(sized max5x judge_exclude_tiers r
 assert_eq "Max 20x: the exported rate stays" "$(sized max20x points_per_usd budget.yml)" \
   "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["points_per_usd"])' "$B/../starter/skills-evals/evals/budget.yml")"
 assert_eq "Max 20x: no 5-hour stop" "$(sized max20x stop_when_session_above budget.yml)" null
-# skills-evals' budget names the plan; Ultra is Max 20x's new name.
-for plan in pro max5x ultra; do
-  assert_eq "$plan: claude_plan names it" "$(sized $plan claude_plan budget.yml)" "\"$plan\""
-done
-assert_eq "max20x is sized as Ultra" "$(sized max20x claude_plan budget.yml)" '"ultra"'
 assert_eq "Ultra: no 5-hour stop" "$(sized ultra stop_when_session_above budget.yml)" null
-# An export that already names the owner's plan has that line replaced, not doubled.
-rm -rf "$T/size" && mkdir -p "$T/size/evals"
-cp "$B/../starter/skills-evals/evals/roster-policy.yml" "$T/size/evals/"
-grep -v '^claude_plan:' "$B/../starter/skills-evals/evals/budget.yml" > "$T/size/evals/budget.yml"
-printf 'claude_plan: ultra\n' >> "$T/size/evals/budget.yml"
-python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan pro >/dev/null; rc=$?
-assert_eq "an exported claude_plan line is resized" "$rc" 0
-assert_eq "the exported plan line is replaced once" "$(grep -c '^claude_plan: pro ' "$T/size/evals/budget.yml"):$(grep -c '^claude_plan:' "$T/size/evals/budget.yml")" 1:1
+# skills-evals#1113's budget names the plan (Ultra is Max 20x's new name):
+# an exported claude_plan line is replaced once, never doubled, and an older
+# export that lacks the key is not given one its skills-evals would refuse.
+plan_of() { # plan: claude_plan lines in a budget that exports the owner's, sized for plan
+  rm -rf "$T/size" && mkdir -p "$T/size/evals"
+  cp "$B/../starter/skills-evals/evals/roster-policy.yml" "$T/size/evals/"
+  grep -v '^claude_plan:' "$B/../starter/skills-evals/evals/budget.yml" > "$T/size/evals/budget.yml"
+  printf 'claude_plan: ultra\n' >> "$T/size/evals/budget.yml"
+  python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan "$1" >/dev/null || return 1
+  grep '^claude_plan:' "$T/size/evals/budget.yml" | sed 's/ *#.*//'
+}
+for plan in pro max5x ultra; do
+  assert_eq "$plan: claude_plan names it" "$(plan_of $plan)" "claude_plan: $plan"
+done
+assert_eq "max20x is sized as Ultra" "$(plan_of max20x)" "claude_plan: ultra"
+if ! grep -q '^claude_plan:' "$B/../starter/skills-evals/evals/budget.yml"; then
+  assert_eq "an export without claude_plan gets none" "$(sized pro claude_plan budget.yml)" null
+fi
 for plan in pro max5x ultra; do
   assert_eq "$plan: the weekly cap stays" "$(sized $plan weekly_cap budget.yml)" \
     "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["weekly_cap"])' "$B/../starter/skills-evals/evals/budget.yml")"

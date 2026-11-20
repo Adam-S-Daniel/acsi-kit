@@ -6,9 +6,10 @@ copy-starter.sh commits it (acsi-kit#28). The exported budget and roster
 policy are the owner's, on Max 20x; a smaller plan has a smaller weekly
 allowance, so the same dollars are more points of it.
 
-- evals/budget.yml: `claude_plan` names the plan (skills-evals'
-  harness/budget.py requires it, and refuses a plan with a 5-hour window
-  that sets no 5-hour stop), `points_per_usd` is set for the plan (Ultra
+- evals/budget.yml: `claude_plan` names the plan when the exported budget
+  carries the key (skills-evals#1113's harness/budget.py requires it, and
+  refuses a plan with a 5-hour window that sets no 5-hour stop; an older
+  export does not know the key, so it is not added), `points_per_usd` is set for the plan (Ultra
   keeps the exported value), and on Pro and Max 5x
   `stop_when_session_above: 0.90` is added, so a sweep cannot use up a whole
   5-hour window (skills-evals#921). A verified Ultra account has no 5-hour
@@ -67,7 +68,11 @@ def size_budget(text: str, plan: str) -> str:
     found = len(PLAN_LINE.findall(text))
     if found > 1 or (found == 0 and "claude_plan" in doc):
         raise SizingError("evals/budget.yml's claude_plan is not one plain line")
-    text = PLAN_LINE.sub(plan_line, text) if found else text.rstrip("\n") + "\n\n" + plan_line + "\n"
+    # Only a skills-evals that knows the key exports it (skills-evals#1113);
+    # an older one refuses it as unknown, so it is not added.
+    named = bool(found)
+    if named:
+        text = PLAN_LINE.sub(plan_line, text)
     stop = SESSION_STOP[plan]
     if stop is not None:
         text = text.rstrip("\n") + (
@@ -77,7 +82,7 @@ def size_budget(text: str, plan: str) -> str:
     sized = yaml.safe_load(text)
     if sized.get("points_per_usd") != (rate if rate is not None else doc["points_per_usd"]) \
             or sized.get("stop_when_session_above") != stop \
-            or sized.get("claude_plan") != plan:
+            or sized.get("claude_plan") != (plan if named else None):
         raise SizingError("evals/budget.yml did not parse back as sized")
     return text
 

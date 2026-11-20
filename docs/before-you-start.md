@@ -97,9 +97,10 @@ Why each setting differs:
   fire starts, and a run already going stops taking on work. Pro and Max 5x
   have a 5-hour window; a verified Ultra account does not
   ([What is the Ultra plan?](https://support.claude.com/en/articles/17728952)),
-  so Ultra sets no 5-hour stop. skills-evals' `harness/budget.py` checks
-  `claude_plan` against the stop and fails, saying which key to fix, when a
-  plan with a window has none.
+  so Ultra sets no 5-hour stop. Once the kit's skills-evals export includes
+  skills-evals#1113, its `harness/budget.py` checks `claude_plan` against
+  the stop and fails, saying which key to fix, when a plan with a window has
+  none. Until then the copied budget has no `claude_plan` line.
 - **Working hours (optional).** On Pro or Max 5x you can keep the loop from
   leaving you a nearly spent window when your day starts. Add a
   `working_hours` block to `evals/budget.yml` in your skills-evals repo, with
