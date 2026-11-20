@@ -103,7 +103,7 @@ def model() -> dict[str, dict[str, float]]:
     exported = budget["points_per_usd"]
     out = {}
     for plan in PLANS:
-        rate = plan_sizing.POINTS_PER_USD[plan] or exported
+        rate = plan_sizing.POINTS_PER_USD[plan_sizing.PLAN_NAMES[plan]] or exported
         ratio = exported / rate
         fires = 168 / fleet_worker_hours(plan)
         base = (fires * USD_PER_FIRE["fleet_worker"]

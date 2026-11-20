@@ -61,14 +61,16 @@ draw on your plan's allowance, like any session.
 
 ## Which plan
 
-Set `CLAUDE_PLAN` in `fleet.env` to `pro`, `max5x`, or `max20x`. It is
-required because the kit's numbers come from the owner's Max 20x account,
+Set `CLAUDE_PLAN` in `fleet.env` to `pro`, `max5x`, or `ultra`. Ultra is
+the plan Anthropic used to call Max 20x, and `max20x` still means it. It is
+required because the kit's numbers come from the owner's Ultra account,
 and a smaller plan has a smaller week. `copy-starter.sh` uses it to size the
 `skills-evals` tree it copies (`bootstrap/lib/plan_sizing.py`), and
 `create-environments.sh` uses it to set how often the fleet worker fires:
 
-| `CLAUDE_PLAN` | `pro` ($20) | `max5x` ($100) | `max20x` ($200) |
+| `CLAUDE_PLAN` | `pro` ($20) | `max5x` ($100) | `ultra` ($200) |
 |---|---|---|---|
+| `claude_plan` in `evals/budget.yml` | `pro` | `max5x` | `ultra` |
 | `points_per_usd` in `evals/budget.yml` | `0.03` | `0.006` | `0.0015` (as exported) |
 | `stop_when_session_above` (5-hour window) | `0.90` | `0.90` | not set |
 | `judge_exclude_tiers` in `evals/roster-policy.yml` | `[fable, mythos]` | not set | not set |
@@ -92,7 +94,21 @@ Why each setting differs:
   hold them back.
 - **The 5-hour stop.** A sweep fires many runs in a few hours, which can use
   up a smaller plan's whole 5-hour window. Once the window reads 90%, no new
-  fire starts, and a run already going stops taking on work.
+  fire starts, and a run already going stops taking on work. Pro and Max 5x
+  have a 5-hour window; a verified Ultra account does not
+  ([What is the Ultra plan?](https://support.claude.com/en/articles/17728952)),
+  so Ultra sets no 5-hour stop. skills-evals' `harness/budget.py` checks
+  `claude_plan` against the stop and fails, saying which key to fix, when a
+  plan with a window has none.
+- **Working hours (optional).** On Pro or Max 5x you can keep the loop from
+  leaving you a nearly spent window when your day starts. Add a
+  `working_hours` block to `evals/budget.yml` in your skills-evals repo, with
+  `timezone` (an IANA name such as America/New_York), `days` (such as
+  `[mon, tue, wed, thu, fri]`), `start` and `end` (such as `"09:00"` and
+  `"18:00"`), and `session_stop` (such as `0.50`). From 5 hours before
+  `start` until `end`, no fire starts and runs stop taking on work once the
+  window reads `session_stop`. At other times the 90% stop applies. Without
+  the block, the 90% stop applies at all hours.
 - **The judge.** Pro bills Fable as usage credits from the first call, so
   the roster picks a judge from another tier.
 - **The fleet worker.** One fire that took an issue cost $1.85. Every 3
@@ -190,7 +206,7 @@ cp bootstrap/fleet.env.example fleet.env
 | `OWNER_TWO` | The second owner the exports name, or the same as `OWNER` ([one owner or two](#one-owner-or-two)). |
 | `OWNER_TYPE` | `user` or `org` (default `user`). An org creates Apps under `organizations/<OWNER>/settings/apps`. |
 | `PLAN` | `free` or `paid`. Required. |
-| `CLAUDE_PLAN` | `pro`, `max5x` or `max20x`: your Claude plan. Required. Sizes the eval budget and the fleet worker's schedule ([which plan](#which-plan)). |
+| `CLAUDE_PLAN` | `pro`, `max5x` or `ultra` (`max20x` is its old name): your Claude plan. Required. Sizes the eval budget and the fleet worker's schedule ([which plan](#which-plan)). |
 | `REVIEWER` | Who approves `fleet-apply` and `plugin-runtime-review` (default `OWNER`). |
 | `OWNER_NAME` | Fills `Example Adopter` and `<your name>` in public plugin manifests and notices (default `OWNER`). Letters, digits, spaces, `.` and `-` only (no apostrophe). Use a public handle, not your legal name, or the privacy check will flag it. |
 | `VISIBILITY_AGENT_GUIDANCE`, `VISIBILITY_SKILLS_EVALS`, `VISIBILITY_WSL_AUTOMATION` | Paid plan only: `public` (default) or `private`. |
