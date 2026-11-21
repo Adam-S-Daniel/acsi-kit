@@ -12,8 +12,9 @@ one is arithmetic over measured inputs, below, and
 export/tests/test_plan_shares.py fails when the table and the model part.
 
 Read from the kit, so the model follows them:
-- each plan's `points_per_usd` (starter budget and bootstrap/lib/plan_sizing.py)
-  and the weekly cap;
+- each plan's allowance scale (`ALLOWANCE_SCALE` in the starter's
+  harness/budget.py: Pro 10, Max 5x 2, Ultra 1), the budget's
+  `legacy_usd_per_point` (dollars per Ultra point) and the weekly cap;
 - how often the fleet worker fires on each plan (`fleet_worker_hours` in
   bootstrap/lib/common.sh);
 - how many core fixtures the starter schedules.
@@ -29,6 +30,7 @@ markdown. Keeps full precision until it prints.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +42,16 @@ sys.path.insert(0, str(KIT / "bootstrap" / "lib"))
 import plan_sizing  # noqa: E402
 
 PLANS = ("pro", "max5x", "max20x")
+
+
+def _allowance_scale() -> dict[str, int]:
+    """The starter's own `ALLOWANCE_SCALE`, read from its harness/budget.py
+    so the numbers are not repeated here."""
+    path = KIT / "starter" / "skills-evals" / "harness" / "budget.py"
+    spec = importlib.util.spec_from_file_location("starter_budget", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return dict(module.ALLOWANCE_SCALE)
 
 #: Dollars per fire, API-equivalent at list prices: each session's own
 #: `total_cost_usd`, one fire of each on the owner's Max 20x account and
@@ -62,18 +74,22 @@ CHANGELOG_PER_WEEK = {"pro": 1, "max5x": 7, "max20x": 7}
 MEMORY_PER_WEEK = 1
 SWEEP_PER_WEEK = 1
 
-#: Dollars per point of the Max 20x weekly meter. The cautious end is the
-#: exported `points_per_usd`. Middle: eval calls cost $8.80 a point over the
-#: 20 points that ticked in overnight windows, 2026-10-26 to 2026-11-11, and
-#: $10.20 by regression. Favorable: three whole weeks of the account's known
-#: spend came to at least $14, $17 and $20 a point.
-USD_PER_POINT_MIDDLE = 10.0
+#: Dollars per point of the Ultra (Max 20x) weekly meter. The cautious end is
+#: the exported budget's `legacy_usd_per_point` ($12.35, the lower of the two
+#: controlled quiet nights of 2026-11-19: $12.35 on Sonnet 5.5, $17.15 on
+#: Opus 5.5). Middle: $14, the lowest of three whole weeks of the account's
+#: known spend (at least $14, $17 and $20 a point), between the two nights.
+#: Favorable: $17, the Opus night and the middle whole week. The flat rate the
+#: budget used until 2026-11-20 ($6.67, then $10 as the middle) charged evals
+#: about 1.9 to 2.6 times their real use, so both are gone.
+USD_PER_POINT_MIDDLE = 14.0
 USD_PER_POINT_FAVORABLE = 17.0
 
-#: A plan's week as a fraction of Max 20x's. The cautious end is the kit's
-#: own sizing (the plan multipliers); the favorable end is the weekly hours
-#: Anthropic gave in 2025 (40-80, 140-280, 240-480). Neither is published as
-#: a weekly ratio.
+#: A plan's week as a fraction of Ultra's. The cautious end is skills-evals'
+#: own scale (`1 / ALLOWANCE_SCALE`: Ultra is 10 times Pro's week and Max 5x
+#: is 5 times Pro's, per Anthropic, so Pro is 1/10 and Max 5x 1/2). The
+#: favorable end is the weekly hours Anthropic gave in 2025 (40-80, 140-280,
+#: 240-480), which make Max 5x 0.58 of Ultra's week and Pro a sixth.
 WEEK_RATIO_FAVORABLE = {"pro": 1 / 6, "max5x": 0.58, "max20x": 1.0}
 
 #: How two routines grow with the number of repos in the fleet. Bounds read
@@ -100,20 +116,21 @@ def model() -> dict[str, dict[str, float]]:
         (KIT / "starter/skills-evals/evals/budget.yml").read_text(encoding="utf-8"))
     scheduled = yaml.safe_load(
         (KIT / "starter/skills-evals/evals/scheduled.yml").read_text(encoding="utf-8"))
-    exported = budget["points_per_usd"]
+    scale = _allowance_scale()
+    legacy = budget["legacy_usd_per_point"]  # dollars per Ultra point
     out = {}
     for plan in PLANS:
-        rate = plan_sizing.POINTS_PER_USD[plan_sizing.PLAN_NAMES[plan]] or exported
-        ratio = exported / rate
+        ratio = 1 / scale[plan_sizing.PLAN_NAMES[plan]]
+        usd_per_point = legacy * ratio  # dollars per point of this plan's week
         fires = 168 / fleet_worker_hours(plan)
         base = (fires * USD_PER_FIRE["fleet_worker"]
                 + CHANGELOG_PER_WEEK[plan] * USD_PER_FIRE["changelog"]
                 + MEMORY_PER_WEEK * USD_PER_FIRE["memory"]
                 + SWEEP_PER_WEEK * USD_PER_FIRE["sweep"])
-        week = {"cautious": 1 / rate,
+        week = {"cautious": 100 * usd_per_point,
                 "middle": 100 * USD_PER_POINT_MIDDLE * ratio,
                 "favorable": 100 * USD_PER_POINT_FAVORABLE * WEEK_RATIO_FAVORABLE[plan]}
-        capped = budget["weekly_cap"] / rate
+        capped = budget["weekly_cap"] * 100 * usd_per_point
         out[plan] = {
             "fleet_worker_fires": fires, "base_usd": base,
             **{f"week_usd_{k}": v for k, v in week.items()},

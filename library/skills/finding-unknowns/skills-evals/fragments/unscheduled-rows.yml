@@ -1,2 +1,2 @@
   - path: evals/finding-unknowns
-    reason: "Scope decision 2026-11-03: process/taste skill; owner review replaces the eval."
+    reason: "Scope decision 2026-11-03: process/taste skill; owner review replaces the eval. Rechecked 2026-11-18, holds: fails criterion 3 (its four objective checks only see cited file paths and untouched sources, and none of its 13 runs carries judge figures) and criterion 4 (the fixture is unchanged since 2026-11-03 03:23 UTC, and its without arm averages 0.875 of checks over those runs, 2026-10-25 to 2026-11-03). The guidance section that points at it, finding-your-unknowns, stays scheduled."

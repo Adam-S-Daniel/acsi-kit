@@ -45,7 +45,8 @@ QUOTES = [
      f"{BUDGET['per_run_cap'] + BUDGET['per_run_overrun']:g}", 1),
     ("per-run cap", r"one run at ([0-9.]+) plus", f"{BUDGET['per_run_cap']:g}", 1),
     ("per-run overrun", r"plus a ([0-9.]+) overrun", f"{BUDGET['per_run_overrun']:g}", 1),
-    ("exported points_per_usd", r"`([0-9.]+)` \(as exported\)", f"{BUDGET['points_per_usd']:g}", 1),
+    ("exported legacy_usd_per_point", r"`legacy_usd_per_point` of \$([0-9.]+)",
+     f"{BUDGET['legacy_usd_per_point']:g}", 1),
 ]
 
 

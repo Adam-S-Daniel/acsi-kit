@@ -63,7 +63,10 @@ check(f"skills-evals listens on the six routine lanes and the dashboard's ({sort
     "claude/eval-*", "claude/eval-improve-*", "claude/eval-cost-*", "claude/eval-guidance-improve-*",
     "claude/scaffold-*", "claude/draft-skill-*"} | DASHBOARD_LANES)
 
-BRANCH = re.compile(r"claude/[a-z][a-z-]*-")
+# Not after a word character, "-" or ".": "build-with-claude/prompt-caching"
+# in a documentation URL is not a branch, while "origin/claude/eval-cost-" and
+# "refs/heads/claude/..." still are.
+BRANCH = re.compile(r"(?<![\w.-])claude/[a-z][a-z-]*-")
 # The instructions are split per mode (docs/routine/modes/*.md), each read
 # by the eval runner for its own mode, so the branches are named across them.
 prompt = "".join(p.read_text(encoding="utf-8") for p in

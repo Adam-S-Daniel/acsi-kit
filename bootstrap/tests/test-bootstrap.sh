@@ -170,41 +170,47 @@ sized() { # plan key file: the key's value in the sized file, as JSON
   python3 -I -c 'import json, sys, yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1]))[sys.argv[2]] if sys.argv[2] in yaml.safe_load(open(sys.argv[1])) else None))' \
     "$T/size/evals/$3" "$2"
 }
-assert_eq "Pro: points_per_usd 0.03" "$(sized pro points_per_usd budget.yml)" 0.03
+assert_eq "Pro: claude_plan pro" "$(sized pro claude_plan budget.yml)" '"pro"'
+assert_eq "Pro: no points_per_usd is written" "$(sized pro points_per_usd budget.yml)" null
 assert_eq "Pro: a 5-hour stop at 0.9" "$(sized pro stop_when_session_above budget.yml)" 0.9
 assert_eq "Pro: no Fable judge" "$(sized pro judge_exclude_tiers roster-policy.yml)" '["fable", "mythos"]'
-assert_eq "Max 5x: points_per_usd 0.006" "$(sized max5x points_per_usd budget.yml)" 0.006
+assert_eq "Max 5x: claude_plan max5x" "$(sized max5x claude_plan budget.yml)" '"max5x"'
+assert_eq "Max 5x: no points_per_usd is written" "$(sized max5x points_per_usd budget.yml)" null
 assert_eq "Max 5x: a 5-hour stop at 0.9" "$(sized max5x stop_when_session_above budget.yml)" 0.9
 assert_eq "Max 5x: the judge is left alone" "$(sized max5x judge_exclude_tiers roster-policy.yml)" null
-assert_eq "Max 20x: the exported rate stays" "$(sized max20x points_per_usd budget.yml)" \
-  "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["points_per_usd"])' "$B/../starter/skills-evals/evals/budget.yml")"
+assert_eq "Max 20x: claude_plan ultra" "$(sized max20x claude_plan budget.yml)" '"ultra"'
+assert_eq "Max 20x: the exported legacy rate stays" "$(sized max20x legacy_usd_per_point budget.yml)" \
+  "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["legacy_usd_per_point"])' "$B/../starter/skills-evals/evals/budget.yml")"
 assert_eq "Max 20x: no 5-hour stop" "$(sized max20x stop_when_session_above budget.yml)" null
 assert_eq "Ultra: no 5-hour stop" "$(sized ultra stop_when_session_above budget.yml)" null
-# skills-evals#1113's budget names the plan (Ultra is Max 20x's new name):
-# an exported claude_plan line is replaced once, never doubled, and an older
-# export that lacks the key is not given one its skills-evals would refuse.
-plan_of() { # plan: claude_plan lines in a budget that exports the owner's, sized for plan
-  rm -rf "$T/size" && mkdir -p "$T/size/evals"
-  cp "$B/../starter/skills-evals/evals/roster-policy.yml" "$T/size/evals/"
-  grep -v '^claude_plan:' "$B/../starter/skills-evals/evals/budget.yml" > "$T/size/evals/budget.yml"
-  printf 'claude_plan: ultra\n' >> "$T/size/evals/budget.yml"
-  python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan "$1" >/dev/null || return 1
+# skills-evals names the plan in the budget (Ultra is Max 20x's new name): the
+# exported claude_plan line is replaced once, never doubled, and a budget
+# without one, or with it in a form that is not one plain line, is refused.
+plan_of() { # plan: claude_plan lines in the exported budget, sized for plan
+  sized "$1" claude_plan budget.yml >/dev/null || return 1
   grep '^claude_plan:' "$T/size/evals/budget.yml" | sed 's/ *#.*//'
 }
 for plan in pro max5x ultra; do
   assert_eq "$plan: claude_plan names it" "$(plan_of $plan)" "claude_plan: $plan"
 done
 assert_eq "max20x is sized as Ultra" "$(plan_of max20x)" "claude_plan: ultra"
-if ! grep -q '^claude_plan:' "$B/../starter/skills-evals/evals/budget.yml"; then
-  assert_eq "an export without claude_plan gets none" "$(sized pro claude_plan budget.yml)" null
-fi
+refuses() { # label, then a budget.yml built by the command in $2: sizing exits 2
+  rm -rf "$T/size" && mkdir -p "$T/size/evals"
+  cp "$B/../starter/skills-evals/evals/roster-policy.yml" "$T/size/evals/"
+  eval "$2" > "$T/size/evals/budget.yml"
+  python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan pro >/dev/null 2>&1; rc=$?
+  assert_eq "$1" "$rc" 2
+}
+refuses "a budget without claude_plan is refused" "grep -v '^claude_plan:' '$B/../starter/skills-evals/evals/budget.yml'"
+refuses "a claude_plan that is not one plain line is refused" "grep -v '^claude_plan:' '$B/../starter/skills-evals/evals/budget.yml'; printf 'claude_plan: ultra\\nclaude_plan: pro\\n'"
+refuses "a claude_plan with a comment is refused" "grep -v '^claude_plan:' '$B/../starter/skills-evals/evals/budget.yml'; printf 'claude_plan: ultra  # note\\n'"
 for plan in pro max5x ultra; do
   assert_eq "$plan: the weekly cap stays" "$(sized $plan weekly_cap budget.yml)" \
     "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["weekly_cap"])' "$B/../starter/skills-evals/evals/budget.yml")"
   assert_eq "$plan: the account stop stays" "$(sized $plan stop_when_account_above budget.yml)" \
     "$(python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["stop_when_account_above"])' "$B/../starter/skills-evals/evals/budget.yml")"
 done
-sized pro points_per_usd budget.yml >/dev/null
+sized pro claude_plan budget.yml >/dev/null
 python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan pro >/dev/null 2>&1; rc=$?
 assert_eq "sizing an already sized tree is refused" "$rc" 2
 rm -rf "$T/size" && mkdir -p "$T/size"

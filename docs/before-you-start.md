@@ -4,7 +4,7 @@
 
 | Need | Why |
 |---|---|
-| Claude Max, ideally Max 20x | Cloud sessions and routines (scheduled and API-triggered cloud runs) also work on Pro, but routines and evals draw on your plan's weekly allowance, and the kit's numbers are sized for Max 20x. Read [which plan](#which-plan) before you start on Pro or Max 5x. Nothing here has been tested on a Team plan. |
+| Claude Max or Ultra, ideally Ultra | Cloud sessions and routines (scheduled and API-triggered cloud runs) also work on Pro, but routines and evals draw on your plan's weekly allowance, and the kit's numbers are measured on Ultra (formerly Max 20x). Read [which plan](#which-plan) before you start on Pro or Max 5x. Nothing here has been tested on a Team plan. |
 | Claude Code, current release | Needed for hooks, plugins, and skills. The eval harness doesn't pin the CLI, so it fails loudly when a release changes behavior. |
 | A GitHub account, and optionally a second | The exports name two owners throughout ([one owner or two](#one-owner-or-two)). |
 | A GitHub plan you know | **Rulesets, required checks and environments are enforced on private repos only on a paid GitHub plan** (Pro for a personal account, Team for an organization). See [free or paid](#free-or-paid-github-plan). |
@@ -55,8 +55,9 @@ draw on your plan's allowance, like any session.
 - **Running it:** evals run as routines on your plan, so they draw down the
   weekly allowance like any session. They stay within the 30% cap, with a
   hard stop when the account meter reads 80% (`stop_when_account_above`).
-  Set your own numbers in `evals/budget.yml` before the planner first runs,
-  especially `points_per_usd` ([which plan](#which-plan)). The fire API
+  Review `evals/budget.yml` before the planner first runs. Its numbers are
+  points of your own plan's week, and skills-evals scales its estimates by
+  the `claude_plan` the kit sets ([which plan](#which-plan)). The fire API
   allows 30 fires an hour per routine and 100 an hour per account.
 
 ## Which plan
@@ -71,36 +72,37 @@ and a smaller plan has a smaller week. `copy-starter.sh` uses it to size the
 | `CLAUDE_PLAN` | `pro` ($20) | `max5x` ($100) | `ultra` ($200) |
 |---|---|---|---|
 | `claude_plan` in `evals/budget.yml` | `pro` | `max5x` | `ultra` |
-| `points_per_usd` in `evals/budget.yml` | `0.03` | `0.006` | `0.0015` (as exported) |
+| Allowance scale skills-evals applies (`ALLOWANCE_SCALE`) | 10 | 2 | 1 |
 | `stop_when_session_above` (5-hour window) | `0.90` | `0.90` | not set |
 | `judge_exclude_tiers` in `evals/roster-policy.yml` | `[fable, mythos]` | not set | not set |
 | Fleet worker (`FLEET_WORKER_EVERY_HOURS` on `_agent-guidance`) | weekly (`168`) | every 12 hours | every 3 hours |
 | Agent changelog watcher (you set its schedule, [routines](routines.md#agent-changelog-watcher)) | weekly | daily | daily |
-| One week of the plan, in API-equivalent dollars (model) | about $50 ($33 to $280) | about $250 ($170 to $990) | about $1,000 ($670 to $1,700) |
+| One week of the plan, in API-equivalent dollars (model) | about $140 ($120 to $280) | about $700 ($620 to $990) | about $1,400 ($1,200 to $1,700) |
 | Base routines, a week | about $11 | about $51 | about $129 |
-| Base routines, share of the week (model) | ~22% (4% to 33%) | ~20% (5% to 31%) | ~13% (8% to 19%) |
-| Evals the weekly cap lets through, a week | about $10: a quarter of the core fixtures | about $50: each core fixture once | about $200: each core fixture four times |
+| Base routines, share of the week (model) | ~8% (4% to 9%) | ~7% (5% to 8%) | ~9% (8% to 10%) |
+| Evals the weekly cap lets through, a week | about $37: about one pass over the core fixtures | about $190: five to six passes | about $370: about eleven passes |
 
 The weekly cap (30%) and the 80% account stop stay as exported on every plan.
 
 Why each setting differs:
 
-- **`points_per_usd`.** The budget charges each eval run its dollar cost
-  (the CLI's API-equivalent figure) times this rate. The exported `0.0015`
-  is about $6.70 per point of the weekly meter, measured on Max 20x on
-  2026-11-10 during quiet overnight windows when evals were the only use ($6
-  to $7.30). If you leave it unchanged on a smaller plan, the guard
-  undercounts evals by 4 or 20 times, and only the 80% account stop would
-  hold them back.
+- **`claude_plan` and the allowance scale.** The budget's numbers are
+  fractions of your own plan's weekly allowance, so a Pro or Max 5x budget is
+  in points of that smaller week. skills-evals prices a run from its token
+  counts as if it ran on Ultra and multiplies by `ALLOWANCE_SCALE` for the
+  budget's `claude_plan` (`harness/budget.py`): 10 on Pro and 2 on Max 5x,
+  because Anthropic gives Ultra 10 times Pro's weekly allowance and Max 5x 5
+  times. The kit sets only `claude_plan`; it no longer rewrites a per-plan
+  rate. For calls recorded without token counts, `legacy_usd_per_point` (an
+  exported $12.35 per Ultra point) stands in, divided by the same scale.
 - **The 5-hour stop.** A sweep fires many runs in a few hours, which can use
   up a smaller plan's whole 5-hour window. Once the window reads 90%, no new
   fire starts, and a run already going stops taking on work. Pro and Max 5x
   have a 5-hour window; a verified Ultra account does not
   ([What is the Ultra plan?](https://support.claude.com/en/articles/17728952)),
-  so Ultra sets no 5-hour stop. Once the kit's skills-evals export includes
-  skills-evals#1113, its `harness/budget.py` checks `claude_plan` against
-  the stop and fails, saying which key to fix, when a plan with a window has
-  none. Until then the copied budget has no `claude_plan` line.
+  so Ultra sets no 5-hour stop. skills-evals' `harness/budget.py` checks
+  `claude_plan` against the stop and fails, saying which key to fix, when a
+  plan with a window has none.
 - **Working hours (optional).** On Pro or Max 5x you can keep the loop from
   leaving you a nearly spent window when your day starts. Add a
   `working_hours` block to `evals/budget.yml` in your skills-evals repo, with
@@ -113,12 +115,13 @@ Why each setting differs:
 - **The judge.** Pro bills Fable as usage credits from the first call, so
   the roster picks a judge from another tier.
 - **The fleet worker.** One fire that took an issue cost $1.85. Every 3
-  hours, that is 56 fires and about $104 a week, or two Pro weeks at the
-  middle estimate. Even daily it would take a quarter of a Pro week, so Pro
+  hours, that is 56 fires and about $104 a week, or three quarters of a Pro
+  week at the middle estimate. Even daily it would take a tenth, which is
+  still more than a smaller plan needs, so Pro
   fires it once a week, on Tuesday at 00:20 UTC, after the allowance week
   turns over.
 - **The changelog watcher.** One fire cost $2.68, so running it daily costs
-  about $19 a week, more than a third of a Pro week at the middle estimate.
+  about $19 a week, about a seventh of a Pro week at the middle estimate.
   A weekly run reads the week's vendor releases all at once.
 
 ### What the shares rest on
@@ -132,18 +135,20 @@ a thin sample, and a fleet worker fire that finds nothing to do costs less.
 
 Two things are unknown, and each share's range covers both:
 
-- **Dollars per point.** The exported $6.70 is the low end of what was
-  measured, which suits a guard because it overcharges evals rather than
-  undercharging them. Over the 20 meter points that ticked in overnight
-  windows from 2026-10-26 to 2026-11-11 with evals running, eval calls cost
-  $8.80 a point ($6.20 to $12.90 by night). Three whole weeks of the
-  account's known spend come to at least $14, $17, and $20 a point. The
-  middle estimate uses $10, and the range runs from $6.70 to $17.
-- **How the plans' weeks compare.** Anthropic publishes 5x and 20x for the
-  5-hour window, but not for the week. The middle estimate and the guard
-  treat Max 5x as a quarter of Max 20x's week and Pro as a twentieth. The
-  weekly hours Anthropic gave in 2025 (40 to 80, 140 to 280, and 240 to 480)
-  would make them 0.58 and a sixth, the favorable end of each range.
+- **Dollars per point.** The exported `legacy_usd_per_point` of $12.35 is
+  the low end of what was measured, which suits a guard because it
+  overcharges rather than undercharges. Two controlled quiet nights
+  (2026-11-19 and 2026-11-20) put the eval mix at $12.35 a point on Sonnet
+  and $17.15 on Opus, and three whole weeks of the account's known spend come
+  to at least $14, $17, and $20 a point. The middle estimate uses $14, and
+  the range runs from $12.35 to $17. These are dollars per Ultra point; a
+  point of a smaller plan's week costs them divided by the plan's scale.
+- **How the plans' weeks compare.** Anthropic gives Ultra 10 times Pro's
+  weekly allowance and Max 5x 5 times, which skills-evals turns into its
+  scale of 10 for Pro and 2 for Max 5x. The worst end and the guard treat Max
+  5x as half of Ultra's week and Pro as a tenth. The weekly hours Anthropic
+  gave in 2025 (40 to 80, 140 to 280, and 240 to 480) would make them 0.58
+  and a sixth, the favorable end of each range.
 
 The figures also come from the owner's fleet of 16 repos, while the kit
 starts you with 5, or 6 with `skills-evals`. Two routines grow with the repo
@@ -160,14 +165,14 @@ count, and neither has been measured across fleet sizes:
   to $5 for 6 repos and $9 for 15.
 
 At the kit's starting size the two roughly cancel out, so the table stands.
-Each repo you add costs about $0.50 a week on Pro, or 1% of the week at the
+Each repo you add costs about $0.50 a week on Pro, under half a percent of the week at the
 middle estimate, and a smaller share of a larger plan. A fleet of 30 repos
 puts the base routines a quarter to two thirds above the table on the Max
 plans, and more than doubles them on Pro.
 
-The eval row is what the guard books at its own rate: 30% of the week is
-$10, $50, or $200 of eval calls, compared with about $42 for one pass over
-the 48 core fixtures. On the meter, that is 30% at worst and about 20% at
+The eval row is what the guard books at the legacy rate: 30% of the week is
+$37, $190, or $370 of eval calls, compared with about $33 for one pass over
+the 38 core fixtures. On the meter, that is 30% at worst and about 26% at
 the middle estimate.
 
 ### On Pro and Max 5x
@@ -175,14 +180,14 @@ the middle estimate.
 Both plans run the whole kit, just more slowly:
 
 - **Max 5x.** The fleet worker fires twice a day, and evals cover the core
-  fixtures about once a week. At the worst end of the ranges, the base
-  routines and evals together take about 60% of the week, so watch the meter
+  fixtures about five times a week. At the worst end of the ranges, the base
+  routines and evals together take about 40% of the week, so watch the meter
   during the first week.
 - **Pro.** The fleet worker fires once a week, and evals cover the core
-  fixtures about once a month. Schedule the changelog watcher weekly, set
+  fixtures about once a week. Schedule the changelog watcher weekly, set
   the memory curation task's model to Sonnet (the owner's $4.54 fire ran on
   Opus), and leave the optional dashboard refresh off, since one refresh
-  cost the owner $7.59. At the worst end, the base routines take a third of
+  cost the owner $7.59. At the worst end, the base routines take 9% of
   the week and evals another 30%. A weekly fleet worker takes at most three
   `agent-ready` issues a week, so press **Run now** on its routine when you
   want a pass sooner.

@@ -165,9 +165,10 @@ HTTP status and error type, never the response body.
 
 `evals/budget.yml` caps all automated evals at 30% of the weekly allowance
 and one run at 0.01 plus a 0.0005 overrun, and it stops a run when the
-account meter reads 80%. Each run is charged its dollar cost times
-`points_per_usd`, which ships sized for Max 20x, so set it for your plan
-first ([which plan](before-you-start.md#which-plan)). Three layers enforce
+account meter reads 80%. Each run is charged from its token counts, and the
+budget is in points of your own plan's week: skills-evals scales every
+estimate by the `claude_plan` the kit sets, so a Pro or Max 5x budget needs
+no rate of its own ([which plan](before-you-start.md#which-plan)). Three layers enforce
 the budget: the in-run stop in the harness, the pre-fire check
 (`scripts/allowance_guard.py`, which refuses a fire that won't fit or when
 it can't read the GitHub API), and the weekly plan, which spends only the

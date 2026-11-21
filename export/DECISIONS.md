@@ -2861,3 +2861,23 @@ The re-sync held back `repo-settings` and `skills-evals`. `repo-settings` is fol
 | wsl-automation | `0d54e508ac91` | `b3adb1e5a5d1` |
 
 Reverse: re-pin the old shas and restore the two `kit_config.py` anchors (23 and 20) and drop the `claude-plan-usage-estimator` entry.
+
+## Re-pin round 19 (2026-11-21): `skills-evals` follows its plan-scaled estimates
+
+Round 18 held `skills-evals` at `48f470e58881` because `8e42f1ad060e` removed `points_per_usd` and the new scheme had no per-plan knob. skills-evals PR #1126 (merge commit `9b4c01f4eda8`) supplies it: `harness/budget.py` scales every estimate by the budget's required `claude_plan` (`ALLOWANCE_SCALE = {pro: 10, max5x: 2, ultra: 1}`, because Anthropic gives Ultra 10 times Pro's weekly allowance and Max 5x 5 times). So the kit sets no per-plan rate any more: it writes `claude_plan`, and a Pro or Max 5x adopter's budget is in points of their own week. Only `skills-evals` moves; the other four sources stay at round 18's pins.
+
+- The export needed no edit: no substitution, `TEST_EDITS` entry or known failure had to change, and the new pin's three explorer pages build with the source's pinned esbuild as before. A full export (with `agentskills-private` at its pin, from a local clone) also regenerated the `library/` fixtures for the two guidance and skill rows the new pin adds (`test-that-can-signal-kills-every-session` two fixtures and their scheduled rows, `finding-unknowns` unscheduled rows). The `standing_budget.py` patch's docstring names `legacy_usd_per_point` where it named `points_per_usd`; its logic never touched the removed key.
+- Bootstrap checker (`bootstrap/tests/check-branch-prefixes.py`): the new `docs/cache-ttl.md` links `.../build-with-claude/prompt-caching.md`, and the checker's `claude/<word>-` token read the end of that URL as a branch no lane listens on. The token now ignores a `claude/` that follows a word character, `-`, `.` or `/`; nothing was loosened for a real branch name.
+- `bootstrap/lib/plan_sizing.py` drops `POINTS_PER_USD` and every `points_per_usd` edit. The exported budget always carries `claude_plan`, so sizing always replaces that one line with the adopter's plan (`max20x` means `ultra`) and refuses a budget whose `claude_plan` is missing or not one plain line (an older export without the key is no longer accepted). The Pro and Max 5x `stop_when_session_above: 0.90` and Pro's `judge_exclude_tiers` stay. `bootstrap/tests/test-bootstrap.sh` checks the written plan, that no `points_per_usd` is written, and the three refusals.
+- `export/plan_shares.py` takes a plan's dollars per point as `legacy_usd_per_point` (dollars per Ultra point, $12.35) over `ALLOWANCE_SCALE[plan]`, read from the starter's `harness/budget.py` rather than repeated. The cautious week ratio is now 1/10 (Pro) and 1/2 (Max 5x), not 1/20 and 1/4. The dollars-per-point range moved with it: the cautious end is $12.35 (night 1 on Sonnet), the middle $14 (the lowest of three whole weeks' lower bounds) and the favorable $17 (night 1 on Opus). The old $10 middle and $6.67 cautious end came from the flat rate that charged evals 1.9 to 2.6 times their real use, and a middle below the new cautious end would invert the range. $14 is a judgment, not a measurement; a maintainer who has a better middle sets `USD_PER_POINT_MIDDLE`. `export/tests/test_plan_shares.py` holds the cautious week to `100 * legacy / scale` and the range to cautious <= middle <= favorable.
+- `docs/before-you-start.md` and `docs/evals-and-loop.md` drop `points_per_usd`, regenerate the model's rows (Pro about $140, Max 5x about $700, Ultra about $1,400 a week), say a Pro or Max 5x budget is in points of the adopter's own week, and update the eval row to the 38 scheduled fixtures (about one, five and eleven passes a week). `export/tests/test_docs_budget.py` quotes `legacy_usd_per_point` instead of `points_per_usd`.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `6ca87b50d1d2` | `6ca87b50d1d2` |
+| agentskills | `dadc729ae91f` | `dadc729ae91f` |
+| repo-settings | `8fe923963a0f` | `8fe923963a0f` |
+| skills-evals | `48f470e58881` | `9b4c01f4eda8` |
+| wsl-automation | `b3adb1e5a5d1` | `b3adb1e5a5d1` |
+
+Reverse: re-pin `skills-evals` to `48f470e58881` and restore `POINTS_PER_USD` (0.03, 0.006) in `plan_sizing.py`, the old `plan_shares.py` model and the pages' wording.

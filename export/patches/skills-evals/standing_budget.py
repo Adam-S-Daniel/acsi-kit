@@ -4,7 +4,7 @@ The source's `evals/budget.yml` records its owner's spending decisions: a
 weekly cap and an account stop that change from week to week, each with a
 comment saying when and why. The kit ships the standing defaults instead,
 30 points a week and an 80% account stop, with comments that say only that.
-The per-run values (`per_run_cap`, `per_run_overrun`, `points_per_usd`) are
+The per-run values (`per_run_cap`, `per_run_overrun`, `legacy_usd_per_point`) are
 measurements, so they and their comments ship as the source has them.
 
 This patch rewrites the two keys' comment paragraphs and values by key,

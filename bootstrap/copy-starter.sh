@@ -17,7 +17,7 @@
 #      <id>+<login>@users.noreply.github.com, the id read from GitHub. A tree
 #      that names the second owner is refused while OWNER_TWO is unset;
 #   2b. sizes a skills-evals tree for CLAUDE_PLAN with lib/plan_sizing.py:
-#      the eval budget's points_per_usd, a 5-hour stop on Pro and Max 5x, and
+#      the eval budget's claude_plan, a 5-hour stop on Pro and Max 5x, and
 #      no Fable judge on Pro (docs/before-you-start.md#which-plan);
 #   3. clones <owner/repo> and refuses, listing the paths, when a file
 #      already on the default branch differs from the starter's, unless

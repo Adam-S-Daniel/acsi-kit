@@ -58,3 +58,20 @@ def test_the_base_counts_the_fleet_worker_at_its_cadence(monkeypatch):
         + plan_shares.CHANGELOG_PER_WEEK["pro"] * plan_shares.USD_PER_FIRE["changelog"]
         + plan_shares.USD_PER_FIRE["memory"]
         + plan_shares.SWEEP_PER_WEEK * plan_shares.USD_PER_FIRE["sweep"])
+
+
+@pytest.mark.parametrize("plan, scale", [("pro", 10), ("max5x", 2), ("max20x", 1)])
+def test_a_plans_week_is_the_ultra_week_over_skills_evals_allowance_scale(plan, scale):
+    # The scale comes from the starter's own harness/budget.py, never from this
+    # model: a plan's dollars per point are legacy_usd_per_point / scale.
+    assert plan_shares._allowance_scale()[plan_shares.plan_sizing.PLAN_NAMES[plan]] == scale
+    result = plan_shares.model()[plan]
+    legacy = plan_shares.yaml.safe_load(
+        (KIT / "starter/skills-evals/evals/budget.yml").read_text(encoding="utf-8"))["legacy_usd_per_point"]
+    assert result["week_usd_cautious"] == pytest.approx(100 * legacy / scale)
+
+
+@pytest.mark.parametrize("plan", plan_shares.PLANS)
+def test_the_week_estimates_run_from_cautious_to_favorable(plan):
+    r = plan_shares.model()[plan]
+    assert r["week_usd_cautious"] <= r["week_usd_middle"] <= r["week_usd_favorable"]
