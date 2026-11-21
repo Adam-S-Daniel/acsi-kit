@@ -2842,3 +2842,22 @@ The `starter-suites` check on the re-sync branch failed one `agent-guidance` ass
 The three `test_codex_cloud` entries in `starter/known-failures.txt` stay. CI reports them "listed as known but did not fail" because its runner is not root, which is only a notice; in a root cloud container they still fail (re-measured 2026-11-19), so removing them would fail the tree where maintainers run it.
 
 Reverse: restore the `copy` entry and the file.
+
+## Re-pin round 18 (2026-11-20): the held-back re-sync; `skills-evals` stays held
+
+The re-sync held back `repo-settings` and `skills-evals`. `repo-settings` is followed here, at its newer head; `skills-evals` stays at its old pin and needs an owner decision (below).
+
+- `repo-settings`' `test_other_repos_render_the_pre_migration_bypass` counts 24 fleet repos with an enabled ruleset (was 23), and `test_the_mapping_is_one_for_one` counts 21 `manage: all` repos (was 20), because the source's fleet gained `claude-plan-usage-estimator`. The kit's `kit_config.py` anchors now match 24 and 21; the replacements are unchanged (the kit's fleet is 8 and 6, C11).
+- The same repo's required-checks table gained a `claude-plan-usage-estimator` line, which names a repo outside the kit's fleet (C11). A new `TEST_EDITS` entry drops it like its siblings.
+- The source's write-risk classifier (its ADR 0019, amended 2026-11-20) now lets CodeQL default setup on, auto-merge either way, the merge commit text and a label's case-only rename apply without approval, and treats fleet-standard settings on a repo with no ruleset as safe. The starter follows it as exported; no page states the old classification, so none changed.
+- Not followed: `skills-evals` `8e42f1ad060e` removes `points_per_usd` from `evals/budget.yml` and charges runs from token counts priced by `evals/usage-weights.lock` (`legacy_usd_per_point` only for calls without tokens). The kit's plan sizing (`bootstrap/lib/plan_sizing.py`, `bootstrap/tests/test-bootstrap.sh`), `export/plan_shares.py`, `export/tests/test_docs_budget.py` and the three pages that quote `points_per_usd` (`docs/before-you-start.md`, `docs/evals-and-loop.md`) all rest on that per-plan rate, and the new scheme has no per-plan knob, so Pro and Max 5x would be under-charged. Which knob replaces it is the owner's decision; nothing was guessed.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `e81aa0a5abb2` | `6ca87b50d1d2` |
+| agentskills | `7bfa661065fe` | `dadc729ae91f` |
+| repo-settings | `2057c0b5ce77` | `8fe923963a0f` |
+| skills-evals | `48f470e58881` | `48f470e58881` (held at `8e42f1ad060e`) |
+| wsl-automation | `0d54e508ac91` | `b3adb1e5a5d1` |
+
+Reverse: re-pin the old shas and restore the two `kit_config.py` anchors (23 and 20) and drop the `claude-plan-usage-estimator` entry.
