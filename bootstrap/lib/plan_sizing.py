@@ -3,26 +3,30 @@
 
 Sizes a staged skills-evals tree for the adopter's Claude plan, before
 copy-starter.sh commits it (acsi-kit#28). The exported budget and roster
-policy are the owner's, on Max 20x; a smaller plan has a smaller weekly
-allowance, so the same dollars are more points of it.
+policy are the owner's, on Ultra (formerly Max 20x). A smaller plan has a
+smaller weekly allowance, so the same dollars are more points of it. The
+sizing is now one line: skills-evals (PR #1126) scales every estimate by the
+budget's required `claude_plan` (harness/budget.py, `ALLOWANCE_SCALE`: Pro
+10, Max 5x 2, Ultra 1, because Anthropic gives Ultra 10 times Pro's weekly
+allowance and Max 5x 5 times), so the budget's numbers stay in points of the
+adopter's own week and the kit sets no per-plan rate.
 
-- evals/budget.yml: `claude_plan` names the plan when the exported budget
-  carries the key (skills-evals#1113's harness/budget.py requires it, and
-  refuses a plan with a 5-hour window that sets no 5-hour stop; an older
-  export does not know the key, so it is not added), `points_per_usd` is set for the plan (Ultra
-  keeps the exported value), and on Pro and Max 5x
-  `stop_when_session_above: 0.90` is added, so a sweep cannot use up a whole
+- evals/budget.yml: `claude_plan` is replaced with the adopter's plan (Ultra
+  is the plan Anthropic called Max 20x; `max20x` still means it). The
+  exported budget always carries it, and a budget whose `claude_plan` is
+  missing or not one plain line is refused. On Pro and Max 5x
+  `stop_when_session_above: 0.90` is added, because skills-evals refuses a
+  plan with a 5-hour window that sets none, so a sweep cannot use up a whole
   5-hour window (skills-evals#921). A verified Ultra account has no 5-hour
-  window (https://support.claude.com/en/articles/17728952). Ultra is the
-  plan Anthropic called Max 20x; `max20x` still means it.
+  window (https://support.claude.com/en/articles/17728952).
 - evals/roster-policy.yml: on Pro, `judge_exclude_tiers: [fable, mythos]`,
   because Pro bills Fable as usage credits from the first call
   (skills-evals#920).
 
-The 25% weekly cap and the 80% account stop are left as exported. A tree
+The weekly cap and the 80% account stop are left as exported. A tree
 without evals/budget.yml (every starter but skills-evals) is left alone.
 Each edit is checked by parsing the result with the YAML parser, and a file
-that already carries the key is refused rather than edited twice. Prints one
+that already carries the stop is refused rather than edited twice. Prints one
 line per file changed. Exits 2 on a bad argument or file.
 """
 
@@ -35,16 +39,10 @@ from pathlib import Path
 
 import yaml
 
-#: Allowance fraction per dollar of API-equivalent spend: the exported Max 20x
-#: rate (0.0015, about $6.70 per point, measured 2026-11-10), scaled by the
-#: plan multipliers (Max 5x a quarter of Max 20x, Pro a twentieth).
-#: docs/before-you-start.md#which-plan.
-POINTS_PER_USD = {"pro": 0.03, "max5x": 0.006, "ultra": None}
 SESSION_STOP = {"pro": 0.90, "max5x": 0.90, "ultra": None}
 JUDGE_EXCLUDE = {"pro": ["fable", "mythos"], "max5x": None, "ultra": None}
 #: The name skills-evals' budget gives each CLAUDE_PLAN value.
 PLAN_NAMES = {"pro": "pro", "max5x": "max5x", "ultra": "ultra", "max20x": "ultra"}
-PPU_LINE = re.compile(r"^points_per_usd:[ \t]*[0-9.eE+-]+[ \t]*$", re.MULTILINE)
 PLAN_LINE = re.compile(r"^claude_plan:[ \t]*[a-z0-9_]+[ \t]*$", re.MULTILINE)
 
 
@@ -55,24 +53,13 @@ class SizingError(Exception):
 def size_budget(text: str, plan: str) -> str:
     plan = PLAN_NAMES[plan]
     doc = yaml.safe_load(text)
-    if not isinstance(doc, dict) or "points_per_usd" not in doc:
-        raise SizingError("evals/budget.yml has no points_per_usd")
+    if not isinstance(doc, dict) or "claude_plan" not in doc:
+        raise SizingError("evals/budget.yml has no claude_plan")
     if "stop_when_session_above" in doc:
         raise SizingError("evals/budget.yml already sets stop_when_session_above")
-    rate = POINTS_PER_USD[plan]
-    if rate is not None:
-        if len(PPU_LINE.findall(text)) != 1:
-            raise SizingError("evals/budget.yml's points_per_usd is not one plain line")
-        text = PPU_LINE.sub(f"points_per_usd: {rate}  # sized for CLAUDE_PLAN={plan}", text)
-    plan_line = f"claude_plan: {plan}  # set by copy-starter.sh from CLAUDE_PLAN"
-    found = len(PLAN_LINE.findall(text))
-    if found > 1 or (found == 0 and "claude_plan" in doc):
+    if len(PLAN_LINE.findall(text)) != 1:
         raise SizingError("evals/budget.yml's claude_plan is not one plain line")
-    # Only a skills-evals that knows the key exports it (skills-evals#1113);
-    # an older one refuses it as unknown, so it is not added.
-    named = bool(found)
-    if named:
-        text = PLAN_LINE.sub(plan_line, text)
+    text = PLAN_LINE.sub(f"claude_plan: {plan}  # set by copy-starter.sh from CLAUDE_PLAN", text)
     stop = SESSION_STOP[plan]
     if stop is not None:
         text = text.rstrip("\n") + (
@@ -80,9 +67,7 @@ def size_budget(text: str, plan: str) -> str:
             "# work once the 5-hour window reads this (docs/how-it-works.md).\n"
             f"stop_when_session_above: {stop}\n")
     sized = yaml.safe_load(text)
-    if sized.get("points_per_usd") != (rate if rate is not None else doc["points_per_usd"]) \
-            or sized.get("stop_when_session_above") != stop \
-            or sized.get("claude_plan") != (plan if named else None):
+    if sized.get("stop_when_session_above") != stop or sized.get("claude_plan") != plan:
         raise SizingError("evals/budget.yml did not parse back as sized")
     return text
 
