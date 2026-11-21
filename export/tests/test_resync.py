@@ -7,6 +7,7 @@ Run: python3 -m pytest KIT/export/tests -q
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -344,7 +345,9 @@ def test_the_fix_pr_workflow_runs_only_after_the_pushed_workflow_with_least_priv
 def test_the_fix_pr_workflow_opens_the_pull_request_with_the_app_token_after_checking_for_one():
     _, job = _fix_job()
     mint = _step(job, "Mint the App token")
-    assert mint["uses"] == "actions/create-github-app-token@v3.2.0"
+    # Any exact release tag: Dependabot bumps it, and a hard-coded version
+    # here failed every such bump's CI.
+    assert re.fullmatch(r"actions/create-github-app-token@v\d+\.\d+\.\d+", mint["uses"])
     assert mint["with"]["permission-contents"] == "read"
     assert mint["with"]["permission-pull-requests"] == "write"
     step = _step(job, "Open the pull request and link it on the issue")
@@ -366,8 +369,9 @@ def test_the_fix_pr_workflow_opens_the_pull_request_with_the_app_token_after_che
 def test_the_actions_lock_lists_both_fix_workflows():
     lock = yaml.safe_load(ACTIONS_LOCK.read_text(encoding="utf-8"))
     assert lock["workflows"][".github/workflows/resync-fix-pushed.yml"] == []
+    _, job = _fix_job()
     assert lock["workflows"][".github/workflows/resync-fix-pr.yml"] == [
-        "actions/create-github-app-token@v3.2.0"]
+        _step(job, "Mint the App token")["uses"]]
     keys = list(lock["workflows"])
     assert keys == sorted(keys)
 
