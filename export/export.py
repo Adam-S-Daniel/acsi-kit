@@ -605,6 +605,27 @@ def _regenerate(repo: str, steps, root: Path, staged: dict, env_extra: dict, sou
             raise ExportError(f"{repo}: unknown regenerate step {step!r}")
 
 
+def _apply_include(name: str, manifest, tree) -> None:
+    """`include`: when a manifest has one, only the source files it names
+    exactly are copied, so a file the source adds later never ships until
+    a maintainer lists it. Every entry must still exist at the pin. Used for
+    a private source, where an `exclude` list would let a new file through."""
+    if "include" not in manifest:
+        return
+    include = manifest["include"]
+    if not isinstance(include, list) or not include:
+        raise ExportError(f"{name}: include must be a non-empty list of file paths")
+    if any(not isinstance(p, str) or any(c in p for c in "*?[") or p.endswith("/") for p in include):
+        raise ExportError(f"{name}: include entries must be exact file paths, not patterns or folders")
+    missing = [p for p in include if p not in tree]
+    if missing:
+        raise ExportError(f"{name}: include paths not in the source at its pin: {missing}")
+    keep = set(include)
+    for rel in list(tree):
+        if rel not in keep:
+            del tree[rel]
+
+
 def export_repo(name: str, manifest, common, sources: Path, staging: Path, staged: dict, report=None,
                 library: Library | None = None) -> Path:
     src_dir = sources / manifest.get("source", name)
@@ -625,6 +646,7 @@ def export_repo(name: str, manifest, common, sources: Path, staging: Path, stage
     unused = [p for p in patterns if p not in used]
     if unused:
         raise ExportError(f"{name}: exclude patterns matched nothing: {unused}")
+    _apply_include(name, manifest, tree)
 
     for imp in manifest.get("imports") or []:
         if not str(imp.get("why", "")).strip():
