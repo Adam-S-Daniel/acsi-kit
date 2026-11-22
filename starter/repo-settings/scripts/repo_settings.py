@@ -511,7 +511,75 @@ def read_codeql_default_setup(repo: str) -> dict | None:
     return {
         "configured": data["state"] == "configured",
         "query_suite": data.get("query_suite"),
+        "languages": [l for l in data.get("languages") or [] if isinstance(l, str)],
     }
+
+
+# GitHub's linguist names -> the CodeQL language default setup scans them as.
+LINGUIST_TO_CODEQL = {
+    "Python": "python", "JavaScript": "javascript-typescript",
+    "TypeScript": "javascript-typescript", "Ruby": "ruby", "Go": "go",
+    "Java": "java-kotlin", "Kotlin": "java-kotlin", "C#": "csharp",
+    "C": "c-cpp", "C++": "c-cpp", "Swift": "swift", "Rust": "rust",
+}
+# A language under this share of the repo's bytes is not expected to be
+# scanned: fixtures and vendored snippets would otherwise read as gaps.
+CODEQL_LANGUAGE_MIN_SHARE = 0.01
+
+
+def codeql_language_gaps(repo_languages: dict, scanned: list[str]) -> list[str]:
+    """CodeQL languages the repo's code needs (at least 1% of its bytes, per
+    GET repos/{repo}/languages) that default setup does not scan. Default
+    setup reports JavaScript/TypeScript as `javascript`, `typescript` and
+    `javascript-typescript`; any one of them counts."""
+    total = sum(v for v in repo_languages.values() if isinstance(v, (int, float)))
+    if total <= 0:
+        return []
+    have = set(scanned)
+    if have & {"javascript", "typescript"}:
+        have.add("javascript-typescript")
+    want = {LINGUIST_TO_CODEQL[name] for name, size in repo_languages.items()
+            if name in LINGUIST_TO_CODEQL and isinstance(size, (int, float))
+            and size / total >= CODEQL_LANGUAGE_MIN_SHARE}
+    return sorted(want - have)
+
+
+def find_existing_codeql(repo: str) -> list[str] | None:
+    """What already runs CodeQL on the repo outside default setup, or None
+    when nothing could be read. Turning default setup on disables such a
+    workflow and refuses its uploads, so a non-empty answer gates the write.
+
+    The analyses list is the authority: default setup's analyses carry an
+    `analysis_key` under `dynamic/`, anything else is an advanced-setup
+    workflow or an upload from other CI. A token without code scanning read
+    falls back to the Actions workflow list (actions read), where only a
+    workflow with `codeql` in its path or name can be told apart."""
+    try:
+        data = gh_api(f"repos/{repo}/code-scanning/analyses?tool_name=CodeQL&per_page=100")
+    except GhError as e:
+        if e.status == 404 and "no analysis found" in str(e.message).lower():
+            return []
+        if e.status not in (403, 404):
+            raise
+    else:
+        if not isinstance(data, list):
+            return None
+        return sorted({a["analysis_key"] for a in data
+                       if isinstance(a, dict) and isinstance(a.get("analysis_key"), str)
+                       and not a["analysis_key"].startswith("dynamic/")})
+    try:
+        data = gh_api(f"repos/{repo}/actions/workflows?per_page=100")
+    except GhError as e:
+        if e.status in (403, 404):
+            return None
+        raise
+    flows = data.get("workflows") if isinstance(data, dict) else None
+    if not isinstance(flows, list):
+        return None
+    return sorted({w["path"] for w in flows
+                   if isinstance(w, dict) and isinstance(w.get("path"), str)
+                   and not w["path"].startswith("dynamic/") and w.get("state") == "active"
+                   and "codeql" in (w["path"] + " " + str(w.get("name", ""))).lower()})
 
 
 def write_codeql_default_setup(repo: str, desired: dict) -> None:
@@ -646,6 +714,47 @@ def admin_bypass_mode(cfg: dict) -> str | None:
     return ADMIN_BYPASS_MODES[value]
 
 
+# `code_scanning` rule thresholds, loosest to strictest. The order is the
+# classifier's definition of "stricter" (write_risk), so keep it that way.
+CODE_SCANNING_ALERTS = ("none", "errors", "errors_and_warnings", "all")
+CODE_SCANNING_SECURITY_ALERTS = ("none", "critical", "high_or_higher", "medium_or_higher", "all")
+CODE_SCANNING_TOOL_KEYS = ("tool", "alerts_threshold", "security_alerts_threshold")
+
+
+def build_code_scanning_tools(value: Any) -> list[dict]:
+    """Validate `ruleset.require_code_scanning` and return the REST
+    `code_scanning_tools` list (each tool with exactly the three keys)."""
+    where = "ruleset.require_code_scanning"
+    if not isinstance(value, list) or not value:
+        raise SystemExit(f"error: {where} must be a non-empty list of "
+                         f"{{tool, alerts_threshold, security_alerts_threshold}} mappings")
+    tools: list[dict] = []
+    seen: set[str] = set()
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise SystemExit(f"error: {where} entries must be mappings (got {entry!r})")
+        bad = [k for k in entry if k not in CODE_SCANNING_TOOL_KEYS]
+        if bad:
+            raise SystemExit(f"error: {where} entry has unknown key(s) "
+                             f"{', '.join(map(repr, bad))} (allowed: {', '.join(CODE_SCANNING_TOOL_KEYS)})")
+        tool = entry.get("tool")
+        if not isinstance(tool, str) or not tool.strip():
+            raise SystemExit(f"error: {where} entry needs a non-empty `tool`")
+        if tool in seen:
+            raise SystemExit(f"error: {where} lists tool {tool!r} twice")
+        seen.add(tool)
+        for key, accepted in (("alerts_threshold", CODE_SCANNING_ALERTS),
+                              ("security_alerts_threshold", CODE_SCANNING_SECURITY_ALERTS)):
+            v = entry.get(key)
+            if not isinstance(v, str) or v not in accepted:
+                raise SystemExit(f"error: {where}[{tool}].{key} must be one of "
+                                 f"{', '.join(accepted)} (got {v!r})")
+        tools.append({"tool": tool,
+                      "alerts_threshold": entry["alerts_threshold"],
+                      "security_alerts_threshold": entry["security_alerts_threshold"]})
+    return tools
+
+
 def build_ruleset_body(cfg: dict) -> dict:
     """Build the POST/PUT body for a desired ruleset from config."""
     name = cfg.get("name", DEFAULT_RULESET_NAME)
@@ -722,6 +831,17 @@ def build_ruleset_body(cfg: dict) -> dict:
                     "required_status_checks": [
                         {"context": c} for c in checks
                     ],
+                },
+            }
+        )
+    if cfg.get("require_code_scanning") is not None:
+        rules.append(
+            {
+                "type": "code_scanning",
+                "parameters": {
+                    "code_scanning_tools": build_code_scanning_tools(
+                        cfg["require_code_scanning"]
+                    )
                 },
             }
         )
@@ -887,6 +1007,13 @@ def normalize_ruleset(rs: dict | None) -> dict | None:
             "required_status_checks", []
         )
     )
+    code_scanning = sorted(
+        (
+            {k: t.get(k) for k in CODE_SCANNING_TOOL_KEYS}
+            for t in rules_by_type.get("code_scanning", {}).get("code_scanning_tools", [])
+        ),
+        key=lambda t: str(t["tool"]),
+    )
     include = sorted(
         rs.get("conditions", {}).get("ref_name", {}).get("include", [])
     )
@@ -915,6 +1042,7 @@ def normalize_ruleset(rs: dict | None) -> dict | None:
         # unordered compare would report drift on a reshuffle.
         "merge_methods": sorted(pr.get("allowed_merge_methods") or []),
         "checks": checks,
+        "code_scanning": code_scanning,
         "bypass": bypass,
     }
 
@@ -954,6 +1082,8 @@ def ruleset_doc(branch_rs: dict) -> dict:
         "block_force_pushes": "non_fast_forward" in norm["rule_types"],
         "block_deletions": "deletion" in norm["rule_types"],
         "required_status_checks": norm["checks"],
+        **({"require_code_scanning": norm["code_scanning"]}
+           if "code_scanning" in norm["rule_types"] else {}),
         # The admin role's live bypass_mode, or "none". A mode outside
         # ADMIN_BYPASS_MODES (GitHub's `exempt`) is emitted as read, so the
         # generated config fails validation rather than silently changing it.
@@ -1357,6 +1487,7 @@ SURFACE_KEYS = {
         "block_force_pushes",
         "block_deletions",
         "required_status_checks",
+        "require_code_scanning",
         "admin_bypass",
         "bypass_actors",
     ),
@@ -2042,6 +2173,14 @@ def plan_repo(repo: str, settings: dict) -> list[dict]:
             else:
                 current = {"codeql_default_setup": live["configured"],
                            "codeql_query_suite": live["query_suite"] if live["configured"] else None}
+                turns_on = (not live["configured"]
+                            and cq_wanted.get("codeql_default_setup", True) is True)
+                existing: list[str] | None = []
+                if turns_on:
+                    try:
+                        existing = find_existing_codeql(repo)
+                    except GhError:
+                        existing = None
                 for key, desired_v in cq_wanted.items():
                     if key == "codeql_query_suite" and cq_wanted.get("codeql_default_setup") is False:
                         continue  # a suite means nothing with default setup off
@@ -2053,7 +2192,31 @@ def plan_repo(repo: str, settings: dict) -> list[dict]:
                         # Every record carries the WHOLE declared group: see
                         # write_codeql_default_setup for why it is one PATCH.
                         "_writer": ("codeql", None, cq_wanted),
+                        # What default setup would replace: see _codeql_risk.
+                        "codeql_existing": existing,
                     })
+                if live["configured"]:
+                    # Report only: the engine never sends `languages`, so a gap
+                    # is GitHub's to fix (it drops a language whose first
+                    # analysis fails and does not retry).
+                    try:
+                        gaps = codeql_language_gaps(gh_api(f"repos/{repo}/languages") or {},
+                                                    live["languages"])
+                    except GhError as e:
+                        records.append(_skip("security.codeql_languages", None,
+                                             f"cannot read repos/{repo}/languages -- {e.message}"))
+                    else:
+                        if gaps:
+                            records.append({
+                                "setting": "security.codeql_languages",
+                                "status": "advisory",
+                                "current": sorted(live["languages"]),
+                                "desired": None,
+                                "note": (f"default setup does not scan {', '.join(gaps)}, which "
+                                         "the repo's code needs. Read Security > Code scanning > "
+                                         "Tool status for why; turning default setup off and on "
+                                         "again re-detects the languages."),
+                            })
 
     # -- ruleset ------------------------------------------------------------ #
     def plan_ruleset(name: str, body: dict, normalize) -> None:
@@ -2104,7 +2267,29 @@ def plan_repo(repo: str, settings: dict) -> list[dict]:
 
     if ruleset_cfg.get("enabled"):
         name = ruleset_cfg.get("name", DEFAULT_RULESET_NAME)
-        plan_ruleset(name, build_ruleset_body(ruleset_cfg), normalize_ruleset)
+        body_cfg = ruleset_cfg
+        if ruleset_cfg.get("require_code_scanning") is not None:
+            build_code_scanning_tools(ruleset_cfg["require_code_scanning"])  # validate first
+            # The rule blocks every merge while its tool is "not configured for
+            # the repository", and CodeQL default setup is not offered on a
+            # private repo (see the codeql_default_setup skip), so the rule
+            # would deadlock merges there. Drop it from the desired body.
+            try:
+                private = is_private()
+            except GhError as e:
+                records.append(_err("ruleset.require_code_scanning",
+                                    ruleset_cfg["require_code_scanning"], e))
+                private = True
+            else:
+                if private:
+                    records.append(_skip(
+                        "ruleset.require_code_scanning",
+                        ruleset_cfg["require_code_scanning"],
+                        "private repo -- CodeQL is not configured there, and the rule "
+                        "blocks merges while its tool is not configured"))
+            if private:
+                body_cfg = {k: v for k, v in ruleset_cfg.items() if k != "require_code_scanning"}
+        plan_ruleset(name, build_ruleset_body(body_cfg), normalize_ruleset)
     elif "admin_bypass" in ruleset_cfg:
         # Not required while disabled, but a value that is given is checked.
         admin_bypass_mode(ruleset_cfg)
@@ -2657,11 +2842,21 @@ def _codeql_risk(wanted: Any, statuses: dict[str, str],
                    and isinstance(suite_rec.get("current"), str)))
     if not live_on:
         # Turning it on enables a security feature, so it does not wait
-        # (owner's rule, 2026-11-20). A repo that runs CodeQL from its own
-        # workflow reads as "not configured" and GitHub stops taking that
-        # workflow's results once default setup is on; check for one before
-        # declaring such a repo.
-        return _safe("CodeQL default setup -> on (enables a security feature)")
+        # (owner's rule, 2026-11-20) -- unless the repo already runs CodeQL
+        # another way. Such a repo reads as "not configured", and GitHub
+        # disables that workflow and refuses its uploads once default setup
+        # is on, which can swap a broader analysis for a narrower one unseen.
+        existing = next((r["codeql_existing"] for r in records
+                         if r.get("setting", "").startswith("security.codeql_")
+                         and "codeql_existing" in r), None)
+        if existing is None:
+            return _gated("CodeQL default setup -> on, but the plan could not check "
+                          "for a CodeQL workflow it would replace")
+        if existing:
+            return _gated("CodeQL default setup -> on would disable the repo's own CodeQL "
+                          f"analysis ({', '.join(existing)})")
+        return _safe("CodeQL default setup -> on (enables a security feature; "
+                     "no CodeQL workflow to replace)")
     suite = wanted.get("codeql_query_suite")
     if suite is not None and suite != "extended" \
             and statuses.get("security.codeql_query_suite") != "match":
@@ -2712,6 +2907,40 @@ def _status_checks_param_risk(key: str, live: Any, desired: Any) -> str | None:
     return f"`{key}` is not on the non-weakening list"
 
 
+def _code_scanning_param_risk(key: str, live: Any, desired: Any) -> str | None:
+    if key != "code_scanning_tools":
+        return f"`{key}` is not on the non-weakening list"
+    if not isinstance(live, list) or not isinstance(desired, list):
+        return f"{key} is not a list on both sides"
+    ranks = {"alerts_threshold": CODE_SCANNING_ALERTS,
+             "security_alerts_threshold": CODE_SCANNING_SECURITY_ALERTS}
+    wanted: dict[str, dict] = {}
+    for entry in desired:
+        if not isinstance(entry, dict) or not isinstance(entry.get("tool"), str):
+            return f"a desired tool has a shape this classifier does not know: {_json(entry)}"
+        wanted[entry["tool"]] = entry
+    for entry in live:
+        if not isinstance(entry, dict) or not isinstance(entry.get("tool"), str):
+            return f"a live tool has a shape this classifier does not know: {_json(entry)}"
+        tool = entry["tool"]
+        if set(entry) - {"tool", *ranks}:
+            return (f"live code scanning tool {_json(tool)} has a field this classifier "
+                    f"does not know: {_json(entry)}")
+        if tool not in wanted:
+            return f"code scanning tool {_json(tool)} removed"
+        new = wanted[tool]
+        for field, order in ranks.items():
+            old_v, new_v = entry.get(field), new.get(field)
+            if old_v not in order or new_v not in order:
+                return f"code scanning {_json(tool)}.{field} {_json(old_v)} -> {_json(new_v)}: a value this classifier cannot rank"
+            if order.index(new_v) < order.index(old_v):
+                return f"code scanning {_json(tool)}.{field} {_json(old_v)} -> {_json(new_v)} is looser"
+    for entry in desired:
+        if set(entry) - {"tool", *ranks}:
+            return f"a desired tool has a field this classifier does not know: {_json(entry)}"
+    return None
+
+
 def _rule_risk(rule_type: str, live_rule: dict, desired_rule: dict) -> str | None:
     """None when replacing live_rule with desired_rule cannot relax it."""
     if rule_type == "update":
@@ -2724,6 +2953,8 @@ def _rule_risk(rule_type: str, live_rule: dict, desired_rule: dict) -> str | Non
         param_risk = _pull_request_param_risk
     elif rule_type == "required_status_checks":
         param_risk = _status_checks_param_risk
+    elif rule_type == "code_scanning":
+        param_risk = _code_scanning_param_risk
     else:
         return None if live == desired else (
             f"rule `{rule_type}` differs, and this classifier does not know its direction")
@@ -2999,6 +3230,7 @@ def classify_records(records: list[dict], defaults: Any = None,
     setting_up = defaults is not None and _onboarding(records, defaults)
     for rec, (verdict, reason) in verdicts:
         if (verdict == GATED and setting_up and not rec.get("bypass_unknown")
+                and rec.get("codeql_existing", []) == []
                 and _whole_write_is_standard(rec, defaults, overrides)):
             verdict, reason = SAFE, f"fleet standard on a repo being set up (was: {reason})"
         rec["risk"], rec["risk_reason"] = verdict, reason
@@ -3018,6 +3250,7 @@ def _sym(status: str) -> str:
         "drift": f"{YELLOW}DRIFT{RESET}",
         "changed": f"{YELLOW}CHANGED{RESET}",
         "skipped": f"{DIM}skip{RESET}",
+        "advisory": f"{YELLOW}CHECK{RESET}",
         "error": f"{RED}ERROR{RESET}",
         "would-change": f"{YELLOW}would change{RESET}",
         "gated": f"{YELLOW}LEFT FOR REVIEW{RESET}",
@@ -3042,7 +3275,7 @@ def render_records(repo: str, records: list[dict], scope: str | None = None) -> 
                      f"\n      why:  {r.get('note', '')}")
         elif r["status"] == "changed":
             line += f"  -> {r['desired']!r}"
-        elif r["status"] in ("skipped", "error"):
+        elif r["status"] in ("skipped", "error", "advisory"):
             line += f"  ({r.get('note', '')})"
         print(line)
 
@@ -3266,7 +3499,7 @@ def cmd_diff(args) -> int:
              "current": r["current"], "desired": r["desired"],
              "note": r.get("note"), "risk": r.get("risk"),
              "risk_reason": r.get("risk_reason")}
-            for r in records if r["status"] in ("drift", "error")
+            for r in records if r["status"] in ("drift", "error", "advisory")
         )
     if getattr(args, "changes_json", None):
         with open(args.changes_json, "w", encoding="utf-8") as fh:
@@ -3393,10 +3626,15 @@ def changes_markdown(changes: list[dict]) -> str:
     drift = sorted((c for c in changes if c["status"] == "drift"),
                    key=lambda c: (c["setting"], c["repo"].lower()))
     errors = [c for c in changes if c["status"] == "error"]
+    advisories = sorted((c for c in changes if c["status"] == "advisory"),
+                        key=lambda c: (c["setting"], c["repo"].lower()))
+    advisory_lines = (["", "## To check (report only)", ""]
+                      + [f"- {c['repo']}: {c['setting']} ({_md_text(c.get('note') or '')})"
+                         for c in advisories]) if advisories else []
     lines = ["## Planned changes", ""]
-    if not changes:
+    if not drift and not errors:
         lines.append("No changes planned. An apply would change nothing.")
-        return "\n".join(lines) + "\n"
+        return "\n".join(lines + advisory_lines) + "\n"
 
     def cell(text: str) -> str:
         return "`" + text.replace("|", "\\|").replace("`", "'") + "`"
@@ -3419,14 +3657,14 @@ def changes_markdown(changes: list[dict]) -> str:
                   "plan is incomplete:", ""]
         lines += [f"- {c['repo']}: {c['setting']} ({c.get('note') or 'error'})"
                   for c in errors]
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines + advisory_lines) + "\n"
 
 
 def changes_annotations(changes: list[dict], summary_url: str | None) -> list[str]:
     """`::notice` lines, at most MAX_NOTICES. When there are more changes than
     that, the last line says so instead of showing one more."""
     where = f" at {summary_url}" if summary_url else ""
-    lines = [_change_line(c) for c in changes]
+    lines = [_change_line(c) for c in changes if c["status"] != "advisory"]
     if len(lines) > MAX_NOTICES:
         shown = lines[: MAX_NOTICES - 1]
         hidden = len(lines) - len(shown)

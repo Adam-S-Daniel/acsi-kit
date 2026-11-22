@@ -818,8 +818,7 @@ No workflow here can judge whether a paragraph under one repo's
 mechanical, though, so the nightly drift report does it: its
 "Repo-specific guidance overlap" section
 ([`scripts/guidance-overlap.js`](scripts/guidance-overlap.js)) lists blocks
-repeated across repos, local copies of `base.md` or a section file, and
-sections requested for a language a repo does not use. It names repos and
+repeated across repos and local copies of `base.md` or a section file. It names repos and
 line ranges only, because the report is public and some repos are private.
 Nothing in it fails the run, so someone has to act on it: once a week, read
 the section in `drift-report.md` on the `persistent/drift-report` branch,
@@ -838,16 +837,22 @@ agent session to, with this section as its brief).
 - **A local copy of shared guidance.** Delete it from that repo's
   `## Repo-specific additions`, unless the local text adds a
   repo-specific fact the shared rule lacks.
-- **A section requested for a language the repo does not use.** Remove
-  the opt-in. Never add a section because GitHub reports a language: the
-  sections are opt-in, and byte counts include generated output.
-
 If the section is missing or says "Not computed", the overlap step
 failed; read the drift report's run log.
 
 This replaced the daily "Guidance centralization audit" Routine, retired on
 2026-11-09; its spec and run log are kept as
 [evidence](docs/evidence/2026-11-09-guidance-centralization-audit-retired.md).
+
+## Language fit
+
+The nightly drift report also carries a "Language fit" section
+([`scripts/language-fit.js`](scripts/language-fit.js)). Per repo it finds
+sections requested for a language the repo lacks (and languages with no
+section), languages whose GitHub bytes are mostly fixture, generated or
+vendored files with no linguist attribute, and manifests Dependabot does not
+cover. Private repos show a category and a count only. Findings feed the
+"Language fit findings" issue, which a fleet worker fixes one repo per PR.
 
 ## Layout
 
