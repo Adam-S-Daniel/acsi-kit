@@ -2901,3 +2901,12 @@ Tests: `python3 -m pytest export/tests -q -p no:cacheprovider`, `bash bootstrap/
 | wsl-automation | `b3adb1e5a5d1` | `f91e27970528` |
 
 Reverse: re-pin each source to its "Before" sha, restore the README `edits` entry's old text and the language bullet in `export/manifests/_agent-guidance.yml`, restore the `.agents-sync.yml` allowlist line, and re-run the full export.
+
+## Re-pin round 21 (2026-11-22): the private source ships only what its manifest lists
+
+No pin moves. The fix routine now fetches `agentskills-private` (round 20 stranded without it), so the export guards the private source more tightly:
+
+- `export/export.py` gains a manifest key, `include`: when present, only the source files it names exactly are copied, after `exclude` runs. Every entry must exist at the pin, and patterns or folders are refused, so a file the private source adds later can never ship until a maintainer reads it and lists it. `export/manifests/agentskills-private.yml` lists the 24 files it already shipped, so `starter/agent-skills-private/` is unchanged. The source's head is 140 commits past the pin and adds files such as `docs/claude-account-preferences.md` and `infrastructure/usage-sink/`; with the old exclude-only manifest a re-pin would have shipped them. `export/tests/test_private_include.py` covers the key.
+- `export/FIX-ROUTINE.md` step 8: the routine never quotes or summarizes a private file's contents in a commit message or committed file (the commit message becomes the public pull request text), and never changes the private manifest's `source_sha` or `include`. Its final session message, which only the owner sees, is the one place it may describe them.
+
+Reverse: delete the `include` list and `_apply_include`, its test file, and the two FIX-ROUTINE.md paragraphs.

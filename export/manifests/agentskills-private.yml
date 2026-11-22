@@ -17,6 +17,35 @@ exclude:
   - path: plugins/adam-private-anything-anywhere/skills/
     why: DECISIONS X2 and X9 (the owner's writing-style skill, the only skill here; the plugin keeps its manifest).
 
+# Only these source files are copied (DECISIONS, re-pin round 21). The source
+# is private, so a file it adds after this pin never ships until a maintainer
+# reads it and lists it here; an exclude list alone would let it through.
+include:
+  - .claude-plugin/marketplace.json
+  - .claude/hooks/agent-checks-guard.sh
+  - .claude/hooks/fleet-guidance.md
+  - .claude/hooks/fleet-memory.sh
+  - .claude/hooks/skills-bootstrap.sh
+  - .claude/settings.json
+  - .gitattributes
+  - .githooks/agent-checks
+  - .githooks/dated-phrasing-allowlist.txt
+  - .githooks/dated-phrasing.js
+  - .githooks/dated-phrasing/package-lock.json
+  - .githooks/dated-phrasing/package.json
+  - .github/workflows/actions.lock
+  - .github/workflows/agent-checks.yml
+  - AGENTS.md
+  - CLAUDE.md
+  - README.md
+  - lessons/README.md
+  - lessons/example/proposals/2026-01-06/guidance-security__agent-check.json
+  - lessons/example/proposals/2026-01-06/skill-writing-adrs__fixture-candidate.json
+  - lessons/example/records/2026-01-06.jsonl
+  - plugins/adam-private-anything-anywhere/.claude-plugin/plugin.json
+  - setup.sh
+  - skills.lock
+
 substitutions:
   # C1, as in the public registry's manifest: a bare `agentskills` names the
   # retired predecessor registry, never the renamed live one

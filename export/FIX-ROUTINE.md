@@ -105,6 +105,15 @@ to them, comment on them, or open pull requests on them.
    Verify the push (`git ls-remote origin refs/heads/<branch>` equals
    `git rev-parse HEAD`). Do not open a pull request, label it, or comment on
    the issue.
+
+   This repository is public, so the commit message, the pull request it
+   becomes and every pushed file are public the moment you push. Never
+   quote, paraphrase or summarize the contents of a private source file
+   (anything under `$S/<the private registry>`, or test output that shows
+   it) in the commit message or a committed file. Name such a file by its
+   path only. Never change `source_sha` or `include` in
+   `export/manifests/agentskills-private.yml`: moving the private pin or
+   shipping another private file is the owner's decision, made by hand.
 9. **Confirm.** If you can, look at
    `https://github.com/<owner>/acsi-kit/pulls` to see that the workflow
    opened the pull request. If you cannot, end.
@@ -114,7 +123,8 @@ to them, comment on them, or open pull requests on them.
 Don't loosen a guard, skip a test, or drop a shipped file to get green. You
 can't comment on the issue, so end with a final message saying what broke,
 what you tried, and what decision it needs. The routine's session output
-reaches the owner.
+reaches the owner, and only there may you describe a private file's
+contents.
 
 ## Limits
 
