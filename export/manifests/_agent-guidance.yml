@@ -6,7 +6,7 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: 6ca87b50d1d2c8db580f3892f535a2a64b42396a
+source_sha: 6bef6d22f0e351491840b151df0acd2c801826b6
 
 exclude:
   - path: docs/reference/adopt-the-whole-system.md
@@ -298,13 +298,13 @@ edits:
   # ---- The guidance overlap judgment: the source's judge is excluded
   - path: README.md
     old: |
-      sections requested for a language a repo does not use. It names repos and
+      repeated across repos and local copies of `base.md` or a section file. It names repos and
       line ranges only, because the report is public and some repos are private.
       Nothing in it fails the run. The weekly
       [Fleet health audit](docs/routines/fleet-health-audit.md) (item 8) makes the
       judgment on each entry.
     new: |
-      sections requested for a language a repo does not use. It names repos and
+      repeated across repos and local copies of `base.md` or a section file. It names repos and
       line ranges only, because the report is public and some repos are private.
       Nothing in it fails the run, so someone has to act on it: once a week, read
       the section in `drift-report.md` on the `persistent/drift-report` branch,
@@ -323,10 +323,6 @@ edits:
       - **A local copy of shared guidance.** Delete it from that repo's
         `## Repo-specific additions`, unless the local text adds a
         repo-specific fact the shared rule lacks.
-      - **A section requested for a language the repo does not use.** Remove
-        the opt-in. Never add a section because GitHub reports a language: the
-        sections are opt-in, and byte counts include generated output.
-
       If the section is missing or says "Not computed", the overlap step
       failed; read the drift report's run log.
     why: >-

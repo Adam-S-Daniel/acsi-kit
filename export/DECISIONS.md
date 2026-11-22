@@ -2881,3 +2881,23 @@ Round 18 held `skills-evals` at `48f470e58881` because `8e42f1ad060e` removed `p
 | wsl-automation | `b3adb1e5a5d1` | `b3adb1e5a5d1` |
 
 Reverse: re-pin `skills-evals` to `48f470e58881` and restore `POINTS_PER_USD` (0.03, 0.006) in `plan_sizing.py`, the old `plan_shares.py` model and the pages' wording.
+
+## Re-pin round 20 (2026-11-22): the held-back re-sync, every public source
+
+The daily re-sync held back `_agent-guidance`, `agentskills`, `repo-settings` and `skills-evals` (issue #70). The fix routine stranded: the bootstrap suite reads `library/`, which only a full export with `agentskills-private` writes, and the routine cannot fetch that repo. This round was finished on a machine with a local clone of every source, so the export ran with `agentskills-private` at its unchanged pin and regenerated `library/` with the rest.
+
+- `_agent-guidance` moved the drift report's language check out of the guidance overlap section into its own "Language fit" section (`scripts/language-fit.js`, README "Language fit"), which files a "Language fit findings" issue. The README `edits` entry that replaces the overlap paragraph's pointer to the excluded Fleet health audit now matches the shorter source sentence, and the kit's adopter-facing overlap rules drop the "section requested for a language the repo does not use" bullet, since the overlap section no longer lists those. The kit ships the new section, script and workflow step as the source has them.
+- The sources' sync now delivers `.agents-sync.yml`, `.gitattributes` (linguist-vendored synced tooling, source ADR 0048) and `.githooks/agent-checks` to `agentskills`, `repo-settings`, `skills-evals` and `wsl-automation`, plus a managed `.github/dependabot.yml`. The kit ships them as exported. Because `starter/agent-skills/.agents-sync.yml` now exists, `export/tests/docs_paths_allow.txt` drops `docs/guidance.md: .agents-sync.yml`, which `test_docs_paths.py` reported stale.
+- `repo-settings` turns on CodeQL's extended query suite fleet-wide (`codeql_query_suite: extended`, `docs/code-scanning.md`) and teaches the apply to skip merge flags the admin App cannot write. `skills-evals` adds the `one-change-per-commit` fixture to the schedule and a site freshness selector fix. `agentskills` follows the credit lane's 5-minute cache and the cloud setup's build step. No export edit was needed for these.
+
+Tests: `python3 -m pytest export/tests -q -p no:cacheprovider`, `bash bootstrap/tests/test-bootstrap.sh` (643 assertions, 0 failed) and `export.py --check` with every source all exit 0.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `6ca87b50d1d2` | `6bef6d22f0e3` |
+| agentskills | `dadc729ae91f` | `c1b56037ce43` |
+| repo-settings | `8fe923963a0f` | `ed24457f3b80` |
+| skills-evals | `9b4c01f4eda8` | `5688cfd1f1a7` |
+| wsl-automation | `b3adb1e5a5d1` | `f91e27970528` |
+
+Reverse: re-pin each source to its "Before" sha, restore the README `edits` entry's old text and the language bullet in `export/manifests/_agent-guidance.yml`, restore the `.agents-sync.yml` allowlist line, and re-run the full export.

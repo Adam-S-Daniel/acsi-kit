@@ -114,6 +114,72 @@ def cfg_with(**changes):
     return cfg
 
 
+CS_TOOL = {"tool": "CodeQL", "alerts_threshold": "errors",
+           "security_alerts_threshold": "high_or_higher"}
+
+
+def cs_live(*tools):
+    live = live_default()
+    live["rules"].append({"type": "code_scanning",
+                          "parameters": {"code_scanning_tools": [dict(t) for t in tools]}})
+    return live
+
+
+class CodeScanningRiskTests(unittest.TestCase):
+    def risk(self, live, tools):
+        cfg = cfg_with(require_code_scanning=tools) if tools is not None else cfg_with()
+        rec = ruleset_record(live, cfg)
+        return rs.write_risk(rec, [rec])
+
+    def assertSafe(self, live, tools):
+        verdict, reason = self.risk(live, tools)
+        self.assertEqual(verdict, SAFE, reason)
+
+    def assertGated(self, live, tools, *words):
+        verdict, reason = self.risk(live, tools)
+        self.assertEqual(verdict, GATED, reason)
+        for word in words:
+            self.assertIn(word, reason)
+
+    def test_adding_the_rule_is_safe(self):
+        self.assertSafe(live_default(), [CS_TOOL])
+
+    def test_unchanged_is_safe(self):
+        self.assertSafe(cs_live(CS_TOOL), [CS_TOOL])
+
+    def test_stricter_thresholds_are_safe(self):
+        self.assertSafe(cs_live(CS_TOOL), [dict(CS_TOOL, alerts_threshold="all")])
+        self.assertSafe(cs_live(CS_TOOL), [dict(CS_TOOL, security_alerts_threshold="medium_or_higher")])
+
+    def test_adding_a_tool_is_safe(self):
+        self.assertSafe(cs_live(CS_TOOL), [CS_TOOL, dict(CS_TOOL, tool="Other")])
+
+    def test_removing_the_rule_is_gated(self):
+        self.assertGated(cs_live(CS_TOOL), None, "removed", "code_scanning")
+
+    def test_removing_a_tool_is_gated(self):
+        other = dict(CS_TOOL, tool="Other")
+        self.assertGated(cs_live(CS_TOOL, other), [CS_TOOL], "Other", "removed")
+
+    def test_loosening_a_threshold_is_gated(self):
+        self.assertGated(cs_live(CS_TOOL), [dict(CS_TOOL, alerts_threshold="none")],
+                         "alerts_threshold", "looser")
+        self.assertGated(cs_live(CS_TOOL), [dict(CS_TOOL, security_alerts_threshold="critical")],
+                         "security_alerts_threshold", "looser")
+
+    def test_an_unknown_live_tool_field_is_gated(self):
+        live = cs_live(dict(CS_TOOL, mystery=1))
+        self.assertGated(live, [CS_TOOL], "does not know")
+
+    def test_an_unknown_live_parameter_is_gated(self):
+        live = cs_live(CS_TOOL)
+        rule(live, "code_scanning")["parameters"]["new_option"] = True
+        self.assertGated(live, [CS_TOOL], "new_option")
+
+    def test_an_unrankable_live_threshold_is_gated(self):
+        self.assertGated(cs_live(dict(CS_TOOL, alerts_threshold="weird")), [CS_TOOL], "cannot rank")
+
+
 class RulesetRiskTests(unittest.TestCase):
     def risk(self, live, cfg):
         rec = ruleset_record(live, cfg)
@@ -630,13 +696,17 @@ class GroupWriterRiskTests(unittest.TestCase):
                 self.assertEqual(rs.write_risk(bad, [bad])[0], GATED)
 
     def test_codeql(self):
-        def setup(current, wanted):
-            return rec("security.codeql_default_setup", ("codeql", None, wanted),
-                       current, wanted.get("codeql_default_setup"))
+        def setup(current, wanted, existing=()):
+            r = rec("security.codeql_default_setup", ("codeql", None, wanted),
+                    current, wanted.get("codeql_default_setup"))
+            r["codeql_existing"] = list(existing)
+            return r
 
-        def suite(current, wanted, status="drift"):
-            return rec("security.codeql_query_suite", ("codeql", None, wanted),
-                       current, wanted.get("codeql_query_suite"), status=status)
+        def suite(current, wanted, status="drift", existing=()):
+            r = rec("security.codeql_query_suite", ("codeql", None, wanted),
+                    current, wanted.get("codeql_query_suite"), status=status)
+            r["codeql_existing"] = list(existing)
+            return r
 
         on_default = {"codeql_default_setup": True, "codeql_query_suite": "default"}
         on_extended = {"codeql_default_setup": True, "codeql_query_suite": "extended"}
@@ -672,6 +742,26 @@ class GroupWriterRiskTests(unittest.TestCase):
         with self.subTest("an unknown key"):
             a = setup(False, dict(on_extended, languages=["python"]))
             self.assertEqual(rs.write_risk(a, [a])[0], GATED)
+        with self.subTest("turning it on over the repo's own CodeQL workflow"):
+            a = setup(False, on_default, existing=[".github/workflows/codeql.yml:analyze"])
+            verdict, reason = rs.write_risk(a, [a])
+            self.assertEqual(verdict, GATED, reason)
+            self.assertIn("codeql.yml", reason)
+        with self.subTest("turning it on when the plan could not check"):
+            a = setup(False, on_default)
+            a["codeql_existing"] = None
+            self.assertEqual(rs.write_risk(a, [a])[0], GATED)
+            del a["codeql_existing"]
+            self.assertEqual(rs.write_risk(a, [a])[0], GATED)
+
+    def test_codeql_over_a_workflow_waits_even_while_setting_up(self):
+        wanted = {"codeql_default_setup": True}
+        a = rec("security.codeql_default_setup", ("codeql", None, wanted), False, True)
+        a["codeql_existing"] = [".github/workflows/codeql.yml:analyze"]
+        with patch.object(rs, "_onboarding", return_value=True), \
+             patch.object(rs, "_whole_write_is_standard", return_value=True):
+            rs.classify_records([a], defaults={"security": wanted}, overrides={})
+        self.assertEqual(a["risk"], GATED, a["risk_reason"])
 
 
 class FleetStandardTests(unittest.TestCase):

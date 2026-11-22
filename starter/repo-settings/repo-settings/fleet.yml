@@ -187,13 +187,16 @@ defaults:
     # CodeQL default setup (owner, 2026-10-26: "turn on codeql for all public
     # repos"). Free on public repos; private repos are skipped because CodeQL
     # there needs GitHub Code Security. GitHub picks the languages itself
-    # (GitHub Actions workflows count, so every repo here has one), and
-    # `codeql_query_suite` is left unmanaged: `default` is GitHub's own
-    # default, and a repo that wants `extended` can declare it in overrides.
+    # (GitHub Actions workflows count, so every repo here has one).
     # Forks and the example-site-platform trio are not managed here (see their
     # entries); before this, all 19 public repos had code scanning never run
     # (security-alerts snapshot, 2026-10-26).
     codeql_default_setup: true
+    # The extended suite (`security-extended`): a three-repo trial
+    # (2026-11-20) added one real high-severity finding in first-party code
+    # and no noise outside skills-evals' eval fixtures. See
+    # docs/code-scanning.md.
+    codeql_query_suite: extended
   ruleset:
     enabled: true
     name: "default branch protection"
