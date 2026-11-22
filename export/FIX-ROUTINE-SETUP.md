@@ -18,7 +18,12 @@ run costs more.
 - **Name:** `acsi-kit re-sync fixer`
 - **Model:** a Sonnet model, chosen by name. "Default" follows the account's
   default model, which may cost more.
-- **Repository:** `<owner>/acsi-kit` only.
+- **Repositories:** `<owner>/acsi-kit`, and the private skills registry
+  named by `source:` in `export/manifests/agentskills-private.yml`. The
+  routine only reads the registry: `library/` takes parts from every source,
+  so without it the routine cannot regenerate `library/` and stops (rounds
+  19 and 20 in `DECISIONS.md` were finished by hand for this reason). The
+  public sources need no attachment; they are fetched without a credential.
 - **Environment:** a slim one that skips loading the fleet guidance and
   whose network allows github.com and the package registries.
 - **Schedule:** none. **Connectors:** none.
