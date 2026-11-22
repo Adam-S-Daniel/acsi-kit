@@ -28,15 +28,27 @@ to them, comment on them, or open pull requests on them.
 
    ```bash
    S=$(mktemp -d)/kit-sources
-   python3 export/fetch_sources.py --owner <owner> --dest "$S" --skip agentskills-private
+   python3 export/fetch_sources.py --owner <owner> --dest "$S"
    ```
+
+   This fetches `agentskills-private` too, which needs the routine to have
+   the private registry attached: the repo named by `source:` in
+   `export/manifests/agentskills-private.yml` (FIX-ROUTINE-SETUP.md). A full
+   export needs it, because `library/` takes parts from every source and the
+   bootstrap tests read `library/`. If that fetch is denied, stop here and
+   end with a message saying the routine cannot read the private source, so
+   it cannot regenerate `library/`. Pushing without it opens a pull request
+   whose bootstrap tests fail.
 
    Then install Node packages at each pin, as the workflow does: copy
    `package.json` and `package-lock.json` from `git -C "$S/_agent-guidance"
    show <pin>:` into a temp folder, `npm ci --ignore-scripts` there, and move
    its `node_modules` into `$S/_agent-guidance/`; the same for
-   `$S/skills-evals/explorer/`. `<pin>` is the manifest's `source_sha`.
-4. **Export.** `python3 export/export.py --sources "$S" --skip agentskills-private`.
+   `$S/skills-evals/explorer/`, creating that folder first (the fetched
+   sources have no working tree, so a bare `mv` would rename `node_modules`
+   to `explorer`). `<pin>` is the manifest's `source_sha`.
+4. **Export.** `python3 export/export.py --sources "$S"`. It writes every
+   starter and `library/`.
    For each failure, read the source at the new pin
    (`git -C "$S/<source>" show <pin>:<path>`) and follow the change:
    - An `edits` entry or patch anchor no longer matches: update its old
@@ -62,11 +74,11 @@ to them, comment on them, or open pull requests on them.
    (`test_doc_regions.py`), or a quoted budget number
    (`test_docs_budget.py`). Never add an entry to
    `docs_paths_known_misses.txt` to get green.
-6. **Tests.** Stage new files (`git add -A -- export/manifests starter docs`),
+6. **Tests.** Stage new files (`git add -A -- export/manifests starter docs library`),
    then run, and get exit 0 from each:
    - `python3 -m pytest export/tests -q -p no:cacheprovider`
    - `bash bootstrap/tests/test-bootstrap.sh`
-   - `KIT_EXPORT_SOURCES="$S" python3 export/export.py --check --sources "$S" --skip agentskills-private`
+   - `KIT_EXPORT_SOURCES="$S" python3 export/export.py --check --sources "$S"`
 
    The kit's CI runs none of the starter suites. For each starter whose
    source moved, also run that starter's own tests where it has a runner
