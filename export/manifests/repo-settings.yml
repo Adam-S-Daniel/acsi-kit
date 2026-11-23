@@ -8,7 +8,7 @@
 repo: repo-settings
 kit_name: repo-settings
 source: repo-settings
-source_sha: ed24457f3b80e311b108b90df73148b110ca031d
+source_sha: df86ab31efbb19d5b76e67eaf91f5a41a8e3bbc0
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror)
 # are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]

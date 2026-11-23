@@ -226,6 +226,16 @@ inside a week, so that reading settles the hold without spending a fire
 (no GitHub API call) and is not fired while it holds. The module docstring's
 "Pace hold" section has the details.
 
+The hold does not leave evals nothing when the owner's own use passes the
+stop over a week. It compares the reading with a line that rises through the
+week, so evals still run whenever other use is under it: in the hours after
+the Monday reset, after a quiet night, or before a busy end of the week. The
+catch-up forecast ([`scripts/forecast_catch_up.py`](../scripts/forecast_catch_up.py),
+`pace_hold_room`) replays the hold over the newest whole weeks of meter
+history, other use scaled to the assumed weekly total, instead of taking the
+stop less a flat weekly average (2026-11-23: about 6 points a week at 82 to
+90 points of other use, where the flat figure said 0).
+
 ### The weekly allowance guard
 
 Since 2026-10-06 the scheduled evals run as Claude Code routines on the
@@ -665,7 +675,15 @@ Work items (`needs-fixtures`, `needs-harder-fixtures`, `fixture-broken`,
 `routine-outage`) are listed in the plan, not fired; each carries a
 `change_type`. A guidance section whose `eval-coverage.yml` row is `gap`
 (tracked, no fixture yet) gets `needs-fixtures` with zero fixtures, so its
-first fixture is asked for before any headroom can be measured. A skill run
+first fixture is asked for before any headroom can be measured.
+**The fixture throttle** (`throttle_fixture_work`, skills-evals#1046): a new
+fixture adds a cell per roster model, so for a subject whose verdict is not
+`keep` the plan withholds `needs-fixtures` (unless it has no fixture),
+withholds `needs-harder-fixtures` unless every counted cell is parked at the
+ceiling, and files what remains only while its priced total fits a weekly
+allowance, `undecided_fixture_share` of the weekly cap in
+[`evals/batch-policy.yml`](../evals/batch-policy.yml). The plan JSON lists
+what it withheld under `fixture_throttle`. A skill run
 tests main's copy of its subject and refuses, with nothing spent, when the
 registry checkout is not clean at its main (ADR 0012, addendum "main's
 copy"); the routine's fire still reads as a success. So a cell with two such

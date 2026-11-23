@@ -273,15 +273,14 @@ otherwise.
 
 ### Docker Desktop WSL integration breaks after reboot; the watchdog repairs it
 
-Diagnosed 2026-10-31; the `Docker WSL Integration Watchdog` task exists for it
-(README has the statuses and alerts).
+The `Docker WSL Integration Watchdog` task exists for it (README has the
+statuses and alerts; diagnosis history in [evidence](docs/evidence/agents-md-observations.md)).
 
 - **Symptom.** Every attempt failed with `dial unix /mnt/wsl/docker-desktop/shared-sockets/host-services/backend.sock: connect: no such file or directory`.
 - **Cause.** Docker's `wsl-bootstrap` pre-bootstrap force-unmounts its
   shared-socket mounts under `/mnt/wsl`, a mount peer group shared across
-  distros ([docker/desktop-feedback#678](https://github.com/docker/desktop-feedback/issues/678)).
-  Ubuntu powered off 35 ms later and its systemd shutdown unmounted
-  `host-services` for good.
+  distros. Ubuntu's systemd shutdown then unmounted `host-services` for good
+  (upstream issue and timing in [evidence](docs/evidence/agents-md-observations.md)).
 - **"Skip WSL distro integration" removes the distro** from `IntegratedWslDistros`
   in `%APPDATA%\Docker\settings-store.json`.
 - **A Docker Desktop restart re-creates the mounts, so it is the repair.**

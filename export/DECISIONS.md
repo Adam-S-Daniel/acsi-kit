@@ -2910,3 +2910,24 @@ No pin moves. The fix routine now fetches `agentskills-private` (round 20 strand
 - `export/FIX-ROUTINE.md` step 8: the routine never quotes or summarizes a private file's contents in a commit message or committed file (the commit message becomes the public pull request text), and never changes the private manifest's `source_sha` or `include`. Its final session message, which only the owner sees, is the one place it may describe them.
 
 Reverse: delete the `include` list and `_apply_include`, its test file, and the two FIX-ROUTINE.md paragraphs.
+
+## Re-pin round 22 (2026-11-23): the held-back re-sync, every public source
+
+The daily re-sync held back a source whose new head broke the export. Two edits needed following; the other moves exported as they are.
+
+- `_agent-guidance` added `claude-plan-usage-estimator` (the source owner's small public library) to `repos.yml`, under both `skills_bootstrap.out_of_scope` and `cron_coverage.fleet`. The `out_of_scope` entry already falls inside the existing `kit_repos.py` cut, but the `cron_coverage.fleet` line did not, so the C11 check that `repos.yml` names only the kit's repos fired. `kit_repos.py` now also drops that line.
+- `skills-evals` rewrote its planner test's control in `test/issues/test_issue_81_private_results.py` so it no longer names a skill. The retarget's second hunk (which swapped the left-out `rename-pdfs` assertion for `workflow-path-audit`) had nothing to match, so it is gone; the first hunk (read the example checkout's `evals/`) stays.
+- `repo-settings` and `wsl-automation` moved with no kit edit needed. `agentskills` moved likewise. The pages' generated regions were already current.
+
+Tests: `python3 -m pytest export/tests -q -p no:cacheprovider` (259 passed, 1 skipped), `bash bootstrap/tests/test-bootstrap.sh` and `export.py --check` with every source: see the commit message.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `6bef6d22f0e3` | `e2e03d6b9f01` |
+| agentskills | `c1b56037ce43` | `a7745bee9b17` |
+| repo-settings | `ed24457f3b80` | `df86ab31efbb` |
+| skills-evals | `d4120ca9cb49` | `79f22702f216` |
+| wsl-automation | `f91e27970528` | `ea01be52f731` |
+
+Reverse: re-pin each source to its "Before" sha, delete the `claude-plan-usage-estimator` line entry from `kit_repos.py`'s `REPOS_YML_LINES`, restore the second `test_issue_81_private_results.py` hunk in `export/patches/skills-evals/retargets.txt`, and re-run the full export.
+
