@@ -370,6 +370,15 @@ mkdir -p "$T/subst-q"; echo "Example Adopter" > "$T/subst-q/a.txt"
 run python3 -I "$B/lib/substitute.py" "$T/subst-q" --owner "$O" --name "O'Brien"; rc=$?
 assert_eq "substitute.py refuses a name with an apostrophe" "$rc" 1
 assert "substitute.py says why" has "$ERR" "no apostrophe"
+# A renamed file or folder takes its symlinks along: their targets are
+# substituted too, or the link would dangle in the adopter's repo.
+mkdir -p "$T/subst-l/example-adopter-notes"; echo x > "$T/subst-l/example-adopter-notes/a.md"
+ln -s example-adopter-notes/a.md "$T/subst-l/link.md"; ln -s example-adopter-notes "$T/subst-l/dirlink"
+run python3 -I "$B/lib/substitute.py" "$T/subst-l" --owner "$O" --owner-two "$O"; rc=$?
+assert_eq "substitute.py renames a tree with symlinks" "$rc" 0
+assert_eq "a file symlink follows its renamed target" "$(readlink "$T/subst-l/link.md")" "$O-notes/a.md"
+assert_eq "a folder symlink follows its renamed target" "$(readlink "$T/subst-l/dirlink")" "$O-notes"
+assert "the file symlink resolves" test -f "$T/subst-l/link.md"
 printf 'not a code!\n' | run bash "$B/create-apps.sh" --config "$CFGP" --out "$T/manifests" roster; rc=$?
 assert_eq "a malformed code is refused" "$rc" 1
 printf 'http://127.0.0.1/?code=abc&state=0000\n' | run bash "$B/create-apps.sh" --config "$CFGP" --out "$T/manifests" roster; rc=$?

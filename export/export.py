@@ -232,7 +232,11 @@ def read_index_tree(root: Path) -> Tree | None:
 
 
 def write_tree(tree: Tree, root: Path) -> None:
-    if root.exists() or root.is_symlink():
+    # Refuse a symlinked output folder rather than delete or write through
+    # it: its target may be a folder outside the kit.
+    if root.is_symlink():
+        raise ExportError(f"{root} is a symlink; replace it with a real folder (or remove it) and run again")
+    if root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True)
     for rel in sorted(tree):

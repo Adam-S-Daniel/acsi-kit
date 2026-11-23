@@ -283,6 +283,15 @@ def main(argv=None):
         if os.sep + ".git" in d + os.sep:
             continue
         for n in sorted(dirs + files):
+            link = os.path.join(d, n)
+            if os.path.islink(link):
+                # A link's target names files too: give it the same names, or
+                # it dangles once its target is renamed.
+                target = os.readlink(link)
+                if sub(target) != target:
+                    os.unlink(link)
+                    os.symlink(sub(target), link)
+                    print(f"relinked: {os.path.relpath(link, a.root)} -> {sub(target)}")
             new = sub(n)
             if new == n:
                 continue
