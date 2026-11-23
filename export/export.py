@@ -8,7 +8,7 @@ Usage:
 
 For every manifest under manifests/ (except _common.yml), the
 repo's tree is read at the manifest's `source_sha` from the local checkout
-`<sources>/<source>` with `git archive` (never the working tree), and turned
+`<sources>/<source>` as committed blobs (never the working tree), and turned
 into KIT/starter/<kit_name>/ by these steps, in order:
 
   1. drop `exclude` paths;
@@ -51,14 +51,12 @@ import argparse
 import fnmatch
 import hashlib
 import importlib.util
-import io
 import os
 import re
 import shutil
 import stat
 import subprocess
 import sys
-import tarfile
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,25 +106,46 @@ def read_git_tree(repo_dir: Path, sha: str) -> Tree:
         raise ExportError(f"source_sha must be a full 40-character sha, got {sha!r}")
     if not (repo_dir / ".git").exists():
         raise ExportError(f"no git checkout at {repo_dir}")
+    # Read the blobs, not `git archive`: archive applies the tree's own
+    # .gitattributes (export-ignore drops a file, export-subst and eol/text
+    # rewrite one), so the kit would not get the bytes at the pin.
     proc = subprocess.run(
-        ["git", "-C", str(repo_dir), "archive", "--format=tar", sha],
+        ["git", "-C", str(repo_dir), "ls-tree", "-r", "-z", "--full-tree", sha],
         capture_output=True,
     )
     if proc.returncode != 0:
-        raise ExportError(f"git archive {sha} failed in {repo_dir}: {proc.stderr.decode(errors='replace').strip()}")
+        raise ExportError(f"git ls-tree {sha} failed in {repo_dir}: {proc.stderr.decode(errors='replace').strip()}")
+    rows = []
+    for record in proc.stdout.split(b"\0"):
+        if not record:
+            continue
+        meta, path = record.split(b"\t", 1)
+        mode, kind, obj = meta.decode().split()
+        name = path.decode("utf-8")
+        if kind == "commit":
+            continue  # a submodule: git archive left it out too
+        if kind != "blob":
+            raise ExportError(f"{repo_dir.name}: unsupported tree entry {name} ({kind})")
+        rows.append((mode, obj, name))
     tree: Tree = {}
-    with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as tar:
-        for member in tar.getmembers():
-            if member.isdir() or member.name == "pax_global_header":
-                continue
-            name = member.name
-            if member.issym():
-                tree[name] = Entry(link=member.linkname)
-            elif member.isfile():
-                data = tar.extractfile(member).read()
-                tree[name] = Entry(data=data, executable=bool(member.mode & 0o111))
-            else:
-                raise ExportError(f"{repo_dir.name}: unsupported tree entry {name}")
+    if not rows:
+        return tree
+    batch = subprocess.run(["git", "-C", str(repo_dir), "cat-file", "--batch"],
+                           input=b"".join(obj.encode() + b"\n" for _m, obj, _n in rows),
+                           capture_output=True)
+    if batch.returncode != 0:
+        raise ExportError(f"git cat-file failed in {repo_dir}: {batch.stderr.decode(errors='replace').strip()}")
+    out, pos = batch.stdout, 0
+    for mode, obj, name in rows:
+        header_end = out.index(b"\n", pos)
+        _obj, kind, size = out[pos:header_end].decode().split()
+        start = header_end + 1
+        data = out[start:start + int(size)]
+        pos = start + int(size) + 1
+        if mode == "120000":
+            tree[name] = Entry(link=data.decode("utf-8"))
+        else:
+            tree[name] = Entry(data=data, executable=mode == "100755")
     return tree
 
 
@@ -576,20 +595,32 @@ def _run_patch(repo: str, spec, root: Path, ctx) -> None:
     mod.apply(root, ctx)
 
 
+def _copy_file(src: Path, dst: Path) -> None:
+    """Copy the bytes. A destination already in the tree keeps its own mode;
+    a new one takes the source's exec bit, like every other written file."""
+    data = src.read_bytes()
+    if dst.exists():
+        dst.write_bytes(data)
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(data)
+    exec_bits = src.stat().st_mode & 0o111
+    if exec_bits:
+        os.chmod(dst, dst.stat().st_mode | exec_bits)
+
+
 def _regenerate(repo: str, steps, root: Path, staged: dict, env_extra: dict, sources: Path) -> None:
     for step in steps or []:
         if "why" not in step:
             raise ExportError(f"{repo}: regenerate step {step!r} has no `why`")
         if "copy" in step:
-            src = root / step["copy"]["from"]
-            dst = root / step["copy"]["to"]
-            dst.write_bytes(src.read_bytes())
+            _copy_file(root / step["copy"]["from"], root / step["copy"]["to"])
         elif "copy_from_kit" in step:
             spec = step["copy_from_kit"]
             other = staged.get(spec["repo"])
             if other is None:
                 raise ExportError(f"{repo}: copy_from_kit needs {spec['repo']} in `after:`")
-            (root / spec["to"]).write_bytes((other / spec["from"]).read_bytes())
+            _copy_file(other / spec["from"], root / spec["to"])
         elif "run" in step:
             env = dict(os.environ)
             env.update({k: str(v) for k, v in env_extra.items()})
