@@ -248,9 +248,10 @@ def main(argv=None):
     if not LOGIN.fullmatch(a.owner) or (a.owner_two and not LOGIN.fullmatch(a.owner_two)):
         sys.exit("ERROR: an owner must be a plain GitHub login")
     name = a.name or a.owner
-    if not NAME.fullmatch(name):
+    if not NAME.fullmatch(name) or name in (".", ".."):
         sys.exit("ERROR: the name may hold only letters, digits, spaces, . and - (no apostrophe: "
-                 "it would end a single-quoted string in the starter's scripts)")
+                 "it would end a single-quoted string in the starter's scripts; not . or .., which "
+                 "would name a folder in a path)")
     if a.noreply and not NOREPLY.fullmatch(a.noreply):
         sys.exit("ERROR: --noreply must be <id>+<login>@users.noreply.github.com")
     for login in (a.owner, a.owner_two):

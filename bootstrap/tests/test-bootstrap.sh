@@ -370,6 +370,15 @@ mkdir -p "$T/subst-q"; echo "Example Adopter" > "$T/subst-q/a.txt"
 run python3 -I "$B/lib/substitute.py" "$T/subst-q" --owner "$O" --name "O'Brien"; rc=$?
 assert_eq "substitute.py refuses a name with an apostrophe" "$rc" 1
 assert "substitute.py says why" has "$ERR" "no apostrophe"
+# A name of . or .. would rename a path component or symlink target to a
+# parent folder, so both are refused (config loader and substitute.py both).
+for bad in . ..; do
+  run python3 -I "$B/lib/substitute.py" "$T/subst-q" --owner "$O" --name "$bad"; rc=$?
+  assert_eq "substitute.py refuses the name $bad" "$rc" 1
+  CFGD="$T/fleet-dots.env"; new_config "$CFGD" paid; sed -i "s/^OWNER_NAME=.*/OWNER_NAME=$bad/" "$CFGD"
+  run bash "$B/create-apps.sh" --config "$CFGD" --dry-run --out "$T/manifests-d"; rc=$?
+  assert_eq "an OWNER_NAME of $bad is refused" "$rc" 1
+done
 # A renamed file or folder takes its symlinks along: their targets are
 # substituted too, or the link would dangle in the adopter's repo.
 mkdir -p "$T/subst-l/example-adopter-notes"; echo x > "$T/subst-l/example-adopter-notes/a.md"
