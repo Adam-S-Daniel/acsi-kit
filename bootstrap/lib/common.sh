@@ -143,7 +143,7 @@ _valid_value() { # key value
     PLAN) [[ $v == free || $v == paid ]] ;;
     CLAUDE_PLAN) [[ $v == pro || $v == max5x || $v == ultra || $v == max20x ]] ;;
     # No apostrophe: the name lands inside single-quoted shell and PowerShell strings.
-    OWNER_NAME) [[ $v =~ ^[A-Za-z0-9\ .-]{0,80}$ ]] ;;
+    OWNER_NAME) [[ $v =~ ^[A-Za-z0-9\ .-]{0,80}$ && $v != . && $v != .. ]] ;;   # . or .. would name a folder in a path
     VISIBILITY_*) [[ $v == public || $v == private ]] ;;
     APP_NAME_PREFIX) [[ $v =~ ^[a-z0-9][a-z0-9-]{0,19}$ ]] ;;
     REPOS_DIR) [[ $v =~ ^(~|/)[A-Za-z0-9._/~-]{0,200}$ ]] ;;
