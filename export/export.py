@@ -595,20 +595,30 @@ def _run_patch(repo: str, spec, root: Path, ctx) -> None:
     mod.apply(root, ctx)
 
 
+def _copy_file(src: Path, dst: Path) -> None:
+    """Copy the bytes. A destination already in the tree keeps its own mode;
+    a new one takes the source's exec bit, like every other written file."""
+    data = src.read_bytes()
+    if dst.exists():
+        dst.write_bytes(data)
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(data)
+    os.chmod(dst, 0o755 if src.stat().st_mode & 0o111 else 0o644)
+
+
 def _regenerate(repo: str, steps, root: Path, staged: dict, env_extra: dict, sources: Path) -> None:
     for step in steps or []:
         if "why" not in step:
             raise ExportError(f"{repo}: regenerate step {step!r} has no `why`")
         if "copy" in step:
-            src = root / step["copy"]["from"]
-            dst = root / step["copy"]["to"]
-            dst.write_bytes(src.read_bytes())
+            _copy_file(root / step["copy"]["from"], root / step["copy"]["to"])
         elif "copy_from_kit" in step:
             spec = step["copy_from_kit"]
             other = staged.get(spec["repo"])
             if other is None:
                 raise ExportError(f"{repo}: copy_from_kit needs {spec['repo']} in `after:`")
-            (root / spec["to"]).write_bytes((other / spec["from"]).read_bytes())
+            _copy_file(other / spec["from"], root / spec["to"])
         elif "run" in step:
             env = dict(os.environ)
             env.update({k: str(v) for k, v in env_extra.items()})
