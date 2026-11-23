@@ -26,11 +26,11 @@ def test_copy_steps_keep_the_exec_bit_and_make_folders(tmp_path):
     other = tmp_path / "other"
     (other / "templates").mkdir(parents=True)
     (other / "templates" / "hook").write_bytes(b"#!/bin/sh\n")
-    os.chmod(other / "templates" / "hook", 0o755)
+    os.chmod(other / "templates" / "hook", 0o700)
     root = tmp_path / "root"
     root.mkdir()
     (root / "run.sh").write_bytes(b"#!/bin/sh\n")
-    os.chmod(root / "run.sh", 0o755)
+    os.chmod(root / "run.sh", 0o700)
     steps = [
         {"copy_from_kit": {"repo": "other", "from": "templates/hook", "to": ".githooks/hook"}, "why": "t"},
         {"copy": {"from": "run.sh", "to": "bin/run.sh"}, "why": "t"},
@@ -47,9 +47,9 @@ def test_copy_onto_an_existing_file_keeps_its_mode(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     (root / "a.sh").write_bytes(b"a\n")
-    os.chmod(root / "a.sh", 0o644)
+    os.chmod(root / "a.sh", 0o600)
     (root / "b.sh").write_bytes(b"old\n")
-    os.chmod(root / "b.sh", 0o755)
+    os.chmod(root / "b.sh", 0o700)
     export._regenerate("x", [{"copy": {"from": "a.sh", "to": "b.sh"}, "why": "t"}], root, {}, {}, tmp_path)
     assert (root / "b.sh").read_bytes() == b"a\n"
     assert _exec(root / "b.sh")

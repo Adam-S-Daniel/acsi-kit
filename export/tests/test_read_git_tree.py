@@ -42,7 +42,7 @@ def test_attributes_do_not_drop_or_rewrite_files(tmp_path):
     for rel, data in files.items():
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         (repo / rel).write_bytes(data)
-    os.chmod(repo / "run.sh", 0o755)
+    os.chmod(repo / "run.sh", 0o700)
     os.symlink("dir name/a.crlf", repo / "link")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "seed")

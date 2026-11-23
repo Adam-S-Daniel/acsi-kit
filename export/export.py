@@ -604,7 +604,9 @@ def _copy_file(src: Path, dst: Path) -> None:
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_bytes(data)
-    os.chmod(dst, 0o755 if src.stat().st_mode & 0o111 else 0o644)
+    exec_bits = src.stat().st_mode & 0o111
+    if exec_bits:
+        os.chmod(dst, dst.stat().st_mode | exec_bits)
 
 
 def _regenerate(repo: str, steps, root: Path, staged: dict, env_extra: dict, sources: Path) -> None:
