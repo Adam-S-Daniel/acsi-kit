@@ -123,8 +123,12 @@ def main(argv=None) -> int:
         if not (target / ".git").exists():
             git("init", "-q", str(target))
         for sha in shas:
-            git("-C", str(target), "fetch", "-q", "--depth", "1", "--no-tags",
-                f"https://github.com/{args.owner}/{repo}.git", sha)
+            try:
+                git("-C", str(target), "fetch", "-q", "--depth", "1", "--no-tags",
+                    f"https://github.com/{args.owner}/{repo}.git", sha)
+            except subprocess.CalledProcessError as exc:
+                print(f"fetch_sources.py: {repo}: git fetch failed (exit {exc.returncode})", file=sys.stderr)
+                return 1
         print(f"{repo}: fetched {len(shas)} pinned commit(s)")
     return 0
 
