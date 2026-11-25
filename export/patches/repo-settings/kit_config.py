@@ -217,7 +217,8 @@ TEST_EDITS = {
         ('                "example-adopter/_agent-guidance",\n                "example-adopter/GHA-bench",\n                "example-adopter/security-alerts",\n',
          '                "example-adopter/_agent-guidance",\n'),
         ("        self.assertEqual(checked, 24)\n",
-         "        self.assertEqual(checked, 8)  # the kit's fleet (DECISIONS C11)\n"),
+         "        # The count is the adopter's: dropping or adding example repos moves it.\n"
+         "        self.assertGreaterEqual(checked, 1)\n"),
         ('        self.assertEqual(t["declared"]["extra_rulesets"][0], EXTRA_CFG)\n',
          '        # fleet.yml names the App id by variable (DECISIONS C12); rendered,\n'
          '        # it is the fixture\'s.\n'
@@ -243,10 +244,16 @@ TEST_EDITS = {
         self.assertEqual(by_value[()], self.WERE_FALSE)
         self.assertEqual(by_value[("labels",)], self.LABELS_ONLY)
         self.assertEqual(len(by_value[("all",)]), 21)''',
-         '''        self.assertEqual(set(by_value), {("all",), ("labels",)})
+         '''        # The adopter drops the example repos, the only label-only rows, so a
+        # file with none is as valid as one with three.
+        self.assertLessEqual(set(by_value), {("all",), ("labels",)})
+        self.assertIn(("all",), by_value)
         self.assertEqual(by_value.get((), set()), self.WERE_FALSE)
-        self.assertEqual(by_value[("labels",)], self.LABELS_ONLY)
-        self.assertEqual(len(by_value[("all",)]), 6)  # the kit's fleet (DECISIONS C11)'''),
+        self.assertEqual(by_value.get(("labels",), set()), self.LABELS_ONLY)
+        # What the engine guards as label-only must be marked so in the file.
+        for name in {e["name"] for e in cfg["repos"]}:
+            if rs.is_cms_label_only(name):
+                self.assertIn(name, self.LABELS_ONLY)'''),
         ("import repo_settings as rs\n\n\nADMIN = ",
          "import repo_settings as rs\n" + MODULE_ENV + "\n\nADMIN = "),
         ("ROSTER_APP_ID = @ROSTER_ID@\n", "ROSTER_APP_ID = 900003  # KIT_APP_IDS above\n"),

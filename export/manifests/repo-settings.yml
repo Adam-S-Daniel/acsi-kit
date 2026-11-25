@@ -42,6 +42,51 @@ edits:
       .pytest_cache/, node_modules/, .DS_Store); the lines already present
       are not repeated.
 
+  # >>> one-owner forms (generated block, edit the spec)
+  - path: tests/test_repo_settings_workflow_token.py
+    stage: output
+    old: "import json\nimport os\nimport re\nimport shlex\n"
+    new: "import itertools\nimport json\nimport os\nimport re\nimport shlex\n"
+    why: >-
+      One-owner forms. The review answers are built with itertools.product, so the cases follow the number of owners the workflow names.
+  - path: tests/test_repo_settings_workflow_token.py
+    stage: output
+    old: "REVIEW_CASES = [(a, b) for a in (\"false\", \"true\", \"\") for b in (\"false\", \"true\", \"\")]\n"
+    new: "REVIEW_CASES = list(itertools.product((\"false\", \"true\", \"\"), repeat=len(REVIEW_OUTPUTS)))\n"
+    why: >-
+      One-owner forms. A pair of answers assumes two owners; a fleet of one owner has one apply-auto answer, so the cases are every combination for however many owners the test names.
+  - path: tests/test_repo_settings_workflow_token.py
+    stage: output
+    old: "expected = sc[\"review\"] != (\"false\", \"false\")\n"
+    new: "expected = any(answer != \"false\" for answer in sc[\"review\"])\n"
+    why: >-
+      One-owner forms. "Every owner answered false" must not name two answers.
+  - path: tests/test_repo_settings_workflow_token.py
+    stage: output
+    old: "        self.assertEqual(sorted(reviewed), sorted(auto + [REVIEW_CONJUNCT]))\n"
+    new: "        # The review answer is one parenthesized conjunct of per-owner\n        # disjuncts. Compare its disjuncts as a set: the workflow lists the\n        # owners in its own order (sorted() differs from it for owner names\n        # that sort the other way round), and a one-owner fleet repeats the\n        # one owner's disjunct. Everything else must equal the unreviewed\n        # job's conjuncts.\n        answer = [c for c in reviewed if c not in auto]\n        self.assertEqual(len(answer), 1, reviewed)\n        self.assertEqual(sorted(c for c in reviewed if c != answer[0]), sorted(auto))\n        self.assertTrue(answer[0].startswith(\"(\") and answer[0].endswith(\")\"), answer[0])\n        self.assertEqual(set(top_level_disjuncts(answer[0][1:-1])),\n                         set(top_level_disjuncts(REVIEW_CONJUNCT[1:-1])))\n"
+    why: >-
+      One-owner and reordered-owner forms. The conjunct was compared as one sorted string, so a duplicate disjunct (one owner) or a different owner order failed it with the same meaning. It compares sets of disjuncts.
+  - path: tests/test_repo_settings.py
+    stage: output
+    old: "# Since issue #88 these manage `labels` only, not nothing.\n    LABELS_ONLY = {\n        \"example-adopter/example-site-platform\", \"example-adopter/example-site-a\",\n        \"example-adopter-two/example-site-b\",\n    }\n"
+    new: "# Since issue #88 these manage `labels` only, not nothing: whatever the\n    # fleet file marks `manage: [\"labels\"]` (the kit's three example repos,\n    # until the adopter drops them).\n    LABELS_ONLY = {\n        e[\"name\"] for e in rs.load_config(str(FLEET))[\"repos\"]\n        if e[\"manage\"] == [\"labels\"]\n    }\n"
+    why: >-
+      The label-only repos are the file's own rows, so dropping the example repos (docs/generated-files.md) leaves the test valid.
+  - path: tests/test_repo_settings.py
+    stage: output
+    old: "targets = rs.resolve_targets(rs.load_config(str(self.FLEET)), None)\n        cms = [t for t in targets if rs.is_cms_label_only(t[\"repo\"])]\n        self.assertEqual({t[\"repo\"] for t in cms}, set(rs.CMS_LABEL_ONLY_REPOS))\n"
+    new: "targets = rs.resolve_targets(rs.load_config(str(self.FLEET)), None)\n        cms = [t for t in targets if rs.is_cms_label_only(t[\"repo\"])]\n        # The engine guards three named repos; the file may name all of them\n        # or, once the adopter drops the example repos, none. The ones it\n        # names must be exactly the ones the engine treats as label-only,\n        # and every `manage: [\"labels\"]` row must pass its rules.\n        listed = {r.casefold() for r in rs.CMS_LABEL_ONLY_REPOS}\n        self.assertEqual({t[\"repo\"].casefold() for t in cms},\n                         {t[\"repo\"].casefold() for t in targets} & listed)\n        for t in targets:\n            if t[\"manage\"] == [\"labels\"]:\n                rs.check_cms_label_only(t)\n"
+    why: >-
+      Every adopter drops the three example repos, which this pinned to the shipped file. The label-only set is what the file marks and the engine guards, and each such repo must still pass the engine's label-only rules.
+  - path: tests/test_repo_settings.py
+    stage: output
+    old: "for owner, want in ((\"example-adopter\", \"example-site-a,example-site-platform\"),\n                            (\"example-adopter-two\", \"example-site-b\")):\n            with self.subTest(owner=owner):\n"
+    new: "# One line per owner the file names, whatever their number: an owner's\n        # label-only repos are the file's `manage: [\"labels\"]` rows that the\n        # engine guards, sorted. A one-owner fleet has one line holding all\n        # of them, and a fleet without the example repos has empty lines.\n        targets = rs.resolve_targets(rs.load_config(str(self.FLEET)), None)\n        owners = {t[\"repo\"].split(\"/\", 1)[0] for t in targets}\n        self.assertTrue(owners)\n        for owner in sorted(owners):\n            want = \",\".join(sorted(\n                t[\"repo\"].split(\"/\", 1)[1] for t in targets\n                if t[\"repo\"].split(\"/\", 1)[0] == owner\n                and t[\"manage\"] == [\"labels\"] and rs.is_cms_label_only(t[\"repo\"])))\n            with self.subTest(owner=owner):\n"
+    why: >-
+      The expected per-owner split named the two invented owners, so a one-owner fleet (one owner holding all three repos) and a fleet without the example repos failed. It derives each owner's list from the file.
+  # <<< one-owner forms
+
 patches:
   - file: kit_config.py
     why: >-
