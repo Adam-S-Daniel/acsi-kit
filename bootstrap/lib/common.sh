@@ -124,7 +124,7 @@ kit_tree() {
 
 # ------------------------------------------------------------------ config
 CONFIG_KEYS=(
-  OWNER OWNER_TWO OWNER_TYPE PLAN CLAUDE_PLAN REVIEWER OWNER_NAME
+  OWNER OWNER_TWO OWNER_TYPE PLAN CLAUDE_PLAN TIME_ZONE REVIEWER OWNER_NAME
   VISIBILITY_AGENT_GUIDANCE VISIBILITY_SKILLS_EVALS VISIBILITY_WSL_AUTOMATION
   APP_NAME_PREFIX REPOS_DIR
   GUIDANCE_SYNC_APP_ID SETTINGS_ADMIN_APP_ID SETTINGS_READ_APP_ID
@@ -133,6 +133,23 @@ CONFIG_KEYS=(
   ANTHROPIC_SERVICE_ACCOUNT_ID ANTHROPIC_WORKSPACE_ID
   SITE_REPO
 )
+
+# time_zone_loads <name>: python3's zoneinfo knows the zone (python3 is required
+# by the kit). Fails with no output when it does not.
+time_zone_loads() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -I -c 'import sys, zoneinfo; zoneinfo.ZoneInfo(sys.argv[1])' "$1" >/dev/null 2>&1
+}
+
+_TIME_ZONE_HELP="set TIME_ZONE in fleet.env to your IANA time zone name, such as Europe/Berlin or America/Chicago. Find yours with: timedatectl show -p Timezone --value (Linux), readlink /etc/localtime (macOS; the name after zoneinfo/), or the list at https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
+
+# require_time_zone: the scripts that write the merge window call this after
+# load_config. TIME_ZONE has no default and is not required by load_config, so
+# status.sh and verify.sh stay green for a setup that copied the starter before
+# the key existed.
+require_time_zone() {
+  [ -n "$CFG_TIME_ZONE" ] || die "${CONFIG_PATH:-fleet.env}: TIME_ZONE is required: $_TIME_ZONE_HELP"
+}
 
 _valid_value() { # key value
   local k=$1 v=$2
@@ -144,6 +161,9 @@ _valid_value() { # key value
     CLAUDE_PLAN) [[ $v == pro || $v == max5x || $v == ultra || $v == max20x ]] ;;
     # No apostrophe: the name lands inside single-quoted shell and PowerShell strings.
     OWNER_NAME) [[ $v =~ ^[A-Za-z0-9\ .-]{0,80}$ && $v != . && $v != .. ]] ;;   # . or .. would name a folder in a path
+    # An IANA zone name (Europe/Berlin, America/Argentina/Buenos_Aires) or UTC;
+    # time_zone_loads checks that the tz database knows it.
+    TIME_ZONE) [[ $v =~ ^[A-Za-z]+(/[A-Za-z0-9_+-]+)+$ || $v == UTC ]] && time_zone_loads "$v" ;;
     VISIBILITY_*) [[ $v == public || $v == private ]] ;;
     APP_NAME_PREFIX) [[ $v =~ ^[a-z0-9][a-z0-9-]{0,19}$ ]] ;;
     REPOS_DIR) [[ $v =~ ^(~|/)[A-Za-z0-9._/~-]{0,200}$ ]] ;;
@@ -174,7 +194,7 @@ load_config() { # path
     known=0
     for k in "${CONFIG_KEYS[@]}"; do [ "$k" = "$key" ] && known=1; done
     [ "$known" = 1 ] || die "$path:$n: unknown key $key"
-    _valid_value "$key" "$val" || die "$path:$n: invalid value for $key$([ "$key" != OWNER_NAME ] || echo " (letters, digits, spaces, . and - only; no apostrophe, it ends a single-quoted string in the starter's scripts)")"
+    _valid_value "$key" "$val" || die "$path:$n: invalid value for $key$([ "$key" != TIME_ZONE ] || echo ": $_TIME_ZONE_HELP")$([ "$key" != OWNER_NAME ] || echo " (letters, digits, spaces, . and - only; no apostrophe, it ends a single-quoted string in the starter's scripts)")"
     printf -v "CFG_$key" '%s' "$val"
   done < "$path"
   [ -n "$CFG_OWNER" ] || die "$path: OWNER is required"

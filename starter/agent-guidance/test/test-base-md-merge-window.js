@@ -17,15 +17,19 @@ const mod = require("../scripts/base-md-merge-window.js");
 
 const ROOT = path.join(__dirname, "..");
 const SCRIPT = path.join(ROOT, "scripts", "base-md-merge-window.js");
-const WINDOW = mod.loadWindow();
+// The shipped file's zone is the adopter's own (TIME_ZONE), so the tests
+// below pin the Monday noon to 2 PM Eastern bounds their dates assume.
+const WINDOW = { timezone: "America/New_York", weekday: 1, start: "12:00", end: "14:00" };
 
 // 2026-11-09 is a Monday, in EST (UTC-5): noon ET is 17:00 UTC.
 const MON_OPEN = "2026-11-09T17:00:00Z";
 const MON_LAST = "2026-11-09T18:59:59Z";
 const MON_CLOSE = "2026-11-09T19:00:00Z";
 
-test("the shipped bounds are Monday noon to 2 PM US Eastern", () => {
-  assert.deepEqual(WINDOW, { timezone: "America/New_York", weekday: 1, start: "12:00", end: "14:00" });
+test("the shipped bounds are Monday noon to 2 PM in the configured zone", () => {
+  const shipped = mod.loadWindow();
+  assert.equal(typeof shipped.timezone, "string");
+  assert.deepEqual({ ...shipped, timezone: null }, { timezone: null, weekday: 1, start: "12:00", end: "14:00" });
   const raw = YAML.parse(fs.readFileSync(path.join(ROOT, "scripts", "base-md-merge-window.yml"), "utf8"));
   assert.deepEqual(Object.keys(raw).sort(), ["end", "start", "timezone", "weekday"]);
 });
