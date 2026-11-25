@@ -59,6 +59,31 @@ merged improvement comes one to two weeks later, because it waits on the
 eval budget rather than on you ([what it
 costs](docs/before-you-start.md#what-it-costs)).
 
+## Update your copy of the kit
+
+The kit changes often. To move your clone to the newest kit, run these from
+the kit's folder:
+
+```bash
+bash bootstrap/update-kit.sh --dry-run
+bash bootstrap/update-kit.sh
+bash bootstrap/status.sh
+```
+
+The script fast-forwards your clone, puts the optional content you chose
+back, and lists any `fleet.env` keys that are new or gone. It refuses when
+you have edited a tracked file outside `starter/`, or edited `starter/`
+yourself (it tells you how to keep those edits).
+
+If your copy predates the script (it has no `bootstrap/update-kit.sh`), run
+`git restore starter && git clean -fd starter && git pull --ff-only`, then
+`bash bootstrap/update-kit.sh`. Your content choices are recorded outside the
+kit and are added back. Your `fleet.env` and your app manifests folder are untouched.
+
+It does not change repos you already filled from an older starter. For
+those, `bash bootstrap/copy-starter.sh --dry-run <starter-subdir> <owner/repo>`
+shows what the newer starter would change.
+
 ## Read more
 
 - [How it works](docs/how-it-works.md): the six repos, the loop, and the
