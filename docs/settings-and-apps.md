@@ -114,7 +114,8 @@ would do. It is advisory, not a required check.
 It also sets `repo-settings`' variables `GUIDANCE_SYNC_APP_ID` and
 `ROSTER_WRITER_APP_ID` from `fleet.env` once `create-apps.sh` has filled
 them in, so run it again after creating the Apps. From the same file, it
-sets `_agent-guidance`'s `FLEET_WORKER_EVERY_HOURS` (from `CLAUDE_PLAN`)
+sets `_agent-guidance`'s `FLEET_WORKER_EVERY_HOURS` and `LOOP_WORKER_EVERY_HOURS` (from `CLAUDE_PLAN`),
+its `EVALS_REPO` and `ARTICLE_WATCH_FEED_URL` (see [routines](routines.md#fleet-worker)),
 and, once `skills-evals` exists, that repo's `SITE_REPO` and four federation
 ids. It skips any key left empty in `fleet.env`.
 
@@ -230,7 +231,14 @@ workflow isn't on the base branch yet:
   `pull_request_target`, which uses the base branch's workflow, and an empty
   repo has none, so it never reports on the first pull request;
 - anything that verifies `actions.lock` against GitHub, the hook pin or the
-  scheduled-run-health pin: steps 15 to 18.
+  scheduled-run-health pin: steps 15 to 18;
+- the daily `scheduled-run-health.yml` of `repo-settings`, `acsi-agentskills`,
+  `wsl-automation` and `skills-evals`: each calls `_agent-guidance`'s reusable
+  workflow at a sha that ships as forty zeros, so the run fails at startup
+  until step 16 pins it;
+- `repo-settings`' `plan` job, which runs when you merge its pull request (step
+  4): it mints a token from the settings-read App's client id and key, which
+  step 6 creates, so it fails until then.
 
 Nothing is protected before step 20, so these don't block the merge. Any
 other failure is real, so read it before you merge.

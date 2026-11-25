@@ -23,6 +23,12 @@ name: Fire fleet worker
 #   one fails that fire naming it, so a missed fire shows red. Fleet worker:
 #   FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER. Loop worker:
 #   LOOP_WORKER_FIRE_URL and LOOP_WORKER_FIRE_BEARER.
+# * EVALS_REPO (a repository variable, no default) says whether there is an
+#   eval loop for the Loop worker to serve: `none`, or <owner>/skills-evals.
+#   `none` skips the Loop worker's fire with a notice, before the cadence and
+#   missing-value checks, so a setup without the eval repository stays green.
+#   Unset or empty fails the Loop worker's fire naming it. The pace hold below
+#   reads the repository it names. The Fleet worker ignores it.
 # * Nothing from the event is interpolated into a `run:` block; the only
 #   `${{ }}` uses are the `env:` that hands the URL, bearer and cadence to
 #   the step.
@@ -108,6 +114,7 @@ jobs:
           EVERY_VAR: ${{ matrix.every_var }}
           EVERY_REQUIRED: ${{ matrix.every_required }}
           FIRE_TEXT: ${{ matrix.text }}
+          EVALS_REPO: ${{ vars.EVALS_REPO }}
         run: |
           set -euo pipefail
           case "$WORKER" in
@@ -115,6 +122,20 @@ jobs:
             loop) FIRE_BEARER="$LOOP_BEARER" ;;
             *) echo "::error::unknown worker: $WORKER"; exit 1 ;;
           esac
+          if [[ "$WORKER" == loop ]]; then
+            case "${EVALS_REPO:-}" in
+              none)
+                echo "::notice::skipped: EVALS_REPO is none, so there is no eval loop for the Loop worker to serve"
+                exit 0 ;;
+              "")
+                echo "::error::not configured: variable EVALS_REPO. It has no default; set it in this repository's Actions settings to none (no eval loop) or to <owner>/skills-evals. bootstrap/create-environments.sh sets it."
+                exit 1 ;;
+            esac
+            if [[ ! "$EVALS_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::variable EVALS_REPO must be none or <owner>/skills-evals"
+              exit 1
+            fi
+          fi
           if [[ "$EVERY_REQUIRED" == true && -z "${EVERY_HOURS:-}" ]]; then
             echo "::error::not configured: variable $EVERY_VAR (3, 6, 12, 24 or 168). It has no default; set it in this repository's Actions settings."
             exit 1
@@ -147,7 +168,7 @@ jobs:
           fi
           if [[ "$WORKER" == loop && "${GITHUB_EVENT_NAME:-}" == schedule ]]; then
             pace=$(mktemp -d)
-            src=https://github.com/example-adopter/skills-evals.git
+            src="https://github.com/$EVALS_REPO.git"
             hold=""
             if git clone -q --depth 1 --filter=blob:none --sparse "$src" "$pace/se" &&
               git -C "$pace/se" sparse-checkout set scripts harness evals vendor &&

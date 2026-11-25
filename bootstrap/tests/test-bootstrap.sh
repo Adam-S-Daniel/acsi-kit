@@ -150,6 +150,10 @@ for plan in pro max5x ultra max20x; do
   assert_eq "fleet_worker_hours $plan" "$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
     "$(case $plan in pro) echo 168;; max5x) echo 12;; ultra|max20x) echo 3;; esac)"
 done
+for plan in pro max5x ultra max20x; do
+  assert_eq "loop_worker_hours $plan" "$(bash -c '. "$1"; loop_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
+    "$(case $plan in pro) echo 168;; *) echo 24;; esac)"
+done
 # The starter's fire workflow must accept each plan's value: run its step by
 # hand with nothing configured, so it stops at "not configured", after the
 # value check and before any network call.
@@ -159,6 +163,12 @@ for plan in pro max5x max20x; do
   hours=$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")
   WORKER=fleet EVERY_REQUIRED=false EVERY_VAR=FLEET_WORKER_EVERY_HOURS URL_VAR=FLEET_WORKER_FIRE_URL BEARER_VAR=FLEET_WORKER_FIRE_BEARER FLEET_BEARER= LOOP_BEARER= EVERY_HOURS=$hours GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL= bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
   assert "the starter's fire workflow accepts $plan's $hours hours" has "$T/fire-step.out" "not configured"
+done
+for plan in pro max5x max20x; do
+  hours=$(bash -c '. "$1"; loop_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")
+  WORKER=loop EVERY_REQUIRED=true EVERY_VAR=LOOP_WORKER_EVERY_HOURS URL_VAR=LOOP_WORKER_FIRE_URL BEARER_VAR=LOOP_WORKER_FIRE_BEARER FLEET_BEARER= LOOP_BEARER= EVERY_HOURS=$hours EVALS_REPO=acme/skills-evals GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL= bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
+  assert "the starter's fire workflow accepts the Loop worker's $hours hours on $plan" has "$T/fire-step.out" "not configured: variable"
+  assert_not "the Loop worker's $hours hours on $plan are not refused" has "$T/fire-step.out" "must be 3, 6"
 done
 
 # ======================================================== plan sizing (acsi-kit#28)
@@ -344,6 +354,51 @@ n=$(log_lines "$GH_LOG")
 run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
 assert_eq "create-environments second run makes no write calls" "$(since "$n")" 0
 assert "create-environments second run says nothing to change" has "$OUT" "Nothing to change"
+# EVALS_REPO and ARTICLE_WATCH_FEED_URL on _agent-guidance, the two switches of
+# the base-only track. skills-evals exists here, so EVALS_REPO names it.
+AG='.values["acme-example/_agent-guidance||variable"]'
+assert_eq "EVALS_REPO names skills-evals once it exists" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+assert_eq "the optional article watch starts off (ARTICLE_WATCH_FEED_URL is none)" "$(jqs "$AG.ARTICLE_WATCH_FEED_URL")" none
+assert_eq "the fleet worker's cadence is still set" "$(jqs "$AG.FLEET_WORKER_EVERY_HOURS" | grep -cE '^(3|12|168)$')" 1
+assert_eq "LOOP_WORKER_EVERY_HOURS is set from CLAUDE_PLAN (max20x)" "$(jqs "$AG.LOOP_WORKER_EVERY_HOURS")" 24
+jqset "$AG.LOOP_WORKER_EVERY_HOURS = \"168\""
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify fails a LOOP_WORKER_EVERY_HOURS that differs from the plan's" has "$OUT" "FAIL: acme-example/_agent-guidance variable LOOP_WORKER_EVERY_HOURS is missing or differs from fleet.env"
+n=$(log_lines "$GH_LOG")
+run bash "$B/create-environments.sh" --config "$CFGP" --dry-run; rc=$?
+assert "the dry run prints the LOOP_WORKER_EVERY_HOURS correction" has "$OUT" "would have: set variable LOOP_WORKER_EVERY_HOURS in acme-example/_agent-guidance"
+assert_eq "the dry run writes nothing" "$(since "$n")" 0
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "create-environments corrects LOOP_WORKER_EVERY_HOURS" "$(jqs "$AG.LOOP_WORKER_EVERY_HOURS")" 24
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify passes LOOP_WORKER_EVERY_HOURS" has "$OUT" "PASS: acme-example/_agent-guidance variable LOOP_WORKER_EVERY_HOURS matches fleet.env"
+assert "verify passes EVALS_REPO when it matches whether skills-evals exists" has "$OUT" "PASS: acme-example/_agent-guidance variable EVALS_REPO matches fleet.env"
+assert "verify passes a set ARTICLE_WATCH_FEED_URL" has "$OUT" "PASS: acme-example/_agent-guidance variable ARTICLE_WATCH_FEED_URL is set"
+jqset "del($AG.EVALS_REPO)"
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify fails a missing EVALS_REPO" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be acme-example/skills-evals"
+jqset "$AG.EVALS_REPO = \"none\""
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify fails EVALS_REPO=none while skills-evals exists" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be acme-example/skills-evals (skills-evals exists)"
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "create-environments flips EVALS_REPO once skills-evals exists" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+# A feed URL the adopter set is theirs: never overwritten, and verify only needs it set.
+jqset "$AG.ARTICLE_WATCH_FEED_URL = \"https://feeds.example.com/articles.xml\""
+n=$(log_lines "$GH_LOG")
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "an adopter-set feed URL is not overwritten" "$(jqs "$AG.ARTICLE_WATCH_FEED_URL")" https://feeds.example.com/articles.xml
+assert_eq "an adopter-set feed URL makes no write call" "$(since "$n")" 0
+assert "an adopter-set feed URL is reported as left alone" has "$OUT" "variable ARTICLE_WATCH_FEED_URL (already set; left alone)"
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify accepts the adopter's feed URL" has "$OUT" "PASS: acme-example/_agent-guidance variable ARTICLE_WATCH_FEED_URL is set"
+jqset "del($AG.ARTICLE_WATCH_FEED_URL)"
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify fails an unset ARTICLE_WATCH_FEED_URL with the hint" has "$OUT" "FAIL: acme-example/_agent-guidance variable ARTICLE_WATCH_FEED_URL is not set (create-environments.sh sets it to none)"
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "an unset ARTICLE_WATCH_FEED_URL is set to none" "$(jqs "$AG.ARTICLE_WATCH_FEED_URL")" none
+n=$(log_lines "$GH_LOG")
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "the second run after both changes makes no write calls" "$(since "$n")" 0
 jqset '.envs["acme-example/skills-evals"]["routine-fire"].policies += [{"id": 1, "name": "feature/*", "type": "branch"}]'
 run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
 assert_eq "an extra branch policy fails the run" "$rc" 1
@@ -1068,6 +1123,30 @@ PY
 git -C "$w" commit -qam "fleet.yml without the example repos" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
 export BASE_ENGINE_LOG="$T/base-engine.log" REAL_ENGINE="$K/starter/repo-settings/scripts/repo_settings.py"; : > "$BASE_ENGINE_LOG"
 SB="$T/state-base/adopt.json"; mkdir -p "$T/state-base"; printf '{"installed": []}\n' > "$T/state-base/adopt.content-choices.json"
+# The two variables on _agent-guidance follow skills-evals: it is gone, but
+# EVALS_REPO still names it, so verify fails until create-environments.sh
+# flips it to none (a base-only run writes nothing that needs skills-evals).
+assert_eq "EVALS_REPO still names the gone skills-evals" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+run bash "$B/verify.sh" --config "$CFGB" --track base --only variables
+assert "verify fails EVALS_REPO naming a skills-evals that does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none (skills-evals does not exist)"
+run bash "$B/create-environments.sh" --config "$CFGB" --dry-run; rc=$?
+assert_eq "create-environments dry run on a base-only setup exits 0" "$rc" 0
+assert "the dry run prints the EVALS_REPO write" has "$OUT" "would have: set variable EVALS_REPO in acme-example/_agent-guidance"
+assert_eq "the dry run writes nothing" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+jqset "del($AG.EVALS_REPO, $AG.ARTICLE_WATCH_FEED_URL)"
+run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
+assert_eq "create-environments on a base-only setup exits 0" "$rc" 0
+assert_eq "a base-only setup sets EVALS_REPO to none" "$(jqs "$AG.EVALS_REPO")" none
+assert_eq "a base-only setup sets ARTICLE_WATCH_FEED_URL to none" "$(jqs "$AG.ARTICLE_WATCH_FEED_URL")" none
+n=$(log_lines "$GH_LOG")
+run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
+assert_eq "a second base-only run makes no write calls" "$(since "$n")" 0
+assert "a second base-only run says nothing to change" has "$OUT" "Nothing to change"
+jqset "$AG.EVALS_REPO = \"acme-example/skills-evals\""
+run bash "$B/verify.sh" --config "$CFGB" --track base --only variables
+assert "verify fails EVALS_REPO naming skills-evals when it does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none"
+run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
+assert_eq "EVALS_REPO is none again" "$(jqs "$AG.EVALS_REPO")" none
 read -r -a asks <<<"$(jq -r '[.steps[] | select(.track == "base" and .check.type == "ask" and .check.record == null) | "--mark", .id] | join(" ")' "$B/steps.json")"
 run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" "${asks[@]}"; rc=$?
 assert_eq "the base ask steps are marked" "$rc" 0
@@ -1082,6 +1161,10 @@ run env ADOPT_STATE_FILE="$SB" bash "$B/verify.sh" --config "$CFGB"; rc=$?
 assert_eq "verify of the whole setup passes a base-only setup" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'
 assert "it says the evals track was left out" has "$OUT" "SKIP: acme-example/skills-evals and the evals track's checks"
+# The shipped workflows' "off" branches, run from their parsed YAML.
+run python3 -I "$B/tests/check-workflow-gates.py"; rc=$?
+assert_eq "check-workflow-gates passes on the kit" "$rc" 0
+assert "it ran its 28 assertions" grep -qE '^28 assertions passed, 0 failed$' "$OUT"
 run bash "$B/regenerate.sh" --config "$CFGB" --check run-health-sha; rc=$?
 assert_eq "regenerate --check run-health-sha passes without skills-evals" "$rc" 0
 assert "it says skills-evals is left out" has "$OUT" "skip: acme-example/skills-evals does not exist yet"

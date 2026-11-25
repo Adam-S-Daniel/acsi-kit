@@ -78,6 +78,7 @@ and a smaller plan has a smaller week. `copy-starter.sh` uses it to size the
 | `stop_when_session_above` (5-hour window) | `0.90` | `0.90` | not set |
 | `judge_exclude_tiers` in `evals/roster-policy.yml` | `[fable, mythos]` | not set | not set |
 | Fleet worker (`FLEET_WORKER_EVERY_HOURS` on `_agent-guidance`) | weekly (`168`) | every 12 hours | every 3 hours |
+| Loop worker, with evals (`LOOP_WORKER_EVERY_HOURS` on `_agent-guidance`) | weekly (`168`) | daily (`24`) | daily (`24`) |
 | Agent changelog watcher (you set its schedule, [routines](routines.md#agent-changelog-watcher)) | weekly | daily | daily |
 | One week of the plan, in API-equivalent dollars (model) | about $140 ($120 to $280) | about $700 ($620 to $990) | about $1,400 ($1,200 to $1,700) |
 | Base routines, a week | about $11 | about $51 | about $129 |
@@ -197,13 +198,7 @@ this page" means every routine and scheduled task in [routines](routines.md).
 - **`CLAUDE_PLAN=pro` in `fleet.env`.** It sets the eval budget in points of
   a Pro week, the 90% five-hour stop, no Fable judge, and a weekly fleet
   worker (see the [table above](#which-plan)).
-- **`LOOP_WORKER_EVERY_HOURS=168`.** No script sets it ([variables and
-  secrets set by hand](../bootstrap/README.md#variables-and-secrets-set-by-hand)).
-  It is required, and `fleet-worker-fire.yml` accepts 3, 6, 12, 24 or 168. On
-  Pro, set `168`, the weekly slot (Tuesday 00:20 UTC):
-  `gh variable set LOOP_WORKER_EVERY_HOURS --repo <you>/_agent-guidance --body 168`.
-  A scheduled Loop worker fire is also skipped while your account is ahead of
-  its weekly pace.
+- **`LOOP_WORKER_EVERY_HOURS=168`.** `create-environments.sh` sets it for you on Pro, and it only matters once you add evals.
 - **Pick Sonnet on every task on this page.** When you save each scheduled
   task, choose Sonnet in its model selector instead of leaving the default.
   Claude Code's default model on Pro has been Opus since CLI v2.1.280
@@ -223,10 +218,9 @@ this page" means every routine and scheduled task in [routines](routines.md).
   ([routines](https://code.claude.com/docs/en/routines), read 2026-11-25).
 - **Schedule and leave off.** Schedule the changelog watcher weekly (`3 1 * * 1`),
   and keep the memory curation task on Sonnet. Leave the optional dashboard
-  refresh off. Leave [article lift](routines.md#article-lift) off too: right
-  after you merge the `_agent-guidance` starter pull request, run
-  `gh workflow disable article-watch.yml --repo <you>/_agent-guidance`.
-  Until article lift is configured, each hourly run fails.
+  refresh off. [Article lift](routines.md#article-lift) is off by default:
+  `create-environments.sh` sets `ARTICLE_WATCH_FEED_URL` to `none`, so each
+  hourly run is skipped with a notice. Leave it that way.
 - **Start with the base track only.** Add evals (`/adopt-evals`) after a
   week of watching the meter. At the worst end the base routines take 9% of
   a Pro week and evals another 30%.

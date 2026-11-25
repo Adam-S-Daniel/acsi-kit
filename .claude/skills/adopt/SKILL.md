@@ -107,6 +107,12 @@ is in `docs/quick-start.md`.
 - **Steps 14 to 18** (`regenerate.sh`) need the starter pull requests
   merged first; `regenerate.sh --check <task>` says what is still to do.
   `skills-locks` runs twice: once for the registry, then for the rest.
+- **Step 27** (the Fleet worker): one task only, the maintenance role, with
+  `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER`. Do not create the Loop
+  worker or set `LOOP_WORKER_*`: it serves the eval loop, and the evals track
+  (`/adopt-evals`, step 24) creates it. `create-environments.sh` has set
+  `EVALS_REPO` to `none`, so the workflow skips the Loop worker's fire and
+  stays green.
 - **Step 30** (memory curation): for the machine task, ask which system
   holds that machine's Claude Code sessions. On macOS, or on Windows with
   Claude Code running natively, offer a Claude desktop app scheduled task

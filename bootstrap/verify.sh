@@ -12,8 +12,10 @@
 #   environments    fleet-apply, plugin-runtime-review, routine-fire exist,
 #                   with their reviewer and branch policy (ENVIRONMENTS)
 #   variables       repo-settings' GUIDANCE_SYNC_APP_ID and (evals)
-#                   ROSTER_WRITER_APP_ID and SITE_REPO match fleet.env
-#                   (REPO_VARIABLES)
+#                   ROSTER_WRITER_APP_ID and SITE_REPO match fleet.env, and
+#                   _agent-guidance's EVALS_REPO is none while skills-evals
+#                   does not exist and <owner>/skills-evals once it does;
+#                   its ARTICLE_WATCH_FEED_URL is set (REPO_VARIABLES)
 #   federation      skills-evals' four ANTHROPIC_* federation ids match
 #                   fleet.env (REPO_VARIABLES; optional, so only when named)
 #   apps:<app>      one App (APPS): its id is in fleet.env, and its client id
@@ -187,6 +189,7 @@ for entry in "${REPO_VARIABLES[@]}"; do
   IFS='|' read -r r name src group <<<"$entry"
   if [ "$group" = federation ]; then sel federation off || continue; else sel "$group" || continue; fi
   tracked "$(variable_track "$r" "$src")" || continue
+  if [[ $src == evals:state && -z "${EVALS_HERE:-}" ]]; then EVALS_HERE=1; evals_repo_exists || EVALS_HERE=0; fi
   want=$(repo_variable_value "$src")
   if [ -z "$want" ]; then
     if [ "$group" = federation ] || [ "$name" = SITE_REPO ]; then fail "$O/$r variable $name: ${src#cfg:} is empty in fleet.env ($(variable_empty_hint "$name" "$group"))"
@@ -198,8 +201,14 @@ for entry in "${REPO_VARIABLES[@]}"; do
     if ! repo_variables "$O/$r"; then fail "$O/$r variables readable (HTTP $GH_HTTP)"; continue; fi
     REPO_VARS[$r]=$REPO_VARS_OUT
   fi
-  if grep -qxF -- "$name"$'\t'"$want" <<<"${REPO_VARS[$r]}"; then
+  if [[ $src == unset:* ]]; then
+    # Only that it is set: a value the adopter chose (a feed URL) is theirs.
+    if grep -qxF -- "$name" <<<"$(cut -f1 <<<"${REPO_VARS[$r]}")"; then pass "$O/$r variable $name is set"
+    else fail "$O/$r variable $name is not set (create-environments.sh sets it to $want)"; fi
+  elif grep -qxF -- "$name"$'\t'"$want" <<<"${REPO_VARS[$r]}"; then
     pass "$O/$r variable $name matches fleet.env"
+  elif [ "$src" = evals:state ]; then
+    fail "$O/$r variable $name should be $want ($([ "$EVALS_HERE" = 1 ] && echo "$EVALS_REPO exists" || echo "$EVALS_REPO does not exist")); it is missing or differs (run create-environments.sh)"
   else
     fail "$O/$r variable $name is missing or differs from fleet.env (run create-environments.sh)"
   fi

@@ -57,11 +57,25 @@ itself changes.
 
 Two tasks run from the one spec, each with its own API trigger: the **Fleet
 worker** (general maintenance) and the **Loop worker** (the continuous
-improvement system's work, kept inside the weekly eval cap). Create both. The
-Loop worker's trigger needs its own variable `LOOP_WORKER_FIRE_URL` and secret
-`LOOP_WORKER_FIRE_BEARER` on `_agent-guidance`, and the repository variable
-`LOOP_WORKER_EVERY_HOURS` (3, 6, 12, 24 or 168), which is required: unset, its
-fire fails naming it. A task whose prompt names no role runs both roles.
+improvement system's work, kept inside the weekly eval cap). On the base track,
+create the Fleet worker only. Add the Loop worker when you add evals
+(`/adopt-evals`), in the same visit as the eval runner: it serves the eval
+loop, so it has nothing to do without `skills-evals`. Its trigger needs its own
+variable `LOOP_WORKER_FIRE_URL` and secret `LOOP_WORKER_FIRE_BEARER` on
+`_agent-guidance`. Its cadence, `LOOP_WORKER_EVERY_HOURS`, is required by the
+workflow, so `create-environments.sh` sets it from `CLAUDE_PLAN`, like the
+Fleet worker's: weekly (`168`) on Pro, daily (`24`) on Max 5x and Ultra. A
+scheduled Loop worker fire is also skipped while your account is ahead of its
+weekly pace. A task whose prompt names no role runs both roles.
+
+`fleet-worker-fire.yml` reads one more variable, `EVALS_REPO` on
+`_agent-guidance`, with no default. `create-environments.sh` sets it to `none`
+while `skills-evals` does not exist, and to `<you>/skills-evals` when you run
+it again on the evals track. While it is `none`, each scheduled Loop worker
+fire is skipped with a notice (the run stays green), and
+[`impact-report.yml`](../starter/agent-guidance/.github/workflows/impact-report.yml)
+skips its publish to `skills-evals` the same way. Unset, both fail naming it.
+The Fleet worker ignores it.
 
 Prompts, exactly (with your owner). Keep the authorization sentence: without
 it, auto mode has refused the routine's label writes. Each lists only its
@@ -285,13 +299,13 @@ approves anything or edits the site repo.
 
 ## Article lift
 
-This is optional, and the kit doesn't set it up. `_agent-guidance`'s
+This is optional, and it is off until you turn it on. `_agent-guidance`'s
 `article-watch.yml` polls a feed of Anthropic engineering articles every
 hour. For each new article with `agent` in its title, it fires this routine
 once with the text "See how much lift you can get out of `<article url>`".
-Until it is configured, each hourly run fails and names the missing value,
-so either set it up or disable the workflow
-(`gh workflow disable article-watch.yml --repo <you>/_agent-guidance`).
+`create-environments.sh` sets `ARTICLE_WATCH_FEED_URL` to `none`, which skips
+each hourly run with a notice. It never overwrites a feed URL you set. If the
+variable is unset, each run fails and names it.
 
 | Setting | Value |
 |---|---|
@@ -299,9 +313,9 @@ so either set it up or disable the workflow
 | Model | Sonnet 5.5, set on the task, never the account default |
 | Spec | `_agent-guidance` [`docs/routines/article-lift.md`](../starter/agent-guidance/docs/routines/article-lift.md); give the routine a short prompt that points at it |
 
-Store the feed's URL, the routine's fire URL and its bearer on
-`<you>/_agent-guidance` as `ARTICLE_WATCH_FEED_URL`, `ARTICLE_WATCH_FIRE_URL`
-and the secret `ARTICLE_WATCH_FIRE_BEARER`
+To turn it on, set all three on `<you>/_agent-guidance`: the feed's URL as
+`ARTICLE_WATCH_FEED_URL` (replacing the `none`), the routine's fire URL as
+`ARTICLE_WATCH_FIRE_URL` and its bearer as the secret `ARTICLE_WATCH_FIRE_BEARER`
 ([by hand](../bootstrap/README.md#variables-and-secrets-set-by-hand)).
 
 Each run reads the article, opens `article-lift/<slug>` pull requests for
