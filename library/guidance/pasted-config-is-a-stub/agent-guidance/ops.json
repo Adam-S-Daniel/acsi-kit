@@ -1,0 +1,30 @@
+{
+  "ops": [
+    {
+      "op": "insert-section",
+      "file": "agents-md/base.md",
+      "fragment": "section.md",
+      "heading": "## Pasted config is a stub",
+      "follows": [
+        "## Working habits",
+        "## Working in these repos"
+      ]
+    },
+    {
+      "op": "coverage-row",
+      "file": "agents-md/eval-coverage.yml",
+      "fragment": "coverage-row.yml",
+      "id": "pasted-config-is-a-stub",
+      "follows": [
+        "working-habits",
+        "working-in-these-repos"
+      ]
+    },
+    {
+      "op": "impact-entry",
+      "file": "docs/guidance-impact.md",
+      "fragment": "impact-entry.md",
+      "heading": "## 2026-10-29 — pasted-config-is-a-stub — create"
+    }
+  ]
+}

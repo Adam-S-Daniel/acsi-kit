@@ -79,6 +79,19 @@ def tearDownModule() -> None:
     unittest.doModuleCleanups()
 
 
+def main_keeping_environ(argv: list[str]) -> int:
+    """`main(argv)` from inside a test, with `os.environ` put back afterwards.
+
+    `main()` writes `maintenance.auto=false` into `os.environ` for the run it
+    starts (`without_git_auto_maintenance`). Called in-process by a test, that
+    write outlived the test in a pytest-xdist worker and surfaced as stray
+    `GIT_CONFIG_*` variables in whichever test ran next, a failure that
+    depended on test order (CI run 45192063066, job 137752700298).
+    """
+    with mock.patch.dict(os.environ):
+        return main(argv)
+
+
 sys.path.insert(0, str(HARNESS_DIR))
 import roster  # noqa: E402
 import run_eval  # noqa: E402
@@ -149,6 +162,11 @@ def _write_positive_cooling_off_policy() -> Path:
         if n != 1:
             raise RuntimeError(f"{SHIPPED_POLICY} does not carry exactly one "
                                f"`{key}:` line to substitute")
+    # The shipped `arm_exclude_tiers` (Fable off the arms, 2026-11-23) is
+    # cleared, so the seating machinery stays tested on every family;
+    # test/issues/test_issue_arm_exclude_tiers.py covers the key itself.
+    text = re.sub(r"^arm_exclude_tiers: .*$", "arm_exclude_tiers: []", text,
+                  flags=re.MULTILINE)
     path = tmp / "roster-policy.yml"
     path.write_text(text, encoding="utf-8")
     return path
@@ -3495,7 +3513,7 @@ class CiShardTests(unittest.TestCase):
     def test_shard_without_jobs_is_refused(self):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            status = main(["--shard", "1/2"])
+            status = main_keeping_environ(["--shard", "1/2"])
         self.assertEqual(status, 2)
         self.assertIn("--shard needs --jobs", buf.getvalue())
 
@@ -8553,26 +8571,26 @@ class TestParallelPinAgreement(unittest.TestCase):
         text = ("# dev-only deps\n"
                "pyyaml==6.0.2\n"
                "\n"
-               "pytest==9.1.1\n"
+               "pytest==9.2.0\n"
                "pytest-xdist==3.8.0 # parallel runner\n")
         self.assertEqual(parallel_pin_disagreements(PARALLEL_PINS, text), [])
 
     def test_different_version_names_both_versions(self):
-        text = "pytest==9.1.1\npytest-xdist==3.7.0\n"
+        text = "pytest==9.2.0\npytest-xdist==3.7.0\n"
         problems = parallel_pin_disagreements(PARALLEL_PINS, text)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("3.7.0", problems[0])
         self.assertIn("3.8.0", problems[0])
 
     def test_missing_package_is_one_disagreement(self):
-        text = "pytest==9.1.1\n"
+        text = "pytest==9.2.0\n"
         problems = parallel_pin_disagreements(PARALLEL_PINS, text)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("pytest-xdist", problems[0])
 
     def test_underscore_and_hyphen_spellings_are_the_same_package(self):
         # PEP 503: pytest_xdist and pytest-xdist name the same package.
-        text = "pytest==9.1.1\npytest_xdist==3.8.0\n"
+        text = "pytest==9.2.0\npytest_xdist==3.8.0\n"
         self.assertEqual(parallel_pin_disagreements(PARALLEL_PINS, text), [])
 
     def test_non_exact_pin_is_a_disagreement(self):
@@ -28145,7 +28163,7 @@ class TestTheRunnerItself(unittest.TestCase):
         with mock.patch.dict(os.environ, {USER_MEMORY_ENV: str(watched)}), \
                 contextlib.redirect_stdout(buf), \
                 contextlib.redirect_stderr(buf):
-            status = main(["_MemoryGuardProbe."
+            status = main_keeping_environ(["_MemoryGuardProbe."
                            "test_writes_the_file_the_runner_watches"])
         out = buf.getvalue()
         self.assertIn("NARROWED RUN: targeting", out,
@@ -28186,7 +28204,7 @@ class TestTheRunnerItself(unittest.TestCase):
         with mock.patch.dict(os.environ, {USER_MEMORY_ENV: str(watched)}), \
                 contextlib.redirect_stdout(buf), \
                 contextlib.redirect_stderr(buf):
-            status = main(["_MemoryQuietProbe.test_touches_nothing"])
+            status = main_keeping_environ(["_MemoryQuietProbe.test_touches_nothing"])
         self.assertEqual(status, 0, buf.getvalue())
         self.assertEqual(watched.read_bytes(), before)
 
@@ -28213,7 +28231,7 @@ class TestTheRunnerItself(unittest.TestCase):
                          "inside itself")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            status = main(["-k", pattern])
+            status = main_keeping_environ(["-k", pattern])
         out = buf.getvalue()
         self.assertEqual(status, 2, out)
         self.assertIn(pattern, out,
@@ -28277,7 +28295,7 @@ class TestParallelJobs(unittest.TestCase):
             with self.subTest(argv=argv):
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf):
-                    status = main(argv)
+                    status = main_keeping_environ(argv)
                 out = buf.getvalue()
                 self.assertEqual(status, 2, out)
                 self.assertIn("FAILED", out)
@@ -28315,7 +28333,7 @@ class TestParallelJobs(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch("pytest.main", side_effect=fake_main_missing_one), \
                 contextlib.redirect_stdout(buf):
-            status = main(["-j", "2"])
+            status = main_keeping_environ(["-j", "2"])
         out = buf.getvalue()
         self.assertEqual(status, 1, out)
         self.assertIn("FAILED", out)
@@ -28330,7 +28348,7 @@ class TestParallelJobs(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch("pytest.main", side_effect=fake_main_matching), \
                 contextlib.redirect_stdout(buf):
-            status = main(["-j", "2"])
+            status = main_keeping_environ(["-j", "2"])
         out = buf.getvalue()
         self.assertEqual(status, 0, out)
         self.assertNotIn("FAILED", out)
@@ -28364,7 +28382,7 @@ class TestParallelJobs(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch("pytest.main", side_effect=fake_main_three_workers), \
                 contextlib.redirect_stdout(buf):
-            status = main(["-j", "auto"])
+            status = main_keeping_environ(["-j", "auto"])
         out = buf.getvalue()
         self.assertEqual(status, 0, out)
         self.assertIn(f"Ran {len(expected)} tests across 3 workers", out,
@@ -28448,7 +28466,7 @@ def memory_guard(memory: Path, before: str, status: int) -> int:
 # Read by both the ImportError message in main() and CiDispatchTests' pin on
 # ci.yml's Install dependencies step, so a version bump is one edit instead
 # of two copies drifting apart.
-PARALLEL_PINS = ("pytest==9.1.1", "pytest-xdist==3.8.0")
+PARALLEL_PINS = ("pytest==9.2.0", "pytest-xdist==3.8.0")
 
 _PIN_OPERATORS = ("==", ">=", "<=", "~=", "!=", ">", "<")
 
@@ -28702,6 +28720,19 @@ class TestWithoutGitAutoMaintenance(unittest.TestCase):
             ["git", "config", "--get", "maintenance.auto"],
             cwd=repo, env=env, capture_output=True, text=True, check=True)
         self.assertEqual(result.stdout.strip(), "false")
+
+    def test_a_test_running_main_in_process_leaves_os_environ_alone(self):
+        # Regression: main() puts the injection into os.environ for its run;
+        # called in-process, the helper tests use must not let it outlive the
+        # call, or a later test in the same worker sees stray GIT_CONFIG_*.
+        with mock.patch.dict(os.environ):
+            for name in [k for k in os.environ if k.startswith(("GIT_CONFIG_KEY_",
+                         "GIT_CONFIG_VALUE_")) or k == "GIT_CONFIG_COUNT"]:
+                del os.environ[name]
+            clean = dict(os.environ)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main_keeping_environ(["-j", "0"]), 2)
+            self.assertEqual(dict(os.environ), clean)
 
     def test_main_applies_it_to_os_environ(self):
         # main(["-j", "0"]) returns 2 early (test_dash_j_rejects_zero_a_

@@ -57,6 +57,9 @@ REPOS_YML_LINES = [
     ("    - ai-usage-dashboard\n    - claude-memory-map\n", ""),
     ("    - fastmail-actions\n", ""),
     ("    - rss-inator\n", ""),
+    # The source owner's small public library (re-pin 2026-11-23), added to
+    # cron_coverage.fleet; an adopter has no copy of it.
+    ("    - claude-plan-usage-estimator\n", ""),
     # The source owner's security-alerts snapshot repo (re-pin 2026-11-03).
     ("    # collect.yml snapshots the fleet's security alerts daily (cron), and the\n"
      "    # daily triage routine reads that snapshot, so a silent cron failure there\n"

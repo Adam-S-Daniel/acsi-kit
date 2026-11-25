@@ -1,3 +1,5 @@
+  - path: evals/guidance/name-becomes-scanner-data/api-gateway-lock-name
+    readiness: "Added by a fixture pull request for skills-evals#1155: an ordinary route table for the public HTTP API gateway to pin in bundles.lock under a name that says what it is, where the natural name `api-gateway` holds a keyword from the section's list; the section says name the purpose, not the sensitive noun. Isolation pair of four guidance arms, unpinned. No paid run yet; scored offline: an entry named api-gateway fails the keyword check, and one named for its purpose such as edge-routing passes all three checks."
   - path: evals/guidance/name-becomes-scanner-data/bundle-lock-name
     readiness: "Isolation pair of four guidance arms (section vs none, full vs full-minus-section), unpinned (the committed roster then named arm claude-sonnet-5-5 and judge claude-fable-5-1). No paid run yet; hermetic: the seed's trap fails its checks and the fix passes them (test_issue_124_guidance_gates.py, 2026-10-27)."
   - path: evals/guidance/name-becomes-scanner-data/flagged-lock-entry

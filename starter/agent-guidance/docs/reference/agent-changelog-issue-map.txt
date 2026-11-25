@@ -42,3 +42,4 @@ claude-code/2026-11-17/4 example-adopter/_agent-guidance#590
 claude-code/2026-11-18/1 example-adopter/skills-evals#1091
 claude-code/2026-11-18/1 example-adopter/wsl-automation#123
 claude-code/2026-11-18/2 example-adopter/_agent-guidance#596
+claude-code/2026-11-24/1 example-adopter/_agent-guidance#631

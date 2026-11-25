@@ -596,7 +596,7 @@ assert_not "the dry run records nothing" test -e "$T/state2/x.content-choices.js
 run env ADOPT_STATE_FILE="$T/state2/x.json" bash "$KC/bootstrap/add-content.sh" --config "$CFGP" --items recommended; rc=$?
 assert_eq "add-content recommended exits 0" "$rc" 0
 [ "$rc" = 0 ] || sed 's/^/    add-content: /' "$ERR"
-assert_eq "it records the eight recommended items" "$(jq -c '.installed | length' "$T/state2/x.content-choices.json")" 8
+assert_eq "it records the nine recommended items" "$(jq -c '.installed | length' "$T/state2/x.content-choices.json")" 9
 assert_eq "the skill is in the registry's layout" \
   "$(jq -c '.plugins["acsi-coding-anywhere"].skills | index("review-bash-ci-reliability") != null' "$KC/starter/agent-skills/scripts/plugin_layout.json")" true
 assert "the skill is in the registry's lock" grep -qF '"acsi-coding-anywhere/review-bash-ci-reliability": "sha256:' "$KC/starter/agent-skills/skills.lock"
@@ -620,7 +620,7 @@ assert_eq "add-content adds opinionated items next to the others" "$rc" 0
 assert "a core id is named as already there" has "$OUT" "note: workflow-path-audit is a core item, already in starter/"
 assert "the joint test module arrives with its second item" test -f "$KC/starter/skills-evals/test/issues/test_issue_71_trigger_set.py"
 assert "the git hook check is in the runner, and in every repo's copy" bash -c 'grep -q "rules-dir" "$1/agent-guidance/templates/agent-checks/agent-checks" && for t in "$1"/*/.githooks/agent-checks; do cmp -s "$t" "$1/agent-guidance/templates/agent-checks/agent-checks" || exit 1; done' _ "$KC/starter"
-assert_eq "the record keeps the earlier items" "$(jq -c '.installed | length' "$T/state2/x.content-choices.json")" 10
+assert_eq "the record keeps the earlier items" "$(jq -c '.installed | length' "$T/state2/x.content-choices.json")" 11
 assert "the added Python test classes parse" python3 -I -c 'import ast, sys; [ast.parse(open(p, encoding="utf-8").read()) for p in sys.argv[1:]]' \
   "$KC/starter/skills-evals/test/run_tests.py" "$KC/starter/skills-evals/test/issues/test_issue_124_guidance_gates.py"
 # verify.sh's content group reads the record and the default branches.
@@ -1240,6 +1240,11 @@ printf '\nSee [nowhere](docs/nope.md) and [no anchor](docs/routines.md#no-such-h
 kb tests/check-links.py "$T/kit"
 assert "check-links fails on a missing file" has "$OUT" "docs/nope.md does not exist"
 assert "check-links fails on a missing anchor" has "$OUT" "has no heading #no-such-heading"
+mk_kit
+sed -i 's/40 steps (27 base,/41 steps (27 base,/' "$T/kit/docs/before-you-start.md"
+kb tests/check-steps.py "$T/kit"; rc=$?
+assert_eq "check-steps fails on a wrong step count in before-you-start.md" "$rc" 1
+assert "check-steps names the expected counts" has "$OUT" "40 steps (27 base, 13 evals)"
 mk_kit
 jq '.steps[3].link = "docs/settings-and-apps.md#no-such-heading" | .steps[4].phase = 3 | .steps[5].check.groups = ["rulesets"]' \
   "$K/bootstrap/steps.json" > "$T/kit/bootstrap/steps.json"

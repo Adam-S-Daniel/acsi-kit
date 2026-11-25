@@ -1094,7 +1094,7 @@ import example_evals  # noqa: E402
         cells = plan_week.eval_cells(example_evals.checkout() / "evals", gates_doc, [], NOW)
 @@@ end
 === test/issues/test_issue_81_private_results.py
-# why: the planner test needs a private skill's committed fixtures (acsi-writing-style, from the private registry) beside a public one's; the kit ships neither (X2, X9), so it reads the example checkout, whose invented acsi-writing-style fixtures name the private registry, and checks the public workflow-path-audit gets a context instead of the left-out rename-pdfs (acsi-kit#72).
+# why: the planner test needs a private skill's committed fixtures (acsi-writing-style, from the private registry) beside a public one's; the kit ships neither (X2, X9), so it reads the example checkout, whose invented acsi-writing-style fixtures name the private registry, (acsi-kit#72). The source's control no longer names a skill (re-pin 2026-11-23), so only the checkout is retargeted.
 @@@ old
             out = plan_week.skill_contexts(
                 ROOT / "evals", Path(tree), "20261031T235959Z", {},
@@ -1103,11 +1103,6 @@ import example_evals  # noqa: E402
             import example_evals
             out = plan_week.skill_contexts(
                 example_evals.checkout() / "evals", Path(tree), "20261031T235959Z", {},
-@@@ end
-@@@ old
-        self.assertIn("rename-pdfs", out)
-@@@ new
-        self.assertIn("workflow-path-audit", out)
 @@@ end
 === test/issues/test_issue_local_eval.py
 # why: the nested-fixture run reads the invented writing-adrs fixtures under test/fixtures/evals/, which are the four the kit wrote; the source's own writing-adrs gained a fifth, pr-body-outgrows-itself, that the kit ships only in the library (acsi-kit#72).

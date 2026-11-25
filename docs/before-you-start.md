@@ -4,7 +4,7 @@
 
 | Need | Why |
 |---|---|
-| Claude Max or Ultra, ideally Ultra | Cloud sessions and routines (scheduled and API-triggered cloud runs) also work on Pro, but routines and evals draw on your plan's weekly allowance, and the kit's numbers are measured on Ultra (formerly Max 20x). Read [which plan](#which-plan) before you start on Pro or Max 5x. Nothing here has been tested on a Team plan. |
+| A paid Claude plan: Pro, Max 5x or Ultra | Every paid plan can run cloud sessions and scheduled tasks ([Anthropic's routines page](https://code.claude.com/docs/en/routines), read 2026-11-25). They draw on your plan's limits like any session. The kit's numbers were measured on Ultra (formerly Max 20x), so a smaller plan runs the same system more slowly. Set `CLAUDE_PLAN` and read [which plan](#which-plan) before you start. Nothing here has been tested on a Team plan. |
 | Claude Code, current release | Needed for hooks, plugins, and skills. The eval harness doesn't pin the CLI, so it fails loudly when a release changes behavior. |
 | A GitHub account, and optionally a second | The exports name two owners throughout ([one owner or two](#one-owner-or-two)). |
 | A GitHub account on any plan, **Free included** | Set `PLAN=free` in `fleet.env` and every step works on a free account. A paid plan (Pro for a personal account, Team for an organization) only adds rulesets and environments on the three private repos and lets you make three more repos private. See [free or paid](#free-or-paid-github-plan). |
@@ -32,11 +32,13 @@ draw on your plan's allowance, like any session.
 
 ## What it costs
 
-- **Hands-on setup:** the [quick start](quick-start.md)'s 35 steps (28 base,
-  7 evals) come to about 40 commands and browser actions, or roughly one to
-  two days. Most of that goes to the browser steps (creating and installing
-  six GitHub Apps, saving six routines) and to reviewing six starter pull
-  requests.
+- **Hands-on setup:** the [quick start](quick-start.md)'s 40 steps (27 base,
+  13 evals) come to roughly one to two days. Two of the evals steps are
+  optional. Most of the time goes to the browser steps (creating and
+  installing six GitHub Apps, saving six routines) and to reviewing six
+  starter pull requests. On GitHub Free it is five Apps, because
+  `create-apps.sh` skips `settings-admin`: its key would live in an
+  environment of the private `repo-settings`, and Free has none there.
 - **Calendar time:** most of the rest is waiting on the eval budget, not
   work. `skills-evals`' `evals/budget.yml` gives all automated evals 30% of
   the weekly allowance (`weekly_cap: 0.30`) and reserves 0.0105 for one eval
@@ -184,13 +186,62 @@ Both plans run the whole kit, just more slowly:
   routines and evals together take about 40% of the week, so watch the meter
   during the first week.
 - **Pro.** The fleet worker fires once a week, and evals cover the core
-  fixtures about once a week. Schedule the changelog watcher weekly, set
-  the memory curation task's model to Sonnet (the owner's $4.54 fire ran on
-  Opus), and leave the optional dashboard refresh off, since one refresh
-  cost the owner $7.59. At the worst end, the base routines take 9% of
-  the week and evals another 30%. A weekly fleet worker takes at most three
+  fixtures about once a week. [What to set, and what to leave
+  off](#on-pro-what-to-set-and-what-to-leave-off) is below.
+
+### On Pro: what to set, and what to leave off
+
+These are the settings that keep the kit inside a Pro week. "Every task on
+this page" means every routine and scheduled task in [routines](routines.md).
+
+- **`CLAUDE_PLAN=pro` in `fleet.env`.** It sets the eval budget in points of
+  a Pro week, the 90% five-hour stop, no Fable judge, and a weekly fleet
+  worker (see the [table above](#which-plan)).
+- **`LOOP_WORKER_EVERY_HOURS=168`.** No script sets it ([variables and
+  secrets set by hand](../bootstrap/README.md#variables-and-secrets-set-by-hand)).
+  It is required, and `fleet-worker-fire.yml` accepts 3, 6, 12, 24 or 168. On
+  Pro, set `168`, the weekly slot (Tuesday 00:20 UTC):
+  `gh variable set LOOP_WORKER_EVERY_HOURS --repo <you>/_agent-guidance --body 168`.
+  A scheduled Loop worker fire is also skipped while your account is ahead of
+  its weekly pace.
+- **Pick Sonnet on every task on this page.** When you save each scheduled
+  task, choose Sonnet in its model selector instead of leaving the default.
+  Claude Code's default model on Pro has been Opus since CLI v2.1.280
+  ([model configuration](https://code.claude.com/docs/en/model-config), read
+  2026-11-25). The eval mix measured $12.35 a point on Sonnet and $17.15 on
+  Opus ([what the shares rest on](#what-the-shares-rest-on)). Never pick a
+  Fable model ([Fable on your plan](https://support.claude.com/en/articles/15424964-claude-fable-models-on-your-plan),
+  read 2026-11-25) or a 1M-context variant of a 4.6 model: on Pro they bill
+  usage credits (the model configuration page, read 2026-11-25).
+- **Check usage credits before the first routine runs.** Open
+  [claude.ai/settings/usage](https://claude.ai/settings/usage). Either leave
+  usage credits off or set a monthly cap you accept
+  ([manage usage credits](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans),
+  read 2026-11-25). With credits off, a routine that reaches your limit is
+  rejected until the window resets, which is the safe failure. With them on,
+  it keeps running and bills the overage
+  ([routines](https://code.claude.com/docs/en/routines), read 2026-11-25).
+- **Schedule and leave off.** Schedule the changelog watcher weekly (`3 1 * * 1`),
+  and keep the memory curation task on Sonnet. Leave the optional dashboard
+  refresh off. Leave [article lift](routines.md#article-lift) off too: right
+  after you merge the `_agent-guidance` starter pull request, run
+  `gh workflow disable article-watch.yml --repo <you>/_agent-guidance`.
+  Until article lift is configured, each hourly run fails.
+- **Start with the base track only.** Add evals (`/adopt-evals`) after a
+  week of watching the meter. At the worst end the base routines take 9% of
+  a Pro week and evals another 30%.
+- **What Pro changes about pace.** A weekly fleet worker takes at most three
   `agent-ready` issues a week, so press **Run now** on its routine when you
-  want a pass sooner.
+  want a pass sooner. Evals make about one pass over the core fixtures a
+  week.
+- **What is the same on every plan.** The limits are hourly: 100 scheduled
+  runs per account, 30 API fires per task and 100 API fires per account.
+  There is no daily cap, and a schedule can't run more often than hourly.
+  Scheduled tasks are a research preview, so these limits may change
+  ([routines](https://code.claude.com/docs/en/routines), read 2026-11-25).
+  Cloud sessions count toward your plan's limits, with no separate charge
+  for the cloud VM ([Claude Code on the web](https://code.claude.com/docs/en/claude-code-on-the-web),
+  read 2026-11-25).
 
 If the first week's meter shows the worst end, turn things off in this
 order: first evals (the base works without `skills-evals`), then the fleet
@@ -267,6 +318,18 @@ applies this from `PLAN`:
   through `repo-settings.yml`'s approved job. The engine logs the skip.
 - **Paid:** the private repos get rulesets and environments too, and
   `_agent-guidance`, `skills-evals` and `wsl-automation` may be private.
+
+GitHub Actions minutes are the other difference. These are estimates from the
+shipped schedules, counting each job as at least one minute (estimated
+2026-11-25, not measured). On Free, only private repos count against the 2,000
+included minutes a month. Those are `repo-settings` (two daily workflows and
+one weekly, about 65 minutes a month from schedules, and 120 to 200 with pull
+requests) and `acsi-agentskills-private` (no scheduled workflow), so Free has
+ample room. Standard-runner minutes in public repos are free. On a paid plan,
+think before you make a repo private. `skills-evals`' schedules alone come to
+roughly 4,500 to 4,700 minutes a month (two workflows run every 30 minutes and
+one hourly), more than GitHub Pro's 3,000. `_agent-guidance` comes to roughly
+1,500, or roughly 800 with `article-watch.yml` disabled.
 
 ## Where to work
 

@@ -6,6 +6,7 @@
       "fragment": "section.md",
       "heading": "## Anything you name gets its link",
       "follows": [
+        "## Pasted config is a stub",
         "## Working habits",
         "## Working in these repos"
       ]
@@ -16,6 +17,7 @@
       "fragment": "coverage-row.yml",
       "id": "anything-you-name-gets-its-link",
       "follows": [
+        "pasted-config-is-a-stub",
         "working-habits",
         "working-in-these-repos"
       ]
