@@ -115,6 +115,7 @@ instead of text:
   |---|---|
   | `skill-shell` | a `SKILL.md` or command file that runs a shell command when it loads |
   | `secret-file` | a committed `.env` or key file |
+  | `privacy` | on push, a ref name or commit message that holds this machine's account name or hostname, or a term in your privacy denylist (a file outside any repo; without one only the machine's own names are checked) |
   | `local-identity` | a changed file that holds this machine's account name in a home path, or its hostname (not run in CI) |
   | `agents-md-size` | a root `AGENTS.md` over the 32 KiB Codex reads |
   | `gha-template-injection` | a workflow expression that zizmor's template-injection audit flags |

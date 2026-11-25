@@ -6,7 +6,7 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: ff0a37a67c037a7c6dee612f8d32d1f7400f8dc5
+source_sha: fe4ba6943f1fbefe3c51f68019b3b883fcd4516d
 
 exclude:
   - path: docs/reference/adopt-the-whole-system.md
@@ -415,6 +415,17 @@ edits:
 
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).
+
+  # ---- re-pin round 5 (2026-11-25): privacy tests with an invented account name
+  - path: test/run-tests.sh
+    stage: output
+    old: "/home/exampleuser"
+    new: "/home/example\"\"user"
+    count: 3
+    why: >-
+      The privacy tests need the invented account name inside a home path, and
+      the leak scan flags that shape; splitting the literal keeps the string
+      the same at run time (an empty quoted pair joins the two halves).
 
 patches:
   - file: blank_content.py

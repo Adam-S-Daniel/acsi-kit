@@ -66,6 +66,11 @@ list item: "- `NAME`: where it lives and how to set it".
 listed here, and on a listed name that a script already sets or nothing
 reads.
 
+- `PRIVACY_DENYLIST_UPDATED_AT`: a repository variable on `<you>/repo-settings`,
+  the time the denylist was last stored. `scripts/set_privacy_denylist.py` in
+  `repo-settings` sets it when you run it, and the `secrets` surface reads it
+  to tell a stale copy from a current one.
+
 These first values publish the Evals Explorer to your own website
 (`skills-evals`' `site-sync.yml` and `site-freshness.yml`,
 [routines](../docs/routines.md#dashboard-refresh)). Neither workflow has a

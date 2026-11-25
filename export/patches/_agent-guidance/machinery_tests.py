@@ -78,7 +78,7 @@ LANE_EDITS = [
         [entry] = self.entries()
         self.assertEqual(entry["event"], "pre-push")
         self.assertEqual(entry["checks"], expected_checks(
-            ["staged-index", "push-to-default", "persistent-delete", "bump-branch-push", "rules-dir", "secret-file", "skill-shell"], declared_lessons()))
+            ["staged-index", "push-to-default", "persistent-delete", "bump-branch-push", "privacy", "rules-dir", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], ["push-to-default"])''',
      '''    def test_refused_pre_push_is_logged_as_pre_push(self):
         self.commit(self.repo, {".env": "A=1\\n"})
@@ -89,7 +89,7 @@ LANE_EDITS = [
         self.assertIn("agent-checks: .env: looks like a secret", out.stderr)
         [entry] = self.entries()
         self.assertEqual(entry["event"], "pre-push")
-        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell"], declared_lessons()))
+        self.assertEqual(entry["checks"], expected_checks(["privacy", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], ["secret-file"])'''),
     ('''        self.assertEqual(entry["checks"], expected_checks(["rules-dir", "secret-file", "skill-shell", "repo-local"], declared_lessons()))''',
      '''        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell", "repo-local"], declared_lessons()))'''),
@@ -100,7 +100,7 @@ LANE_EDITS = [
         self.assertGreaterEqual(len(calls), 5)'''),
     ('''        self.assertLessEqual({"rules-dir", "secret-file", "skill-shell", "staged-index", "push-to-default", "persistent-delete",
                               "bump-branch-push",
-                              "repo-local", "pr-tldr", "local-identity"}, ids)''',
+                              "repo-local", "pr-tldr", "local-identity", "privacy"}, ids)''',
      '''        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)'''),
 ]
 

@@ -672,7 +672,7 @@ class RunLogTests(LaneTestCase):
         self.assertIn("agent-checks: .env: looks like a secret", out.stderr)
         [entry] = self.entries()
         self.assertEqual(entry["event"], "pre-push")
-        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell"], declared_lessons()))
+        self.assertEqual(entry["checks"], expected_checks(["privacy", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], ["secret-file"])
 
     def test_repo_local_check_is_logged(self):

@@ -47,11 +47,12 @@ PLUGINS = {
         "the owner's skills for any Claude surface, coding or not: the claude.ai web and iOS apps, "
         "Claude in Chrome, the Claude Desktop app, and Claude Code. Writing ADRs and resolving task ambiguity. "
         "It also installs the fleet guidance into Claude Code's user memory at session start, "
-        "and in Claude Code blocks a GitHub write that lacks the agent marker.",
+        "and in Claude Code and Codex blocks a GitHub write that lacks the agent marker or holds a "
+        "privacy-denylisted detail.",
         "Skills for any Claude surface, coding or not: the claude.ai web and iOS apps, "
         "Claude in Chrome, the Claude Desktop app, and Claude Code. It also installs the fleet guidance "
-        "into Claude Code's user memory at session start, and in Claude Code blocks a GitHub write that "
-        "lacks the agent marker.",
+        "into Claude Code's user memory at session start, and in Claude Code and Codex blocks a GitHub "
+        "write that lacks the agent marker or holds a privacy-denylisted detail.",
         ["adr", "documentation", "requirements", "ambiguity", "planning"],
         ["skills", "writing", "planning"],
     ),
@@ -80,6 +81,19 @@ PLUGINS = {
         "Cowork.",
         ["pdf", "ocr", "fastmail", "email", "identities", "from-address", "browser", "claude-in-chrome"],
         ["skills", "documents", "browser"],
+    ),
+}
+
+
+# The source's marketplace.json kept an older description for a plugin after
+# its plugin.json moved on (the privacy-denylist sentence); the anchor for the
+# marketplace entry is the text it still has, the replacement is the same.
+MARKET_OLD_DESC = {
+    "acsi-anything-anywhere": (
+        "the owner's skills for any Claude surface, coding or not: the claude.ai web and iOS apps, "
+        "Claude in Chrome, the Claude Desktop app, and Claude Code. Writing ADRs and resolving task ambiguity. "
+        "It also installs the fleet guidance into Claude Code's user memory at session start, "
+        "and in Claude Code blocks a GitHub write that lacks the agent marker."
     ),
 }
 
@@ -114,7 +128,7 @@ def apply(root: Path, ctx) -> None:
          '"description": "Reusable agent skills, packaged'),
     ]
     for name, (old_desc, new_desc, old_kw, new_kw) in PLUGINS.items():
-        market += [(f'"description": {json.dumps(old_desc)}', f'"description": {json.dumps(new_desc)}'),
+        market += [(f'"description": {json.dumps(MARKET_OLD_DESC.get(name, old_desc))}', f'"description": {json.dumps(new_desc)}'),
                    (f'"keywords": {_inline(old_kw)}', f'"keywords": {_inline(new_kw)}')]
         _sub(root, f"plugins/{name}/.claude-plugin/plugin.json", [
             (f'"description": {json.dumps(old_desc)}', f'"description": {json.dumps(new_desc)}'),

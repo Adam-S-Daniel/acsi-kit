@@ -2941,3 +2941,25 @@ Reverse: re-pin each source to its "Before" sha, remove the `pasted-config-is-a-
 The fix is isolation, not ordering. A manifest's `suite:` block may say `venv: true`; `run_suites.py` then runs `python3 -m venv` under that suite's temporary directory and puts it first on `PATH` (with `VIRTUAL_ENV`) for that suite's setup and command only. The venv is deleted with the copy. Only `skills-evals` sets it, because it is the only setup that installs Python packages; the others probe the interpreter and keep the plain environment. CI's "Install suite dependencies" step still installs `agent-skills`' and `repo-settings`' requirements into the shared interpreter, serially, before any suite starts, so it does not race; its pins agree with each other. The `test` job's `markdown-it-py==4.2.0` runs alone in its own job, so it is no part of this race and is unchanged. `export/tests/test_run_suites.py` proves the isolation with fake suites.
 
 Reverse: remove `venv_env` and the `venv` branch in `run_one`, the `venv: true` line in `export/manifests/skills-evals.yml`, the new tests, and the README and comment lines that mention it.
+
+## Re-pin round 23 (2026-11-25): the held-back re-sync, `_agent-guidance` and `agentskills`
+
+The daily re-sync held back `_agent-guidance` and `agentskills`; the fix routine moved every public source and followed each change.
+
+- `_agent-guidance` added a `privacy` check to the agent-checks runner (`privacy_push_ref`, called per pushed ref: a ref name or commit message holding the machine's account name or hostname, or a term in the owner's privacy denylist; `templates/agent-checks/privacy-denylist.py` ships beside the runner). The call sits inside the pre-push block that `blank_content.py` replaces, so its anchor now includes the line. The kit keeps the check, because it needs nothing fleet-specific: the replacement calls `privacy_push_ref` in the trimmed loop, `machinery_tests.py` expects `privacy` in the pre-push run log and the core ids, and `docs/guidance.md` lists it in the checks table.
+- `_agent-guidance`'s new privacy tests spell an invented account name inside home paths in `test/run-tests.sh`. The leak scan flags that shape, so an `edits` entry splits the literal (`/home/example""user`), which is the same string at run time.
+- `agentskills` changed the anything-anywhere plugin description in `plugin.json` (the hook now also runs in Codex and blocks a privacy-denylisted detail) but not in `marketplace.json`. `blank_registry.py` now anchors the two files on their own text (`MARKET_OLD_DESC`) and writes the new wording to both.
+- `repo-settings` imports `os` itself now, so the `import os` edit in `kit_config.py` is dropped. Its workflow gained a workflow-level `env:` with the privacy-denylist stamp; the kit's two App-id variables now join that block. It also added a `secrets` surface (`PRIVACY_DENYLIST` fan-out): the App permissions it needs are in `starter/repo-settings/README.md` ("Secrets fan-out") and a sentence in `docs/settings-and-apps.md`. `bootstrap/create-apps.sh` and `bootstrap/lib/common.sh` still create the two settings Apps without the Secrets permission; that is left for the owner to decide.
+
+Tests: `python3 -m pytest export/tests -q -p no:cacheprovider`, `bash bootstrap/tests/test-bootstrap.sh`, and `export.py --check`; results are in the pull request. Pester was not run (cloud session).
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `ff0a37a67c03` | `fe4ba6943f1f` |
+| agentskills | `b7c639206bb1` | `eb945793e28c` |
+| repo-settings | `4eeed17191dd` | `18d2dbfc2b77` |
+| skills-evals | `ea84ca96c028` | `4f013ff360e6` |
+| wsl-automation | `d0eb45224f13` | `a0ea11186db6` |
+| agentskills-private | `c5b1bc9dfaae` | unchanged |
+
+Reverse: re-pin each source to its "Before" sha, drop `MARKET_OLD_DESC` and the two description edits in `blank_registry.py`, the `privacy_push_ref` line and the `privacy` entries in `blank_content.py` and `machinery_tests.py`, the `/home/example""user` entry in `export/manifests/_agent-guidance.yml`, restore the `import os` edit and the old workflow edit in `kit_config.py`, and remove the `privacy` row and the Secrets sentence from the docs.

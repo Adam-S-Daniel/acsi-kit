@@ -87,7 +87,6 @@ FLEET_EDITS = [
 ]
 
 ENGINE_EDITS = [
-    ("import json\nimport re\n", "import json\nimport os\nimport re\n"),
     ('''def _bypass_entries(actors: list | None) -> list[dict]:''',
      '''# An account-specific id (a GitHub App's) is written in fleet.yml as
 # "${NAME}" and read from the environment variable NAME when the ruleset is
@@ -118,18 +117,18 @@ def _bypass_entries(actors: list | None) -> list[dict]:'''),
 ]
 
 WORKFLOW_EDITS = [
-    ('''permissions:
-  contents: read
+    # The source's workflow-level env block now holds the privacy-denylist
+    # stamp; the kit's two App-id variables join it (one env: key per file).
+    ('''env:
+  PRIVACY_DENYLIST_UPDATED_AT: ${{ vars.PRIVACY_DENYLIST_UPDATED_AT }}
 
 jobs:''',
-     '''permissions:
-  contents: read
-
-# Account-specific App ids that fleet.yml names as "${NAME}" (the adoption
-# kit's DECISIONS C12): repository variables the kit's bootstrap sets. The
-# engine refuses to render a ruleset whose id is unset, so a missing variable
-# fails the plan instead of dropping a bypass.
-env:
+     '''env:
+  PRIVACY_DENYLIST_UPDATED_AT: ${{ vars.PRIVACY_DENYLIST_UPDATED_AT }}
+  # Account-specific App ids that fleet.yml names as "${NAME}" (the adoption
+  # kit's DECISIONS C12): repository variables the kit's bootstrap sets. The
+  # engine refuses to render a ruleset whose id is unset, so a missing variable
+  # fails the plan instead of dropping a bypass.
   GUIDANCE_SYNC_APP_ID: ${{ vars.GUIDANCE_SYNC_APP_ID }}
   ROSTER_WRITER_APP_ID: ${{ vars.ROSTER_WRITER_APP_ID }}
 

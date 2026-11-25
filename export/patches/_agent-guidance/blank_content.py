@@ -269,6 +269,7 @@ check_paths() {
         esac
         continue
       fi
+      privacy_push_ref "$remote" "$remote_ref" "$local_oid" "$remote_oid"
       # The consumer lock bumper (_agent-guidance scripts/bump-consumer-locks.sh)
       # owns this branch. Deleting it, above, is the way to free it.
       if [ "$remote_ref" = refs/heads/skills-lock-bump/update ]; then
@@ -280,6 +281,7 @@ check_paths() {
       [ -n "${remote_ref:-}" ] || continue
       # A delete pushes no content to check.
       is_zero "$local_oid" && continue
+      privacy_push_ref "$remote" "$remote_ref" "$local_oid" "$remote_oid"
 '''),
 ]
 

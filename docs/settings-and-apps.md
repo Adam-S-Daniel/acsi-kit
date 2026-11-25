@@ -157,6 +157,13 @@ nightly drift report, the skills-lock bumper, and the Dependabot sweep.
 secret because its gates check that both values exist before minting a
 token. App names are `<APP_NAME_PREFIX>-<app>`.
 
+The shipped `fleet.yml` declares a `secrets` surface (`PRIVACY_DENYLIST`),
+which needs one more permission than the table lists: **Secrets: Read &
+write** on `settings-admin` and **Secrets: Read** on `settings-read`, accepted
+on each installation. Until then each repo's `fanout[PRIVACY_DENYLIST]` record is an `error`
+naming the HTTP failure. See
+"Secrets fan-out" in `starter/repo-settings/README.md`.
+
 The base needs only the three fleet-wide Apps, created in step 6.
 `eval-improve`, `roster`, and `registry-read` serve only evals and keep
 their credentials in `skills-evals`. `/adopt-evals` creates and installs
