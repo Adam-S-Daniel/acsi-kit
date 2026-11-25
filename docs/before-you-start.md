@@ -34,8 +34,8 @@ draw on your plan's allowance, like any session.
 
 ## What it costs
 
-- **Hands-on setup:** the [quick start](quick-start.md)'s 40 steps (27 base,
-  13 evals) come to roughly one to two days. Two of the evals steps are
+- **Hands-on setup:** the [quick start](quick-start.md)'s 41 steps (27 base,
+  14 evals) come to roughly one to two days. Two of the evals steps are
   optional. Most of the time goes to the browser steps (creating and
   installing six GitHub Apps, saving six routines) and to reviewing six
   starter pull requests. On GitHub Free it is five Apps, because

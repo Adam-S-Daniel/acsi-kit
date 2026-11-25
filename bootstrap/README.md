@@ -127,7 +127,9 @@ The same workflow fires a second task, the Loop worker
 ([routines](../docs/routines.md#fleet-worker)), with its own values. It serves
 the eval loop, so it belongs to the evals track: while `EVALS_REPO` is `none`
 (a base-only setup), its fire is skipped with a notice and needs none of these.
-Once `skills-evals` exists, set them. Its cadence, `LOOP_WORKER_EVERY_HOURS`,
+Once `skills-evals` exists, set them before `create-environments.sh` runs again
+(the evals track's step 41, before step 37): that run flips `EVALS_REPO` to
+`skills-evals`, and a scheduled fire then fails while either is unset. Its cadence, `LOOP_WORKER_EVERY_HOURS`,
 is not among them: `create-environments.sh` sets it from `CLAUDE_PLAN`, like
 the fleet worker's (168 on Pro, else 24), on every track.
 

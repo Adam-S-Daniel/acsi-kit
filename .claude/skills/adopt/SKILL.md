@@ -113,7 +113,7 @@ is in `docs/quick-start.md`.
 - **Step 27** (the Fleet worker): one task only, the maintenance role, with
   `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER`. Do not create the Loop
   worker or set `LOOP_WORKER_*`: it serves the eval loop, and the evals track
-  (`/adopt-evals`, step 24) creates it. `create-environments.sh` has set
+  (`/adopt-evals`, step 41) creates it. `create-environments.sh` has set
   `EVALS_REPO` to `none`, so the workflow skips the Loop worker's fire and
   stays green.
 - **Step 30** (memory curation): for the machine task, ask which system

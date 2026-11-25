@@ -1360,10 +1360,10 @@ kb tests/check-links.py "$T/kit"
 assert "check-links fails on a missing file" has "$OUT" "docs/nope.md does not exist"
 assert "check-links fails on a missing anchor" has "$OUT" "has no heading #no-such-heading"
 mk_kit
-sed -i 's/40 steps (27 base,/41 steps (27 base,/' "$T/kit/docs/before-you-start.md"
+sed -i 's/41 steps (27 base,/42 steps (27 base,/' "$T/kit/docs/before-you-start.md"
 kb tests/check-steps.py "$T/kit"; rc=$?
 assert_eq "check-steps fails on a wrong step count in before-you-start.md" "$rc" 1
-assert "check-steps names the expected counts" has "$OUT" "40 steps (27 base, 13 evals)"
+assert "check-steps names the expected counts" has "$OUT" "41 steps (27 base, 14 evals)"
 mk_kit
 jq '.steps[3].link = "docs/settings-and-apps.md#no-such-heading" | .steps[4].phase = 3 | .steps[5].check.groups = ["rulesets"]' \
   "$K/bootstrap/steps.json" > "$T/kit/bootstrap/steps.json"

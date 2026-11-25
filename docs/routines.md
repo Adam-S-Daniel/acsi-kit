@@ -59,8 +59,10 @@ Two tasks run from the one spec, each with its own API trigger: the **Fleet
 worker** (general maintenance) and the **Loop worker** (the continuous
 improvement system's work, kept inside the weekly eval cap). On the base track,
 create the Fleet worker only. Add the Loop worker when you add evals
-(`/adopt-evals`), in the same visit as the eval runner: it serves the eval
-loop, so it has nothing to do without `skills-evals`. Its trigger needs its own
+(`/adopt-evals`, step 41): it serves the eval loop, so it has nothing to do
+without `skills-evals`. Create it before you run `create-environments.sh` on
+the evals track (step 37): that run flips `EVALS_REPO` to `skills-evals`, after
+which a scheduled Loop worker fire fails while its URL or bearer is unset. Its trigger needs its own
 variable `LOOP_WORKER_FIRE_URL` and secret `LOOP_WORKER_FIRE_BEARER` on
 `_agent-guidance`. Its cadence, `LOOP_WORKER_EVERY_HOURS`, is required by the
 workflow, so `create-environments.sh` sets it from `CLAUDE_PLAN`, like the

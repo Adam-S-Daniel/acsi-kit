@@ -30,6 +30,9 @@
    settings needs variables) is checked by an earlier step of the same
    track, or, for an evals step's need on the base track, by any base step
    (/adopt-evals runs every base step first).
+6. The step that sets the Loop worker's fire URL and bearer comes before the
+   first evals step that runs create-environments.sh, which flips EVALS_REPO
+   to skills-evals (after which a scheduled Loop worker fire needs both).
 
 Prints "N assertions passed" and exits 1 on any failure. Standard library only.
 """
@@ -197,6 +200,23 @@ for s in STEPS:
         check(f"step {s.get('id')} ({tr}): {g} needs {missing}, which no earlier step of that track checks",
               not missing)
     seen |= targets(s)
+
+# fleet-worker-fire.yml fires the Loop worker on schedule once EVALS_REPO names
+# a repo, and fails while its fire URL or bearer is unset. The evals track's
+# first create-environments.sh run flips EVALS_REPO (lib/common.sh, evals:state), so
+# the step that sets the Loop worker's URL and bearer must come first, or a
+# scheduled fire between the two steps is red.
+pos = {s.get("id"): i for i, s in enumerate(STEPS)}
+loop_steps = [s["id"] for s in STEPS
+              if "LOOP_WORKER_FIRE_URL" in s.get("run", "") and "LOOP_WORKER_FIRE_BEARER" in s.get("run", "")]
+flip_steps = [s["id"] for s in STEPS
+              if s.get("track") == "evals" and "bootstrap/create-environments.sh" in s.get("run", "")]
+check(f"one step sets the Loop worker's fire URL and bearer: {loop_steps}", len(loop_steps) == 1)
+check("an evals step runs create-environments.sh, whose first run there sets EVALS_REPO to the repo",
+      len(flip_steps) > 0)
+if len(loop_steps) == 1 and flip_steps:
+    check(f"step {loop_steps[0]} (Loop worker fire URL and bearer) comes before step {flip_steps[0]} "
+          "(EVALS_REPO flips to skills-evals)", pos[loop_steps[0]] < pos[flip_steps[0]])
 
 # The cost sentence in docs/before-you-start.md quotes the step counts.
 EXPECTED_COUNTS = tuple(str(n) for n in (len(STEPS), sum(s.get("track") == "base" for s in STEPS),

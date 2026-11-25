@@ -65,15 +65,16 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
   behind the `fleet-apply` approval.
 - **Step 19** (eval.yml's default fixture): the shipped default runs as it
   is; a change is a pull request on the user's `skills-evals`.
-- **The eval runner and the Loop worker** (steps 24 and 25): the bearer is
-  shown once. The user keeps it and the `trig_...` id and types both into
-  `set-secrets.sh --only routine-fire` themselves. Step 24 also creates the
-  Loop worker task (loop role, prompt in `docs/routines.md`) in the same
-  visit, and sets `LOOP_WORKER_FIRE_URL` and `LOOP_WORKER_FIRE_BEARER` on
-  `_agent-guidance` (`create-environments.sh` already set
-  `LOOP_WORKER_EVERY_HOURS` from `CLAUDE_PLAN`).
-  Step 37's run of `create-environments.sh` has already flipped `EVALS_REPO`
-  to `<owner>/skills-evals`, which is what lets the Loop worker's fire run.
+- **The Loop worker** (step 41, before step 37): the task (loop role,
+  prompt in `docs/routines.md`) and its `LOOP_WORKER_FIRE_URL` and
+  `LOOP_WORKER_FIRE_BEARER` on `_agent-guidance` (`create-environments.sh`
+  already set `LOOP_WORKER_EVERY_HOURS` from `CLAUDE_PLAN`). It comes before
+  step 37 because step 37's run of `create-environments.sh` flips
+  `EVALS_REPO` to `<owner>/skills-evals`, after which a scheduled Loop worker
+  fire runs and fails while its URL or bearer is unset.
+- **The eval runner** (steps 24 and 25): the bearer is shown once. The user
+  keeps it and the `trig_...` id and types both into
+  `set-secrets.sh --only routine-fire` themselves.
 - **Steps 26 and 32** are optional: offer them, and move on when the user
   declines.
 - **Step 32** makes two claude.ai artifacts from one build

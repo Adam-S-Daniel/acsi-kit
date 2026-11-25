@@ -381,7 +381,7 @@
     {
       "id": "27",
       "title": "Create the fleet worker routine",
-      "run": "At https://claude.ai/code/routines, one task (the Fleet worker, maintenance role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it. The Loop worker serves the eval loop, so the evals track creates it with the eval runner",
+      "run": "At https://claude.ai/code/routines, one task (the Fleet worker, maintenance role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it. The Loop worker serves the eval loop, so the evals track creates it (step 41)",
       "kind": "browser",
       "part": "routines",
       "track": "base",
@@ -507,6 +507,19 @@
       "minutes": 10
     },
     {
+      "id": "41",
+      "title": "Create the Loop worker routine",
+      "run": "At https://claude.ai/code/routines, one task (the Loop worker, loop role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set LOOP_WORKER_FIRE_URL and LOOP_WORKER_FIRE_BEARER on _agent-guidance (create-environments.sh already set LOOP_WORKER_EVERY_HOURS from CLAUDE_PLAN). fleet-worker-fire.yml skips its fire while EVALS_REPO is none and fires it once the next step flips EVALS_REPO to skills-evals, so this comes first",
+      "kind": "browser",
+      "part": "routines",
+      "track": "evals",
+      "link": "docs/routines.md#fleet-worker",
+      "check": {
+        "type": "ask"
+      },
+      "minutes": 10
+    },
+    {
       "id": "37",
       "title": "Create its environment and copy the roster App's id",
       "run": "`bootstrap/create-environments.sh` again (the `routine-fire` environment in `skills-evals`, `ROSTER_WRITER_APP_ID` in `repo-settings`, and `EVALS_REPO` on `_agent-guidance`, which flips from `none` to `<owner>/skills-evals`)",
@@ -587,8 +600,8 @@
     },
     {
       "id": "24",
-      "title": "Create the eval runner and Loop worker routines",
-      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id. In the same visit create the Loop worker task (loop role, prompt in docs/routines.md) and set LOOP_WORKER_FIRE_URL and LOOP_WORKER_FIRE_BEARER on _agent-guidance (create-environments.sh already set LOOP_WORKER_EVERY_HOURS from CLAUDE_PLAN), whose fleet-worker-fire.yml fires it once EVALS_REPO names skills-evals",
+      "title": "Create the eval runner routine",
+      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id for the next step",
       "kind": "browser",
       "part": "routines",
       "track": "evals",
@@ -596,7 +609,7 @@
       "check": {
         "type": "ask"
       },
-      "minutes": 25
+      "minutes": 15
     },
     {
       "id": "25",
