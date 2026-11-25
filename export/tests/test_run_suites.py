@@ -163,3 +163,66 @@ def test_a_failed_setup_probe_stops_the_setup_even_when_a_command_follows_it(tmp
     assert not ok
     assert summary == "setup exited 1 (needs: the probe's package)"
     assert "SUITE RAN" not in log
+
+
+def _fake_tree(tmp_path, monkeypatch, name):
+    (tmp_path / name).mkdir()
+    (tmp_path / name / "f.txt").write_text("x")
+    monkeypatch.setattr(run_suites.export, "STARTER", tmp_path)
+
+
+# Setup "installs" a marker module into the active interpreter's site-packages,
+# the way pip would, without the network: what matters is which interpreter's
+# site-packages the write lands in.
+INSTALL = (
+    'python3 -c \'import pathlib, site, sys; '
+    'p = pathlib.Path(site.getsitepackages()[0]) / "marker_%s.py"; '
+    'p.write_text("V = %s\\n"); print("wrote", p)\''
+)
+TRY_IMPORT = (
+    'python3 -c \'import importlib.util as u; '
+    'print("SEES", [n for n in ("marker_a", "marker_b") if u.find_spec(n)])\''
+)
+
+
+def test_each_installing_suite_gets_its_own_environment(tmp_path, monkeypatch):
+    _fake_tree(tmp_path, monkeypatch, "a")
+    (tmp_path / "b").mkdir()
+    monkeypatch.setattr(run_suites.export, "STARTER", tmp_path)
+    ok_a, _, log_a, _ = run_suites.run_one(
+        "a", {"venv": True, "setup": INSTALL % ("a", 1), "command": TRY_IMPORT}, keep=False)
+    ok_b, _, log_b, _ = run_suites.run_one(
+        "b", {"venv": True, "setup": INSTALL % ("b", 2), "command": TRY_IMPORT}, keep=False)
+    assert ok_a and ok_b
+    # Each sees only its own marker, and the install landed in a venv.
+    assert "SEES ['marker_a']" in log_a and "marker_b" not in log_a.split("SEES")[1]
+    assert "SEES ['marker_b']" in log_b
+    assert "kit-suite-a-" in log_a and "/venv/" in log_a
+    # The base interpreter sees neither.
+    import importlib.util
+    assert importlib.util.find_spec("marker_a") is None
+    assert importlib.util.find_spec("marker_b") is None
+
+
+def test_the_venv_is_deleted_with_the_copy(tmp_path, monkeypatch):
+    _fake_tree(tmp_path, monkeypatch, "a")
+    ok, _, log, _ = run_suites.run_one("a", {"venv": True, "command": "echo $VIRTUAL_ENV"}, keep=False)
+    assert ok
+    venv = [l for l in log.splitlines() if l.endswith("/venv")][0]
+    assert not Path(venv).exists()
+
+
+def test_a_suite_that_installs_nothing_gets_no_venv(tmp_path, monkeypatch):
+    _fake_tree(tmp_path, monkeypatch, "a")
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    ok, _, log, _ = run_suites.run_one(
+        "a", {"command": 'echo "VENV=[${VIRTUAL_ENV:-}]"; ls ..'}, keep=False)
+    assert ok
+    assert "VENV=[]" in log
+    assert "venv" not in log.split("VENV=[]")[1]
+
+
+def test_only_skills_evals_declares_a_venv():
+    manifests = run_suites.export.load_manifests()
+    with_venv = sorted(m["kit_name"] for m in manifests.values() if (m.get("suite") or {}).get("venv"))
+    assert with_venv == ["skills-evals"]
