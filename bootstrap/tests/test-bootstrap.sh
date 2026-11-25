@@ -842,7 +842,8 @@ assert "it points to status.sh" has "$OUT" "Next: bash bootstrap/status.sh --con
 assert "it says repos already filled are not updated" has "$OUT" "are NOT updated by this script"
 assert "an untracked fleet.env survives" test -f "$UK/fleet.env"
 assert "an untracked app-manifests/ survives" test -f "$UK/app-manifests/x"
-assert_eq "the recorded choices are the same" "$(jq -c '.installed | length' "$UCH")" 8
+# Every recommended item, counted from the catalog so a new one needs no edit here.
+assert_eq "the recorded choices are the same" "$(jq -c '.installed | length' "$UCH")" "$(jq '[.items[] | select(.tier == "recommended")] | length' "$K/bootstrap/content-catalog.json")"
 st1=$(git -C "$UK" status --porcelain); h1=$(git -C "$UK" rev-parse HEAD)
 uk "$UK" --config "$UK/fleet.env"; rc=$?
 assert_eq "a second update-kit run exits 0" "$rc" 0
