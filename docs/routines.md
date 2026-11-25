@@ -51,7 +51,7 @@ itself changes.
 | Schedule | none on claude.ai, only an API trigger. `_agent-guidance`'s `fleet-worker-fire.yml` fires it every 3 hours, or every 12 hours or weekly depending on the `FLEET_WORKER_EVERY_HOURS` variable, which `create-environments.sh` sets from `CLAUDE_PLAN` ([which plan](before-you-start.md#which-plan)). Set `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER` on that repo ([bootstrap README](../bootstrap/README.md#variables-and-secrets-set-by-hand)). Each fire gets a fresh session |
 | Connector | the GitHub connector |
 | Repos | it attaches the repos in `_agent-guidance`'s `repos.yml` `cron_coverage.fleet` itself |
-| Model | no override |
+| Model | no override on Max or Ultra; on Pro pick Sonnet ([which plan](before-you-start.md#on-pro-what-to-set-and-what-to-leave-off)) |
 | Notifications | push on, email off, "Auto-fix pull requests" on |
 | Spec | `_agent-guidance` [`docs/routines/fleet-worker.md`](../starter/agent-guidance/docs/routines/fleet-worker.md) |
 
