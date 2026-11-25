@@ -710,6 +710,9 @@ regenerate:
 
 suite:
   git_init: true
+  # dev_setup.sh pip-installs the suite's pins, so it gets its own virtual
+  # environment: the trees run at once and share one interpreter otherwise.
+  venv: true
   setup: bash scripts/dev_setup.sh
   command: python3 test/run_tests.py --jobs auto
   needs: python3 with pip, node 22 and npm, git, jq, bwrap for the workspace-executing scorers

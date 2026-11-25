@@ -39,6 +39,11 @@ script copies the folder to a temporary directory, makes it a git repo where
 the suite reads its history, runs the repo's setup and test command in a PID
 namespace, and prints one PASS or FAIL line per folder. Each suite needs
 what its repo's CI installs, and the manifest's `suite.needs` lists it.
+The suites start at the same time, so a suite whose setup installs Python
+packages (`skills-evals`) runs in its own virtual environment, created under
+its temporary directory and deleted with it. Its pins, which differ from
+`agent-skills`' and `repo-settings`', never replace a package another suite
+is importing, and your own interpreter's packages are left as they were.
 `_agent-guidance`'s suite needs mikefarah's Go `yq` v4 on `PATH`. Debian's
 `yq` is a different program, and with it `scripts/sync.sh` refuses to run,
 so about 250 of that suite's assertions fail. The `skills-evals` suite takes

@@ -28,6 +28,15 @@ theirs, and they are the ids to list, so a new test failing in that group
 is a new id. Every excused id is printed; a listed id that did not fail is
 reported, so the list can be kept short.
 
+A suite whose setup installs Python packages says so with `venv: true`: the
+runner then creates a virtual environment under that suite's temporary
+directory (`python3 -m venv`), puts it first on the PATH of the suite's setup
+and command only, and deletes it with the copy. The trees run at the same
+time, so an install into the shared interpreter would uninstall and reinstall
+a package another tree's workers are importing (skills-evals' markdown-it-py
+pin against agent-skills' and repo-settings': acsi-kit#104). A suite that
+installs nothing gets no venv and the plain environment.
+
 The suite's prerequisites (`needs:` in the manifest) are the repo's own;
 nothing here installs a system package.
 """
@@ -141,6 +150,14 @@ def judge(out: str, known: dict) -> tuple[bool, list]:
     return not unknown and problem is None, lines
 
 
+def venv_env(env: dict, venv: Path) -> dict:
+    """env with the virtual environment at venv active for a child process."""
+    out = {k: v for k, v in env.items() if k != "PYTHONHOME"}
+    out["VIRTUAL_ENV"] = str(venv)
+    out["PATH"] = f"{venv / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+    return out
+
+
 def run_one(kit_name: str, suite: dict, keep: bool, known: dict | None = None) -> tuple[bool, str, str, list]:
     src = export.STARTER / kit_name
     tmp = Path(tempfile.mkdtemp(prefix=f"kit-suite-{kit_name}-"))
@@ -150,6 +167,12 @@ def run_one(kit_name: str, suite: dict, keep: bool, known: dict | None = None) -
         shutil.copytree(src, work, symlinks=True,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "node_modules"))
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        if suite.get("venv"):
+            venv = tmp / "venv"
+            p = subprocess.run(["python3", "-m", "venv", str(venv)], capture_output=True, text=True, env=env)
+            if p.returncode != 0:
+                return False, f"venv creation failed: {p.stderr.strip()}", "", []
+            env = venv_env(env, venv)
         if suite.get("git_init"):
             for cmd in (["git", "init", "-q", "-b", "main"],
                         ["git", "add", "-A"],
