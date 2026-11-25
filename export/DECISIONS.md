@@ -409,6 +409,19 @@ suite, ShellCheck over `ci.yml`'s list, and the ASCII check of every
   grace, `Persistent=true`). Neither ran on macOS: launchd output is checked
   by parsing the plists with `plistlib`, and bash 3.2 compatibility of the
   runner is by inspection only.
+- **Installer preflight** (wsl-automation#132): `install-schedule.sh` refuses
+  before writing anything when `flock`, `timeout`/`gtimeout`, a date that reads
+  `-d @0` (only for the jobs that need it: the waiting feed), or, for systemd,
+  a user bus (`systemctl --user show-environment`) is missing, and lists every
+  gap with its fix in one message. The lookups and the PATH setup live in
+  `scripts/unix/tool-path.sh`, sourced by both scripts so the installer cannot
+  disagree with the runner. A failed `launchctl bootstrap` removes that
+  job's plist and exits 1 (no pre-check: it cannot be probed without a
+  session). On macOS the waiting feed is skipped, because Claude Code's
+  documentation puts macOS credentials in the Keychain, not in
+  `~/.claude/.credentials.json`. The source's `publish-waiting-feed.sh`
+  `date -d` is fixed in the source repository, not here. Exercised only
+  through stubs (no macOS machine).
 - `NOTICE` names the source repository and commit.
 
 ## Export record: agentskills
