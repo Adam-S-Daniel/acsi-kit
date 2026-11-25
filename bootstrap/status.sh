@@ -5,7 +5,7 @@
 # call. For each step in steps.json it decides done or not done from the real
 # state where it can:
 #
-#   config  fleet.env exists, parses, and sets OWNER and PLAN (step 0);
+#   config  fleet.env exists, parses, and sets OWNER, PLAN and CLAUDE_PLAN (step 0);
 #   verify  verify.sh --track <the step's track> --only <groups> reports no
 #           FAIL and at least one PASS (so a base step never looks at
 #           skills-evals, and adding evals never undoes a base step);
@@ -181,6 +181,7 @@ fi
 log "Next: $NEXT ${TITLE[$NEXT]} (about ${MIN[$NEXT]} minutes, ${KIND[$NEXT]})"
 log "  Run: ${RUN[$NEXT]}"
 log "  Read: ${LINK[$NEXT]}"
+case $NEXT in 0|1|2) log "  Before step 2: bash bootstrap/preflight.sh checks the tools and the gh sign-in these scripts need." ;; esac
 if [ -n "${DETAIL[$NEXT]:-}" ]; then
   log "  Not done yet:"
   printf '%s\n' "${DETAIL[$NEXT]}" | sed 's/^/    /'

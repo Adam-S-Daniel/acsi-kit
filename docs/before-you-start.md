@@ -14,6 +14,8 @@
 | `node` and `npm` | Used by `_agent-guidance`'s tests and the guidance improve lane. |
 | PowerShell 7 (Windows only) | Runs `wsl-automation`'s scheduled tasks. |
 
+`bash bootstrap/preflight.sh` checks all of this on your machine, read-only, and prints the install command for your OS next to anything missing.
+
 ## With or without evals
 
 The kit has two tracks. The **base** (`/adopt`) uses five repos and covers
