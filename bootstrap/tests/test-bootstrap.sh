@@ -264,7 +264,8 @@ assert_eq "a python3 without PyYAML exits 1" "$rc" 1
 assert "missing PyYAML is a FAIL" grep -q '^FAIL: python3 -I cannot import PyYAML' "$OUT"
 assert "debian's PyYAML fix is the OS package" grep -qF '      fix: sudo apt-get install -y python3-yaml' "$OUT"
 PF_OS=macos pf PF_NO_YAML=1 -- --config "$PFCFG"
-assert "macOS's PyYAML fix is brew" grep -qF '      fix: brew install pyyaml' "$OUT"
+assert "macOS's PyYAML fix is a virtual environment" grep -qF '      fix: a virtual environment that is active when you run the scripts: python3 -m venv' "$OUT"
+assert_not "macOS's PyYAML fix names no Homebrew formula (there is none)" grep -qF 'brew install pyyaml' "$OUT"
 assert_not "no PyYAML fix recommends --user" grep -q 'fix:.*--user' "$OUT"
 assert "python3 -I really hides the user site (why --user is not advised)" python3 -I -c 'import sys; sys.exit(0 if sys.flags.no_user_site else 1)'
 mkdir "$T/pf-outer" "$T/pf-outer/kit" "$T/pf-outer/kit/bootstrap" "$T/pf-outer/kit/bootstrap/lib"

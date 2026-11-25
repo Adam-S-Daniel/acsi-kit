@@ -249,8 +249,10 @@ check_python() {
       debian) fix "sudo apt-get install -y python3-yaml" ;;
       fedora) fix "sudo dnf install -y python3-pyyaml" ;;
       macos)
-        fix "brew install pyyaml   (for Homebrew's python3)"
-        fix "or, with another python3, a virtual environment that is active when you run the scripts: python3 -m venv ~/.venvs/kit && . ~/.venvs/kit/bin/activate && python3 -m pip install pyyaml"
+        # Homebrew has no pyyaml formula (formulae.brew.sh, checked
+        # 2026-11-25), and its python3 refuses a pip install outside a
+        # virtual environment, so the venv is the one line that works.
+        fix "a virtual environment that is active when you run the scripts: python3 -m venv ~/.venvs/kit && . ~/.venvs/kit/bin/activate && python3 -m pip install pyyaml"
         ;;
       *) fix "python3 -m pip install pyyaml   (into the interpreter's own site, such as an active virtual environment; not --user)" ;;
     esac
