@@ -106,12 +106,12 @@ ensure_clone _agent-guidance scripts/register-memory-home-hook.sh; AG=$C
 
 # In a dry run of a fresh machine the clones are temporary; name where they will be.
 [ "$DRY_RUN" = 0 ] || { AS=$DIR/acsi-agentskills; AG=$DIR/_agent-guidance; }
-step "acsi-agentskills setup.sh --owner-machine" bash "$AS/setup.sh" --owner-machine
-step "acsi-agentskills install-agent-hooks.sh" bash "$AS/scripts/install-agent-hooks.sh"
-step "_agent-guidance register-memory-home-hook.sh" bash "$AG/scripts/register-memory-home-hook.sh" --hook "$DIR/_agent-guidance/.claude/hooks/memory-home.sh"
+step "acsi-agentskills setup.sh --owner-machine" "$BASH" "$AS/setup.sh" --owner-machine
+step "acsi-agentskills install-agent-hooks.sh" "$BASH" "$AS/scripts/install-agent-hooks.sh"
+step "_agent-guidance register-memory-home-hook.sh" "$BASH" "$AG/scripts/register-memory-home-hook.sh" --hook "$DIR/_agent-guidance/.claude/hooks/memory-home.sh"
 if [ "$WITH_CODEX" = 1 ]; then
   if [ -d "$HOME/.codex" ]; then
-    step "_agent-guidance register-codex-hook.sh" bash "$AG/scripts/register-codex-hook.sh"
+    step "_agent-guidance register-codex-hook.sh" "$BASH" "$AG/scripts/register-codex-hook.sh"
     log "Then trust the hook once in Codex: run codex and type /hooks."
   else
     log "skip: --with-codex, but there is no ~/.codex on this machine"

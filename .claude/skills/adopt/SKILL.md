@@ -33,13 +33,16 @@ is in `docs/quick-start.md`.
 2. If there is no `fleet.env`, start at step 0: copy
    `bootstrap/fleet.env.example` to `fleet.env` (outside any repo is better;
    then pass `--config <path>` to every script) and help the user fill in
-   `OWNER`, `OWNER_TWO` (the same login when they have one account) and
-   `PLAN`. `docs/before-you-start.md` explains each key and the costs; say
+   `OWNER`, `OWNER_TWO` (the same login when they have one account), `PLAN` and
+   `CLAUDE_PLAN` (pro, max5x or ultra; `docs/before-you-start.md`, "Which
+   plan"). `docs/before-you-start.md` explains each key and the costs; say
    the costs out loud before step 2. No step needs a paid GitHub plan: a
    user on GitHub Free sets `PLAN=free`, and the scripts skip what Free
    lacks. Never tell a user to upgrade GitHub to continue.
-3. Check the tools the scripts need: `gh` signed in as `OWNER`
-   (`gh auth status`), `jq`, `git`, `python3` with PyYAML.
+3. Run `bash bootstrap/preflight.sh` (with `--config <path>` if needed). It
+   checks the tools the scripts need and that `gh` is signed in as `OWNER`
+   with the `workflow` scope. Read every FAIL and WARN to the user with its
+   fix line, and do not start step 2 while a FAIL remains.
 
 ## Each turn
 
