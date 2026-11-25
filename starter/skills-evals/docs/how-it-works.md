@@ -226,6 +226,16 @@ inside a week, so that reading settles the hold without spending a fire
 (no GitHub API call) and is not fired while it holds. The module docstring's
 "Pace hold" section has the details.
 
+The hold does not leave evals nothing when the owner's own use passes the
+stop over a week. It compares the reading with a line that rises through the
+week, so evals still run whenever other use is under it: in the hours after
+the Monday reset, after a quiet night, or before a busy end of the week. The
+catch-up forecast ([`scripts/forecast_catch_up.py`](../scripts/forecast_catch_up.py),
+`pace_hold_room`) replays the hold over the newest whole weeks of meter
+history, other use scaled to the assumed weekly total, instead of taking the
+stop less a flat weekly average (2026-11-23: about 6 points a week at 82 to
+90 points of other use, where the flat figure said 0).
+
 ### The weekly allowance guard
 
 Since 2026-10-06 the scheduled evals run as Claude Code routines on the
@@ -240,7 +250,7 @@ weekly allowance):
 |---|---|---|
 | `weekly_cap` | 0.25 | all automated evals, in each allowance week of the account (from Monday 17:00 UTC) |
 | `per_run_cap` | 0.01 | one run stops starting new work after this much (the owner, 2026-11-01; was 0.03) |
-| `per_run_overrun` | 0.0005 | added to every run: the routine session's own cost (about $0.67 per fire) and the run's last call, which no reading includes (was 0.005, then 0.002, then 0.0018; 2026-11-06) |
+| `per_run_overrun` | 0.0005 | added to every run charged by meter delta or reservation (not to a run priced from its own calls, since 2026-11-25): the routine session's own cost (about $0.67 per fire) and the run's last call, which no reading includes (was 0.005, then 0.002, then 0.0018; 2026-11-06). Also the named fallback for a run priced from its own calls when the spend file's measured `eval_routine` block is missing or stale |
 | `legacy_usd_per_point` | 12.35 | dollars per point, used only for calls recorded without token counts (summaries from before tokens were kept, a result with no `modelUsage`, a model the weight table does not price) and for improve cost records, which keep dollars only. Night 1 (2026-11-19) measured the eval mix at $17.15 a point on Opus 5.5 and $12.35 on Sonnet 5.5; this is the lower. It replaced `points_per_usd` (0.0015, $6.67 a point), which charged eval runs about 1.9 to 2.6 times their real use |
 | `stop_when_account_above` | 0.80 | a run stops, and no fire starts, once the account's weekly meter reads this |
 | `stop_when_session_above` | not set | required on a plan with a 5-hour window, refused on one without (`claude_plan`): a run stops, and no fire starts, once the CLI's 5-hour window reads this (`unifiedWindows.five_hour`), for a smaller plan whose sweep could use up a whole window; absent, the 5-hour window is not read (#921) |
@@ -268,7 +278,13 @@ Three layers enforce it:
    (`ACCOUNT_WEEK_RESET` plus whole weeks: Monday 17:00 UTC, so daylight
    saving does not move it; a rolling seven days until 2026-10-26; a manual reset the owner pressed, listed in `MANUAL_RESETS`, starts it at that instant for the rest of its week): each ingested run on `persistent/eval-results` at its
    estimated points (its trial summaries' token counts by type, priced as
-   below) plus the overrun; at its measured weekly delta plus the overrun when
+   below), with no overrun since 2026-11-25 (the owner: "Count runs at their
+   measured cost") but plus its routine session's measured cost, once per
+   run: `spend/weekly.json` `eval_routine.points_per_fire`, the median eval
+   runner fire in the fire ledger's last 14 days, written by every dashboard
+   refresh (the owner, 2026-11-24: "Make this measured cost thing automated and
+   dynamic"; `per_run_overrun` when that block is missing or more than 3 days
+   old, and the guard's message says which); at its measured weekly delta plus the overrun when
    some call of it has neither tokens nor dollars (the delta is the whole account's movement, so it charged
    each run every other thread's use: 116 points booked against about 23 real
    in the week to 2026-11-04); or at the full reservation,
@@ -665,7 +681,15 @@ Work items (`needs-fixtures`, `needs-harder-fixtures`, `fixture-broken`,
 `routine-outage`) are listed in the plan, not fired; each carries a
 `change_type`. A guidance section whose `eval-coverage.yml` row is `gap`
 (tracked, no fixture yet) gets `needs-fixtures` with zero fixtures, so its
-first fixture is asked for before any headroom can be measured. A skill run
+first fixture is asked for before any headroom can be measured.
+**The fixture throttle** (`throttle_fixture_work`, skills-evals#1046): a new
+fixture adds a cell per roster model, so for a subject whose verdict is not
+`keep` the plan withholds `needs-fixtures` (unless it has no fixture),
+withholds `needs-harder-fixtures` unless every counted cell is parked at the
+ceiling, and files what remains only while its priced total fits a weekly
+allowance, `undecided_fixture_share` of the weekly cap in
+[`evals/batch-policy.yml`](../evals/batch-policy.yml). The plan JSON lists
+what it withheld under `fixture_throttle`. A skill run
 tests main's copy of its subject and refuses, with nothing spent, when the
 registry checkout is not clean at its main (ADR 0012, addendum "main's
 copy"); the routine's fire still reads as a success. So a cell with two such

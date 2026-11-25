@@ -78,7 +78,7 @@ LANE_EDITS = [
         [entry] = self.entries()
         self.assertEqual(entry["event"], "pre-push")
         self.assertEqual(entry["checks"], expected_checks(
-            ["staged-index", "push-to-default", "persistent-delete", "rules-dir", "secret-file", "skill-shell"], declared_lessons()))
+            ["staged-index", "push-to-default", "persistent-delete", "bump-branch-push", "rules-dir", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], ["push-to-default"])''',
      '''    def test_refused_pre_push_is_logged_as_pre_push(self):
         self.commit(self.repo, {".env": "A=1\\n"})
@@ -99,6 +99,7 @@ LANE_EDITS = [
         # The kit's runner: the machinery's own three, secret-file and skill-shell (Content tiers).
         self.assertGreaterEqual(len(calls), 5)'''),
     ('''        self.assertLessEqual({"rules-dir", "secret-file", "skill-shell", "staged-index", "push-to-default", "persistent-delete",
+                              "bump-branch-push",
                               "repo-local", "pr-tldr", "local-identity"}, ids)''',
      '''        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)'''),
 ]
@@ -141,7 +142,47 @@ test_agent_checks_persistent_delete() {
     else
         fail "agent-checks persistent: deleting persistent/results is refused — exit $rc"
     fi
-''', ''),    # The dated-phrasing pass's run-log assertion lists the checks that ran;
+''', ''),    # The bump-branch-push check is a fleet check (the consumer lock bumper's
+    # branch) and is not shipped, so its test and its group entry go too.
+    ('''# pre-push refuses a push to the lock bumper's branch, because a commit the
+# bumper did not make strands its pull request; deleting that branch, which is
+# the way to free it, and pushing to any other branch still pass.
+test_agent_checks_bump_branch_push() {
+    echo ""
+    echo "=== Test: agent-checks pre-push refuses a push to skills-lock-bump/update ==="
+    local runner="$REPO_ROOT/templates/agent-checks/agent-checks"
+    local repo="$TEST_DIR/ac-bump-branch" zero sha rc
+    zero=0000000000000000000000000000000000000000
+    git init -q "$repo"
+    git -C "$repo" -c user.name=Example -c user.email=agent@example.com commit -q --allow-empty -m base
+    sha=$(git -C "$repo" rev-parse HEAD)
+    rc=0; (cd "$repo" && GIT_CONFIG_GLOBAL=/dev/null AGENT_CHECKS_LOG=off bash "$runner" pre-push origin https://example.com/r.git \\
+        <<< "refs/heads/work $sha refs/heads/skills-lock-bump/update $zero") >/dev/null 2>"$TEST_DIR/ac-bump-branch.err" || rc=$?
+    if [[ $rc -eq 1 ]] && grep -qF 'refusing to push to skills-lock-bump/update' "$TEST_DIR/ac-bump-branch.err"; then
+        pass "agent-checks bump branch: a push to skills-lock-bump/update is refused"
+    else
+        fail "agent-checks bump branch: a push to skills-lock-bump/update is refused — exit $rc: $(cat "$TEST_DIR/ac-bump-branch.err")"
+    fi
+    rc=0; (cd "$repo" && GIT_CONFIG_GLOBAL=/dev/null AGENT_CHECKS_LOG=off bash "$runner" pre-push origin https://example.com/r.git \\
+        <<< "(delete) $zero refs/heads/skills-lock-bump/update $sha") >/dev/null 2>&1 || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        pass "agent-checks bump branch: deleting skills-lock-bump/update passes"
+    else
+        fail "agent-checks bump branch: deleting skills-lock-bump/update passes — exit $rc"
+    fi
+    rc=0; (cd "$repo" && GIT_CONFIG_GLOBAL=/dev/null AGENT_CHECKS_LOG=off bash "$runner" pre-push origin https://example.com/r.git \\
+        <<< "refs/heads/work $sha refs/heads/skills-lock-bump/other $zero") >/dev/null 2>&1 || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        pass "agent-checks bump branch: a push to another branch passes"
+    else
+        fail "agent-checks bump branch: a push to another branch passes — exit $rc"
+    fi
+}
+
+''', ''),
+    ('''    test_agent_checks_bump_branch_push
+''', ''),
+    # The dated-phrasing pass's run-log assertion lists the checks that ran;
     # the kit's runner has no rules-dir (its library item puts it back).
     ('''grep -qE '"checks":\\["rules-dir","secret-file","skill-shell"(,"lesson-[a-z0-9-]+")*,"dated-phrasing"\\],"failed":\\[\\]' ''',
      '''grep -qE '"checks":\\["secret-file","skill-shell"(,"lesson-[a-z0-9-]+")*,"dated-phrasing"\\],"failed":\\[\\]' '''),

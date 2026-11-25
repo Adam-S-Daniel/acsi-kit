@@ -68,7 +68,8 @@ one of three tiers, listed in
   you add, based on its eval verdict or because nobody uses it.
 - **Recommended**: what most adopters want. That is two skills
   (`review-bash-ci-reliability`, `disarm-inherited-reach`), four safety
-  sections, and two sections on everyday working and git habits.
+  sections, and three sections on everyday working, pasted-config and git
+  habits.
 - **Opinionated**: a particular way of working that may not match yours.
   That is two skills (`writing-adrs`, `finding-unknowns`), four guidance
   sections, and the `rules-dir` git hook. Each item's `details` text says

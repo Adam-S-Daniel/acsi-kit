@@ -1,0 +1,12 @@
+- id: pasted-config-is-a-stub
+  heading: Pasted config is a stub
+  file: agents-md/base.md
+  audience: owner
+  status: skipped
+  reason: >-
+    Owner rule (the owner, 2026-11-13, restated 2026-11-14): a routine prompt or
+    environment setup script pasted into a settings page holds only a stub that
+    runs or reads a repo file. It is checked by review of what an agent hands
+    the owner to paste; no fixture can watch a settings page.
+  since: 2026-11-14
+  bytes: 101

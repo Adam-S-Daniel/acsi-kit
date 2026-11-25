@@ -358,6 +358,8 @@ class GuardChargeTests(TmpCase):
     def test_token_bearing_trial_blocks_are_charged_their_points_not_a_larger_delta(self):
         run = self.run_dir()
         self.summary(run, "k/20261019T100000Z/with_skill/trial-1", self.usage(block()))
+        # Measured cost (the owner, 2026-11-25) plus the routine session at its
+        # per_run_overrun fallback (no eval_routine block in the tree).
         expected = points(block())["points"] / 100 + LIMITS["per_run_overrun"]
         self.assertLess(expected, 0.30 + LIMITS["per_run_overrun"])
         self.assertAlmostEqual(self.spent(), expected, places=12)

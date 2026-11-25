@@ -81,7 +81,7 @@ a project task's prompt (2026-11-18), so this line is the entry point.
 **Who runs what.** The main session only dispatches, as `tasks/refresh.md` "Run" says: it
 runs on Opus whatever the task page says, and each of its calls re-reads a context that starts
 near 100k tokens. Steps 1 and 3, step 2, and step 5 (with its fire cost ledger) run in three
-Haiku subagents at once; their tool output is large (every thread, the owner's new messages,
+subagents at once (Haiku for steps 1 to 3, Sonnet for step 5); their tool output is large (every thread, the owner's new messages,
 every session and every scheduled task). Each writes its result straight to the file or helper
 the step names (step 5 also writes arg 1 to `$REFRESH_WORK/arg1.json` and the run list for
 step 6 to `$REFRESH_WORK/runs.json`) and returns one line: its counts, or the `STOP:` text.
@@ -280,7 +280,13 @@ weekly meter use from `scripts/automatic_spend.py`, over `inputs/triggers.json`,
 allowance guard then refuses evals rather than guess), or when an in-loop task's rate cannot be read.
 An in-loop task with no fire on its current model yet is priced at its dearest recorded fire, a
 task never costed at all at the dearest in-loop fire; tasks scheduled on the owner's local machine are not counted; and
-`scripts/explorer_public.py` never copies it. No
+`scripts/explorer_public.py` never copies it. `eval_routine` (`as_of`, `points_per_fire`,
+`usd_per_fire`, `fires`) is what one eval runner routine fire costs in its own session: the
+median of its fires in the ledger's last 14 days on its current model, priced the same way. The
+allowance guard charges it once per eval run priced from its own calls, and the forecast takes
+`usd_per_fire` as `fire_overhead_usd`; it is left out when no such fire is in the window, and
+both then fall back to their configured figures (`per_run_overrun`, the forecast's default) and
+say so. `scripts/explorer_public.py` never copies it either. No
 session or thread row goes in. At `spend/weekly.json` on the results branch,
 `scripts/explorer_public.py` copies it into the public document's `spend` (when
 `evals/public-export.yml` sets `include_spend`), and the public Spend and use group

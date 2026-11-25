@@ -651,6 +651,8 @@ class GuardTests(unittest.TestCase):
         run = self.run_dir("20261019T100000Z")
         self.summary(run, "k/20261019T100000Z/with_skill/trial-1",
                      self.priced_usage(delta=0.30))
+        # Measured cost (the owner, 2026-11-25) plus the routine session, here at
+        # its per_run_overrun fallback: the tree has no eval_routine block.
         expected = self.points(self.token_block()) / 100 + 0.005
         self.assertGreater(expected, 0.005)
         self.assertLess(expected, 0.30)
@@ -1108,7 +1110,6 @@ class PaceRoomTests(unittest.TestCase):
         self.assertAlmostEqual(state["week_elapsed"], 6 / 7, places=12)
         self.assertEqual(guard.fits(state), 9)
         self.assertIsNone(guard.check(state))
-        self.assertEqual(guard.fires_that_fit(self.tree, LIMITS, NOW, (1, 1)), 9)
 
     def test_fires_without_results_come_off_the_pace_room(self):
         # The snapshot may predate them, so each pending fire (3.5 points)

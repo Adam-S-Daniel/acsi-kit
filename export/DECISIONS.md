@@ -2910,3 +2910,26 @@ No pin moves. The fix routine now fetches `agentskills-private` (round 20 strand
 - `export/FIX-ROUTINE.md` step 8: the routine never quotes or summarizes a private file's contents in a commit message or committed file (the commit message becomes the public pull request text), and never changes the private manifest's `source_sha` or `include`. Its final session message, which only the owner sees, is the one place it may describe them.
 
 Reverse: delete the `include` list and `_apply_include`, its test file, and the two FIX-ROUTINE.md paragraphs.
+
+## Re-pin round 22 (2026-11-25): every public source, after two held-back days
+
+The daily re-sync held back every public source again, and the fix routine could not finish (it cannot fetch `agentskills-private`). This round was finished on a machine with a local clone of every source, with `agentskills-private` at its unchanged pin. It supersedes the unmerged PR #100, whose two patch fixes it carries.
+
+- `_agent-guidance` added a section "Pasted config is a stub" to `agents-md/base.md` (coverage row `pasted-config-is-a-stub`, skipped, audience owner). The kit tiers it `recommended`, group `habits`: it is one working-habit rule, so it sits beside "Working habits" and "Git habits" as a library item, not core. `export/patches/_agent-guidance/blank_content.py` lists it in `SECTIONS` after "Working in these repos" (the source's order), the export writes `library/guidance/pasted-config-is-a-stub/`, and `bootstrap/content-catalog.json` records it. `docs/skills.md` now says three habit sections, not two.
+- `_agent-guidance` added the `bump-branch-push` pre-push check (refuses a push to the consumer lock bumper's branch, `skills-lock-bump/update`). It belongs to the fleet's bumper, which an adopter does not run, so the kit removes it with the other fleet pre-push checks: the `blank_content.py` runner edit now matches the added `note_ran` line and the added block, and the `machinery_tests.py` edits match the two test lines the source changed (the logged check ids and `test_core_check_ids`) and cut the source's new `test_agent_checks_bump_branch_push` function and its group entry from `test/run-tests.sh`, which would otherwise fail against the kit's runner. The shipped runner is unchanged by the new check.
+- `_agent-guidance` added `claude-plan-usage-estimator`, the source owner's small public library, to `cron_coverage.fleet` in `repos.yml`. An adopter has no copy of it, so `kit_repos.py` drops the line (inherited from PR #100).
+- `skills-evals` changed a planner test so its control no longer names a skill, so the `rename-pdfs` to `workflow-path-audit` hunk in `export/patches/skills-evals/retargets.txt` no longer applies; it is dropped and the `why` comment says so (inherited from PR #100). Only the example-checkout retarget remains.
+- `skills-evals` also stops charging the per-run overrun to a run priced from its own calls (it charges the measured routine session cost once per run instead), adds `arm_exclude_tiers` to `roster-policy.yml`, a pace-hold forecast, a `withheld` field in the weekly routine, and a `wsl-launch-login-path` fixture; `agentskills` makes the lock generator refuse an unfiltered tar extract, and `repo-settings` and `wsl-automation` moved without a break. The kit ships these as exported; no hand-written page quoted the changed numbers.
+
+Tests: `python3 -B -m pytest export/tests -q -p no:cacheprovider`, `bash bootstrap/tests/test-bootstrap.sh`, `export.py --check` with every source, and `run-all-tests.sh` in a PID namespace; results are in the pull request.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `6bef6d22f0e3` | `ff0a37a67c03` |
+| agentskills | `c1b56037ce43` | `b7c639206bb1` |
+| repo-settings | `ed24457f3b80` | `4eeed17191dd` |
+| skills-evals | `d4120ca9cb49` | `ea84ca96c028` |
+| wsl-automation | `f91e27970528` | `d0eb45224f13` |
+| agentskills-private | `c5b1bc9dfaae` | unchanged |
+
+Reverse: re-pin each source to its "Before" sha, remove the `pasted-config-is-a-stub` entry from `SECTIONS` and the catalog and the `bump-branch-push` lines from `blank_content.py` and `machinery_tests.py`, restore the "three" to "two" in `docs/skills.md`, and re-run the full export. The `kit_repos.py` and `retargets.txt` fixes stay only if the sources still need them.

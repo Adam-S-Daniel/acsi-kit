@@ -18,16 +18,35 @@ number, computed by their code, never recomputed here:
     reading (`--week-used`, `--week-at`, `--week-resets`, at most
     `LIVE_MAX_AGE` old) is minutes old, so the page shows both and says
     which the guard used.
-  * loop spend: approximate points (percent of the weekly allowance) the
-    loop has committed since the account's weekly reset: eval runs spent
-    and pending (the guard's `committed`), plus the loop's own scheduled
-    jobs (`loop_reserve`, spend/weekly.json `loop_jobs`), against the
-    configured cap. Project threads are development, not loop spend: no
-    figure here counts them.
+  * loop spend: points (percent of the weekly allowance) in two figures.
+    `estimated_points` is what the loop has used since the account's weekly
+    reset: each ingested eval run priced from its token counts with no
+    overrun (`allowance_guard.run_points`, what the pages show), matched
+    improve runs at their measured charge, and the loop's scheduled jobs
+    (`loop_reserve`, spend/weekly.json `loop_jobs`) for the share of the
+    week gone. `used_points` is what the guard books against the configured
+    cap: its `committed` (measured cost since 2026-11-25; before that with
+    every run's `per_run_overrun` safety margin; never more than the account
+    reading's `bound`, which holds the whole account's use) plus the jobs' WHOLE week up front. The booked
+    figure is a guard's safe upper bound, not spend: on 2026-11-24 it read
+    17.6 while the whole account had used 13% (the owner: "Loop spend is shown
+    as higher than all usage"). Project threads are development, not loop
+    spend: no figure here counts them.
   * forecast: `forecast_catch_up.py`'s catch-up weeks and dates and keep-up
-    per week, read from its output document. `collect` runs it at most every
-    `--forecast-every-minutes` from the newest `gates` artifact of
-    loop-pr-refresh.yml, the results branch and the account's meter history.
+    per week, read from its output document, with the pace-hold replay
+    behind the eval capacity (`pace_replay`: weeks replayed, their range,
+    the flat stop-less-other figure it replaced, and when evals had spent
+    half their week), and the catch-up arithmetic step by step
+    (`calculation`: each open subject's pairs and points, the backlog, the
+    capacity from the weekly cap down, the keep-up items, the room and the
+    weeks). `collect` runs it at most every
+    `--forecast-every-minutes` (15 by default since 2026-11-25, was 60:
+    The owner, "make the forecast update for all the factors more often"; it
+    costs no allowance) from the newest `gates` artifact of
+    loop-pr-refresh.yml, the results branch (fetched every
+    `--results-every-minutes`, with the loop jobs' reserve and the eval
+    routine session's measured cost in its spend file) and the account's
+    meter history.
     Its per-task rows need the scheduled tasks' fire ledger, which only the
     daily dashboard refresh holds, so they are listed only when the
     forecast's input carries them.
@@ -72,6 +91,11 @@ GUIDANCE_REPO = "https://github.com/example-adopter/_agent-guidance"
 #: The collector's reading is used for the live pace only while it is this
 #: fresh; an older one says too little about the account now.
 LIVE_MAX_AGE = timedelta(hours=1)
+#: The collector passes the usage endpoint's `seven_day.utilization`
+#: unchanged (ai-usage-dashboard collector/AiUsage.psm1), and that endpoint
+#: rounds to a whole percent; the guard's own snapshot is the CLI's, which
+#: truncates.
+LIVE_READER = guard.allowance_points.USAGE_ENDPOINT
 #: How long a subprocess (git, gh) may take before `collect` gives up on it.
 STEP_TIMEOUT = 120
 
@@ -119,23 +143,29 @@ def live_reading(used_pct, at: datetime | None, resets: datetime | None,
 
 
 def verdict(state: dict) -> tuple[str, str]:
-    """What the guard does with an eval fire now, as (code, why)."""
+    """What the guard does with an eval run now, as (code, why)."""
     if state.get("session_hold"):
-        return "session_hold", "The 5-hour window is at or above its stop: no fire goes."
+        return "session_hold", ("The 5-hour usage limit is nearly reached, so no evals start. "
+                                "They start again once that usage drops back down.")
     if state.get("pace_hold"):
         if state.get("pace_probe"):
-            return "pace_probe", ("No recent account reading: one eval fire may go as the pace "
-                                  "probe, to bring one.")
+            return "pace_probe", ("The latest weekly usage reading is too old to trust, so evals are "
+                                  "paused. One eval run may start anyway, because every run brings "
+                                  "back a fresh reading. After it, the guard checks your pace again.")
         if state.get("account_used") is None:
-            return "pace_hold", ("No recent account reading, and a probe is not due yet: "
-                                 "no fire goes.")
-        return "pace_hold", "The account is ahead of its weekly pace line: no fire goes."
+            return "pace_hold", ("The latest weekly usage reading is too old to trust, so evals are "
+                                 "paused. One eval run is allowed about every six hours to get a "
+                                 "fresh reading, and none is due yet.")
+        return "pace_hold", ("Your weekly usage is ahead of the pace line, so no evals start. "
+                             "They start again once the pace line catches up.")
     fits = guard.fits(state)
     if fits >= 1:
-        return "open", f"{fits} more eval fire(s) fit under the cap now."
+        return "open", f"There is room for {fits} more eval run(s) in the loop's weekly share."
     if guard.refresh(state):
-        return "refresh", "The cap is full, but one eval fire may go to bring a newer reading."
-    return "cap_full", "The loop's share of the week is used: no fire goes."
+        return "refresh", ("The loop's weekly share is used up, but one eval run may start so the "
+                           "guard gets a newer usage reading.")
+    return "cap_full", ("The loop's weekly share is used up, so no evals start until the weekly "
+                        "reset.")
 
 
 def pace_block(reading: dict | None, limits: dict, source: str) -> dict | None:
@@ -146,8 +176,68 @@ def pace_block(reading: dict | None, limits: dict, source: str) -> dict | None:
     return {"source": source, "used_pct": points(reading["used"]), "at": iso(reading["at"]),
             "elapsed_pct": points(reading["elapsed"]), "line_pct": points(line),
             "stop_pct": points(stop),
-            "ahead": guard.ahead_of_pace(reading["used"], reading["elapsed"], limits),
+            "ahead": guard.ahead_of_pace(reading["used"], reading["elapsed"], limits,
+                                         LIVE_READER if source == "live" else
+                                         guard.allowance_points.CLI),
             "under_line_points": points(line - reading["used"])}
+
+
+def _median(values: list) -> float | None:
+    numbers = sorted(v for v in values
+                     if isinstance(v, (int, float)) and not isinstance(v, bool))
+    if not numbers:
+        return None
+    mid = len(numbers) // 2
+    return numbers[mid] if len(numbers) % 2 else (numbers[mid - 1] + numbers[mid]) / 2
+
+
+#: The most subject rows the status document carries.
+CALC_MAX_SUBJECTS = 60
+
+
+def _points(usd, mid):
+    return usd / mid if isinstance(usd, (int, float)) and mid else None
+
+
+def _calculation(doc: dict, inputs: dict, scenario: dict, mid: float) -> dict:
+    """The catch-up arithmetic step by step, in points (the owner, 2026-11-23:
+    "have the forecast show the catch-up calculation in detail"): the open
+    subjects with the pairs and points each still needs, the backlog they
+    add to, the eval capacity from the weekly cap down, the keep-up items,
+    the room left and the weeks the backlog takes at that room."""
+    backlog = doc.get("backlog_usd") or {}
+    capacity = (doc.get("capacity_usd_per_week") or {}).get("plan_central")
+    keep_up = doc.get("keep_up_usd_per_week")
+    subjects = sorted((r for r in doc.get("subjects") or [] if isinstance(r, dict)),
+                      key=lambda r: -(r.get("usd_central") or 0.0))
+    steps = inputs.get("cap_steps") if isinstance(inputs.get("cap_steps"), dict) else {}
+    room = None
+    if isinstance(capacity, (int, float)) and isinstance(keep_up, (int, float)) and mid:
+        room = (capacity - keep_up) / mid
+    return {
+        "subjects": [{"kind": r.get("kind"), "subject": r.get("subject"), "route": r.get("route"),
+                      "open_cells": r.get("open_cells"), "pairs": r.get("pairs_central"),
+                      "points": _points(r.get("usd_central"), mid)}
+                     for r in subjects[:CALC_MAX_SUBJECTS]],
+        "subjects_total": len(subjects),
+        "backlog_points": {k: _points(backlog.get(k), mid) for k in ("central", "low", "high")},
+        "backlog_pairs": (doc.get("backlog_pairs") or {}).get("central"),
+        "usd_per_point": mid,
+        "weekly_cap_points": steps.get("weekly_cap_points"),
+        "loop_jobs_points": inputs.get("loop_jobs_points_per_week"),
+        "after_loop_jobs_points": steps.get("after_loop_jobs_points"),
+        "capacity_points": _points(capacity, mid),
+        "capacity_basis": steps.get("account_stop_basis"),
+        "account_stop_points": steps.get("account_stop_points"),
+        "keep_up_items": [{"item": k, "points": _points(v, mid)}
+                          for k, v in (doc.get("keep_up_items") or {}).items()
+                          if isinstance(v, (int, float)) and v > 0],
+        "keep_up_points": _points(keep_up, mid),
+        "room_points": room,
+        "weeks_central": scenario.get("weeks_central")
+        if scenario.get("weeks_central") != float("inf") else None,
+        "start": (inputs.get("assumptions") or {}).get("start"),
+    }
 
 
 def forecast_block(doc) -> dict | None:
@@ -167,6 +257,19 @@ def forecast_block(doc) -> dict | None:
     def weeks(key):
         value = scenario.get(key)
         return None if not isinstance(value, (int, float)) or value == float("inf") else value
+    replay = inputs.get("pace_replay")
+    replay = {"weeks": len(replay.get("weeks") or []), "low_points": replay.get("low"),
+              "high_points": replay.get("high"), "flat_points": replay.get("flat_points"),
+              # When the median week had spent half its eval points, in
+              # hours after the reset: evals get their room early.
+              "half_spent_by_hours": _median([w.get("half_spent_by_hours")
+                                              for w in replay.get("weeks") or []
+                                              if isinstance(w, dict)])} \
+        if isinstance(replay, dict) else None
+    try:
+        calculation = _calculation(doc, inputs, scenario, mid)
+    except (AttributeError, TypeError, ValueError):
+        calculation = None
     tasks = [{"task": t.get("task"), "in_loop": t.get("in_loop"), "model": t.get("model"),
               "fires_per_week": t.get("fires_per_week"), "points_per_week": t.get("points_per_week")}
              for t in inputs.get("scheduled_tasks") or [] if isinstance(t, dict)]
@@ -182,8 +285,31 @@ def forecast_block(doc) -> dict | None:
         "loop_jobs_points_per_week": inputs.get("loop_jobs_points_per_week"),
         "non_eval_points_per_week": (inputs.get("assumptions") or {}).get("non_eval_points_per_week"),
         "pace_hold_modeled": bool((inputs.get("assumptions") or {}).get("pace_hold")),
+        "pace_replay": replay,
+        "calculation": calculation,
         "tasks": tasks,
     }
+
+
+def estimated_spend(tree: Path, limits: dict, now: datetime, since: datetime,
+                    state: dict) -> dict:
+    """What the loop has used since `since`, as fractions of the week:
+    `evals` (each ingested run's token-priced `run_points` plus its
+    routine session's measured charge, the guard's `eval_routine_per_fire`,
+    or the guard's `run_cost` when it cannot be priced, never zero), `improve` (matched
+    improve fires at their measured charge), and `jobs` (the scheduled
+    jobs' weekly reserve times the share of the week gone)."""
+    legacy = limits.get(budget_file.LEGACY_RATE)
+    scale = budget_file.allowance_scale(limits)
+    evals = 0.0
+    for run_dir in guard.ingested_runs(tree, now, since):
+        found = guard.run_points(run_dir, legacy, scale)
+        evals += (found["points"] / 100 + state.get(guard.ROUTINE_CHARGE, 0.0)) if found \
+            else guard.run_cost(run_dir, limits)
+    gone = min(1.0, max(0.0, (now - since) / guard.WINDOW))
+    jobs = state.get("loop_reserve", 0.0) * gone
+    improve = state.get("improve_matched_cost", 0.0)
+    return {"evals": evals, "improve": improve, "jobs": jobs, "total": evals + improve + jobs}
 
 
 def status(tree: Path, limits: dict, now: datetime, state: dict | None,
@@ -218,7 +344,12 @@ def status(tree: Path, limits: dict, now: datetime, state: dict | None,
                 {"used": state["account_used"], "at": found[0] if found else None,
                  "elapsed": state["week_elapsed"]}, limits, "guard")
         committed = state["committed"]
+        spend = estimated_spend(tree, limits, now, since, state)
         doc["loop"] = {
+            "estimated_points": points(spend["total"]),
+            "eval_estimated_points": points(spend["evals"]),
+            "improve_estimated_points": points(spend["improve"]),
+            "loop_jobs_so_far_points": points(spend["jobs"]),
             "eval_spent_points": points(state["spent"]),
             "eval_pending_points": points(state["pending"]),
             "eval_committed_points": points(committed),
@@ -228,6 +359,8 @@ def status(tree: Path, limits: dict, now: datetime, state: dict | None,
             "eval_cap_points": points(state["cap"]),
             "room_points": points(guard.room(state)),
             "eval_runs": state["runs"], "fires": state["fires"],
+            "eval_routine_points_per_run": points(state.get(guard.ROUTINE_CHARGE)),
+            "eval_routine_source": state.get("eval_routine_source"),
         }
     doc["pace"] = pace_block(live, limits, "live") or doc["guard_pace"]
     return doc
@@ -420,7 +553,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None, **stand_ins
     p.add_argument("--week-at", default=None, help="when it was read (ISO)")
     p.add_argument("--week-resets", default=None, help="when that week resets (ISO)")
     p.add_argument("--results-every-minutes", type=float, default=10)
-    p.add_argument("--forecast-every-minutes", type=float, default=60)
+    p.add_argument("--forecast-every-minutes", type=float, default=15)
     p.add_argument("--claude-settings", type=Path, default=None,
                    help="collect: a Claude Code settings.json to set subagentPromptCacheTtl in")
     p.add_argument("--claude-projects", type=Path, default=None,
