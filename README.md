@@ -72,14 +72,37 @@ bash bootstrap/status.sh
 ```
 
 The script fast-forwards your clone, puts the optional content you chose
-back, and lists any `fleet.env` keys that are new or gone. It refuses when
-you have edited a tracked file outside `starter/`, or edited `starter/`
-yourself (it tells you how to keep those edits).
+back, and lists the `fleet.env` keys that are new (saying which are
+required) or gone. It refuses, changing nothing, when you have edited a
+tracked file outside `starter/`, edited `starter/` yourself (it tells you how
+to keep those edits), or when your `fleet.env` does not load under the newer
+kit (it names the key to fix). It exits 0 only when everything worked.
 
 If your copy predates the script (it has no `bootstrap/update-kit.sh`), run
-`git restore starter && git clean -fd starter && git pull --ff-only`, then
-`bash bootstrap/update-kit.sh`. Your content choices are recorded outside the
-kit and are added back. Your `fleet.env` and your app manifests folder are untouched.
+this block from the kit's folder instead. It first saves everything under
+`starter/` that differs from the kit, your own edits and new files included,
+to `~/kit-starter-backup` outside the clone (it stops if that folder already
+exists, so a second run cannot overwrite the backup), then resets `starter/`,
+pulls, and runs the script, which puts your content choices back and lists
+the `fleet.env` keys changed since your old copy:
+
+```bash
+mkdir ~/kit-starter-backup &&
+git diff --binary HEAD -- starter > ~/kit-starter-backup/starter-edits.patch &&
+git ls-files -z --others --exclude-standard -- starter | tar --null -cf ~/kit-starter-backup/starter-new-files.tar -T - &&
+git restore --source=HEAD --staged --worktree starter && git clean -fd starter &&
+git pull --ff-only &&
+bash bootstrap/update-kit.sh --since ORIG_HEAD
+```
+
+If the last command exits with an error, fix what it says and run
+`bash bootstrap/update-kit.sh` again before anything else: until it succeeds
+your content choices are not back in `starter/`. The backup holds
+`add-content.sh`'s changes as well as yours; `tar -tf
+~/kit-starter-backup/starter-new-files.tar` lists the new files. Your own
+`starter/` edits belong in a pull request on your repo after
+`copy-starter.sh`, not in the kit. Your content choices are recorded outside
+the kit. Your `fleet.env` and your app manifests folder are untouched.
 
 It does not change repos you already filled from an older starter. For
 those, `bash bootstrap/copy-starter.sh --dry-run <starter-subdir> <owner/repo>`

@@ -33,8 +33,12 @@ is in `docs/quick-start.md`.
 2. When the user is resuming a setup started earlier, run
    `bash bootstrap/update-kit.sh --dry-run` before anything else and offer
    the update it plans. If the script is missing, the copy predates it: give
-   these three commands, then run the script: `git restore starter`,
-   `git clean -fd starter`, `git pull --ff-only`.
+   the README's block for that case ("Update your copy of the kit"), whole
+   and exactly as written there. It saves the user's `starter/` changes and
+   new files to `~/kit-starter-backup` before it resets `starter/`, then
+   pulls and runs the script; never give the reset commands without it. If
+   the script then exits 1, fix what it says and run it again before any
+   other step.
 3. If there is no `fleet.env`, start at step 0: copy
    `bootstrap/fleet.env.example` to `fleet.env` (outside any repo is better;
    then pass `--config <path>` to every script) and help the user fill in
