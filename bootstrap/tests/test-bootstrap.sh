@@ -59,7 +59,7 @@ git config --global init.defaultBranch main
 git config --global protocol.file.allow always
 
 SCRIPTS=(create-repos.sh create-environments.sh create-apps.sh set-secrets.sh copy-starter.sh
-         regenerate.sh apply-settings.sh install-machine.sh verify.sh status.sh add-content.sh update-kit.sh)
+         regenerate.sh apply-settings.sh install-machine.sh verify.sh status.sh add-content.sh update-kit.sh preflight.sh)
 FLEET=(_agent-guidance repo-settings acsi-agentskills acsi-agentskills-private skills-evals wsl-automation)
 O=acme-example
 OUT="$T/out" ERR="$T/err"
@@ -160,6 +160,150 @@ for plan in pro max5x max20x; do
   WORKER=fleet EVERY_REQUIRED=false EVERY_VAR=FLEET_WORKER_EVERY_HOURS URL_VAR=FLEET_WORKER_FIRE_URL BEARER_VAR=FLEET_WORKER_FIRE_BEARER FLEET_BEARER= LOOP_BEARER= EVERY_HOURS=$hours GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL= bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
   assert "the starter's fire workflow accepts $plan's $hours hours" has "$T/fire-step.out" "not configured"
 done
+
+# ======================================================== preflight.sh
+# Tools are stubbed by a bin dir that is the whole PATH: symlinks to what
+# should exist, tiny wrappers for what a test fakes. A tool left out is
+# missing. PREFLIGHT_OS and PREFLIGHT_WSL pin the OS the fix lines are for.
+PF_REAL_GIT=$(command -v git) PF_REAL_PY=$(command -v python3) PF_REAL_JQ=$(command -v jq)
+mkpf() { # dir [tool ...]: PATH dir without the tools named
+  local d=$1 t src; shift
+  rm -rf "$d"; mkdir -p "$d"
+  for t in bash env uname grep sed cat dirname mktemp rm chmod tr cut od head wc; do
+    case " $* " in *" $t "*) continue ;; esac
+    src=$(command -v "$t") && ln -s "$src" "$d/$t"
+  done
+  printf '#!/bin/sh\nexec "%s" "$@"\n' "$B/tests/stubs/gh" > "$d/gh"
+  printf '#!/bin/sh\nif [ "$1" = --version ] && [ -n "${PF_GIT_VERSION:-}" ]; then echo "git version $PF_GIT_VERSION"; exit 0; fi\nexec "%s" "$@"\n' "$PF_REAL_GIT" > "$d/git"
+  printf '#!/bin/sh\nif [ -n "${PF_NO_YAML:-}" ] && [ "$*" = "-I -c import yaml" ]; then exit 1; fi\nexec "%s" "$@"\n' "$PF_REAL_PY" > "$d/python3"
+  printf '#!/bin/sh\nif [ -n "${PF_JQ_VERSION:-}" ] && [ "$1" = --version ]; then echo "jq-$PF_JQ_VERSION"; exit 0; fi\nexec "%s" "$@"\n' "$PF_REAL_JQ" > "$d/jq"
+  for t in node npm claude; do printf '#!/bin/sh\nexit 0\n' > "$d/$t"; done
+  for t in gh git python3 jq node npm claude; do
+    case " $* " in *" $t "*) rm -f "$d/$t" ;; *) chmod +x "$d/$t" ;; esac
+  done
+}
+PFBIN="$T/pf-bin"; mkpf "$PFBIN"
+PFCFG="$T/pf.env"; new_config "$PFCFG" free
+printf '[credential "https://github.com"]\n\thelper = !gh auth git-credential\n' > "$T/pf-gitconfig"
+: > "$T/pf-all.out"
+pf() { # [env VAR=value ...] -- args to preflight.sh: runs it on PFBIN with a pinned OS
+  local e=()
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do e+=("$1"); shift; done
+  shift
+  run env "PATH=${PF_PATH:-$PFBIN}" PREFLIGHT_OS="${PF_OS:-debian}" PREFLIGHT_WSL=0 GIT_CONFIG_GLOBAL="$T/pf-gitconfig" "${e[@]}" "$BASH" "$B/preflight.sh" "$@"
+  local rc=$?
+  cat "$OUT" "$ERR" >> "$T/pf-all.out"
+  return $rc
+}
+pf -- --config "$PFCFG"; rc=$?
+assert_eq "preflight exits 0 when everything is in place" "$rc" 0
+assert "preflight's summary says 0 failed" grep -qE ' 0 failed,' "$OUT"
+assert "preflight prints a PASS line per check" grep -q '^PASS: jq ' "$OUT"
+assert "preflight reports the signed-in owner" grep -q '^PASS: gh is signed in as acme-example, the OWNER' "$OUT"
+before=$(log_lines "$GH_LOG")
+assert_eq "preflight makes no write call to GitHub" "$(since "$before")" 0
+pf PF_GIT_VERSION=2.39.5 -- --config "$PFCFG"; rc=$?
+assert_eq "an old git is a warning, not a failure" "$rc" 0
+assert "old git warns" grep -q '^WARN: git 2.39.5 is older than 2.54' "$OUT"
+assert "old git on debian: apt-get fix line" grep -qF '      fix: sudo apt-get install -y git' "$OUT"
+PF_OS=macos pf PF_GIT_VERSION="2.39.5 (Apple Git-154)" -- --config "$PFCFG"
+assert "old Apple git on macOS: brew fix line" grep -qF '      fix: brew install git' "$OUT"
+assert "the Apple git version is parsed" grep -q '^WARN: git 2.39.5 is older' "$OUT"
+PF_OS=fedora pf PF_GIT_VERSION=2.30.0 -- --config "$PFCFG"
+assert "old git on fedora: dnf fix line" grep -qF '      fix: sudo dnf install -y git' "$OUT"
+PF_OS=other pf PF_GIT_VERSION=2.30.0 -- --config "$PFCFG"
+assert "old git elsewhere: a neutral install line" grep -qF '      fix: install git from https://git-scm.com/downloads' "$OUT"
+pf PF_GIT_VERSION=2.54.0.windows.1 -- --config "$PFCFG"
+assert "git 2.54.0.windows.1 passes" grep -q '^PASS: git 2.54.0' "$OUT"
+mkpf "$T/pf-nojq" jq
+PF_PATH="$T/pf-nojq" pf -- --config "$PFCFG"; rc=$?
+assert_eq "a missing jq exits 1" "$rc" 1
+assert "a missing jq is a FAIL" grep -q '^FAIL: jq is not installed' "$OUT"
+assert "a missing jq has a fix line" grep -qF '      fix: sudo apt-get install -y jq' "$OUT"
+assert "the summary counts the failure" grep -qE '^[0-9]+ passed, 1 failed, ' "$OUT"
+pf PF_JQ_VERSION=1.5 -- --config "$PFCFG"; rc=$?
+assert_eq "jq 1.5 exits 1" "$rc" 1
+assert "jq 1.5 is a FAIL naming 1.6" grep -q '^FAIL: jq 1.5 is older than 1.6' "$OUT"
+pf PF_JQ_VERSION=1.7.1 -- --config "$PFCFG"
+assert "jq-1.7.1 passes" grep -q '^PASS: jq 1.7.1' "$OUT"
+mkpf "$T/pf-nonode" node npm
+PF_PATH="$T/pf-nonode" pf -- --config "$PFCFG"; rc=$?
+assert_eq "missing node and npm exit 1" "$rc" 1
+assert "missing node is a FAIL with a fix line" grep -q '^FAIL: node is not installed' "$OUT"
+assert "the npm fix line names the package" grep -qF 'sudo apt-get install -y nodejs npm' "$OUT"
+mkpf "$T/pf-noclaude" claude
+PF_PATH="$T/pf-noclaude" pf -- --config "$PFCFG"; rc=$?
+assert_eq "a missing claude is only a warning" "$rc" 0
+assert "a missing claude warns" grep -q '^WARN: claude is not installed' "$OUT"
+pf GH_STUB_LOGIN=someone-else -- --config "$PFCFG"; rc=$?
+assert_eq "gh signed in as another login exits 1" "$rc" 1
+assert "the FAIL names both logins" grep -qE '^FAIL: .*someone-else.*acme-example' "$OUT"
+sed 's/^OWNER_TYPE=user/OWNER_TYPE=org/' "$PFCFG" > "$T/pf-org.env"
+pf GH_STUB_LOGIN=someone-else -- --config "$T/pf-org.env"; rc=$?
+assert_eq "an org owner cannot be checked, so it only warns" "$rc" 0
+assert "the org warning names the active account" grep -qE '^WARN: OWNER acme-example is an organization.*someone-else' "$OUT"
+pf GH_STUB_AUTH=0 -- --config "$PFCFG"; rc=$?
+assert_eq "gh not signed in exits 1" "$rc" 1
+assert "not signed in: gh auth login fix" grep -qF '      fix: gh auth login' "$OUT"
+pf "GH_STUB_SCOPES=repo, read:org" -- --config "$PFCFG"; rc=$?
+assert_eq "a token without the workflow scope exits 1" "$rc" 1
+assert "the missing workflow scope is a FAIL" grep -q '^FAIL: gh.s token lacks the workflow scope' "$OUT"
+assert "its fix line refreshes the scope" grep -qF '      fix: gh auth refresh -h github.com -s workflow' "$OUT"
+pf GH_STUB_SCOPES=workflow -- --config "$PFCFG"; rc=$?
+assert_eq "a token without the repo scope exits 1" "$rc" 1
+assert "the missing repo scope is a FAIL" grep -q '^FAIL: gh.s token lacks the repo scope' "$OUT"
+pf GH_STUB_SCOPES=none -- --config "$PFCFG"; rc=$?
+assert_eq "no scopes header is only a warning" "$rc" 0
+assert "no scopes header warns and names what is needed" grep -qE '^WARN: gh.s token scopes could not be read.*repository administration' "$OUT"
+printf '' > "$T/pf-gitconfig-empty"
+pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-empty" -- --config "$PFCFG"; rc=$?
+assert_eq "no gh credential helper is only a warning" "$rc" 0
+assert "no credential helper: gh auth setup-git fix" grep -qF '      fix: gh auth setup-git' "$OUT"
+pf PF_NO_YAML=1 -- --config "$PFCFG"; rc=$?
+assert_eq "a python3 without PyYAML exits 1" "$rc" 1
+assert "missing PyYAML is a FAIL" grep -q '^FAIL: python3 -I cannot import PyYAML' "$OUT"
+assert "debian's PyYAML fix is the OS package" grep -qF '      fix: sudo apt-get install -y python3-yaml' "$OUT"
+PF_OS=macos pf PF_NO_YAML=1 -- --config "$PFCFG"
+assert "macOS's PyYAML fix is brew" grep -qF '      fix: brew install pyyaml' "$OUT"
+assert_not "no PyYAML fix recommends --user" grep -q 'fix:.*--user' "$OUT"
+assert "python3 -I really hides the user site (why --user is not advised)" python3 -I -c 'import sys; sys.exit(0 if sys.flags.no_user_site else 1)'
+mkdir "$T/pf-outer" "$T/pf-outer/kit" "$T/pf-outer/kit/bootstrap" "$T/pf-outer/kit/bootstrap/lib"
+git -C "$T/pf-outer" init -q
+cp "$B/preflight.sh" "$T/pf-outer/kit/bootstrap/"; cp "$B/lib/common.sh" "$T/pf-outer/kit/bootstrap/lib/"
+run env "PATH=$PFBIN" PREFLIGHT_OS=debian PREFLIGHT_WSL=0 GIT_CONFIG_GLOBAL="$T/pf-gitconfig" "$BASH" "$T/pf-outer/kit/bootstrap/preflight.sh" --config "$PFCFG"; rc=$?
+assert_eq "a kit inside another git repository exits 1" "$rc" 1
+assert "that is a FAIL" grep -q '^FAIL: this kit is inside another git repository' "$OUT"
+pf -- --config "$T/none.env"; rc=$?
+assert_eq "a missing fleet.env is not a failure" "$rc" 0
+assert "a missing fleet.env is a SKIP that says do step 0" grep -qE '^SKIP: .*none.env does not exist.*step 0' "$OUT"
+assert_not "a missing fleet.env is not a FAIL" grep -q '^FAIL' "$OUT"
+pf -- --config "$T/bad1.env"; rc=$?
+assert_eq "a fleet.env that does not parse exits 1" "$rc" 1
+assert "the FAIL carries the parser's message" grep -q '^FAIL: .*bad1.env.*unknown key TOKEN' "$OUT"
+pf PF_WSL_UNUSED=1 -- --config "$PFCFG" --track base; rc=$?
+assert_eq "--track base is accepted" "$rc" 0
+run env "PATH=$PFBIN" PREFLIGHT_OS=debian PREFLIGHT_WSL=1 GIT_CONFIG_GLOBAL="$T/pf-gitconfig" "$BASH" "$B/preflight.sh" --config "$PFCFG"
+assert "on WSL, pwsh.exe missing is a warning with a Windows-side fix" grep -qE '^WARN: WSL: pwsh.exe is not reachable' "$OUT"
+assert_not "the secrets and bodies the gh stub holds never appear" grep -qE 'STUBTOKENMARKER|BODY-MUST-NOT-BE-PRINTED' "$T/pf-all.out"
+assert_not "no token or secret marker in any preflight output" grep -qE "$PEM_MARK|$CS_MARK|$BEARER" "$T/pf-all.out"
+# version_ge is defined in preflight.sh, which runs when sourced; take just the function.
+sed -n '/^version_ge() {/,/^}/p' "$B/preflight.sh" > "$T/version_ge.sh"
+pf_ge() { bash -c '. "$1"; version_ge "$2" "$3"' _ "$T/version_ge.sh" "$1" "$2"; }
+assert "2.54.0 >= 2.54" pf_ge 2.54.0 2.54
+assert "2.54 >= 2.54.0" pf_ge 2.54 2.54.0
+assert_not "2.9 < 2.54" pf_ge 2.9 2.54
+assert "2.54.0.windows.1 >= 2.54" pf_ge 2.54.0.windows.1 2.54
+assert_not "2.53.0.windows.1 < 2.54" pf_ge 2.53.0.windows.1 2.54
+assert "10.0 >= 9.9" pf_ge 10.0 9.9
+assert_not "9.9 < 10.0" pf_ge 9.9 10.0
+assert "3.12.3 >= 3.9" pf_ge 3.12.3 3.9
+assert_not "3.8.18 < 3.9" pf_ge 3.8.18 3.9
+# add-content.sh needs node and npm (content.py runs npm ci and node); without them it stops with the message, not a traceback.
+mkpf "$T/pf-nonode2" node npm
+run env "PATH=$T/pf-nonode2" "$BASH" "$B/add-content.sh" --config "$CFG" --items none; rc=$?
+assert_eq "add-content.sh without node exits 1" "$rc" 1
+assert "it says node is required and where to look" has "$ERR" "node is required and was not found on PATH; bash bootstrap/preflight.sh"
+assert_not "and prints no traceback" grep -q Traceback "$OUT" "$ERR"
 
 # ======================================================== plan sizing (acsi-kit#28)
 # The real exported budget and roster policy, sized for each plan and read back with the YAML parser.

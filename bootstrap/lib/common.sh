@@ -448,7 +448,7 @@ usage() { sed -n '2,/^$/{s/^# \{0,1\}//;p}' "$0"; }
 # sha256_stdin: the hex sha256 of stdin. python3, not sha256sum, which macOS lacks.
 sha256_stdin() { python3 -I -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'; }
 
-require_tools() { local t; for t in "$@"; do command -v "$t" >/dev/null 2>&1 || die "$t is required"; done; }
+require_tools() { local t; for t in "$@"; do command -v "$t" >/dev/null 2>&1 || die "$t is required and was not found on PATH; bash bootstrap/preflight.sh lists what is missing and how to install it"; done; }
 
 # ------------------------------------------------------------------ registry
 # Every GitHub Actions environment a kit workflow names, with its protection:
@@ -611,5 +611,6 @@ GIT_BASE=${BOOTSTRAP_GIT_BASE:-${COPY_STARTER_GIT_BASE:-https://github.com}}
 # clone_repo <owner/repo> <dir> [--depth N]: a clone of the default branch.
 clone_repo() {
   local repo=$1 dir=$2; shift 2
-  git clone --quiet "$@" "$GIT_BASE/$repo.git" "$dir" 2>"$BOOT_WORK/err" || die "could not clone $repo"
+  GIT_TERMINAL_PROMPT=0 git clone --quiet "$@" "$GIT_BASE/$repo.git" "$dir" 2>"$BOOT_WORK/err" \
+    || die "could not clone $repo: check that \`gh auth status\` shows ${repo%%/*} and run \`gh auth setup-git\`; bash bootstrap/preflight.sh checks both"
 }

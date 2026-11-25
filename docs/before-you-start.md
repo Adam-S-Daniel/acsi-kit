@@ -11,8 +11,10 @@
 | One durable machine | The session miner, the waiting-on-you feed, and machine memory curation never run in the cloud. |
 | git 2.54 or newer on that machine | Needed for config-based git hooks, which older git silently ignores. |
 | `gh`, `git`, `jq`, `python3` with PyYAML, bash 4.4+ | The bootstrap scripts use them on Linux, WSL, or macOS. macOS ships bash 3.2, so install a current one (with Homebrew, for example) and run the scripts with it. The scripts avoid GNU-only flags, but the kit's test suites (`run-all-tests.sh`, `bootstrap/tests/`) run on Linux and assume GNU `sed` and coreutils. Sign `gh` in as the owner with `gh auth login`, run `gh auth refresh -s workflow` so a push can add workflow files, then run `gh auth setup-git`. |
-| `node` and `npm` | Used by `_agent-guidance`'s tests and the guidance improve lane. |
+| `node` and `npm` | Step 1's `add-content.sh` runs them to rebuild the generated guidance files, so the setup needs them from the start. `_agent-guidance`'s tests and the guidance improve lane use them too. |
 | PowerShell 7 (Windows only) | Runs `wsl-automation`'s scheduled tasks. |
+
+`bash bootstrap/preflight.sh` checks all of this on your machine, read-only, and prints the install command for your OS next to anything missing.
 
 ## With or without evals
 

@@ -20,7 +20,12 @@ fail with that HTTP status.
 GH_STUB_GIT_REMOTES=<dir> answers a contents read from the bare repo
 <dir>/<owner>/<repo>.git's default branch, so a test's merge is what GitHub sees.
 GH_STUB_FAKE_PEM and GH_STUB_CLIENT_SECRET are what a manifest conversion
-returns. Errors look like gh's: a JSON body on stdout, "gh: ... (HTTP n)" on
+returns. `gh auth status` exits 0 (prints a fake token on stderr, which a test
+checks is never shown) unless GH_STUB_AUTH=0. `gh api user` answers the login
+GH_STUB_LOGIN (default acme-example); with -i it also sends the header
+X-OAuth-Scopes: $GH_STUB_SCOPES (default "repo, workflow"; "none" sends no
+such header, like a fine-grained token); --jq .login prints just the login.
+Errors look like gh's: a JSON body on stdout, "gh: ... (HTTP n)" on
 stderr, exit 1.
 """
 import base64
@@ -90,6 +95,27 @@ def repo_view(r):
 
 
 def api(args):
+    include = "-i" in args or "--include" in args
+    jq_login = False
+    if "--jq" in args:
+        i = args.index("--jq")
+        jq_login = args[i + 1] == ".login"
+        args = args[:i] + args[i + 2:]
+    args = [a for a in args if a not in ("-i", "--include")]
+    if args[:1] == ["user"]:
+        login = os.environ.get("GH_STUB_LOGIN", "acme-example")
+        if jq_login:
+            print(login)
+            sys.exit(0)
+        scopes = os.environ.get("GH_STUB_SCOPES", "repo, workflow")
+        if include:
+            print("HTTP/2.0 200 OK")
+            if scopes != "none":
+                print("X-Oauth-Scopes: " + scopes)
+            print("X-Accepted-Oauth-Scopes: ")
+            print()
+        print(json.dumps({"login": login, "secret_looking_body": "BODY-MUST-NOT-BE-PRINTED"}))
+        sys.exit(0)
     method = (opt(args, "-X") or opt(args, "--method") or "GET").upper()
     body = None
     src = opt(args, "--input")
@@ -347,7 +373,9 @@ def pr(args):
 if not argv:
     sys.exit(2)
 cmd = argv[0]
-if cmd == "api":
+if cmd == "--version":
+    print("gh version 2.50.0 (stub)")
+elif cmd == "api":
     api(argv[1:])
 elif cmd == "repo" and argv[1] == "create":
     full = argv[2]
@@ -361,6 +389,9 @@ elif cmd in ("variable", "secret"):
     values(cmd, argv[1:])
 elif cmd == "pr":
     pr(argv[1:])
+elif cmd == "auth" and argv[1:2] == ["status"]:
+    print("  - Token: gho_STUBTOKENMARKER", file=sys.stderr)
+    sys.exit(0 if os.environ.get("GH_STUB_AUTH", "1") != "0" else 1)
 elif cmd == "actions-lock":
     if os.environ.get("GH_STUB_NO_ACTIONS_LOCK") == "1":
         print("unknown command \"actions-lock\" for \"gh\"", file=sys.stderr)

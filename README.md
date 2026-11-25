@@ -48,7 +48,8 @@ step, which ones are done (it checks GitHub rather than a list you keep),
 and what to run next.
 
 ```bash
-cp bootstrap/fleet.env.example fleet.env   # fill in OWNER, OWNER_TWO, PLAN
+cp bootstrap/fleet.env.example fleet.env   # fill in OWNER, OWNER_TWO, PLAN, CLAUDE_PLAN
+bash bootstrap/preflight.sh
 bash bootstrap/status.sh
 ```
 

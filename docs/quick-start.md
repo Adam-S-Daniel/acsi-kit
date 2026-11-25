@@ -40,7 +40,7 @@ failures to expect. Don't add collaborators before step 20.
 
 | Step | What | Run | Time | Track | Read |
 |---|---|---|---|---|---|
-| 0 | Write fleet.env | `cp bootstrap/fleet.env.example fleet.env`, fill in `OWNER`, `OWNER_TWO` and `PLAN` | 5 min | base | [before you start](before-you-start.md#the-config-file) |
+| 0 | Write fleet.env | `cp bootstrap/fleet.env.example fleet.env`, fill in `OWNER`, `OWNER_TWO`, `PLAN` and `CLAUDE_PLAN` | 5 min | base | [before you start](before-you-start.md#the-config-file) |
 | 1 | Choose optional skills, guidance and git hooks | `bootstrap/add-content.sh --items recommended --dry-run`, then the same without `--dry-run` (or name the items you want, or `--items none`) | 10 min | base | [skills](skills.md#choosing-optional-content) |
 | 2 | Create the five base repos | `bootstrap/create-repos.sh` (all but `skills-evals`, which only evals use: the evals track creates it) | 5 min | base | [settings](settings-and-apps.md#the-six-repos) |
 | 3 | Store the privacy denylist | `bootstrap/set-secrets.sh --only privacy --denylist <file outside every repo>` | 10 min | base | [skills](skills.md#the-privacy-check) |

@@ -46,7 +46,8 @@ open_pr() {
     [ "$sha" != "$base" ] || die "no commit was made"
     [ "$("${G[@]}" rev-parse --abbrev-ref HEAD)" = "$branch" ] || die "not on $branch"
     WRITES=$((WRITES + 1))
-    "${G[@]}" push --quiet origin "HEAD:refs/heads/$branch" 2>"$BOOT_WORK/err" || die "the push to $branch failed"
+    GIT_TERMINAL_PROMPT=0 "${G[@]}" push --quiet origin "HEAD:refs/heads/$branch" 2>"$BOOT_WORK/err" \
+      || die "the push to $branch failed: check that \`gh auth status\` shows the owner and run \`gh auth setup-git\`; a branch that adds .github/workflows/ files needs the token's workflow scope: gh auth refresh -h github.com -s workflow; bash bootstrap/preflight.sh checks these"
     "${G[@]}" fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch"
     "${G[@]}" merge-base --is-ancestor "$sha" "origin/$branch" \
       || die "the commit $sha is not on origin/$branch after the push"

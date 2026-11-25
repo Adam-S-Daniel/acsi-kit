@@ -37,7 +37,10 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    sys.exit("ERROR: PyYAML is required: bash bootstrap/preflight.sh shows how to install it for this python3")
 
 SESSION_STOP = {"pro": 0.90, "max5x": 0.90, "ultra": None}
 JUDGE_EXCLUDE = {"pro": ["fable", "mythos"], "max5x": None, "ultra": None}

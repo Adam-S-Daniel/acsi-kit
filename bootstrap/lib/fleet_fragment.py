@@ -29,7 +29,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    sys.exit("ERROR: PyYAML is required: bash bootstrap/preflight.sh shows how to install it for this python3")
 
 FLEET = "repo-settings/fleet.yml"
 FRAGMENT = "repo-settings/fleet.evals.yml"

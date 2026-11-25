@@ -66,9 +66,9 @@ REPO_NAME=${BASH_REMATCH[2]}
 # Caches and local junk never leave the machine: a .pyc embeds local absolute
 # paths. They are pruned from every check below and from the copy.
 JUNK=( \( -name __pycache__ -o -name .pytest_cache -o -name node_modules -o -name '*.pyc' -o -name .DS_Store \) -prune -o )
-[ -n "$(find "$SRC" "${JUNK[@]}" -name .git -print -quit)" ] && die "the starter folder contains a .git entry"
-[ -n "$(find "$SRC" "${JUNK[@]}" ! -type f ! -type d ! -type l -print -quit)" ] && die "the starter folder contains a special file"
-[ -n "$(find "$SRC" "${JUNK[@]}" -type f -print -quit)" ] || die "the starter folder has no files"
+[ -n "$(find "$SRC" "${JUNK[@]}" -name .git -print | head -n 1)" ] && die "the starter folder contains a .git entry"
+[ -n "$(find "$SRC" "${JUNK[@]}" ! -type f ! -type d ! -type l -print | head -n 1)" ] && die "the starter folder contains a special file"
+[ -n "$(find "$SRC" "${JUNK[@]}" -type f -print | head -n 1)" ] || die "the starter folder has no files"
 # A symlink is kept (git stores it as a link) only when it is relative and
 # resolves inside the tree, so the copy can never point outside your repo.
 while IFS= read -r -d '' l; do
