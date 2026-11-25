@@ -7,7 +7,7 @@
 | Claude Max or Ultra, ideally Ultra | Cloud sessions and routines (scheduled and API-triggered cloud runs) also work on Pro, but routines and evals draw on your plan's weekly allowance, and the kit's numbers are measured on Ultra (formerly Max 20x). Read [which plan](#which-plan) before you start on Pro or Max 5x. Nothing here has been tested on a Team plan. |
 | Claude Code, current release | Needed for hooks, plugins, and skills. The eval harness doesn't pin the CLI, so it fails loudly when a release changes behavior. |
 | A GitHub account, and optionally a second | The exports name two owners throughout ([one owner or two](#one-owner-or-two)). |
-| A GitHub plan you know | **Rulesets, required checks and environments are enforced on private repos only on a paid GitHub plan** (Pro for a personal account, Team for an organization). See [free or paid](#free-or-paid-github-plan). |
+| A GitHub account on any plan, **Free included** | Set `PLAN=free` in `fleet.env` and every step works on a free account. A paid plan (Pro for a personal account, Team for an organization) only adds rulesets and environments on the three private repos and lets you make three more repos private. See [free or paid](#free-or-paid-github-plan). |
 | One durable machine | The session miner, the waiting-on-you feed, and machine memory curation never run in the cloud. |
 | git 2.54 or newer on that machine | Needed for config-based git hooks, which older git silently ignores. |
 | `gh`, `git`, `jq`, `python3` with PyYAML, bash 4.4+ | The bootstrap scripts use them on Linux, WSL, or macOS. macOS ships bash 3.2, so install a current one (with Homebrew, for example) and run the scripts with it. The scripts avoid GNU-only flags, but the kit's test suites (`run-all-tests.sh`, `bootstrap/tests/`) run on Linux and assume GNU `sed` and coreutils. Sign `gh` in as the owner with `gh auth login`, run `gh auth refresh -s workflow` so a push can add workflow files, then run `gh auth setup-git`. |
@@ -255,7 +255,9 @@ empty.
 
 ## Free or paid GitHub plan
 
-`create-repos.sh` applies this from `PLAN`:
+You don't need a paid plan. Set `PLAN=free` if you are on GitHub Free, and
+every step, including step 2's `create-repos.sh`, works. `create-repos.sh`
+applies this from `PLAN`:
 
 - **Free:** every repo is public except `acsi-agentskills-private`,
   `repo-settings`, and the optional `waiting-feed`. Those stay private and,
