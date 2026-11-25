@@ -45,7 +45,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "$ITEMS" ] || { usage; die "give --items <ids|recommended|none>"; }
-require_tools git python3
+require_tools git python3 node npm
 load_config "$CONFIG"
 # The kit's own clone is fine; a kit inside another repository is not, since
 # that repository's CLAUDE.md and AGENTS.md load into the session.
