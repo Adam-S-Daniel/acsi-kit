@@ -18,6 +18,8 @@
 #   run_write_stdin <cmd...>  write command whose value arrives on stdin (secrets)
 #   value_names <secret|variable> <owner/repo> <env|->  names set (never values)
 #   finish                 the "changed N things" / "nothing to change" summary
+#   CONFIG_REQUIRED        the keys load_config requires
+#   detect_os, install_cmd, node_install_cmd   the install command for this OS (OS_KIND)
 #   state_file / choices_file   status.sh's answers and add-content.sh's record (STATE, CHOICES)
 #
 # The registries below (ENVIRONMENTS, APPS, OTHER_VALUES, REPO_VARIABLES,
@@ -134,6 +136,16 @@ CONFIG_KEYS=(
   SITE_REPO
 )
 
+# The keys load_config refuses to leave empty; update-kit.sh reads this list
+# to say which new keys a newer kit requires.
+CONFIG_REQUIRED=(OWNER PLAN CLAUDE_PLAN)
+required_hint() { # key
+  case $1 in
+    PLAN) printf ' (free or paid)' ;;
+    CLAUDE_PLAN) printf " (pro, max5x or ultra): it sizes the eval budget and the fleet worker's schedule; docs/before-you-start.md#which-plan" ;;
+  esac
+}
+
 _valid_value() { # key value
   local k=$1 v=$2
   [ -z "$v" ] && return 0   # empty means "use the default"; required keys are checked after parsing
@@ -177,9 +189,10 @@ load_config() { # path
     _valid_value "$key" "$val" || die "$path:$n: invalid value for $key$([ "$key" != OWNER_NAME ] || echo " (letters, digits, spaces, . and - only; no apostrophe, it ends a single-quoted string in the starter's scripts)")"
     printf -v "CFG_$key" '%s' "$val"
   done < "$path"
-  [ -n "$CFG_OWNER" ] || die "$path: OWNER is required"
-  [ -n "$CFG_PLAN" ] || die "$path: PLAN is required (free or paid)"
-  [ -n "$CFG_CLAUDE_PLAN" ] || die "$path: CLAUDE_PLAN is required (pro, max5x or ultra): it sizes the eval budget and the fleet worker's schedule; docs/before-you-start.md#which-plan"
+  for key in "${CONFIG_REQUIRED[@]}"; do
+    known=CFG_$key
+    [ -n "${!known}" ] || die "$path: $key is required$(required_hint "$key")"
+  done
   : "${CFG_OWNER_TYPE:=user}" "${CFG_REVIEWER:=$CFG_OWNER}"
   # <your name> and "Example Adopter" land in public repos: default to the
   # public handle, never a legal name.
@@ -444,6 +457,48 @@ parse_common_args() {
 }
 
 usage() { sed -n '2,/^$/{s/^# \{0,1\}//;p}' "$0"; }
+
+# ------------------------------------------------------------------ the OS
+# preflight.sh's tool checks and update-kit.sh's node check name the install
+# command for this OS with these. PREFLIGHT_OS and PREFLIGHT_WSL (tests only)
+# override the detection.
+# OS_KIND is macos, debian, fedora or other; IS_WSL is 1 on Linux under WSL.
+detect_os() {
+  local kernel
+  kernel=$(uname -s)
+  if [ -n "${PREFLIGHT_OS:-}" ]; then
+    case $PREFLIGHT_OS in macos|debian|fedora|other) OS_KIND=$PREFLIGHT_OS ;; *) die "PREFLIGHT_OS wants macos, debian, fedora or other, not: $PREFLIGHT_OS" ;; esac
+  elif [ "$kernel" = Darwin ]; then
+    OS_KIND=macos
+  elif [ "$kernel" = Linux ] && command -v apt-get >/dev/null 2>&1; then
+    OS_KIND=debian
+  elif [ "$kernel" = Linux ] && command -v dnf >/dev/null 2>&1; then
+    OS_KIND=fedora
+  else
+    OS_KIND=other
+  fi
+  IS_WSL=0
+  if [ -n "${PREFLIGHT_WSL:-}" ]; then
+    [ "$PREFLIGHT_WSL" != 1 ] || IS_WSL=1
+  elif [ "$kernel" = Linux ] && [ -r /proc/version ] && [[ $(cat /proc/version 2>/dev/null || true) == *[Mm]icrosoft* ]]; then
+    IS_WSL=1
+  fi
+}
+
+# install_cmd <tool> <brew package> <apt package> <dnf package> <install page>:
+# the command for this OS; an empty package means no package, so the page.
+install_cmd() {
+  local tool=$1 brew=$2 apt=$3 dnf=$4 page=$5
+  case $OS_KIND in
+    macos)  [ -z "$brew" ] || { printf 'brew install %s' "$brew"; return 0; } ;;
+    debian) [ -z "$apt" ]  || { printf 'sudo apt-get install -y %s' "$apt"; return 0; } ;;
+    fedora) [ -z "$dnf" ]  || { printf 'sudo dnf install -y %s' "$dnf"; return 0; } ;;
+  esac
+  printf 'install %s from %s' "$tool" "$page"
+}
+
+# node_install_cmd <node|npm>: the one place that names node's packages.
+node_install_cmd() { install_cmd "$1" node "nodejs npm" "nodejs npm" https://nodejs.org/en/download; }
 
 # sha256_stdin: the hex sha256 of stdin. python3, not sha256sum, which macOS lacks.
 sha256_stdin() { python3 -I -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'; }
