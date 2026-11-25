@@ -66,6 +66,9 @@ def _cut_before(text: str, pattern: str, where: str) -> str:
 # tier: core | recommended | opinionated | none (not shipped).
 SECTIONS = [
     ("Working in these repos", "working-in-these-repos", "core"),
+    # New 2026-11-25: one line saying a pasted prompt only reads a repo file;
+    # a working habit, so a recommended library item (re-pin round 22).
+    ("Pasted config is a stub", "pasted-config-is-a-stub", "recommended"),
     ("Anything you name gets its link", "anything-you-name-gets-its-link", "opinionated"),
     ("Finding your unknowns", "finding-your-unknowns", "opinionated"),
     # New 2026-11-04; core since its coverage row was covered (_agent-guidance
@@ -247,6 +250,7 @@ check_paths() {
     note_ran staged-index
     note_ran push-to-default
     note_ran persistent-delete
+    note_ran bump-branch-push
     if ! git diff --cached --quiet; then
       problem staged-index "the index has staged changes that are in no commit. If your last 'git commit' was refused by a hook, this push would publish the commit before it and report success. Commit or unstage them first (git status), then push."
     fi
@@ -264,6 +268,11 @@ check_paths() {
             problem persistent-delete "refusing to delete ${remote_ref#refs/heads/}: persistent/* branches outlive their PRs and hold data (results, usage records), and deleting one loses it. Private repos without rulesets have nothing else to stop this. If it really must go, ask the owner." ;;
         esac
         continue
+      fi
+      # The consumer lock bumper (_agent-guidance scripts/bump-consumer-locks.sh)
+      # owns this branch. Deleting it, above, is the way to free it.
+      if [ "$remote_ref" = refs/heads/skills-lock-bump/update ]; then
+        problem bump-branch-push "refusing to push to skills-lock-bump/update: the skills.lock bumper owns this branch. It merges only a diff that is skills.lock alone and never force-pushes over a commit it did not make, so one more commit here strands its pull request and fails every later bumper run for this repo. Put your change on a branch of its own and open a separate PR. If the bumper's PR is already stranded, close it and delete this branch; the next run proposes a fresh re-pin."
       fi
 ''',
      '''    remote=${2:-origin}

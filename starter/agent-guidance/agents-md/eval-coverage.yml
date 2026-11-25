@@ -93,7 +93,7 @@
     templates/agent-checks/agent-checks, and the section's body is unchanged
     since this row was written).
   since: 2026-11-02
-  bytes: 324
+  bytes: 227
 
 - id: watch-finished-is-not-ci-passed
   heading: '"The watch finished" is not "CI passed"'

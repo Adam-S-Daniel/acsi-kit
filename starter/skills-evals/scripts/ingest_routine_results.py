@@ -125,9 +125,11 @@ SPEND_MAX_WEEKS = 1040
 #: The only keys a spend file may carry: explorer/schema.json `$defs.spend_file`
 #: allows more, and this gate does not, so a per-session or per-thread row can
 #: never reach the public results branch.
-SPEND_KEYS = frozenset({"schema", "generated_at", "plan", "weeks", "total", "loop_jobs", "rates"})
+SPEND_KEYS = frozenset({"schema", "generated_at", "plan", "weeks", "total", "loop_jobs",
+                        "eval_routine", "rates"})
 SPEND_RATES_KEYS = frozenset({"eval_usd_per_point", "scheduled_task_usd_per_point", "thread_usd_per_point"})
 SPEND_LOOP_JOBS_KEYS = frozenset({"as_of", "points_per_week", "usd_per_week"})
+SPEND_EVAL_ROUTINE_KEYS = frozenset({"as_of", "points_per_fire", "usd_per_fire", "fires"})
 SPEND_WEEK_KEYS = frozenset({"week", "eval_runs", "plan_meter_points", "api_usd",
                              "thread_spend_usd", "cost_per_verdict", "plan", "run_usd",
                              "scheduled_usd", "run_points", "scheduled_points"})
@@ -1664,15 +1666,18 @@ def _sum_estimated(parts: list):
 def estimate(tree: Path, run_id: str) -> dict:
     """Write `cost_estimate.json` for the ingested run `run_id`, unless one
     is there or no invocation of it carries `usage.cost_estimate` (a run
-    from before it). Full precision; nothing is rounded. `points` is the
+    from before it). An existing file that is not a JSON object (a write
+    cut short before this was atomic) is rewritten. The write goes to a
+    temporary file renamed into place, so it is never seen half written.
+    Full precision; nothing is rounded. `points` is the
     meter-calibrated figure; `estimated_points` (schema 2) is the allowance
     estimate priced from the invocation's token counts by type."""
     if not re.fullmatch(RUN_ID, run_id):
         raise Rejected("run id is not a routine run id")
     run_dir = tree / DEST_ROOT / run_id
     target = run_dir / ESTIMATE_NAME
-    if target.exists() or target.is_symlink() or not run_dir.is_dir() \
-            or run_dir.is_symlink():
+    if target.is_symlink() or not run_dir.is_dir() or run_dir.is_symlink() \
+            or (target.exists() and _estimate_readable(target)):
         return {"estimated": "false"}
     found = [(u["cost_estimate"], measured)
              for u, measured in _invocation_groups(run_dir)
@@ -1702,8 +1707,23 @@ def estimate(tree: Path, run_id: str) -> dict:
            "estimated_points": _sum_estimated(
                [i["estimated_points"] for i in invocations]),
            "invocations": invocations}
-    target.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, target)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return {"estimated": "true"}
+
+
+def _estimate_readable(path: Path) -> bool:
+    """Whether the estimate at `path` parses as a JSON object; a file that
+    does not is a write cut short, and `estimate` replaces it."""
+    try:
+        return isinstance(json.loads(path.read_text(encoding="utf-8")), dict)
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1902,6 +1922,8 @@ def check_spend(doc: dict, text: str, where: str) -> None:
         raise Rejected(f"{where}: the total carries a field that is not a weekly total")
     if isinstance(doc.get("loop_jobs"), dict) and set(doc["loop_jobs"]) - SPEND_LOOP_JOBS_KEYS:
         raise Rejected(f"{where}: loop_jobs carries a field that is not a weekly total")
+    if isinstance(doc.get("eval_routine"), dict) and set(doc["eval_routine"]) - SPEND_EVAL_ROUTINE_KEYS:
+        raise Rejected(f"{where}: eval_routine carries a field that is not a per-fire total")
     if "rates" in doc and (not isinstance(doc["rates"], dict) or set(doc["rates"]) - SPEND_RATES_KEYS):
         raise Rejected(f"{where}: rates carries a field that is not a display rate")
     plans = [doc.get("plan")]

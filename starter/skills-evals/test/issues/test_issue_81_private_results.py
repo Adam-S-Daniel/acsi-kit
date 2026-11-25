@@ -161,7 +161,11 @@ class PlannerKeepsPrivateSkillsOutOfPublicOutputs(unittest.TestCase):
                 {"roster_models": ["claude-sonnet-5-5"], "skills": {}},
                 [], [], [], datetime(2026, 10, 31, 23, 59, tzinfo=timezone.utc))
         self.assertNotIn("acsi-writing-style", out)
-        self.assertIn("workflow-path-audit", out)
+        self.assertFalse(set(out) & plan_week.private_skills(ROOT / "evals"))
+        # Control: a public skill still gets one. Which one depends on what
+        # evals/scheduled.yml schedules today, so no skill is named: a scope
+        # change that pauses any one public skill must not fail this test.
+        self.assertTrue(out, "no public skill got an improve context")
 
 
 if __name__ == "__main__":

@@ -212,6 +212,16 @@
       "source_link": "library/guidance/working-habits/agent-guidance/fragments/section.md"
     },
     {
+      "id": "pasted-config-is-a-stub",
+      "kind": "guidance",
+      "tier": "recommended",
+      "group": "habits",
+      "title": "Pasted config is a stub",
+      "short": "Treats a pasted routine prompt or setup script as a stub that only runs or reads a file in the repo.",
+      "library_path": "library/guidance/pasted-config-is-a-stub",
+      "source_link": "library/guidance/pasted-config-is-a-stub/agent-guidance/fragments/section.md"
+    },
+    {
       "id": "git-habits",
       "kind": "guidance",
       "tier": "recommended",

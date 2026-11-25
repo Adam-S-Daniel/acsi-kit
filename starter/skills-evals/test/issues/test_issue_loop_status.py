@@ -11,6 +11,7 @@ import json
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -96,6 +97,17 @@ class LiveReadingTests(unittest.TestCase):
         self.assertGreater(under["under_line_points"], 0)
 
 
+    def test_the_live_reading_is_read_as_rounded_not_truncated(self):
+        # The collector passes the usage endpoint's utilization, which rounds
+        # to a whole percent: 45 is [44.5, 45.5), so with the line at 45.75
+        # the account is under it. Read as a truncated CLI value (top 46) it
+        # would show as ahead.
+        reading = loop_status.live_reading(45.0, NOW, RESETS, NOW)
+        limits = {**LIMITS, "stop_when_account_above": 0.4575 / reading["elapsed"]}
+        self.assertFalse(loop_status.pace_block(reading, limits, "live")["ahead"])
+        self.assertTrue(loop_status.pace_block(reading, limits, "guard")["ahead"])
+
+
 FORECAST = {
     "inputs": {"usd_per_point": [6.0, 8.0], "weekly_cap_points": 16.0,
                "loop_jobs_points_per_week": 9.0,
@@ -130,6 +142,46 @@ class ForecastTests(unittest.TestCase):
         got = loop_status.forecast_block(FORECAST)
         self.assertEqual(got["tasks"][0]["task"], "Dashboard refresh")
         self.assertEqual(got["tasks"][0]["points_per_week"], 3.5)
+
+    def test_the_pace_replay_behind_the_capacity(self):
+        doc = json.loads(json.dumps(FORECAST))
+        doc["inputs"]["pace_replay"] = {
+            "points": 6.0, "low": 4.5, "high": 8.0, "flat_points": 0.0,
+            "weeks": [{"half_spent_by_hours": 17.0}, {"half_spent_by_hours": 57.0}]}
+        got = loop_status.forecast_block(doc)["pace_replay"]
+        self.assertEqual(got, {"weeks": 2, "low_points": 4.5, "high_points": 8.0,
+                               "flat_points": 0.0, "half_spent_by_hours": 37.0})
+        self.assertIsNone(loop_status.forecast_block(FORECAST)["pace_replay"])
+
+    def test_the_catch_up_calculation_step_by_step_in_points(self):
+        doc = json.loads(json.dumps(FORECAST))
+        doc["subjects"] = [{"kind": "skill", "subject": "a", "route": "keep", "open_cells": 1,
+                            "pairs_central": 4, "usd_central": 14.0},
+                           {"kind": "guidance", "subject": "b", "route": "remove-or-cap",
+                            "open_cells": 2, "pairs_central": 20, "usd_central": 70.0}]
+        doc["backlog_usd"] = {"central": 84.0, "low": 70.0, "high": 140.0}
+        doc["backlog_pairs"] = {"central": 24}
+        doc["keep_up_items"] = {"new skills": 35.0, "new git hooks": 0.0, "re-checks": 35.0}
+        doc["inputs"]["cap_steps"] = {"weekly_cap_points": 25.0, "after_loop_jobs_points": 16.0,
+                                      "after_account_stop_points": 16.0,
+                                      "account_stop_basis": "pace_replay"}
+        doc["inputs"]["assumptions"]["start"] = "2026-11-23T17:00:00Z"
+        c = loop_status.forecast_block(doc)["calculation"]
+        self.assertEqual([r["subject"] for r in c["subjects"]], ["b", "a"])  # largest first
+        self.assertAlmostEqual(c["subjects"][0]["points"], 10.0)
+        self.assertEqual(c["subjects_total"], 2)
+        self.assertAlmostEqual(c["backlog_points"]["central"], 12.0)
+        self.assertEqual((c["weekly_cap_points"], c["loop_jobs_points"],
+                          c["after_loop_jobs_points"], c["capacity_basis"]),
+                         (25.0, 9.0, 16.0, "pace_replay"))
+        self.assertAlmostEqual(c["capacity_points"], 20.0)
+        self.assertEqual([i["item"] for i in c["keep_up_items"]], ["new skills", "re-checks"])
+        self.assertAlmostEqual(c["keep_up_points"], 10.0)
+        self.assertAlmostEqual(c["room_points"], 10.0)
+        self.assertEqual(c["weeks_central"], 2.5)
+        self.assertEqual(c["start"], "2026-11-23T17:00:00Z")
+        doc["keep_up_items"] = ["not", "a", "dict"]
+        self.assertIsNone(loop_status.forecast_block(doc)["calculation"])
 
     def test_a_document_without_the_figures_is_none(self):
         self.assertIsNone(loop_status.forecast_block({"inputs": {}}))
@@ -181,6 +233,40 @@ class StatusTests(unittest.TestCase):
         self.assertIsNone(doc["guard_pace"])
         self.assertEqual(doc["week"]["resets_at"], iso(RESETS))
         self.assertEqual(doc["session"], {"plan": "ultra", "stop_pct": None, "hold": False})
+
+    def test_estimated_spend_is_token_priced_runs_improve_and_jobs_so_far(self):
+        # The owner, 2026-11-24: "Loop spend is shown as higher than all usage".
+        # The guard's booked figure (overrun per run, the account-wide bound,
+        # the jobs' whole week) is not spend; the estimate prices each run's
+        # own calls, falls back to run_cost only for a run it cannot price,
+        # and counts the jobs for the share of the week gone.
+        since = guard.window_start(NOW)
+        runs = [self.tree / "a", self.tree / "b"]
+        priced = {runs[0]: {"points": 0.06}, runs[1]: None}
+        state = base_state(loop_reserve=0.07, improve_matched_cost=0.02)
+        with unittest.mock.patch.object(guard, "ingested_runs", return_value=runs), \
+                unittest.mock.patch.object(guard, "run_points", side_effect=lambda r, *_: priced[r]), \
+                unittest.mock.patch.object(guard, "run_cost", return_value=0.0015):
+            spend = loop_status.estimated_spend(self.tree, LIMITS, NOW, since, state)
+        gone = (NOW - since) / guard.WINDOW
+        self.assertAlmostEqual(spend["evals"], 0.0006 + 0.0015)
+        self.assertAlmostEqual(spend["improve"], 0.02)
+        self.assertAlmostEqual(spend["jobs"], 0.07 * gone)
+        self.assertAlmostEqual(spend["total"], 0.0006 + 0.0015 + 0.02 + 0.07 * gone)
+
+    def test_the_document_carries_the_estimate_below_the_booked_figure(self):
+        (self.tree / "spend").mkdir()
+        (self.tree / "spend" / "weekly.json").write_text(json.dumps(
+            {"loop_jobs": {"as_of": iso(NOW - timedelta(hours=1)), "points_per_week": 9.0,
+                           "usd_per_week": 60.0}}))
+        doc = loop_status.status_from_tree(self.tree, LIMITS, NOW, _args(), None, **self.counts())
+        loop = doc["loop"]
+        gone = (NOW - guard.window_start(NOW)) / guard.WINDOW
+        self.assertAlmostEqual(loop["loop_jobs_so_far_points"], 9.0 * gone)
+        self.assertAlmostEqual(loop["estimated_points"],
+                               loop["eval_estimated_points"] + loop["improve_estimated_points"]
+                               + loop["loop_jobs_so_far_points"])
+        self.assertLess(loop["estimated_points"], loop["used_points"])
 
     def test_main_prints_one_json_document(self):
         out = io.StringIO()

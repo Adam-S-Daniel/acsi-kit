@@ -26,7 +26,6 @@ example-adopter/acsi-agentskills plugins/acsi-coding-local/skills/migrate-claude
 example-adopter/acsi-agentskills plugins/acsi-coding-local/skills/sync-cc-settings-between-wsl-and-windows/SKILL.md :: more-recently-modified-wins
 example-adopter/acsi-agentskills plugins/acsi-non-coding-local/skills/fastmail/SKILL.md :: Confirm the inbox is now visible
 example-adopter/example-site-platform skills/cms-stuck-pr-triage/SKILL.md :: reported green no longer counts
-example-adopter/example-site-platform skills/github-actions-sha-pinning/SKILL.md :: can no longer move it, and fails SILENTLY
 example-adopter/example-site-platform skills/platform-release-and-bump/SKILL.md :: the precondition is now MORE likely
 example-adopter/wsl-automation AGENTS.md :: Real, previously-booted distros
 example-adopter-two/example-site-b AGENTS.md :: previously partner and
