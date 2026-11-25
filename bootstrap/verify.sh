@@ -14,8 +14,11 @@
 #   variables       repo-settings' GUIDANCE_SYNC_APP_ID and (evals)
 #                   ROSTER_WRITER_APP_ID and SITE_REPO match fleet.env, and
 #                   _agent-guidance's EVALS_REPO is none while skills-evals
-#                   does not exist and <owner>/skills-evals once it does;
-#                   its ARTICLE_WATCH_FEED_URL is set (REPO_VARIABLES)
+#                   does not exist and <owner>/skills-evals once it does
+#                   (on --track base either value passes, so adding evals
+#                   never undoes a base step; the evals track and all want
+#                   the exact one); its ARTICLE_WATCH_FEED_URL is set
+#                   (REPO_VARIABLES)
 #   federation      skills-evals' four ANTHROPIC_* federation ids match
 #                   fleet.env (REPO_VARIABLES; optional, so only when named)
 #   apps:<app>      one App (APPS): its id is in fleet.env, and its client id
@@ -115,6 +118,8 @@ ONLY_CONTENT=0
 [ "$ONLY" != content ] || ONLY_CONTENT=1
 
 # A base-only setup has no skills-evals: the whole setup is then the base.
+# ASKED_TRACK keeps what was asked for: EVALS_REPO's check is exact on all.
+ASKED_TRACK=$TRACK
 if [ "$TRACK" = all ] && [ "$ONLY_CONTENT" = 0 ] && ! evals_repo_exists; then
   TRACK=base
   skp "$O/$EVALS_REPO and the evals track's checks ($EVALS_REPO is not created yet; the evals track creates it: /adopt-evals)"
@@ -188,7 +193,9 @@ declare -A REPO_VARS
 for entry in "${REPO_VARIABLES[@]}"; do
   IFS='|' read -r r name src group <<<"$entry"
   if [ "$group" = federation ]; then sel federation off || continue; else sel "$group" || continue; fi
-  tracked "$(variable_track "$r" "$src")" || continue
+  # EVALS_REPO lives in a base repo but says whether evals are on, so every
+  # track checks it: the evals track confirms its flip (step 37).
+  [ "$src" = evals:state ] || tracked "$(variable_track "$r" "$src")" || continue
   if [[ $src == evals:state && -z "${EVALS_HERE:-}" ]]; then EVALS_HERE=1; evals_repo_exists || EVALS_HERE=0; fi
   want=$(repo_variable_value "$src")
   if [ -z "$want" ]; then
@@ -201,7 +208,18 @@ for entry in "${REPO_VARIABLES[@]}"; do
     if ! repo_variables "$O/$r"; then fail "$O/$r variables readable (HTTP $GH_HTTP)"; continue; fi
     REPO_VARS[$r]=$REPO_VARS_OUT
   fi
-  if [[ $src == unset:* ]]; then
+  if [[ $src == evals:state && $ASKED_TRACK == base ]]; then
+    # The base track accepts either well-formed value, so creating
+    # skills-evals (step 35) never turns a base step back to not done before
+    # create-environments.sh flips EVALS_REPO (step 37).
+    if ! grep -qxF -- "$name" <<<"$(cut -f1 <<<"${REPO_VARS[$r]}")"; then
+      fail "$O/$r variable $name is not set (run create-environments.sh)"
+    else
+      v=$(awk -F'\t' -v n="$name" '$1 == n { print substr($0, length(n) + 2); exit }' <<<"${REPO_VARS[$r]}")
+      if [ "$v" = none ] || [ "$v" = "$O/$EVALS_REPO" ]; then pass "$O/$r variable $name is $v"
+      else fail "$O/$r variable $name is not none or $O/$EVALS_REPO (run create-environments.sh)"; fi
+    fi
+  elif [[ $src == unset:* ]]; then
     # Only that it is set: a value the adopter chose (a feed URL) is theirs.
     if grep -qxF -- "$name" <<<"$(cut -f1 <<<"${REPO_VARS[$r]}")"; then pass "$O/$r variable $name is set"
     else fail "$O/$r variable $name is not set (create-environments.sh sets it to $want)"; fi

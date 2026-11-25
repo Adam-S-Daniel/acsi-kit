@@ -527,6 +527,30 @@ run bash "$B/verify.sh" --config "$CFGP" --only variables
 assert "verify fails EVALS_REPO=none while skills-evals exists" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be acme-example/skills-evals (skills-evals exists)"
 run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
 assert_eq "create-environments flips EVALS_REPO once skills-evals exists" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+# Adding evals never undoes a base step: between creating skills-evals (step
+# 35) and the flip (step 37) EVALS_REPO is still none, which the base track
+# accepts; the evals track and --track all want the exact value.
+for v in none acme-example/skills-evals; do
+  jqset "$AG.EVALS_REPO = \"$v\""
+  run bash "$B/verify.sh" --config "$CFGP" --track base --only variables
+  assert "verify --track base passes EVALS_REPO=$v while skills-evals exists" has "$OUT" "PASS: acme-example/_agent-guidance variable EVALS_REPO is $v"
+  assert_not "verify --track base fails nothing about EVALS_REPO=$v" grep -q "^FAIL: .*variable EVALS_REPO" "$OUT"
+done
+jqset "$AG.EVALS_REPO = \"none\""
+for tr in evals all; do
+  run bash "$B/verify.sh" --config "$CFGP" --track "$tr" --only variables
+  assert "verify --track $tr names the value EVALS_REPO should have" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be acme-example/skills-evals (skills-evals exists)"
+done
+jqset "$AG.EVALS_REPO = \"acme-example/skills-evals\""
+run bash "$B/verify.sh" --config "$CFGP" --track evals --only variables
+assert "verify --track evals passes the flipped EVALS_REPO" has "$OUT" "PASS: acme-example/_agent-guidance variable EVALS_REPO matches fleet.env"
+for v in other-owner/skills-evals acme-example/other '' ; do
+  if [ -n "$v" ]; then jqset "$AG.EVALS_REPO = \"$v\""; else jqset "del($AG.EVALS_REPO)"; fi
+  run bash "$B/verify.sh" --config "$CFGP" --track base --only variables
+  assert "verify --track base names EVALS_REPO='$v' and what it may be" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO is $([ -n "$v" ] && echo "not none or acme-example/skills-evals" || echo "not set") (run create-environments.sh)"
+done
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "create-environments restores EVALS_REPO" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
 # A feed URL the adopter set is theirs: never overwritten, and verify only needs it set.
 jqset "$AG.ARTICLE_WATCH_FEED_URL = \"https://feeds.example.com/articles.xml\""
 n=$(log_lines "$GH_LOG")
@@ -1269,11 +1293,15 @@ git -C "$w" commit -qam "fleet.yml without the example repos" && git -C "$w" pus
 export BASE_ENGINE_LOG="$T/base-engine.log" REAL_ENGINE="$K/starter/repo-settings/scripts/repo_settings.py"; : > "$BASE_ENGINE_LOG"
 SB="$T/state-base/adopt.json"; mkdir -p "$T/state-base"; printf '{"installed": []}\n' > "$T/state-base/adopt.content-choices.json"
 # The two variables on _agent-guidance follow skills-evals: it is gone, but
-# EVALS_REPO still names it, so verify fails until create-environments.sh
-# flips it to none (a base-only run writes nothing that needs skills-evals).
+# EVALS_REPO still names it. The base track accepts either well-formed value
+# (it never looks at skills-evals); --track all wants the exact one until
+# create-environments.sh flips it to none (a base-only run writes nothing that
+# needs skills-evals).
 assert_eq "EVALS_REPO still names the gone skills-evals" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
-run bash "$B/verify.sh" --config "$CFGB" --track base --only variables
-assert "verify fails EVALS_REPO naming a skills-evals that does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none (skills-evals does not exist)"
+run bash "$B/verify.sh" --config "$CFGB" --track base --only variables; rc=$?
+assert_eq "verify --track base accepts EVALS_REPO naming skills-evals" "$rc" 0
+run bash "$B/verify.sh" --config "$CFGB" --only variables
+assert "verify --track all fails EVALS_REPO naming a skills-evals that does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none (skills-evals does not exist)"
 run bash "$B/create-environments.sh" --config "$CFGB" --dry-run; rc=$?
 assert_eq "create-environments dry run on a base-only setup exits 0" "$rc" 0
 assert "the dry run prints the EVALS_REPO write" has "$OUT" "would have: set variable EVALS_REPO in acme-example/_agent-guidance"
@@ -1288,8 +1316,8 @@ run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
 assert_eq "a second base-only run makes no write calls" "$(since "$n")" 0
 assert "a second base-only run says nothing to change" has "$OUT" "Nothing to change"
 jqset "$AG.EVALS_REPO = \"acme-example/skills-evals\""
-run bash "$B/verify.sh" --config "$CFGB" --track base --only variables
-assert "verify fails EVALS_REPO naming skills-evals when it does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none"
+run bash "$B/verify.sh" --config "$CFGB" --only variables
+assert "verify --track all fails EVALS_REPO naming skills-evals when it does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none"
 run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
 assert_eq "EVALS_REPO is none again" "$(jqs "$AG.EVALS_REPO")" none
 read -r -a asks <<<"$(jq -r '[.steps[] | select(.track == "base" and .check.type == "ask" and .check.record == null) | "--mark", .id] | join(" ")' "$B/steps.json")"
