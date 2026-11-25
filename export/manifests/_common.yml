@@ -48,8 +48,13 @@ protect:
 #   literal + to          exact text
 #   literal + to + forms  also every case and separator form (adam-s-daniel,
 #                         adam_s_daniel, ADAM_S_DANIEL, ...; a one-word name
-#                         next to `_` takes the snake form)
+#                         next to `_` takes the snake form), with no word
+#                         boundary, so inside identifiers too
 #   regex + to            a Python re template (\1 for groups)
+#   regex + to + forms    a one-word `to` in the matched text's case style:
+#                         all lower -> lower, all upper -> upper, else
+#                         capitalized (no word boundary unless the regex
+#                         has one, so inside identifiers too)
 #   sentence_case: true   capitalize the replacement at a sentence start
 #   paths: [globs]        only in these files
 substitutions:
@@ -89,8 +94,13 @@ substitutions:
   - {name: C10 first name, regex: '(?<![\w-])Adam(?![\w-])', to: 'the owner', sentence_case: true}
   # C1: the bare `adam` bundle label (and names built on it) becomes `acsi`.
   - {name: C1 bare adam label, regex: '(?<![\w-])adam(?![a-z_])', to: 'acsi'}
-  # Machine names and the owner's drive letter.
-  - {name: workstation name, regex: '\bBOXY\b', to: 'WORKSTATION'}
+  # Machine names and the owner's drive letter. The workstation name is
+  # spelled one letter class at a time, so the kit's own text never holds
+  # it, and takes `forms`: it is replaced in every letter case and inside
+  # identifiers (scan_<name>_tasks, <name>Tasks, scan<Name>Tasks), in the
+  # matched case style, so a definition and its callers stay consistent
+  # (DECISIONS, "The workstation name in every case").
+  - {name: workstation name, regex: '[Bb][Oo][Xx][Yy]', to: WORKSTATION, forms: true}
   - {name: old workstation name, regex: '\bZENDA\b', to: 'OLD-WORKSTATION'}
   - {name: owner's clone drive, regex: 'D:(?=\\+repos)', to: '<drive>:'}
   # C7: claude.ai account object ids.
@@ -129,7 +139,7 @@ leak_scan:
   - {name: jodidaniel, regex: '(?i)jodidaniel'}
   - {name: superoutrigger, regex: '(?i)superoutrigger'}
   - {name: adamdaniel, regex: '(?i)adamdaniel'}
-  - {name: BOXY, regex: 'BOXY'}
+  - {name: workstation name, regex: '[Bb][Oo][Xx][Yy]'}
   - {name: ZENDA, regex: 'ZENDA'}
   - {name: 'D:\repos', regex: 'D:\\+repos'}
   - {name: claude.ai id, regex: '\b(?:trig|env|session|cse)_(?!EXAMPLE|FIXTURE)[A-Za-z0-9]{16,}'}

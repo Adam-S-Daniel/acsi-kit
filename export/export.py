@@ -452,6 +452,14 @@ def compile_rules(items) -> list:
             rules.append(Rule(re.compile(ci, re.IGNORECASE), None, (to_words,), sentence, paths, name + " (any case)"))
         elif "literal" in item:
             rules.append(Rule(re.compile(re.escape(item["literal"])), item["to"].replace("\\", "\\\\"), None, sentence, paths, name))
+        elif "regex" in item and item.get("forms"):
+            # A regex that spells a name one letter class at a time (so the
+            # manifest never holds it): the one-word `to` takes the matched
+            # text's case style, as the literal catch-all above does.
+            to_words = [w for w in re.split(r"[-_]", item["to"]) if w]
+            if len(to_words) != 1:
+                raise ExportError(f"substitution {name!r}: a regex with forms needs a one-word `to`")
+            rules.append(Rule(re.compile(item["regex"]), None, (to_words,), sentence, paths, name))
         elif "regex" in item:
             rules.append(Rule(re.compile(item["regex"]), item["to"], None, sentence, paths, name))
         else:
