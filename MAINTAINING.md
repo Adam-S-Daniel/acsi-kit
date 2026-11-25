@@ -55,6 +55,10 @@ routine can push, but it can't open pull requests or comment, so
 commit's message, labels it, and links it on the issue. Review and merge it
 like any other.
 
+The owner's fleet worker may also merge re-sync pull requests after its own
+review, under the rule in the source spec's kit-only block, which the export
+strips (`export/DECISIONS.md`, "Kit-only blocks in the source").
+
 Two workflows keep the App key off the branch. `resync-fix-pushed.yml` runs
 on the push, holds no secrets, and only announces it. `resync-fix-pr.yml`
 runs on its `workflow_run`, which always uses the default branch's copy, so

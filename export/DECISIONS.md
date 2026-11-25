@@ -2933,3 +2933,13 @@ Tests: `python3 -B -m pytest export/tests -q -p no:cacheprovider`, `bash bootstr
 | agentskills-private | `c5b1bc9dfaae` | unchanged |
 
 Reverse: re-pin each source to its "Before" sha, remove the `pasted-config-is-a-stub` entry from `SECTIONS` and the catalog and the `bump-branch-push` lines from `blank_content.py` and `machinery_tests.py`, restore the "three" to "two" in `docs/skills.md`, and re-run the full export. The `kit_repos.py` and `retargets.txt` fixes stay only if the sources still need them.
+
+## Kit-only blocks in the source (2026-11-25, Adam-S-Daniel/_agent-guidance#644)
+
+The source's fleet-worker spec (`docs/routines/fleet-worker.md`) gains a rule that lets the owner's fleet worker merge the kit's own re-sync pull requests (heads `resync/auto` and `resync-fix/*`), fenced by `<!-- kit-only:begin -->` and `<!-- kit-only:end -->` lines, and `repos.yml` gains a top-level `kit_resync` key (`repo`, `app_slug`) under a comment block. An adopter's fleet has no kit, so neither ships.
+
+- `export/patches/_agent-guidance/kit_only.py` cuts every marker-fenced region from the Markdown files under `docs/routines/` (markers and one blank line after the end marker included, so the paragraphs around it stay one blank line apart) and the `kit_resync` key with the comment block directly above it from `repos.yml`. It runs first among the patches, on the substituted tree, while the marker text is intact.
+- It landed before the source change, which is why it is a patch and not an `edits` entry (an edit's old text must match at the pin). With no markers and no key it changes nothing, so the starters are unchanged at the current pin. An unbalanced, nested or out-of-order marker stops the export, naming the file, instead of shipping half a block.
+- `export/tests/test_kit_only.py` covers the patch and holds the shipped fleet-worker spec to no marker, no `resync/auto` and no `resync-fix/`, and the shipped `repos.yml` to no `kit_resync`.
+
+Reverse: delete the patch, its manifest entry and its test file. The next re-pin then ships the owner's merge rule and key as exported.
