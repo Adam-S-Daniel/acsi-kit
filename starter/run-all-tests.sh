@@ -3,7 +3,8 @@
 # line per tree, then the totals. Exits 1 if any tree failed. Each tree runs
 # through ../export/run_suites.py, which copies it to a temporary directory and
 # runs the source repo's own setup and test command (all trees at once) (its manifest's suite:
-# block) in a PID namespace. Failures listed in known-failures.txt, by exact
+# block) in a PID namespace. A suite that installs Python packages gets its own
+# virtual environment, so the trees' pins never meet in one interpreter. Failures listed in known-failures.txt, by exact
 # id, are excused only when they account for the whole failure; anything else
 # fails the tree. A failing tree's log is shown.
 set -uo pipefail
@@ -15,7 +16,8 @@ logs=$(mktemp -d)
 trap 'rm -rf "$logs"' EXIT
 passed=0 failed=0
 # Start every tree at once, then report in a fixed order. Each tree runs in its
-# own temporary copy and PID namespace, so they do not share state.
+# own temporary copy and PID namespace, and one that installs packages in its
+# own virtual environment, so they do not share state.
 for t in "${trees[@]}"; do
   if ! grep -qxE "kit_name: $t" ../export/manifests/*.yml 2>/dev/null; then
     echo 2 > "$logs/$t.rc"; echo "no manifest names it" > "$logs/$t.log"; continue
