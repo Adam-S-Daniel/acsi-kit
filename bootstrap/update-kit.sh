@@ -163,12 +163,12 @@ config_refusal() {
 # Runs in the NEW copy of the script after a fast-forward, or directly on a
 # current kit.
 rest() {
-  local tier id kept=() gone=() core=() out=$BOOT_WORK/reapply.out args reapply=1
+  local tier id kept=() gone=() core=() out=$BOOT_WORK/reapply.out args reapply=1 since
   log ""
   if [ -n "$SINCE" ]; then
-    if git -C "$KIT" rev-parse --verify -q "$SINCE^{commit}" >/dev/null; then
+    if since=$(git -C "$KIT" rev-parse --verify -q "$SINCE^{commit}"); then
       printf '%s\n' "${CONFIG_REQUIRED[@]}" > "$BOOT_WORK/keys.required"
-      key_report "$SINCE" "$HERE/fleet.env.example" "$BOOT_WORK/keys.required"
+      key_report "$since" "$HERE/fleet.env.example" "$BOOT_WORK/keys.required"
     else
       log "(--since $SINCE is not a commit here, so the fleet.env key changes are not listed)"
     fi
@@ -221,8 +221,8 @@ rest() {
     log "read those before any --force."
   fi
   log ""
+  # No finish(): its "nothing to change" would hide add-content.sh's writes.
   log "Next: bash bootstrap/status.sh${CONFIG_ARG}"
-  [ -n "$AFTER" ] || finish
   exit 0
 }
 

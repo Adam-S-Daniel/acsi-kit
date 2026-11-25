@@ -872,6 +872,8 @@ assert_eq "a second run keeps HEAD" "$(git -C "$UK" rev-parse HEAD)" "$h1"
 uk "$UK" --config "$UK/fleet.env" --since "$h0"; rc=$?
 assert_eq "update-kit --since on a current kit exits 0" "$rc" 0
 assert "--since names the key added since then" has "$OUT" "new, optional: NEW_KEY_FOR_TEST"
+assert "--since names the commit, not the name given" has "$OUT" "changed since ${h0:0:12}"
+assert_not "it does not say nothing changed after re-applying the choices" has "$OUT" "Nothing to change"
 # Hand edits inside starter/ are not add-content's, so they are refused.
 bump "upstream again"
 assert "the hand-edited file is tracked" git -C "$UK" ls-files --error-unmatch starter/repo-settings/README.md
