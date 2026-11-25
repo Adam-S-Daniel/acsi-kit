@@ -235,5 +235,12 @@ workflow isn't on the base branch yet:
 Nothing is protected before step 20, so these don't block the merge. Any
 other failure is real, so read it before you merge.
 
+On `PLAN=free`, `create-apps.sh` skips the `settings-admin` App, so
+`REPO_SETTINGS_APP_CLIENT_ID` is never set in `repo-settings`. Both apply
+jobs in `repo-settings.yml` (`apply-auto` and `repo-settings`) check that
+variable and are skipped. The weekly `plan` job doesn't, so it still runs
+with the read App and reports drift. You apply from your machine with
+`bash bootstrap/apply-settings.sh`.
+
 Until step 20, `repo-settings.yml`'s apply job waits for your approval on
 each merge to `repo-settings`. Reject those deployments until then.

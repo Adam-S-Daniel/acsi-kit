@@ -198,5 +198,14 @@ for s in STEPS:
               not missing)
     seen |= targets(s)
 
+# The cost sentence in docs/before-you-start.md quotes the step counts.
+EXPECTED_COUNTS = tuple(str(n) for n in (len(STEPS), sum(s.get("track") == "base" for s in STEPS),
+                                         sum(s.get("track") == "evals" for s in STEPS)))
+COUNT_RE = re.compile(r"(\d+) steps \((\d+) base,\s+(\d+) evals\)")
+m = COUNT_RE.search((ROOT / "docs" / "before-you-start.md").read_text(encoding="utf-8"))
+check("docs/before-you-start.md says '<N> steps (<B> base, <E> evals)' with steps.json's counts "
+      f"{EXPECTED_COUNTS[0]} steps ({EXPECTED_COUNTS[1]} base, {EXPECTED_COUNTS[2]} evals); found "
+      f"{m.groups() if m else 'no such sentence'}", bool(m) and m.groups() == EXPECTED_COUNTS)
+
 print(f"{passed} assertions passed, {failed} failed")
 sys.exit(1 if failed else 0)
