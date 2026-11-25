@@ -94,8 +94,8 @@ class Breakdown(unittest.TestCase):
              "fired_at": "2026-11-12T02:22:00Z"},
         ]
 
-    def run_breakdown(self, boxy=()):
-        return aus.breakdown(CONFIG, self.triggers, self.fires, self.workflows, list(boxy),
+    def run_breakdown(self, workstation=()):
+        return aus.breakdown(CONFIG, self.triggers, self.fires, self.workflows, list(workstation),
                              NOW, 14)
 
     def job(self, doc, name):
@@ -144,7 +144,7 @@ class Breakdown(unittest.TestCase):
         self.assertEqual(fw["rate_source"], "ledger fires in 14 days")
         self.assertAlmostEqual(fw["fires_per_week"], 3 * 7 / 14)
 
-    def test_boxy_task_that_runs_claude_is_meter_and_unmeasured(self):
+    def test_workstation_task_that_runs_claude_is_meter_and_unmeasured(self):
         doc = self.run_breakdown([{"name": "Memory Curation", "fires_per_week": 1.0,
                                    "runs_claude": True, "scripts": []},
                                   {"name": "Task Health Publish", "fires_per_week": 7.0,
@@ -297,7 +297,7 @@ class ShippedConfig(unittest.TestCase):
                              ("_agent-guidance/fleet-worker-fire.yml", hours), name)
 
 
-class BoxyTasks(unittest.TestCase):
+class WorkstationTasks(unittest.TestCase):
     def test_register_tasks_parameters_and_claude_scripts(self):
         root = Path(tempfile.mkdtemp())
         (root / "scripts").mkdir()
@@ -314,7 +314,7 @@ class BoxyTasks(unittest.TestCase):
         (root / "scripts" / "run-memory-curation.sh").write_text(
             'timeout 60 "$claude_bin" -p "$prompt" --model sonnet\n', encoding="utf-8")
         (root / "scripts" / "publish-task-health.sh").write_text("echo ok\n", encoding="utf-8")
-        tasks = {t["name"]: t for t in aus.scan_boxy_tasks(root)}
+        tasks = {t["name"]: t for t in aus.scan_workstation_tasks(root)}
         self.assertEqual((tasks["Memory Curation"]["fires_per_week"],
                           tasks["Memory Curation"]["runs_claude"]), (1.0, True))
         self.assertEqual((tasks["Task Health Publish"]["fires_per_week"],
