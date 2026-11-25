@@ -193,7 +193,10 @@ jobs:
             bwrap --ro-bind / / --unshare-pid --unshare-net --proc /proc --dev /dev --die-with-parent -- true
 
       # The Python pins agent-skills' and repo-settings' suites check for
-      # (their manifests' `needs`); skills-evals' setup installs its own.
+      # (their manifests' `needs`). These two install serially, here, before
+      # any suite starts; skills-evals' setup installs its own pins, which
+      # differ (markdown-it-py), into a virtual environment that run_suites.py
+      # creates for that suite alone (its manifest's `venv: true`).
       # skills-evals' real-work fixture gems need the bundler version their
       # lockfile names, as skills-evals' own ci.yml installs it.
       - name: Install suite dependencies
