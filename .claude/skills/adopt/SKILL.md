@@ -35,7 +35,9 @@ is in `docs/quick-start.md`.
    then pass `--config <path>` to every script) and help the user fill in
    `OWNER`, `OWNER_TWO` (the same login when they have one account) and
    `PLAN`. `docs/before-you-start.md` explains each key and the costs; say
-   the costs out loud before step 2.
+   the costs out loud before step 2. No step needs a paid GitHub plan: a
+   user on GitHub Free sets `PLAN=free`, and the scripts skip what Free
+   lacks. Never tell a user to upgrade GitHub to continue.
 3. Check the tools the scripts need: `gh` signed in as `OWNER`
    (`gh auth status`), `jq`, `git`, `python3` with PyYAML.
 
