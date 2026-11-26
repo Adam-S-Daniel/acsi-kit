@@ -72,7 +72,7 @@ jobs:
               if git clone --quiet --depth 1 "https://github.com/$repo.git" "$dir"; then ok=1; break; fi
               rm -rf -- "$dir"; sleep $((attempt * 10))
             done
-            [ -n "$ok" ] || { echo "::error::could not clone $repo"; exit 1; }
+            [ -n "$ok" ] || { echo "::error::could not clone $repo (cloned with no token: it must be public and exist; fix or remove its row in evals/rules-consistency.yml)"; exit 1; }
           done < "$RUNNER_TEMP/repos.txt"
       - name: Check the clones against docs/rules.json
         id: check
