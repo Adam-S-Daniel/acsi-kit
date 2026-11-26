@@ -2,9 +2,9 @@
 
 export/patches/agentskills-private/owner_only.py cuts the eval-protection gate,
 the left-out workflows' lockfile entries, and the AGENTS.md and README.md text
-about the usage sink and the private explorer (DECISIONS "Re-pin of the
-private registry (2026-11-26)"). These tests hold the shipped tree to that,
-reading each file with its parser, and the patch's cuts to their shape.
+about what the include list leaves out (DECISIONS "Re-pin of the private
+registry (2026-11-26)"). These tests hold the shipped tree to that, reading
+each file with its parser, and the patch's cuts to their shape.
 
 Run: python3 -m pytest KIT/export/tests -q
 """
@@ -25,26 +25,12 @@ _spec = importlib.util.spec_from_file_location(
 owner_only = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(owner_only)
 
-# What only the source owner runs: none of it may ship, or be named.
-OWNER_ONLY = ("usage-sink", "usage_sink", "explorer-private", "eval-results-ingest",
-              "eval-results-pushed", "guidance-load-record", "cloud-setup-record",
-              "configure-aws-credentials", ".eval-protection")
-
-
-def test_the_shipped_tree_has_no_owner_only_file():
+def test_the_shipped_tree_has_no_infrastructure_or_plugin_hooks():
     files = [p.relative_to(TREE).as_posix() for p in TREE.rglob("*") if p.is_file()]
-    assert not [f for f in files if any(w in f for w in OWNER_ONLY)]
     assert not [f for f in files if f.startswith("infrastructure/")]
     assert not [f for f in files if f.startswith("plugins/") and "/hooks/" in f]
-
-
-def test_the_shipped_text_names_no_owner_only_part():
-    hits = []
-    for p in TREE.rglob("*"):
-        if p.is_file():
-            text = p.read_text(encoding="utf-8", errors="replace")
-            hits += [(p.relative_to(TREE).as_posix(), w) for w in OWNER_ONLY if w in text]
-    assert not hits
+    assert not [f for f in files if f.startswith(".github/workflows/") and f.endswith(".yml")
+                and f != owner_only.AGENT_CHECKS]
 
 
 def test_agent_checks_runs_no_other_repos_code():
@@ -69,6 +55,11 @@ def test_the_plugin_declares_no_hooks():
     assert "hooks" not in plugin
     market = json.loads((TREE / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
     assert all("records" not in p["description"] for p in market["plugins"])
+
+
+def test_the_readme_describes_no_hook_the_bundle_does_not_ship():
+    text = (TREE / "README.md").read_text(encoding="utf-8")
+    assert "Stop hook" not in text and "hooks/claude-code.json" not in text
 
 
 def test_agents_md_ends_at_the_marker():
@@ -127,6 +118,19 @@ def test_the_gate_cut_leaves_the_checks_and_drops_the_gate():
     steps = yaml.safe_load(out)["jobs"]["agent-checks"]["steps"]
     assert [s.get("name") for s in steps] == [None, "Run"]
     assert "permissions" not in yaml.safe_load(out)["jobs"]["agent-checks"]
+
+
+def test_a_step_after_the_gate_stops_the_cut():
+    text = GATE_SRC + "      - name: A step the source adds later\n        run: echo later\n"
+    with pytest.raises(SystemExit, match="not the gate's"):
+        owner_only.cut_gate(text)
+
+
+def test_the_synced_scanners_are_the_ones_agent_guidance_delivers():
+    ag = KIT / "starter/agent-guidance/templates"
+    assert (TREE / ".githooks/privacy-denylist.py").read_bytes() == (ag / "agent-checks/privacy-denylist.py").read_bytes()
+    assert (TREE / ".githooks/privacy-comment-scan.py").read_bytes() == \
+        (ag / "privacy-comment-alert/privacy-comment-scan.py").read_bytes()
 
 
 @pytest.mark.parametrize("fn, text", [

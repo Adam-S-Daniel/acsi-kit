@@ -1,22 +1,20 @@
 """DECISIONS "Re-pin of the private registry (2026-11-26)": the source owner's own machinery stays out.
 
-The private registry's source now carries what serves only its owner: the
-eval-results lane and private explorer (eval-results-*.yml,
-explorer-private.yml), the usage sink (infrastructure/usage-sink/,
-usage-sink-ingest.yml, and the bundle's two Stop hooks that send records to
-it), and an eval-protection gate in agent-checks.yml that checks out the
-owner's _agent-guidance and skills-evals at the owner's commits. The include
-list already keeps those files out; this cuts what the shipped files say
-about them, so nothing names or runs a part the adopter does not have:
+The private registry's source carries workflows, hooks and infrastructure
+that serve only its owner, outside the include list, and an eval-protection
+gate in agent-checks.yml that checks out the owner's repos at the owner's
+commits. The include list keeps those files out; this cuts what the shipped
+files say about them, so nothing names or runs a part the adopter does not
+have:
 
 - agent-checks.yml: the eval-protection steps (the kit's private registry
   ships no skills, so the gate has nothing to protect, and on the base track
   there is no skills-evals to check out) and the job permissions they needed.
+  Only those steps go: the cut fails if the tail it removes holds any other.
 - actions.lock: the entries of workflows that are not in the tree, and the
   tags only those used.
-- AGENTS.md: the repo-specific sections after the starter's marker comment
-  (they describe the left-out workflows and the usage-sink stack).
-- README.md: the paragraphs about the bundle's Stop hooks.
+- AGENTS.md: the repo-specific sections after the starter's marker comment.
+- README.md: the paragraphs about the bundle's hooks.
 
 Runs on the substituted tree, before the regenerate steps (which rebuild
 AGENTS.md's managed half from what is left). Every cut checks its shape and
@@ -55,15 +53,37 @@ def _once(text: str, needle: str, where: str) -> int:
     return text.index(needle)
 
 
+def _steps(text: str) -> list:
+    try:
+        return yaml.safe_load(text)["jobs"]["agent-checks"]["steps"]
+    except (yaml.YAMLError, KeyError, TypeError):
+        raise PatchError(f"owner_only: {AGENT_CHECKS}: no agent-checks job with steps") from None
+
+
+def _gate_step(step) -> bool:
+    """A step of the eval-protection gate: it checks out another repo or uses
+    the gate's working folder."""
+    return bool((step.get("with") or {}).get("repository")) or ".eval-protection" in yaml.safe_dump(step)
+
+
 def cut_gate(text: str) -> str:
-    """agent-checks.yml without the eval-protection steps and their permissions."""
+    """agent-checks.yml without the eval-protection steps and their permissions.
+
+    The gate is the job's last steps, from its comment to the end of the file;
+    the cut parses both texts and refuses unless the steps it removes are all
+    gate steps and the ones it keeps are the same as before, so a step the
+    source adds after the gate stops the export instead of vanishing."""
+    before = _steps(text)
     i = _once(text, "\n" + GATE_COMMENT, AGENT_CHECKS)
     text = text[:i + 1].rstrip("\n") + "\n"
     _once(text, PERMS, AGENT_CHECKS)
     text = text.replace(PERMS, "")
-    steps = yaml.safe_load(text)["jobs"]["agent-checks"]["steps"]
-    if any("eval-protection" in yaml.safe_dump(s) or (s.get("with") or {}).get("repository") for s in steps):
-        raise PatchError(f"owner_only: {AGENT_CHECKS}: a step still checks out another repo or names the gate")
+    steps = _steps(text)
+    removed = before[len(steps):]
+    if before[:len(steps)] != steps or not removed or not all(_gate_step(s) for s in removed):
+        raise PatchError(f"owner_only: {AGENT_CHECKS}: the cut would remove a step that is not the gate's")
+    if any(_gate_step(s) for s in steps):
+        raise PatchError(f"owner_only: {AGENT_CHECKS}: a gate step is still there")
     return text
 
 

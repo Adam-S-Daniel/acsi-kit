@@ -60,22 +60,20 @@ Skills are namespaced by bundle, e.g. `/acsi-private-anything-anywhere:<skill>`.
 To refresh the catalog manually later, use
 `/plugin marketplace update acsi-agentskills-private`.
 
-## Install — Codex, and what `setup.sh` does now
+## Install — Codex, and `setup.sh`
 
 Codex installs these plugins from the same marketplace: register the catalog
 with `codex plugin marketplace add example-adopter/acsi-agentskills-private`,
 then install the bundle from it.
 
-`setup.sh` **no longer links skills anywhere**. It used to link every private
-skill into `~/.agents/skills/`, `~/.agent/skills/`, `~/.gemini/skills/`,
-`~/.gemini/antigravity/skills/` and `~/.cursor/skills/`. The public registry
-retired that
-([acsi-agentskills ADR 0017](https://github.com/example-adopter/acsi-agentskills/blob/main/docs/decisions/0017-harness-aware-plugin-hooks-because-codex-loads-them-too.md)),
-and the same reasons hold here: with Codex installing the plugins, a link
-would load every skill a second time.
-
-Run it once **in each environment** (Windows Git Bash *and* WSL) to remove the
-links an earlier version made:
+`setup.sh` links no skill into another tool's folder (`~/.agents/skills/`,
+`~/.agent/skills/`, `~/.gemini/skills/`, `~/.gemini/antigravity/skills/`,
+`~/.cursor/skills/`): with Codex installing the plugins, a link would load
+every skill a second time, as the public registry's
+[ADR 0017](https://github.com/example-adopter/acsi-agentskills/blob/main/docs/decisions/0017-harness-aware-plugin-hooks-because-codex-loads-them-too.md)
+explains. It only removes such links, which an older version of the script
+made, so a new setup has nothing for it to do. To run it anyway, once
+**in each environment** (Windows Git Bash *and* WSL):
 
 ```bash
 bash setup.sh
