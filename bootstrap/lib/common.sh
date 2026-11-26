@@ -518,6 +518,29 @@ parse_common_args() {
 
 usage() { sed -n '2,/^$/{s/^# \{0,1\}//;p}' "$0"; }
 
+# config_arg: " --config <path>" (shell-quoted) for a bootstrap command a
+# script prints, or nothing while CONFIG is ./fleet.env, the default every
+# printed command otherwise assumes. With fleet.env outside the kit, a
+# printed command then runs as printed instead of stopping at "no ./fleet.env".
+config_arg() {
+  case ${CONFIG:-./fleet.env} in ./fleet.env|fleet.env|"$PWD/fleet.env") return 0 ;; esac
+  printf ' --config %q' "$CONFIG"
+}
+# with_config_arg <text>: the text with config_arg after every
+# bootstrap/<script>.sh it names (a steps.json run text, which names the
+# scripts without their --config).
+with_config_arg() {
+  local rest=$1 out="" m arg
+  arg=$(config_arg)
+  if [ -z "$arg" ]; then printf '%s' "$rest"; return 0; fi
+  while [[ $rest =~ bootstrap/[a-z][a-z-]*\.sh ]]; do
+    m=${BASH_REMATCH[0]}
+    out+=${rest%%"$m"*}$m$arg
+    rest=${rest#*"$m"}
+  done
+  printf '%s' "$out$rest"
+}
+
 # ------------------------------------------------------------------ the OS
 # preflight.sh's tool checks and update-kit.sh's node check name the install
 # command for this OS with these. PREFLIGHT_OS and PREFLIGHT_WSL (tests only)
@@ -563,7 +586,7 @@ node_install_cmd() { install_cmd "$1" node "nodejs npm" "nodejs npm" https://nod
 # sha256_stdin: the hex sha256 of stdin. python3, not sha256sum, which macOS lacks.
 sha256_stdin() { python3 -I -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'; }
 
-require_tools() { local t; for t in "$@"; do command -v "$t" >/dev/null 2>&1 || die "$t is required and was not found on PATH; bash bootstrap/preflight.sh lists what is missing and how to install it"; done; }
+require_tools() { local t; for t in "$@"; do command -v "$t" >/dev/null 2>&1 || die "$t is required and was not found on PATH; bash bootstrap/preflight.sh$(config_arg) lists what is missing and how to install it"; done; }
 
 # ------------------------------------------------------------------ registry
 # Every GitHub Actions environment a kit workflow names, with its protection:
@@ -771,5 +794,5 @@ GIT_BASE=${BOOTSTRAP_GIT_BASE:-${COPY_STARTER_GIT_BASE:-https://github.com}}
 clone_repo() {
   local repo=$1 dir=$2; shift 2
   GIT_TERMINAL_PROMPT=0 git clone --quiet "$@" "$GIT_BASE/$repo.git" "$dir" 2>"$BOOT_WORK/err" \
-    || die "could not clone $repo: check that \`gh auth status\` shows ${repo%%/*} and run \`gh auth setup-git\`; bash bootstrap/preflight.sh checks both"
+    || die "could not clone $repo: check that \`gh auth status\` shows ${repo%%/*} and run \`gh auth setup-git\`; bash bootstrap/preflight.sh$(config_arg) checks both"
 }

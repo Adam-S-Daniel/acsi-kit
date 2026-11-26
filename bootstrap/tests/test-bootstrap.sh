@@ -1603,19 +1603,22 @@ INST=installs:guidance-sync,installs:settings-admin,installs:settings-read
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
 assert_eq "verify fails an installation gh's sign-in cannot read" "$rc" 1
 assert "it says to check by hand at settings/installations" has "$OUT" "gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: acme-example-guidance-sync must have access to acme-example/_agent-guidance, "
-assert "it names the step to mark" has "$OUT" "Then: bash bootstrap/status.sh --mark 7"
+assert "it names the step to mark, with this fleet.env's path (it is outside the kit)" has "$OUT" "Then: bash bootstrap/status.sh --config $CFGP --mark 7"
+MARK7=$(sed -n 's/.*Then: \(bash bootstrap\/status\.sh .*--mark 7\)$/\1/p' "$OUT" | head -n1)
 assert_not "the 403's body is not printed" grep -q "BODY-MUST-NOT-BE-PRINTED" "$OUT" "$ERR"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
 assert "with gh's sign-in, step 7 is not done before the answer" grep -qE '^next +7 ' "$OUT"
-run env ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --mark 7; rc=$?
-assert_eq "status --mark 7 is accepted (the installation step takes an answer)" "$rc" 0
+# The command as printed, run from the kit's folder, where there is no fleet.env.
+assert_not "the kit's folder has no fleet.env" test -e "$K/fleet.env"
+run env ADOPT_STATE_FILE="$SB7" bash -c 'cd "$1" && eval "$2"' _ "$K" "$MARK7"; rc=$?
+assert_eq "the printed --mark 7 runs as printed (the installation step takes an answer)" "$rc" 0
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
 assert_eq "verify passes the installations you confirmed" "$rc" 0
 assert "it says they were confirmed by you" has "$OUT" "confirmed by you (status.sh --mark 7); gh's sign-in cannot read installations (HTTP 403)"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
 assert "with gh's sign-in, step 7 is done once answered" grep -qE '^done +7 ' "$OUT"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track evals --only installs:guidance-sync; rc=$?
-assert "the evals track's installation step needs its own answer" has "$OUT" "Then: bash bootstrap/status.sh --mark 34"
+assert "the evals track's installation step needs its own answer" has "$OUT" "Then: bash bootstrap/status.sh --config $CFGP --mark 34"
 run env GH_STUB_INSTALLATIONS_STATUS=401 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
 assert "a 401 says to sign in again" has "$OUT" "HTTP 401: gh's sign-in has expired or was revoked; run gh auth login, then this again"
 run env GH_STUB_INSTALLATIONS_STATUS=502 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
@@ -1727,6 +1730,14 @@ assert "the fragment stays when the merge is refused" test -e "$fw/repo-settings
 rm -rf "$fw"
 
 # ======================================================== regenerate.sh
+# Before any regenerate step: status.sh shows step 14's reasons, the indented
+# NOT DONE lines verify.sh prints under its FAIL, not a FAIL line ending in a colon.
+SR="$T/state-regen/adopt.json"; mkdir -p "$T/state-regen"; cp "$CHOICES" "$T/state-regen/adopt.content-choices.json"
+run env ADOPT_STATE_FILE="$SR" bash "$B/status.sh" --config "$CFGP" --track base --mark 9 --mark 11
+assert "step 14 is next before skills-locks runs" grep -q '^Next: 14 ' "$OUT"
+grep -q '^Next: 14 ' "$OUT" || sed 's/^/    status: /' "$OUT"
+assert "status.sh names step 14's failing check" grep -qx '    FAIL: regenerate.sh skills-locks is done on the base track:' "$OUT"
+assert "and the reasons under it" bash -c 'grep -A1 -x "    FAIL: regenerate.sh skills-locks is done on the base track:" "$1" | tail -n1 | grep -q "^        NOT DONE: "' _ "$OUT"
 for task in skills-locks hook-pin run-health-sha codex-pin evals-fleet; do
   run bash "$B/regenerate.sh" --config "$CFGP" --check "$task"; rc=$?
   assert_eq "regenerate --check $task fails on the export's placeholders" "$rc" 1
@@ -2008,13 +2019,22 @@ run bash "$B/status.sh" --config "$CFGP"; rc=$?
 assert "the regenerate steps read as done after their merges" bash -c 'for i in 14 15 16 17 18; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
 assert "step 20, the settings apply, is next" grep -q '^Next: 20 ' "$OUT"
 grep -q '^Next: 20 ' "$OUT" || sed 's/^/    status: /' "$OUT"
+# Every bootstrap command status.sh prints carries --config when fleet.env is
+# not ./fleet.env (shell-quoted), and none when it is.
+assert "the Run: line carries --config" has "$OUT" "  Run: bootstrap/apply-settings.sh --config $CFGP (and"
+mkdir -p "$T/my cfg" "$T/cwd-cfg"; cp "$CFGP" "$T/my cfg/fleet.env"; cp "$CFGP" "$T/cwd-cfg/fleet.env"
+run bash "$B/status.sh" --config "$T/my cfg/fleet.env"
+assert "a path with a space is shell-quoted" has "$OUT" "  Run: bootstrap/apply-settings.sh --config $(printf '%q' "$T/my cfg/fleet.env") (and"
+run bash -c 'cd "$1" && bash "$2/status.sh"' _ "$T/cwd-cfg" "$B"
+assert "with ./fleet.env the Run: line has no --config" has "$OUT" "  Run: bootstrap/apply-settings.sh (and"
+assert_not "nor any other line" grep -q -- '--config' "$OUT"
 assert "the evals steps that add skills-evals read as done" bash -c 'for i in 35 36 33 34 37 38 40; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
 assert "the optional dashboard step is labeled optional" grep -qE '^optional +32 ' "$OUT"
 assert "the optional federation step reads as done once its ids are set" grep -qE '^done +26 ' "$OUT"
 bash "$B/status.sh" --config "$CFGP" --unmark 9 >/dev/null 2>&1
 run bash "$B/status.sh" --config "$CFGP"
 assert "--unmark makes a step next again" grep -q '^Next: 9 ' "$OUT"
-assert "status says how to mark an ask step" has "$OUT" "bootstrap/status.sh --mark 9"
+assert "status says how to mark an ask step, with this fleet.env's path" has "$OUT" "bootstrap/status.sh --config $CFGP --mark 9"
 # --track: one track's steps, its own next step, and both tracks' counts.
 track_ids() { jq -r --arg t "$1" '[.steps[] | select(.track == $t) | .id] | join(" ")' "$B/steps.json"; }
 listed() { sed -nE 's/^(done|asked: done|next|todo|optional) +([0-9]+) .*/\2/p' "$1" | paste -sd' ' -; }

@@ -260,7 +260,7 @@ installs_by_hand() {
   if [ -n "$ids" ] && [ -z "$missing" ]; then
     pass "$app App's installation on $repos: confirmed by you (status.sh --mark $(paste -sd' ' <<<"$ids")); gh's sign-in cannot read installations (HTTP 403)"
   else
-    fail "$app App's installation: gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: ${CFG_APP_NAME_PREFIX}-$app must have access to $repos. Then: bash bootstrap/status.sh --mark ${missing% }"
+    fail "$app App's installation: gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: ${CFG_APP_NAME_PREFIX}-$app must have access to $repos. Then: bash bootstrap/status.sh$(config_arg) --mark ${missing% }"
   fi
 }
 INSTALLS=""

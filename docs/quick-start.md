@@ -108,12 +108,14 @@ bash bootstrap/status.sh --unmark 24   # if you marked it by mistake
 Your answers live in a state file outside every repo
 (`~/.local/state/adopt-the-whole-system/<owner>.json`). `--track base` or
 `--track evals` lists one track's steps and picks the next step from them.
-Every run also prints how many steps of each track are done.
+Every run also prints how many required steps of each track are done (an
+optional step is listed but never counted). When your `fleet.env` is not
+`./fleet.env`, every command it prints carries your `--config`.
 
 `bash bootstrap/verify.sh` checks the fast groups: repos, labels, branches,
-environments, variables, Apps and their installations, and secrets by name.
+environments, variables, Apps and their installations, secrets by name, and
+the shape of the Fleet worker's and the prompt-audit sweep's fire URLs.
 `--only settings` and `--only regen:<task>` clone repos to check for
-settings drift and the regenerated files. Without evals, its `apps:` and
-`installs:` checks for `eval-improve` and `registry-read` and its
-`values:routine-fire` check are expected to fail. Use
-`status.sh --track base` to check the base.
+settings drift and the regenerated files. Without evals (no `skills-evals`
+yet), it checks the base alone and says so in one SKIP line. Use
+`status.sh --track base` to check the base step by step.

@@ -74,6 +74,6 @@ for t in "${trees[@]}"; do
     log "$CFG_OWNER/$r already exists, so this reached only starter/$t. Open a pull request on it"
     log "  (never a push to its default branch) that adds the starter/$t files listed above, with"
     log "  your names as copy-starter.sh writes them; when acsi-agentskills changes, run"
-    log "  bootstrap/regenerate.sh skills-locks after it merges."
+    log "  bootstrap/regenerate.sh$(config_arg) skills-locks after it merges."
   done
 done
