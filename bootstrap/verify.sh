@@ -260,7 +260,7 @@ installs_by_hand() {
   local done_ids=""
   if [ -f "${STATE:-}" ]; then done_ids=$(jq -r '.done[]?' "$STATE" 2>/dev/null || true); fi
   for id in $ids; do grep -qxF -- "$id" <<<"$done_ids" || missing+="$id "; done
-  if [ "$installed" = fleet ]; then repos=$(track_repos "$TRACK" | sed "s|^|$O/|" | paste -sd, - | sed 's/,/, /g'); else repos=""; for id in $installed; do repos+="${repos:+, }$O/$id"; done; fi
+  repos=$(install_repos "$installed" "$TRACK")
   if [ -n "$ids" ] && [ -z "$missing" ]; then
     pass "$app App's installation on $repos: confirmed by you (status.sh --mark $(paste -sd' ' <<<"$ids")); gh's sign-in cannot read installations (HTTP 403)"
   else

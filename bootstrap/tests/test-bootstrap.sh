@@ -927,6 +927,11 @@ assert_eq "eval-improve's client id is a secret (its gates check both exist)" "$
 assert_eq "skills-evals holds the roster and registry-read client ids as variables" \
   "$(jqs '.values["acme-example/skills-evals||variable"] | keys | join(",")')" REGISTRY_READ_APP_CLIENT_ID,ROSTER_APP_CLIENT_ID
 assert "it prints each install link" has "$OUT" "https://github.com/apps/acme-example-app-1/installations/new"
+# The repos to pick: the kit's (here both tracks, since skills-evals exists),
+# the list verify.sh names at step 7, never fleet.yml's example repos.
+assert "it names the repos to pick for a fleet-wide App" has "$OUT" "Pick: Only select repositories: acme-example/_agent-guidance, acme-example/repo-settings, acme-example/acsi-agentskills, acme-example/acsi-agentskills-private, acme-example/skills-evals, acme-example/wsl-automation"
+assert "and an App's own repos" has "$OUT" "Pick: Only select repositories: acme-example/acsi-agentskills, acme-example/_agent-guidance"
+assert_not "it never sends the adopter to fleet.yml's list" grep -qE 'every repo fleet.yml|example-site' "$OUT"
 assert_not "no client id, key or secret was passed in argv" grep -qE "Iv23liExample|$PEM_MARK|$CS_MARK" "$GH_LOG"
 n=$(log_lines "$GH_LOG")
 run bash "$B/create-apps.sh" --config "$CFGP" --out "$T/manifests" </dev/null; rc=$?

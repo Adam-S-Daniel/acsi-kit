@@ -352,6 +352,21 @@ on_track() { [ "$1" = all ] || [ "$1" = "$2" ]; }
 repo_track() { if [ "$1" = "$EVALS_REPO" ]; then echo evals; else echo base; fi; }
 # track_repos <track>: the fleet repos of a track, in FLEET_REPOS order.
 track_repos() { local r; for r in "${FLEET_REPOS[@]}"; do on_track "$1" "$(repo_track "$r")" && printf '%s\n' "$r"; done; return 0; }
+# install_repos <installed> <track>: the repos an App goes on, as
+# "OWNER/a, OWNER/b": a fleet-wide App's are the track's repos (track_repos),
+# another's the ones APPS names. create-apps.sh prints this list at step 6 and
+# verify.sh names it when it cannot read the installation (step 7), so the two
+# always agree, and neither sends the adopter to fleet.yml, which still names
+# the example repos until step 9.
+install_repos() {
+  local r out=""
+  if [ "$1" = fleet ]; then
+    while IFS= read -r r; do out+="${out:+, }$CFG_OWNER/$r"; done < <(track_repos "$2")
+  else
+    for r in $1; do out+="${out:+, }$CFG_OWNER/$r"; done
+  fi
+  printf '%s' "$out"
+}
 # app_track <app>: an App is the evals track's when its credentials live in
 # EVALS_REPO (eval-improve, roster, registry-read).
 app_track() {

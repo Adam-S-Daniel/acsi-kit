@@ -188,9 +188,11 @@ prints for a missing key.
 
 Installing happens in the browser. Open each
 `https://github.com/apps/<slug>/installations/new` link `create-apps.sh`
-printed, choose "Only select repositories", and pick the repos listed in the
-table. For the three fleet-wide Apps, that means the kit repos you created
-and every consumer in `_agent-guidance`'s `repos.yml`. Once the evals track
+printed, choose "Only select repositories", and pick the repos it names
+under the link. For the fleet-wide Apps, that is the five base repos the kit
+created, the same list `verify.sh` names for step 7 (not the repos
+`fleet.yml` lists, which still include the example repos until step 9). Add
+a repo of your own when you list it in `fleet.yml` or `repos.yml`. Once the evals track
 creates `skills-evals`, add it to their installations (step 34). With a
 second owner, the three are public Apps, so sign in as that owner and
 install them there too. `bash bootstrap/verify.sh --only installs:<app>`
