@@ -23,9 +23,12 @@
 #                  computed it). Refuses when your registry's hook bytes
 #                  differ. Afterwards the nightly skills-lock-bump.yml keeps it
 #                  current with scripts/bump-hook-pin.sh.
-#   run-health-sha every place the base repos name a commit of the source
-#                  owner's _agent-guidance becomes your _agent-guidance default
-#                  branch's commit. In scheduled-run-health.yml (repo-settings,
+#   run-health-sha the places the base repos' code names a commit of the
+#                  source owner's _agent-guidance become your _agent-guidance
+#                  default branch's commit (all but one: the recipe in
+#                  _agent-guidance's own docs/codex-cloud.md, which a Codex
+#                  user pastes by hand, keeps the source's commit; its comment
+#                  says how to bump it). In scheduled-run-health.yml (repo-settings,
 #                  skills-evals, acsi-agentskills, wsl-automation) the
 #                  forty-zero placeholder: a cross-repo reusable workflow takes
 #                  a full sha. In the base repos' copies it also turns the
@@ -37,9 +40,14 @@
 #                  "fleet-guidance: setup skipped") and, in
 #                  .github/workflows/ci.yml, the ref of the step that checks
 #                  out the eval-protection gate (lib/guidance_pins.py).
-#                  Refuses, changing nothing, when .claude/hooks/fleet-memory.sh
-#                  at that commit does not have the sha256 cloud-env-setup.sh
-#                  records (fleet_pin_sha256, which it never writes).
+#                  Each of the two is written only when it does not name a
+#                  commit of your repo yet. When it is about to write
+#                  fleet_pin_commit, it first refuses, changing nothing, if
+#                  .claude/hooks/fleet-memory.sh at the new commit does not
+#                  have the sha256 cloud-env-setup.sh records
+#                  (fleet_pin_sha256, which it never writes); a pin that
+#                  already names a commit of yours with that digest is left
+#                  alone and not compared again.
 #   codex-pin      wsl-automation scripts/sync-codex-cloud-environments.sh:
 #                  bootstrap_revision and bootstrap_sha256 become your
 #                  acsi-agentskills HEAD and its hook's digest, and
@@ -283,6 +291,9 @@ registry_pins() {
     RP_FLEET="$FM at fleet_pin_commit ${commit:0:12} does not have the sha256 fleet_pin_sha256 records (${sum:0:12})"
   fi
   in_guidance "$ag" "$ref" || RP_GATE="the step \"Check out the eval-protection gate\" checks out ${ref:0:12}, which is not a commit of your _agent-guidance"
+  # About to write the gate's ref: prove that rewrite now, before any repo is
+  # touched (gate-read already refused a file that could not be rewritten).
+  if [ "$CHECK" = 0 ] && [ -n "$RP_GATE" ]; then pins gate-try "$reg/$CI_YML" "$O/$REG $CI_YML" "$O" "$AG_SHA" || exit 1; fi
   [ "$CHECK" = 0 ] && [ -n "$RP_FLEET" ] || return 0
   # About to write fleet_pin_commit: the installer at the new commit must be
   # the one the registry's digest line names, or cloud sessions would refuse it.

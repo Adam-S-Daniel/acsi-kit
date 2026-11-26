@@ -121,6 +121,125 @@ def test_a_workflow_that_is_not_yaml_is_an_error():
         pins.gate_read("jobs: [\n", OWNER)
 
 
+# A hand-written workflow, so the cases below can use YAML that safe_dump never writes.
+RAW = f"""name: CI
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Another checkout of the same commit
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: {OWNER}/_agent-guidance
+          ref: {A}
+      - name: {pins.GATE_STEP}
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: {OWNER}/_agent-guidance
+          ref: {A}
+          path: gate
+"""
+GATE_WITH = f"""        with:
+          repository: {OWNER}/_agent-guidance
+          ref: {A}
+          path: gate
+"""
+
+
+def refs(text):
+    return [s["with"]["ref"] for s in yaml.safe_load(text)["jobs"]["test"]["steps"]]
+
+
+def both_refuse(text, said):
+    """gate_read and gate_set refuse alike, so a caller learns before it writes anything."""
+    for call in (lambda: pins.gate_read(text, OWNER), lambda: pins.gate_set(text, OWNER, B)):
+        with pytest.raises(pins.ShapeError) as e:
+            call()
+        assert said in str(e.value)
+
+
+def test_the_hand_written_workflow_is_rewritten_in_the_gate_step_only():
+    assert RAW.count(GATE_WITH) == 1 and pins.gate_read(RAW, OWNER) == A
+    assert refs(pins.gate_set(RAW, OWNER, B)) == [A, B]
+
+
+def test_a_rewrite_that_changes_how_the_document_parses_is_refused_by_the_proof_alone():
+    # Every shape check passes: the file is fine and the commit is 40 hex
+    # characters. But YAML reads a plain all-digit value as a number, so the
+    # parsed document would differ in more than the text of the ref. Only the
+    # comparison of the parsed documents catches it.
+    digits = "1" * 40
+    assert pins.SHA40.fullmatch(digits) and isinstance(yaml.safe_load(digits), int)
+    with pytest.raises(pins.ShapeError) as e:
+        pins.gate_set(RAW, OWNER, digits)
+    assert "would change something else" in str(e.value)
+
+
+def test_the_dry_run_command_refuses_what_the_write_would(tmp_path, capsys):
+    f = tmp_path / "ci.yml"
+    f.write_text(RAW, encoding="utf-8")
+    assert pins.main(["gate-try", str(f), "label", OWNER, "1" * 40]) == 2
+    assert capsys.readouterr().err.startswith("ERROR: label: the rewrite of the gate step's ref would change something else")
+    assert pins.main(["gate-try", str(f), "label", OWNER, B]) == 0
+    assert f.read_text(encoding="utf-8") == RAW          # a dry run writes nothing
+
+
+def test_crlf_line_endings_are_kept():
+    crlf = RAW.replace("\n", "\r\n")
+    after = pins.gate_set(crlf, OWNER, B)
+    assert after == crlf.replace(f"ref: {A}\r\n          path", f"ref: {B}\r\n          path")
+    assert after.count("\r\n") == crlf.count("\r\n") and refs(after) == [A, B]
+
+
+def test_a_flow_style_with_is_rewritten_in_place():
+    flow = RAW.replace(GATE_WITH, f"        with: {{repository: {OWNER}/_agent-guidance, ref: {A}, path: gate}}\n")
+    after = pins.gate_set(flow, OWNER, B)
+    assert f"ref: {B}, path: gate}}" in after and refs(after) == [A, B]
+
+
+@pytest.mark.parametrize("name, text", [
+    # The gate step's `with` is an alias of another step's: the position the
+    # parser gives is in that other step.
+    ("alias in the gate step", RAW.replace("        with:\n          repository", "        with: &w\n          repository", 1)
+                                  .replace(GATE_WITH, "        with: *w\n")),
+    # The gate step's own `with` is the anchor, and another step borrows it.
+    ("anchor in the gate step", RAW.replace(GATE_WITH, GATE_WITH.replace("with:", "with: &w"))
+                                   + "      - name: A later step that borrows it\n        uses: actions/checkout@v7.0.1\n        with: *w\n"),
+    ("an anchored ref", RAW.replace(f"ref: {A}\n          path", f"ref: &r {A}\n          path")),
+    ("a merge key", RAW.replace("          path: gate\n", "          path: gate\n          <<: {fetch-depth: 1}\n")),
+])
+def test_a_gate_step_that_shares_yaml_with_another_is_refused(name, text):
+    yaml.safe_load(text)                                    # each is valid YAML: the refusal is ours
+    both_refuse(text, "uses a YAML anchor, alias or merge key")
+
+
+def test_the_alias_case_would_have_rewritten_the_other_step():
+    # What the refusal prevents, shown on the text itself: the only `ref:` in
+    # the file is the other step's.
+    text = (RAW.replace("        with:\n          repository", "        with: &w\n          repository", 1)
+               .replace(GATE_WITH, "        with: *w\n"))
+    assert text.count(f"ref: {A}") == 1 and refs(text) == [A, A]
+
+
+@pytest.mark.parametrize("text, said", [
+    (RAW.replace("          path: gate\n", f"          path: gate\n          ref: {B}\n"), "writes a key of its `with` twice: ref"),
+    (RAW + "        with:\n          repository: someone/else\n", "writes a key of the step twice: with"),
+    (RAW.replace("name: CI\n", "name: !unknown CI\n"), "is not valid YAML this can rewrite (ConstructorError)"),
+    (RAW + "---\nname: second document\n", "is not valid YAML this can rewrite (ComposerError)"),
+])
+def test_what_the_write_cannot_handle_is_refused_at_read_time(text, said):
+    both_refuse(text, said)
+
+
+def test_an_unknown_tag_is_one_error_line_and_exit_2_not_a_traceback(tmp_path, capsys):
+    f = tmp_path / "ci.yml"
+    f.write_text(RAW.replace("name: CI\n", "name: !unknown CI\n"), encoding="utf-8")
+    for cmd in (["gate-read", str(f), "owner/repo ci.yml", OWNER], ["gate-set", str(f), "owner/repo ci.yml", OWNER, B]):
+        assert pins.main(cmd) == 2
+        err = capsys.readouterr().err
+        assert err.count("\n") == 1 and err.startswith("ERROR: owner/repo ci.yml: is not valid YAML this can rewrite")
+
+
 SETUP_TEXT = f"# pin\nfleet_pin_commit={A}\nfleet_pin_sha256={'c' * 64}\nrest=1\n"
 CODEX_TEXT = f"readonly fleet_pin_commit='{A}'\nreadonly fleet_pin_sha256='{'c' * 64}'\nrest=1\n"
 

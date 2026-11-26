@@ -1459,6 +1459,21 @@ run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
 assert_eq "--check fails when the gate step is doubled" "$rc" 1
 assert "the error counts the steps" has "$ERR" "ERROR: $AS $CIY: has 2 step(s) named \"$GATE\", want exactly 1"
 restore_main acsi-agentskills "$as_before"
+# A gate step the rewrite could not prove (its ref written twice) is refused
+# when the file is read, so no other repo's pull request is opened first.
+as_before=$(edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+i = t.index("- name: Check out the eval-protection gate\n")
+j = t.index("          ref: " + sys.argv[2] + "\n", i)
+open(p, "w", encoding="utf-8").write(t[:j] + "          ref: 2222222222222222222222222222222222222222\n" + t[j:])' "$old_ref")
+n=$(log_lines "$GH_LOG")
+run bash "$B/regenerate.sh" --config "$CFGP" run-health-sha; rc=$?
+assert_eq "the task fails when the gate step writes its ref twice" "$rc" 1
+assert "the error names the file and the doubled key" has "$ERR" "ERROR: $AS $CIY: the step \"$GATE\" writes a key of its \`with\` twice: ref"
+assert_eq "and opens nothing, in any repo" "$(since "$n")" 0
+assert "and pushes no branch, in any repo" no_regen_branch run-health-sha
+restore_main acsi-agentskills "$as_before"
 as_before=$(edit_main acsi-agentskills 'import sys
 open(sys.argv[1] + "/scripts/cloud-env-setup.sh", "a", encoding="utf-8").write("fleet_pin_commit=2222222222222222222222222222222222222222\n")')
 run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
