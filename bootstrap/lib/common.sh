@@ -12,7 +12,8 @@
 #   kit_tree <repo>        the kit's starter/<tree> folder name for a repo
 #   EVAL_RESULTS_BRANCH    skills-evals' persistent/eval-results, which create-repos.sh creates
 #   repo_visibility <name> public|private, from the plan and fleet.env
-#   gh_read <endpoint>     GET; sets GH_OUT (body) and GH_HTTP (status); never prints the body
+#   gh_read <endpoint>     GET; sets GH_OUT (body) and GH_HTTP (status); never prints the body;
+#                          a renamed repo's old name reads as 404 (GitHub's redirect is ignored)
 #   gh_write_api <METHOD> <endpoint> [json]   write call, or a printed DRY-RUN line
 #   run_write <cmd...>     any other write command (gh repo create, gh pr create, ...)
 #   run_write_stdin <cmd...>  write command whose value arrives on stdin (secrets)
@@ -452,9 +453,32 @@ evals_repo_exists() {
 # ------------------------------------------------------------------ gh calls
 _status_from() { grep -oE 'HTTP [0-9]{3}' "$1" 2>/dev/null | tail -n1 | cut -d' ' -f2 || true; }
 
+# _repo_renamed <owner/repo>: whether GitHub answers for that repo with
+# another one. A renamed repo leaves a redirect from its old name, and gh
+# follows it, so repos/OWNER/repo-settings can answer 200 for a repo now
+# called repo-settings-fork. The kit must see "no such repo" there, or it
+# never creates the repo and later steps write into the other one. The
+# answer is cached per process until the next real write (run_write,
+# run_write_stdin, gh_write_api: creating the repo ends the redirect); a read that fails or names no repo is not a
+# rename (the read itself then reports what it got).
+declare -gA _RENAMED_CACHE=()
+_repo_renamed() { # owner/repo
+  local key=${1,,} name
+  case ${_RENAMED_CACHE[$key]-} in yes) return 0 ;; no) return 1 ;; esac
+  name=$("$GH" api "repos/$1" --jq '.full_name // ""' 2>/dev/null) || name=""
+  if [ -n "$name" ] && [ "${name,,}" != "$key" ]; then
+    _RENAMED_CACHE[$key]=yes; return 0
+  fi
+  _RENAMED_CACHE[$key]=no; return 1
+}
+
 gh_read() { # endpoint
-  local err="$BOOT_WORK/err"
+  local err="$BOOT_WORK/err" path=${1%%\?*}
   GH_HTTP=""
+  # repos/<owner>/<repo>[/...]: a renamed repo's old name is an absent repo.
+  if [[ $path =~ ^/?repos/([^/]+/[^/]+)(/|$) ]] && _repo_renamed "${BASH_REMATCH[1]}"; then
+    GH_OUT=""; GH_HTTP=404; return 1
+  fi
   if GH_OUT=$("$GH" api "$1" 2>"$err"); then GH_HTTP=200; return 0; fi
   GH_OUT=""
   GH_HTTP=$(_status_from "$err"); GH_HTTP=${GH_HTTP:-000}
@@ -497,6 +521,7 @@ gh_write_api() { # METHOD endpoint [json]
     fi
     GH_OUT="{}"; return 0
   fi
+  _RENAMED_CACHE=()
   if [ -n "$body" ]; then
     printf '%s' "$body" > "$in"
     if GH_OUT=$("$GH" api -X "$method" "$endpoint" --input "$in" 2>"$err"); then rm -f "$in"; return 0; fi
@@ -514,6 +539,7 @@ gh_write_api() { # METHOD endpoint [json]
 run_write() { # cmd...
   WRITES=$((WRITES + 1))
   if [ "$DRY_RUN" = 1 ]; then _print_cmd "$@"; return 0; fi
+  _RENAMED_CACHE=()   # a write (gh repo create, a rename) can end a redirect
   "$@" >/dev/null 2>"$BOOT_WORK/err" || die "${*:1:3} failed (HTTP $(_status_from "$BOOT_WORK/err"))"
 }
 
@@ -524,6 +550,7 @@ run_write() { # cmd...
 run_write_stdin() {
   WRITES=$((WRITES + 1)); RUN_OUT=""
   if [ "$DRY_RUN" = 1 ]; then cat >/dev/null; _print_cmd "$@"; printf '         (value on stdin, not shown)\n'; return 0; fi
+  _RENAMED_CACHE=()
   RUN_OUT=$("$@" 2>"$BOOT_WORK/err") || die "${*:1:3} failed (HTTP $(_status_from "$BOOT_WORK/err"))"
 }
 
