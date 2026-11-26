@@ -155,7 +155,7 @@
     {
       "id": "9",
       "title": "Drop the example repos from fleet.yml",
-      "run": "In a pull request on `<you>/repo-settings`, remove the `example-site-*` entries from `repo-settings/fleet.yml` and their rows in `tests/test_repo_settings.py` (unless you have those repos)",
+      "run": "In a pull request on `<you>/repo-settings`, remove the three `example-site-*` entries from `repo-settings/fleet.yml` (unless you have those repos); the tests read that file, so none needs changing",
       "kind": "manual",
       "part": "settings",
       "track": "base",
@@ -191,7 +191,7 @@
     {
       "id": "11",
       "title": "Drop the example repos from repos.yml",
-      "run": "In a pull request on `<you>/_agent-guidance`, remove the `example-site-*` names from `repos.yml` `cron_coverage.fleet` (unless you have those repos)",
+      "run": "In a pull request on `<you>/_agent-guidance`, remove the `example-site-*` names from `repos.yml` `cron_coverage.fleet` and `skills_bootstrap.repos` (unless you have those repos)",
       "kind": "manual",
       "part": "guidance",
       "track": "base",
