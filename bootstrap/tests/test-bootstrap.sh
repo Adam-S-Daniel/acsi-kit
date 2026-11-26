@@ -1428,14 +1428,17 @@ assert "status says how to mark an ask step" has "$OUT" "bootstrap/status.sh --m
 # --track: one track's steps, its own next step, and both tracks' counts.
 track_ids() { jq -r --arg t "$1" '[.steps[] | select(.track == $t) | .id] | join(" ")' "$B/steps.json"; }
 listed() { sed -nE 's/^(done|asked: done|next|todo|optional) +([0-9]+) .*/\2/p' "$1" | paste -sd' ' -; }
-nbase=$(track_ids base | wc -w) nevals=$(track_ids evals | wc -w)
-assert_eq "the two tracks split every step" "$((nbase + nevals))" "$(jq '.steps | length' "$B/steps.json")"
+assert_eq "the two tracks split every step" "$(($(track_ids base | wc -w) + $(track_ids evals | wc -w)))" "$(jq '.steps | length' "$B/steps.json")"
+# The counts are of required steps: an optional one is listed and never counted.
+required() { jq -r --arg t "$1" '[.steps[] | select(.track == $t and (.optional | not))] | length' "$B/steps.json"; }
+nbase=$(required base) nevals=$(required evals)
+assert "each track has an optional step, so the counts differ from the lists" bash -c '[ "$1" -lt "$2" ] && [ "$3" -lt "$4" ]' _ "$nbase" "$(track_ids base | wc -w)" "$nevals" "$(track_ids evals | wc -w)"
 assert "status counts each track's steps done" grep -qE "^base: [0-9]+ of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
 for tr in base evals; do
   run bash "$B/status.sh" --config "$CFGP" --track "$tr"; rc=$?
   assert_eq "status --track $tr exits 0" "$rc" 0
   assert_eq "status --track $tr lists only the $tr steps, in order" "$(listed "$OUT")" "$(track_ids "$tr")"
-  assert "status --track $tr counts only its steps" grep -qE "^[0-9]+ of $(track_ids "$tr" | wc -w) done$" "$OUT"
+  assert "status --track $tr counts only its required steps" grep -qE "^[0-9]+ of $(required "$tr") done$" "$OUT"
   assert "status --track $tr still counts both tracks" grep -qE "^base: [0-9]+ of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
 done
 run bash "$B/status.sh" --config "$CFGP" --track base
@@ -1679,6 +1682,26 @@ assert_eq "status --track base on a base-only setup exits 0" "$rc" 0
 assert "a base-only setup reaches done" has "$OUT" "Next: nothing; every required base step is done"
 grep -qF 'Next: nothing' "$OUT" || sed 's/^/    status: /' "$OUT"
 assert "every base step is done" grep -qE "^base: $nbase of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
+# An adopter without Codex skips step 17 (optional): the base still reads done,
+# and the evals track does not say the base is unfinished. The Codex pin goes
+# back to the starter's zeros on wsl-automation's main for this case.
+ws_git="$T/remotes/$O/wsl-automation.git"; ws_before=$(git --git-dir="$ws_git" rev-parse main)
+w="$T/tmp/skip17"; rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/wsl-automation.git" "$w"
+sed -i.bak "s/^readonly bootstrap_revision='[0-9a-f]\{40\}'/readonly bootstrap_revision='0000000000000000000000000000000000000000'/" "$w/scripts/sync-codex-cloud-environments.sh"
+rm -f "$w/scripts/sync-codex-cloud-environments.sh.bak"
+git -C "$w" commit -qam "no Codex pin" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
+run bash "$B/regenerate.sh" --config "$CFGB" --check --track base codex-pin; rc=$?
+assert_eq "the Codex pin is not done in this case" "$rc" 1
+run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" --track base; rc=$?
+assert "the skipped Codex step is labeled optional" grep -qE '^optional +17 ' "$OUT"
+assert "the base still reaches done with step 17 skipped" has "$OUT" "Next: nothing; every required base step is done"
+assert "and its count is complete" grep -qE "^base: $nbase of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
+assert "and its own list counts the same" grep -qxE "$nbase of $nbase done" "$OUT"
+run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" --track evals; rc=$?
+assert_not "the evals track does not call the base unfinished over an optional step" has "$OUT" "The base track is not done yet"
+git --git-dir="$ws_git" update-ref refs/heads/main "$ws_before"
+run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" --track base
+assert "with the pin back, step 17 reads done and the count is unchanged" bash -c 'grep -qE "^done +17 " "$1" && grep -qxE "$2 of $2 done" "$1"' _ "$OUT" "$nbase"
 assert "the settings check ran the engine" grep -q '^diff |' "$BASE_ENGINE_LOG"
 assert_not "the engine was never given skills-evals" grep -qF skills-evals "$BASE_ENGINE_LOG"
 run env ADOPT_STATE_FILE="$SB" bash "$B/verify.sh" --config "$CFGB"; rc=$?
