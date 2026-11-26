@@ -417,9 +417,14 @@ assert_eq "no scopes header is only a warning" "$rc" 0
 assert "no scopes header warns and names what is needed" grep -qE '^WARN: gh.s token scopes could not be read.*repository administration' "$OUT"
 printf '' > "$T/pf-gitconfig-empty"
 pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-empty" -- --config "$PFCFG"; rc=$?
-assert_eq "no gh credential helper fails, since every push needs it" "$rc" 1
-assert "it is a FAIL" grep -q '^FAIL: git is not set up to use gh.s credential for https pushes' "$OUT"
+assert_eq "no credential helper at all fails, since every push needs one" "$rc" 1
+assert "it is a FAIL" grep -q '^FAIL: git has no credential helper for https pushes' "$OUT"
 assert "no credential helper: gh auth setup-git fix" grep -qF '      fix: gh auth setup-git' "$OUT"
+printf '[credential]\n\thelper = store\n' > "$T/pf-gitconfig-other"
+pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-other" -- --config "$PFCFG"; rc=$?
+assert_eq "another credential helper (osxkeychain, GCM) is only a warning" "$rc" 0
+assert "it warns that a push goes as that helper's account" grep -q '^WARN: git pushes with another credential helper, not gh.s' "$OUT"
+assert "with the same fix line" grep -qF '      fix: gh auth setup-git' "$OUT"
 mkpf "$T/pf-notar" tar
 PF_PATH="$T/pf-notar" pf -- --config "$PFCFG"; rc=$?
 assert_eq "a missing tar exits 1" "$rc" 1
