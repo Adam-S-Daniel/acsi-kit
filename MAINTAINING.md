@@ -136,6 +136,14 @@ checks holds that source's re-sync back until the page follows.
 checks. `test` needs the `PRIVACY_DENYLIST` repository secret, with one
 regular expression per line, and fails without it.
 
+## Real GitHub Free walk
+
+`export/real-free-walk/README.md` is the checklist for walking the base track
+against real GitHub with a second, Free account, and `walk.sh` there is the
+wrapper every command of that walk goes through: it runs in an isolated HOME
+and refuses unless `gh` is signed in as the test account. Its settings file
+names the test account, so it stays outside the repo.
+
 ## Outside pull requests
 
 Outside pull requests never get that secret, so `test` always fails on them.
