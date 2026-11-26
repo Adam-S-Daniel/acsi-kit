@@ -32,9 +32,9 @@ needs the `gh actions-lock` extension. Claude Code installs the plugins
 | `fleet.env.example` | The only file you fill in: owners, plan, `TIME_ZONE`, visibility, `REPOS_DIR`, and the App ids `create-apps.sh` records. No secrets, ever. | |
 | `add-content.sh` | Adds the recommended and opinionated items you name (`--items <ids\|recommended\|none>`, from `content-catalog.json`) to the kit copy's `../starter/` from `../library/`, rebuilds the generated files they feed (through `lib/content.py`), and records your choices beside `status.sh`'s state file. Idempotent; `--dry-run` lists the files it would add or change. | Write to GitHub: once the repos exist it lists the repos that need a pull request. Run inside a git work tree. |
 | `update-kit.sh` | Moves a clone of the kit to the newest kit; the README's update block runs the newest copy of it from a temporary folder (`--kit <clone>`), so it also updates a clone older than the script (`--dry-run` reports only). It checks your `fleet.env` with the newer kit's loader, proves that your `starter/` changes are exactly what `add-content.sh` wrote (contents and executable bits), saves every `starter/` change to `~/kit-starter-backup-<commit>`, discards them, fast-forwards to `origin/HEAD`, lists the `fleet.env` keys `fleet.env.example` added (required or optional) or removed since your old commit (names only), and runs `add-content.sh` again with your recorded choices, dropping any the catalog no longer offers. A detached HEAD, a merge or rebase in progress, a tracked edit outside `starter/`, a hand edit in `starter/` (unless `--discard-starter-edits`), no `fleet.env` at `--config` while `starter/` has changes or a choices record exists, a `fleet.env` the newer kit refuses or a local commit makes it refuse before it changes anything. Exits 0 only when it all worked; an interrupt or failure says where things stand and what to run next. | Change repos you already filled from an older starter (use `copy-starter.sh --dry-run`), update a downloaded copy that is not a git clone, or write to GitHub. |
-| `create-repos.sh` | The five base repos, and `skills-evals` only when named (the evals track's first step) or once it exists (`FLEET_REPOS` and `EVALS_REPO` in `lib/common.sh`), with the owner's visibility, a generated README as the first commit, the labels `agent-ready` and `on-hold`, and, in `skills-evals`, the orphan branch `persistent/eval-results` (a README only) that the eval loop's workflows fetch and nothing else creates. `--with-optional` adds the private `waiting-feed`. | Change an existing repo's visibility (it reports the mismatch and exits 1). Every other setting is `fleet.yml`'s, applied by `apply-settings.sh`. |
+| `create-repos.sh` | The five base repos, and `skills-evals` only when named (the evals track's first step) or once it exists (`FLEET_REPOS` and `EVALS_REPO` in `lib/common.sh`), with the owner's visibility, a generated README as the first commit, the labels `agent-ready`, `on-hold` and `ci` (the scheduled workflows file their issues under `ci`, and `gh issue create --label` fails on a label the repo lacks), and, in `skills-evals`, the orphan branch `persistent/eval-results` (a README only) that the eval loop's workflows fetch and nothing else creates. `--with-optional` adds the private `waiting-feed`. | Change an existing repo's visibility (it reports the mismatch and exits 1). Every other setting is `fleet.yml`'s, applied by `apply-settings.sh`. |
 | `copy-starter.sh` | Clones one of your repos, copies an export from `../starter/` into it with your names (every form of the invented owners, and `<your name>`, through `lib/substitute.py`, and your `TIME_ZONE` into `_agent-guidance`'s `scripts/base-md-merge-window.yml`, through `lib/time_zone.py`, which refuses a tree without that one `timezone: UTC` line), commits on `starter/<folder>`, pushes, checks the commit is on the remote branch, and opens a pull request. Refuses to overwrite a file that differs unless `--force`, except the README `create-repos.sh` generated. | Merge it: review it yourself, above all `.github/workflows/`. |
-| `create-environments.sh` | The three environments (`ENVIRONMENTS`): `fleet-apply` in `repo-settings` and `routine-fire` in `skills-evals`, limited to the default branch, and `plugin-runtime-review` in `acsi-agentskills` with you as reviewer. Then the repository variables in `REPO_VARIABLES` (`repo-settings`' `GUIDANCE_SYNC_APP_ID` and `ROSTER_WRITER_APP_ID`, `skills-evals`' required `SITE_REPO` (`none`: no website), and, when you fill them in, `skills-evals`' four optional `ANTHROPIC_*` federation ids, all from `fleet.env`). While `skills-evals` does not exist, what lives in it is skipped. | Create an environment in a private repo on GitHub Free (it says so and skips it). Delete an extra branch policy (it reports it). |
+| `create-environments.sh` | The three environments (`ENVIRONMENTS`): `fleet-apply` in `repo-settings` and `routine-fire` in `skills-evals`, limited to the default branch, and `plugin-runtime-review` in `acsi-agentskills` with you as reviewer. Then the repository variables in `REPO_VARIABLES` (`repo-settings`' `GUIDANCE_SYNC_APP_ID` and `ROSTER_WRITER_APP_ID`, `skills-evals`' required `SITE_REPO` (`none`: no website), and, when you fill them in, `skills-evals`' four optional `ANTHROPIC_*` federation ids, all from `fleet.env`), plus on `_agent-guidance` the `FLEET_WORKER_EVERY_HOURS` and `LOOP_WORKER_EVERY_HOURS` cadences (from `CLAUDE_PLAN`), `EVALS_REPO` (`none` while `skills-evals` does not exist, `<you>/skills-evals` once it does, so the evals track's run flips it) and `ARTICLE_WATCH_FEED_URL` (`none`, which turns the optional article watch off, only while it is not set at all: a feed URL you set is never overwritten), and `FLEET_WORKER_FIRE_URL` and `LOOP_WORKER_FIRE_URL` (`none`, "not set up yet", by the same rule, until steps 27 and 41 set the routines' URLs); `acsi-agentskills` gets `EVALS_REPO` too. While `skills-evals` does not exist, what lives in it is skipped. | Create an environment in a private repo on GitHub Free (it says so and skips it). Delete an extra branch policy (it reports it). |
 | `create-apps.sh` | The six Apps (`APPS`) through GitHub's App manifest flow: writes `app-manifests/<app>.html`, exchanges the code from the URL you paste, records the App id in `fleet.env`, stores the client id and private key under the names the workflows read, on stdin, and prints the install link and the repos to pick. The three evals Apps keep their credentials in `skills-evals`, so they wait for it. | Click Create or install an App for you. Recover a lost key. |
 | `set-secrets.sh` | `PRIVACY_DENYLIST` in `acsi-agentskills` (`--only privacy`: the file must be outside every git work tree and every line must compile), and `EVAL_ROUTINE_FIRE_BEARER` and `ROUTINE_TRIGGER_ID` in `skills-evals`' `routine-fire` environment (`--only routine-fire`), from a hidden prompt or the file, on stdin. `--rotate` replaces values already set. | Read the bearer from claude.ai: you copy it from the routine's API trigger. Compare a stored secret (GitHub never shows one). |
 | `regenerate.sh <task>` | Rebuilds a generated file the export could not (`skills-locks`, `hook-pin`, `run-health-sha`, `codex-pin`, `actions-lock`) with the repo's own tooling, on a clone, and proposes it as a pull request on `regenerate/<task>`. `evals-fleet` (the evals track's) merges `repo-settings`' `repo-settings/fleet.evals.yml`, the `skills-evals` element, into `repo-settings/fleet.yml` with `lib/fleet_fragment.py` and deletes the fragment. `--check` reads the default branches and exits 1 while it is not done. `skills-evals` counts once it exists; `--track base\|evals` limits a task to one track's repos. | Merge what it opens. |
@@ -59,7 +59,9 @@ reads, except the ones listed below. `create-apps.sh` sets App client ids
 and keys. `set-secrets.sh` sets `PRIVACY_DENYLIST`,
 `EVAL_ROUTINE_FIRE_BEARER`, and `ROUTINE_TRIGGER_ID`.
 `create-environments.sh` sets the repository variables, including
-`SITE_REPO` from `fleet.env`.
+`SITE_REPO` from `fleet.env`, `EVALS_REPO` (`none` or `<you>/skills-evals`,
+which `fleet-worker-fire.yml` and `impact-report.yml` read and have no default
+for) and `ARTICLE_WATCH_FEED_URL` (`none` until you set a feed URL).
 
 If you add a workflow that reads a value no script sets, add it here as a
 list item: "- `NAME`: where it lives and how to set it".
@@ -128,10 +130,17 @@ configured, and you start the sweep by hand.
   `gh secret set PROMPT_AUDIT_SWEEP_FIRE_BEARER --repo <you>/_agent-guidance`
   and type the value at its prompt.
 
-`_agent-guidance`'s `fleet-worker-fire.yml` fires the fleet worker every 3
-hours ([routines](../docs/routines.md#fleet-worker)). The workflow has no
-default for either value, so if one is unset, each scheduled run fails and
-names it.
+`_agent-guidance`'s `fleet-worker-fire.yml` fires the fleet worker on the
+cadence in `FLEET_WORKER_EVERY_HOURS`, which `create-environments.sh` sets
+from `CLAUDE_PLAN`: weekly (168) on Pro, every 12 hours on Max 5x, every 3
+hours on Ultra ([routines](../docs/routines.md#fleet-worker)). The workflow
+has no default for either value below. `create-environments.sh` sets
+`FLEET_WORKER_FIRE_URL` to `none` while it is not set at all, and each
+scheduled run then skips the fire with a "not set up yet" notice (a setup
+before step 27). Step 27 replaces `none` with the routine's URL; from then
+on an empty URL (a deleted variable), a missing bearer or a failed fire fails
+the run. `verify.sh --only fleet-worker` (step 27's check) reports a URL
+that is unset or still `none`, and a missing bearer.
 
 - `FLEET_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
   the fleet worker routine's fire URL. Set it like
@@ -140,18 +149,20 @@ names it.
   that routine's bearer. Set it like `PROMPT_AUDIT_SWEEP_FIRE_BEARER`.
 
 The same workflow fires a second task, the Loop worker
-([routines](../docs/routines.md#fleet-worker)), with its own values. Unlike the
-fleet worker's cadence, which `create-environments.sh` sets from `CLAUDE_PLAN`,
-the loop's has no default and no plan mapping, because its spend must fit your
-weekly eval cap: if any of these is unset, its fire fails and names it.
+([routines](../docs/routines.md#fleet-worker)), with its own values. It serves
+the eval loop, so it belongs to the evals track: while `EVALS_REPO` is `none`
+(a base-only setup), its fire is skipped with a notice and needs none of these.
+`create-environments.sh` sets `LOOP_WORKER_FIRE_URL` to `none` while it is not
+set at all, which also skips the fire with a notice. Once `skills-evals` exists, set them (replacing `none`) before `create-environments.sh` runs again
+(the evals track's step 41, before step 37): that run flips `EVALS_REPO` to
+`skills-evals`, and a scheduled fire then fails while either is unset. Its cadence, `LOOP_WORKER_EVERY_HOURS`,
+is not among them: `create-environments.sh` sets it from `CLAUDE_PLAN`, like
+the fleet worker's (168 on Pro, else 24), on every track.
 
 - `LOOP_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
   the Loop worker routine's fire URL. Set it like `PROMPT_AUDIT_SWEEP_FIRE_URL`.
 - `LOOP_WORKER_FIRE_BEARER`: a repository secret on `<you>/_agent-guidance`,
   that routine's bearer. Set it like `PROMPT_AUDIT_SWEEP_FIRE_BEARER`.
-- `LOOP_WORKER_EVERY_HOURS`: a repository variable on `<you>/_agent-guidance`,
-  how often the loop fires: `3`, `6`, `12`, `24` or `168`. Set it with
-  `gh variable set LOOP_WORKER_EVERY_HOURS --repo <you>/_agent-guidance --body 24`.
 
 `repo-settings`' `repo-settings.yml` can also apply tightening changes with no
 approval, through an optional second environment, `fleet-apply-auto`. The kit
@@ -165,17 +176,29 @@ reviewed apply.
 `_agent-guidance`'s `article-watch.yml` polls a feed of Anthropic
 engineering articles hourly and fires an article-lift routine
 (`docs/routines/article-lift.md` there) for each new one about agents. It is
-optional, and the kit doesn't set it up. If these are unset, each hourly run
-fails and names the missing value, so either set the three below or disable
-the workflow
-(`gh workflow disable article-watch.yml --repo <you>/_agent-guidance`).
+optional. `create-environments.sh` sets the repository variable
+`ARTICLE_WATCH_FEED_URL` to `none`, which skips each hourly run with a notice,
+so the watch is off until you turn it on: set `ARTICLE_WATCH_FEED_URL` to the
+feed's URL (the script never overwrites a value you set) and the next two.
 
-- `ARTICLE_WATCH_FEED_URL`: a repository variable on `<you>/_agent-guidance`,
-  the feed's URL.
 - `ARTICLE_WATCH_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
   the article-lift routine's fire URL.
 - `ARTICLE_WATCH_FIRE_BEARER`: a repository secret on `<you>/_agent-guidance`,
   that routine's bearer.
+
+Whether a script could set each by-hand value, and what fails while it is
+unset (checked against the starter workflows):
+
+| Values | A script can set it? | While unset |
+|---|---|---|
+| `FLEET_WORKER_FIRE_URL`, `FLEET_WORKER_FIRE_BEARER` | No: the routine's API trigger on claude.ai shows them once | Every scheduled Fleet worker fire fails naming the missing one |
+| `LOOP_WORKER_FIRE_URL`, `LOOP_WORKER_FIRE_BEARER` | No, same reason | The Loop worker's scheduled fire fails naming it, but only once `EVALS_REPO` names `skills-evals`; while it is `none` the fire is skipped |
+| `ARTICLE_WATCH_FIRE_URL`, `ARTICLE_WATCH_FIRE_BEARER` | No, same reason | Nothing while `ARTICLE_WATCH_FEED_URL` is `none` (the watch is skipped); a feed URL turns them on, and the run then fails naming them |
+| `PROMPT_AUDIT_SWEEP_FIRE_URL`, `PROMPT_AUDIT_SWEEP_FIRE_BEARER` | No, same reason | Nothing fails: the workflow comments that the fire isn't configured |
+| `SITE_PAGE_URL`, `SITE_ASSET_URL`, `SITE_FRESHNESS_ROUTINE_ID`, `SITE_FRESHNESS_FIRE_BEARER`, `SITE_PREVIEW_URL` | No: your website's URLs and a routine's trigger | Nothing while `SITE_REPO` is `none`, which `fleet.env.example` ships; with a site, the site workflows fail naming them |
+
+Every value a script could derive (a plan's cadences, `EVALS_REPO`, the
+article watch's `none`, `SITE_REPO` from `fleet.env`) is already set by one.
 
 ## Security
 

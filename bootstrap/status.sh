@@ -74,7 +74,8 @@ done < <(jq -r '.steps[] | [.id, .title, .kind, (.run | gsub("`"; "")), .link, (
 
 for id in "${MARKS[@]}" "${UNMARKS[@]}"; do
   [ -n "${TITLE[$id]+set}" ] || die "no step $id in steps.json"
-  [ "${CTYPE[$id]}" = ask ] || die "step $id is checked against the real state, so status.sh decides it; only ask steps take --mark or --unmark"
+  [ "${CTYPE[$id]}" = ask ] || [ "$(jq -r --arg id "$id" '.steps[] | select(.id == $id) | .check.by_hand // false' "$STEPS_FILE")" = true ] \
+    || die "step $id is checked against the real state, so status.sh decides it; only ask steps (and the App installation steps, which gh's sign-in cannot read) take --mark or --unmark"
 done
 
 # ------------------------------------------------------------------ config

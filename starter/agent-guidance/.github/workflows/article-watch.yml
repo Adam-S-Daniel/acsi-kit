@@ -14,6 +14,8 @@ name: Anthropic article watch
 #   Actions secret. A missing one fails the run naming it.
 # * Nothing from the event or the inputs is interpolated into a `run:` block;
 #   the reseed input is read from $GITHUB_EVENT_PATH with jq.
+# * ARTICLE_WATCH_FEED_URL set to `none` turns the watch off: the run exits 0
+#   with a notice before anything else. Unset still fails naming it.
 # * No `uses:` step, so actions.lock lists this file with no actions. The
 #   script is read at this run's own commit.
 
@@ -49,8 +51,12 @@ jobs:
           FIRE_BEARER: ${{ secrets.ARTICLE_WATCH_FIRE_BEARER }}
         run: |
           set -euo pipefail
+          if [[ "$FEED_URL" == none ]]; then
+            echo "::notice::skipped: ARTICLE_WATCH_FEED_URL is none, so the article watch is off"
+            exit 0
+          fi
           if [[ -z "$FEED_URL" ]]; then
-            echo "::error::repository variable ARTICLE_WATCH_FEED_URL is not set; set it to the feed's URL"
+            echo "::error::repository variable ARTICLE_WATCH_FEED_URL is not set; set it to the feed's URL, or to none to turn the watch off"
             exit 1
           fi
           if [[ "$FEED_URL" != https://* ]]; then

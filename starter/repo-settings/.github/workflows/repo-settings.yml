@@ -136,9 +136,11 @@ jobs:
   # policies. Not the merge flags: the admin App has no Contents either, so the
   # apply skips them too and only an operator `apply` converges them.
   #
-  # Not gated on the read App's variable, on purpose: a plan that skipped
-  # would read as "nothing to apply" on push. A missing App fails the mint and
-  # turns the plan red instead.
+  # Not gated on the read App's variable on push or dispatch, on purpose: a
+  # plan that skipped would read as "nothing to apply". A missing App fails
+  # the mint and turns the plan red instead. The kit's one exception is the
+  # weekly schedule before the App exists (step "Is the read App set up
+  # yet?" below): it skips with a notice, since nothing could be applied.
   plan:
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'pull_request' }}
@@ -159,8 +161,27 @@ jobs:
       - name: Install PyYAML
         run: python3 -m pip install -r requirements.txt
 
+      # Not set up yet, on the weekly schedule only: until create-apps.sh
+      # has made the settings-read App and set its client id, a scheduled
+      # plan has nothing to plan with, so a notice says so and it reports
+      # no drift. A push or a dispatch still mints, and fails at the mint
+      # without the App: a settings change must never read as "nothing to
+      # apply".
+      - name: Is the read App set up yet?
+        id: read_app
+        env:
+          READ_APP_CLIENT_ID: ${{ vars.REPO_SETTINGS_READ_APP_CLIENT_ID }}
+        run: |
+          if [[ -z "$READ_APP_CLIENT_ID" && "$GITHUB_EVENT_NAME" == schedule ]]; then
+            echo "::notice::not set up yet: variable REPO_SETTINGS_READ_APP_CLIENT_ID is not set, so the weekly plan planned nothing. bootstrap/create-apps.sh sets it when it creates the settings-read App (quick start step 6)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Mint read-only GitHub App token for example-adopter
         id: token_example_adopter
+        if: steps.read_app.outputs.ready == 'true'
         uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ vars.REPO_SETTINGS_READ_APP_CLIENT_ID }}
@@ -173,6 +194,7 @@ jobs:
 
       - name: Mint read-only GitHub App token for example-adopter-two
         id: token_example_adopter_two
+        if: steps.read_app.outputs.ready == 'true'
         uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ vars.REPO_SETTINGS_READ_APP_CLIENT_ID }}
@@ -189,6 +211,7 @@ jobs:
       # or 1 fails the plan: "could not ask" must never read as "no drift".
       - name: Plan for example-adopter
         id: plan_example_adopter
+        if: steps.read_app.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ steps.token_example_adopter.outputs.token }}
           OWNER: example-adopter
@@ -206,6 +229,7 @@ jobs:
 
       - name: Plan for example-adopter-two
         id: plan_example_adopter_two
+        if: steps.read_app.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ steps.token_example_adopter_two.outputs.token }}
           OWNER: example-adopter-two
@@ -272,6 +296,7 @@ jobs:
       # id; each owner's exit code is its own output, `rc_<OWNER KEY>`.
       - name: Which repos does fleet.yml not declare?
         id: coverage
+        if: steps.read_app.outputs.ready == 'true'
         continue-on-error: true
         env:
           OWNERS: example-adopter example-adopter-two
@@ -300,6 +325,7 @@ jobs:
       # continue-on-error: a nudge that cannot file its issue must not fail the
       # plan, because a failed plan withholds the apply on push.
       - name: Nudge on repos fleet.yml does not declare
+        if: steps.read_app.outputs.ready == 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -650,8 +650,33 @@ jobs:
       # never seen by them. The PR body and file list come from the API, so a
       # re-run after a body edit sees the new body. When a skill is touched
       # and the explorer cannot be fetched, the gate fails closed: re-run.
-      - name: Check out the eval-protection gate
+      #
+      # EVALS_REPO (a repository variable, no default) says whether there is
+      # a skills-evals with eval results: `none` skips the gate with a notice
+      # (no eval loop, so nothing is protected); unset fails here naming it.
+      - name: Decide whether there is an eval repository to read
+        id: evals
         if: github.event_name == 'pull_request'
+        env:
+          EVALS_REPO: ${{ vars.EVALS_REPO }}
+        run: |
+          set -euo pipefail
+          case "${EVALS_REPO:-}" in
+            none)
+              echo "::notice::not checked: eval protection of skills (EVALS_REPO is none, so there are no eval results to protect)"
+              echo "on=false" >> "$GITHUB_OUTPUT" ;;
+            "")
+              echo "::error::not configured: variable EVALS_REPO. It has no default; set it in this repository's Actions settings to none (no eval loop) or to <owner>/skills-evals. bootstrap/create-environments.sh sets it."
+              exit 1 ;;
+            *)
+              if [[ ! "$EVALS_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+                echo "::error::variable EVALS_REPO must be none or <owner>/skills-evals"
+                exit 1
+              fi
+              echo "on=true" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - name: Check out the eval-protection gate
+        if: github.event_name == 'pull_request' && steps.evals.outputs.on == 'true'
         uses: actions/checkout@v7.0.1
         with:
           repository: example-adopter/_agent-guidance
@@ -665,9 +690,10 @@ jobs:
             package-lock.json
           sparse-checkout-cone-mode: false
       - name: Eval-protected skills take correctness fixes only
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.evals.outputs.on == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          EVALS_REPO: ${{ vars.EVALS_REPO }}
         run: |
           set -euo pipefail
           d="$RUNNER_TEMP/eval-protected"
@@ -678,7 +704,7 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/files?per_page=100" \
             | jq 'add // []' > "$d/files.json"
           curl -fsSL --retry 3 -o "$d/explorer.json" \
-            https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/explorer/latest.json \
+            "https://raw.githubusercontent.com/$EVALS_REPO/persistent/eval-results/explorer/latest.json" \
             || rm -f "$d/explorer.json"
           node .eval-protection-gate/scripts/eval-protected.js ci --repo "$GITHUB_REPOSITORY" \
             --pr-json "$d/pr.json" --files "$d/files.json" --explorer "$d/explorer.json"

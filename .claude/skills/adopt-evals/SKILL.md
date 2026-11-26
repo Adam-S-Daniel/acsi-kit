@@ -42,7 +42,10 @@ step is marked by hand: run `bash bootstrap/status.sh --mark <id>` once the
 user says it is done. A `verify` step is never marked: status.sh refuses
 `--mark` for it, so run `bash bootstrap/status.sh --track evals` again
 until it reads done. The browser steps that create or install the eval
-Apps (33, 34) and the federation step (26) are `verify` steps. Every evals
+Apps (33, 34) and the federation step (26) are `verify` steps. Like an
+`ask` step, step 34 takes `--mark 34` when verify.sh says gh's sign-in
+cannot read the installations (HTTP 403): the user confirms them at
+https://github.com/settings/installations first. Every evals
 check reads only the evals track's part (`verify.sh --track evals`), so
 the base stays done while you add `skills-evals`.
 
@@ -51,12 +54,16 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
 
 ## Steps with a catch
 
-- **Steps 35 to 40** add `skills-evals` with the base's own scripts, which
-  include it once it exists (`docs/evals-and-loop.md`, "Adding
-  skills-evals"): `create-repos.sh skills-evals`, its starter pull request,
-  `create-environments.sh`, `regenerate.sh run-health-sha` and
-  `actions-lock`, `regenerate.sh evals-fleet` and `apply-settings.sh`. They
-  come first: every other evals step needs that repo.
+- **The first evals steps**, in the order status.sh gives them, add
+  `skills-evals` with the base's own scripts, which include it once it
+  exists (`docs/evals-and-loop.md`, "Adding skills-evals"):
+  `create-repos.sh skills-evals` (step 35), its starter pull request (36),
+  the eval Apps (33, 34), the Loop worker routine (step 41), and only then
+  `create-environments.sh` (step 37, which flips `EVALS_REPO`), followed by
+  `regenerate.sh run-health-sha` and `actions-lock` (38),
+  `regenerate.sh evals-fleet` (40) and `apply-settings.sh` (39). Never run
+  `create-environments.sh` on the evals track before step 41, even when
+  `create-apps.sh` ends by suggesting it.
 - **Step 40** (`regenerate.sh evals-fleet`) declares `skills-evals` in
   `repo-settings/fleet.yml`. In a pull request on the user's
   `repo-settings`, it moves the element from `repo-settings/fleet.evals.yml`
@@ -65,8 +72,19 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
   behind the `fleet-apply` approval.
 - **Step 19** (eval.yml's default fixture): the shipped default runs as it
   is; a change is a pull request on the user's `skills-evals`.
-- **The eval runner** (steps 24 and 25): the bearer is shown once. The
-  user keeps it and the `trig_...` id and types both into
+- **Step 42** (each durable machine): `SKILLS_EVALS_URL` in
+  `~/.config/wsl-automation/settings.env` goes from `none` to the user's
+  `skills-evals` URL, which turns on the session miner and the usage census;
+  then one `run-session-miner.sh --dry-run` by hand (docs/machine.md).
+- **The Loop worker** (step 41, before step 37): the task (loop role,
+  prompt in `docs/routines.md`) and its `LOOP_WORKER_FIRE_URL` and
+  `LOOP_WORKER_FIRE_BEARER` on `_agent-guidance` (`create-environments.sh`
+  already set `LOOP_WORKER_EVERY_HOURS` from `CLAUDE_PLAN`). It comes before
+  step 37 because step 37's run of `create-environments.sh` flips
+  `EVALS_REPO` to `<owner>/skills-evals`, after which a scheduled Loop worker
+  fire runs and fails while its URL or bearer is unset.
+- **The eval runner** (steps 24 and 25): the bearer is shown once. The user
+  keeps it and the `trig_...` id and types both into
   `set-secrets.sh --only routine-fire` themselves.
 - **Steps 26 and 32** are optional: offer them, and move on when the user
   declines.

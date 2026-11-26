@@ -206,6 +206,28 @@ run PYTHON="$test_root/bin/python-ok" LESSONS_CLONE="$HOME/repos/acsi-agentskill
 assert_eq "$rc" 2 'an unset SKILLS_EVALS_URL exits 2'
 assert_match "$out" '^session miner: SKILLS_EVALS_URL is not set; set it in ~/\.config/wsl-automation/settings\.env \(WSL_AUTOMATION_SETTINGS; see config/settings\.env\.example\)' 'the missing SKILLS_EVALS_URL is named with where to set it'
 assert_eq "$([[ -f $STUB_RECORD ]] && echo ran || echo idle)" idle 'an unset SKILLS_EVALS_URL runs no miner'
+assert_match "$out" 'or to none if you have no skills-evals repository$' 'the missing SKILLS_EVALS_URL says none turns the job off'
+
+# 8b. SKILLS_EVALS_URL=none (no skills-evals: the kit's base track) turns the
+# job off before anything else is required, scheduled or by hand, from the
+# environment or the settings file: exit 0, one log line, no miner.
+for args in '' --dry-run; do
+    rm -f -- "$STUB_RECORD"
+    before=$(line_count)
+    # shellcheck disable=SC2086 # $args is empty or one flag
+    run SKILLS_EVALS_URL=none LESSONS_CLONE= PRIVACY_DENYLIST_FILE="$test_root/no-denylist" SESSION_MINER_MARKER="$test_root/no-marker" bash "$script" $args
+    assert_eq "$rc" 0 "SKILLS_EVALS_URL=none exits 0 (args: '$args')"
+    assert_eq "$out" 'session miner: skipped: SKILLS_EVALS_URL is none, so there is no skills-evals to run the miner from' "the none notice (args: '$args')"
+    assert_eq "$([[ -f $STUB_RECORD ]] && echo ran || echo idle)" idle "SKILLS_EVALS_URL=none runs no miner (args: '$args')"
+    assert_eq "$(line_count)" "$((before + 1))" "SKILLS_EVALS_URL=none logs one line (args: '$args')"
+    assert_match "$(last_line)" ' exit=0 session miner: skipped: SKILLS_EVALS_URL is none' "the skip is logged (args: '$args')"
+done
+none_config="$test_root/settings-none.env"
+printf 'SKILLS_EVALS_URL=none\n' >"$none_config"
+rm -f -- "$STUB_RECORD"
+run -u SKILLS_EVALS_URL WSL_AUTOMATION_SETTINGS="$none_config" SESSION_MINER_MARKER="$test_root/no-marker" bash "$script"
+assert_eq "$rc" 0 'SKILLS_EVALS_URL=none in the settings file exits 0'
+assert_eq "$([[ -f $STUB_RECORD ]] && echo ran || echo idle)" idle 'SKILLS_EVALS_URL=none in the settings file runs no miner'
 run PYTHON="$test_root/bin/python-ok" LESSONS_CLONE="$HOME/repos/acsi-agentskills-private" bash "$script" --dry-run
 assert_eq "$rc" 0 'the denylist default runs'
 assert_eq "$(record denylist)" "$HOME/.config/privacy-denylist.txt" 'default denylist path'
