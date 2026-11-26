@@ -47,6 +47,20 @@ marker the hook does nothing on a durable machine
 
 ## Scheduled jobs (wsl-automation)
 
+**What a base-only machine schedules** (no `skills-evals`, so
+`SKILLS_EVALS_URL=none`):
+
+- **Windows:** `register-tasks.ps1` registers every task. The ones that do
+  work on the base are the ccstatusline config sync, the WSL memory log, the
+  Docker watchdog and memory curation. The session miner and the usage
+  census log that they skipped and exit 0. The waiting feed fails each
+  minute until you create `waiting-feed` and set `WAITING_FEED_URL`
+  (optional).
+- **Linux and macOS:** nothing. `scripts/unix/install-schedule.sh` schedules
+  the usage census and the session miner, which serve evals, and the
+  optional waiting feed. Skip it on the base (mark the quick start's step 22
+  done), or schedule `--jobs waiting-feed` if you use the feed.
+
 [`wsl-automation`](../starter/wsl-automation/README.md) schedules the jobs
 that must run on your machine because they read its transcripts or use its
 login:
@@ -87,8 +101,11 @@ you are logged out.
 repository, so a job whose key is missing exits 2 and names it. Before you
 register the jobs, copy the repo's `config/settings.env.example` to
 `~/.config/wsl-automation/settings.env`, in the distro or on Linux or macOS.
-`copy-starter.sh` has already put your owner in it. Check `SKILLS_EVALS_URL`
-(usage census and session miner), `LESSONS_CLONE` (session miner),
+`copy-starter.sh` has already put your owner in it. It ships
+`SKILLS_EVALS_URL=none`: the usage census and the session miner run code
+from `skills-evals`, so without it they log that they skipped and exit 0.
+When you add evals, set it to your `skills-evals` URL (quick start step 42).
+Check `LESSONS_CLONE` (session miner),
 `WAITING_FEED_URL` (waiting feed), `AGENT_GUIDANCE_URL` (memory curation),
 and `CODEX_CLOUD_GUIDANCE_REPOSITORY` (Codex Cloud sync, as `owner/name`).
 The README's "Settings file for the Bash tasks" has the format.
@@ -104,7 +121,7 @@ hand, in the distro. It needs:
 - `python3-yaml`;
 - `LESSONS_CLONE` and `SKILLS_EVALS_URL` in `settings.env`. Both are
   required and have no default, so the wrapper exits 2 and names whichever
-  is unset.
+  is unset; `SKILLS_EVALS_URL=none` turns the miner off instead.
 
 Then run `bash scripts/run-session-miner.sh --dry-run`. It files no issues
 until you set `FILE_ISSUES=on`, so read a sample of its records first. The

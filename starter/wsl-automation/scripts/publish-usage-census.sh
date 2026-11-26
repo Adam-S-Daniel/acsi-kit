@@ -52,6 +52,14 @@ if ! wsl_automation_require_setting SKILLS_EVALS_URL; then
     printf '%s\n' "$out"
     exit 2
 fi
+# SKILLS_EVALS_URL=none: no skills-evals (the kit's base track), so the
+# census has nowhere to publish; skip, logged, and exit 0.
+if [[ $SKILLS_EVALS_URL == none ]]; then
+    out='usage census: skipped: SKILLS_EVALS_URL is none, so there is no skills-evals to publish to'
+    printf '%s exit=0 %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$out" >>"$log"
+    printf '%s\n' "$out"
+    exit 0
+fi
 url=$SKILLS_EVALS_URL
 
 tmp=$(mktemp -d)

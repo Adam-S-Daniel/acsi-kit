@@ -65,6 +65,10 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
   behind the `fleet-apply` approval.
 - **Step 19** (eval.yml's default fixture): the shipped default runs as it
   is; a change is a pull request on the user's `skills-evals`.
+- **Step 42** (each durable machine): `SKILLS_EVALS_URL` in
+  `~/.config/wsl-automation/settings.env` goes from `none` to the user's
+  `skills-evals` URL, which turns on the session miner and the usage census;
+  then one `run-session-miner.sh --dry-run` by hand (docs/machine.md).
 - **The Loop worker** (step 41, before step 37): the task (loop role,
   prompt in `docs/routines.md`) and its `LOOP_WORKER_FIRE_URL` and
   `LOOP_WORKER_FIRE_BEARER` on `_agent-guidance` (`create-environments.sh`

@@ -134,14 +134,17 @@ is in `docs/quick-start.md`.
   `fleet.yml` that doesn't declare it yet. Every check runs on the base
   track (`status.sh --track base` passes it to `verify.sh`), so none asks
   for that repo. Don't create it here, even if a script mentions it, because
-  `/adopt-evals` does that. Leave out step 22's usage census, which only
-  evals read: on Linux or macOS, pass `--jobs session-miner`.
+  `/adopt-evals` does that.
 - **Step 22** (machine jobs): before registering anything, have the user
   copy `config/settings.env.example` to
   `~/.config/wsl-automation/settings.env` in the distro (or on Linux or
   macOS) and check each repository in it. No job has a built-in repository:
-  one whose key is missing exits 2 naming it. The session miner's
-  `LESSONS_CLONE` is in the same file (docs/machine.md).
+  one whose key is missing exits 2 naming it. Leave `SKILLS_EVALS_URL=none`
+  as it ships: the session miner and the usage census run code from
+  `skills-evals`, so they skip and exit 0 (the evals track's step 42 turns
+  them on). On Windows, register the tasks. On Linux or macOS there is
+  nothing to schedule for the base: tell the user so and mark the step done,
+  unless they use the optional waiting feed (`--jobs waiting-feed`).
 
 ## The content step
 
