@@ -52,10 +52,11 @@ FORMS = {
 }
 CHOICES = ("invented", "one", "two")
 # form -> the TIME_ZONE the copy is given: neither is the export's UTC, and one
-# is not a whole number of hours from it. Both are names Node's Intl keeps as
-# written: _agent-guidance's scripts/base-md-merge-window.js refuses a name
-# Intl renames (Asia/Kolkata, Europe/Kyiv), which is the source's to fix.
-ZONES = {"one": "America/Chicago", "two": "Australia/Adelaide"}
+# is not a whole number of hours from it. Asia/Kolkata is also a name Node's
+# Intl renames (to Asia/Calcutta): _agent-guidance's
+# scripts/base-md-merge-window.js accepts it since the source's c8cdbd4, which
+# the kit's pin includes, so a staged copy proves that fix holds.
+ZONES = {"one": "America/Chicago", "two": "Asia/Kolkata"}
 
 EXAMPLE_PREFIX = "example-site-"
 # kit tree -> [(file in the tree, key path to the list, rows expected)]
