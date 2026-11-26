@@ -192,6 +192,7 @@ def api(args):
     if rest == "/contents/README.md" and method == "PUT":
         r["has_commits"] = True
         r["readme"] = base64.b64decode(body["content"]).decode("utf-8")
+        r["readme_author"], r["readme_committer"] = body.get("author"), body.get("committer")
         return out({"content": {"path": "README.md"}})
     if rest.startswith("/contents/") and method == "GET":
         # The default branch's files: README.md once there is a first commit,
@@ -232,7 +233,8 @@ def api(args):
             return err(422, "Tree SHA does not exist")
         sha = hashlib.sha1(json.dumps(body, sort_keys=True).encode()).hexdigest()
         r.setdefault("commits", {})[sha] = {"tree": body["tree"], "parents": body.get("parents", []),
-                                            "message": body.get("message")}
+                                            "message": body.get("message"),
+                                            "author": body.get("author"), "committer": body.get("committer")}
         return out({"sha": sha})
     if rest == "/git/refs" and method == "POST":
         b = body.get("ref", "")

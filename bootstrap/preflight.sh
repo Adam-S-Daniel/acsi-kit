@@ -204,12 +204,12 @@ check_git_identity() {
     noreply="<id>+<login>@users.noreply.github.com"
   fi
   if [ "$CONFIG_STATE" = ok ]; then handle=$CFG_OWNER_NAME; else handle="<OWNER_NAME, a public handle>"; fi
-  fixline="git config --global user.name '$handle' && git config --global user.email '$noreply'   (or set both in each clone of these repos)"
+  fixline="git config --global user.name '$handle' && git config --global user.email '$noreply'   (or set both without --global in each clone of these repos; this check reads only the global ones)"
   if [ -z "$name" ] || [ -z "$email" ]; then
     warn_ "git has no user.name or user.email in its global config; a commit you make by hand needs both, and public history keeps them for good, so use a public handle and your GitHub noreply address"
     fix "$fixline"
   elif [[ ! $email =~ ^([0-9]+\+)?[A-Za-z0-9-]+@users\.noreply\.github\.com$ ]]; then
-    warn_ "git commits as an email that is not a GitHub noreply address, so a commit you make by hand in these repos publishes it for good (the kit's own commits use OWNER_NAME and your noreply address)"
+    warn_ "git commits as an email that is not a GitHub noreply address (git's global user.email), so a commit you make by hand in these repos publishes it for good (the kit's own commits use OWNER_NAME and your noreply address)"
     fix "$fixline"
   else
     pass "git commits as a GitHub noreply address"

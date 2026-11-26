@@ -654,6 +654,7 @@ run bash "$B/create-repos.sh" --config "$CFG" --dry-run skills-evals; rc=$?
 assert_eq "a dry run naming skills-evals exits 0" "$rc" 0
 assert "dry run prints the results branch's tree, commit and ref" bash -c 'for u in git/trees git/commits git/refs; do grep -qF "DRY-RUN: gh api -X POST repos/acme-example/skills-evals/$u" "$1" || exit 1; done' _ "$OUT"
 assert "dry run says it would create the orphan results branch" has "$OUT" "would have: created the orphan branch persistent/eval-results in acme-example/skills-evals"
+assert "dry run shows the results commit's author as OWNER_NAME and the noreply address" has "$OUT" "\"author\":{\"name\":\"Acme Example\",\"email\":\"$(uid_of acme-example)+acme-example@users.noreply.github.com\"}"
 assert_eq "dry run creates no branch" "$(jqs '[.repos[]? | .branches // {} | keys[]] | length')" 0
 
 run bash "$B/create-repos.sh" --config "$CFG"; rc=$?
@@ -716,6 +717,12 @@ assert_eq "every README is the generated one, ending in the marker" \
 assert_eq "persistent/eval-results exists on skills-evals only" "$(jqs '[.repos | to_entries[] | select(.value.branches["persistent/eval-results"] != null) | .key] | join(" ")')" "$O/skills-evals"
 assert_eq "the results branch is an orphan commit" "$(jqs '.repos["acme-example/skills-evals"] | .commits[.branches["persistent/eval-results"]].parents | length')" 0
 assert_eq "the results branch holds a README and nothing else" "$(jqs '.repos["acme-example/skills-evals"] | .trees[.commits[.branches["persistent/eval-results"]].tree] | map(.path) | join(",")')" README.md
+# Both API commits name OWNER_NAME and the noreply address, never GitHub's own record of the account.
+KIT_AUTHOR=$(jq -nc --arg n 'Acme Example' --arg e "$(uid_of "$O")+$O@users.noreply.github.com" '{name: $n, email: $e}')
+assert_eq "every README commit is authored and committed as OWNER_NAME and the noreply address" \
+  "$(jq -r --argjson a "$KIT_AUTHOR" '[.repos[] | select(.readme_author == $a and .readme_committer == $a)] | length' "$GH_STUB_STATE")" 6
+assert_eq "the results branch's commit is authored and committed as OWNER_NAME and the noreply address" \
+  "$(jq -r --argjson a "$KIT_AUTHOR" '.repos["acme-example/skills-evals"] | .commits[.branches["persistent/eval-results"]] | .author == $a and .committer == $a' "$GH_STUB_STATE")" true
 assert "the results README says what the branch holds" jq -e '.repos["acme-example/skills-evals"] | .trees[.commits[.branches["persistent/eval-results"]].tree][0].content | contains("never merges into main")' "$GH_STUB_STATE"
 assert_eq "labels agent-ready, on-hold and ci on all six" "$(jqs '[.repos[] | select([.labels[].name] | index("agent-ready") and index("on-hold") and index("ci"))] | length')" 6
 assert_eq "it leaves merge and Actions settings to fleet.yml" "$(jqs '[.repos[] | select(.allow_squash_merge and (.actions.sha_pinning_required | not))] | length')" 6

@@ -707,7 +707,7 @@ error that names `-OwnerRoot`, the variable and the settings file.
   git ignores template hooks and the installer warns). It refuses to replace a
   different `init.templateDir` or a foreign hook unless you pass `-Force`.
 - **On Linux / inside WSL** both scripts also run under the Linux pwsh
-  (`pwsh` on `PATH`). Add `WSL_AUTOMATION_AGENT_OWNER_ROOTS=~/src` to
+  (`pwsh` on `PATH`). Add `WSL_AUTOMATION_AGENT_OWNER_ROOTS=~/repos` to
   `~/.config/wsl-automation/settings.env` (there is no `~/repos` default, and
   not a shell profile: the git hook runs in whatever process runs git, and a
   non-interactive or long-running process never reads a profile). The file is

@@ -124,14 +124,18 @@ that already ran them:
   it in four repos (the registry, `_agent-guidance`, `repo-settings`,
   `wsl-automation`), so a setup that stored it before shows step 3 as not
   done again. Run step 3 again; it skips the repo that already has it.
-- Step 3, and your own commits: the kit's own commits (`copy-starter.sh`,
-  `regenerate.sh`) now use `OWNER_NAME` and your GitHub noreply address,
-  not git's own `user.name` and `user.email`. Commit in these repos under
-  the same identity ([the privacy check](docs/skills.md#the-privacy-check)
-  says how; `bash bootstrap/preflight.sh` warns until you do), and keep
+- Step 3, and your own commits: the kit's own commits (`create-repos.sh`,
+  `copy-starter.sh`, `regenerate.sh`) now use `OWNER_NAME` and your GitHub
+  noreply address, not git's own `user.name` and `user.email` or GitHub's
+  record of your account. Commit in these repos under the same identity,
+  and set GitHub to keep your email private
+  ([the privacy check](docs/skills.md#the-privacy-check) says how;
+  `bash bootstrap/preflight.sh` warns until git does), and keep
   the list at `~/.config/privacy-denylist.txt`, where this machine's checks
   read it (`bash bootstrap/install-machine.sh` warns while it is missing).
-  Commits already made keep the identity they were made with.
+  Commits already made keep the identity they were made with: a starter or
+  regenerate pull request the kit opened before and you have not merged
+  keeps it too, so close it, delete its branch and run its step again.
 - Steps 12 and 20 (the registry's `privacy` job): the `acsi-agentskills`
   starter no longer has its own `privacy` CI job, and `fleet.yml` no longer
   requires it; each repo's `agent-checks` scans for personal data instead
@@ -150,7 +154,7 @@ that already ran them:
   shows the same reason).
 - Step 35 (creating `skills-evals`, on the evals track): it now also stores
   the privacy list in `skills-evals`. If you created it before, run
-  `bash bootstrap/set-secrets.sh --only privacy --denylist <the same file>`
+  `bash bootstrap/set-secrets.sh --only privacy --denylist ~/.config/privacy-denylist.txt`
   again; it stores only the copy that is missing.
 - Step 22 (the machine jobs): `~/.config/wsl-automation/settings.env` now
   needs `WSL_AUTOMATION_AGENT_OWNER_ROOTS`, the folder that holds your clones

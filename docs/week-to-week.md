@@ -53,4 +53,4 @@ means the API accepted the request.
   routine's page at https://claude.ai/code/routines, then
   `bash bootstrap/set-secrets.sh --only routine-fire --rotate`.
 - **The privacy denylist:** edit the file outside your repos, then
-  `bash bootstrap/set-secrets.sh --only privacy --rotate --denylist <path>`.
+  `bash bootstrap/set-secrets.sh --only privacy --rotate --denylist ~/.config/privacy-denylist.txt`.
