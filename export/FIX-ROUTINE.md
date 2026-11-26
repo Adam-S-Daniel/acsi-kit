@@ -20,7 +20,9 @@ to them, comment on them, or open pull requests on them.
 1. **Branch.** From `origin/main`, create `resync-fix/<UTC date>`, for
    example `resync-fix/2026-11-13`. If an open pull request already comes
    from a `resync-fix/` branch, stop and end with a message saying a fix is
-   already open.
+   already open. (The daily re-sync closes such a pull request first when a
+   held source's head has moved past its pins, so one still open when you
+   start follows the current heads.)
 2. **Move the pins.** Run `python3 export/resync.py --owner <owner>`.
    It moves every public source to its head, not only the held ones, so the
    fix covers whatever else moved since.

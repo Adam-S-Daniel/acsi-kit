@@ -409,6 +409,19 @@ suite, ShellCheck over `ci.yml`'s list, and the ASCII check of every
   grace, `Persistent=true`). Neither ran on macOS: launchd output is checked
   by parsing the plists with `plistlib`, and bash 3.2 compatibility of the
   runner is by inspection only.
+- **Installer preflight** (wsl-automation#132): `install-schedule.sh` refuses
+  before writing anything when `flock`, `timeout`/`gtimeout`, a date that reads
+  `-d @0` (only for the jobs that need it: the waiting feed), or, for systemd,
+  a user bus (`systemctl --user show-environment`) is missing, and lists every
+  gap with its fix in one message. The lookups and the PATH setup live in
+  `scripts/unix/tool-path.sh`, sourced by both scripts so the installer cannot
+  disagree with the runner. A failed `launchctl bootstrap` removes that
+  job's plist and exits 1 (no pre-check: it cannot be probed without a
+  session). On macOS the waiting feed is skipped, because Claude Code's
+  documentation puts macOS credentials in the Keychain, not in
+  `~/.claude/.credentials.json`. The source's `publish-waiting-feed.sh`
+  `date -d` is fixed in the source repository, not here. Exercised only
+  through stubs (no macOS machine).
 - `NOTICE` names the source repository and commit.
 
 ## Export record: agentskills
@@ -3001,3 +3014,31 @@ Reverse: re-pin each source to its "Before" sha, remove the `pasted-config-is-a-
 The fix is isolation, not ordering. A manifest's `suite:` block may say `venv: true`; `run_suites.py` then runs `python3 -m venv` under that suite's temporary directory and puts it first on `PATH` (with `VIRTUAL_ENV`) for that suite's setup and command only. The venv is deleted with the copy. Only `skills-evals` sets it, because it is the only setup that installs Python packages; the others probe the interpreter and keep the plain environment. CI's "Install suite dependencies" step still installs `agent-skills`' and `repo-settings`' requirements into the shared interpreter, serially, before any suite starts, so it does not race; its pins agree with each other. The `test` job's `markdown-it-py==4.2.0` runs alone in its own job, so it is no part of this race and is unchanged. `export/tests/test_run_suites.py` proves the isolation with fake suites.
 
 Reverse: remove `venv_env` and the `venv` branch in `run_one`, the `venv: true` line in `export/manifests/skills-evals.yml`, the new tests, and the README and comment lines that mention it.
+
+## The workstation name in every case (2026-11-25)
+
+The rule for the owner's workstation name was a case-sensitive, word-bounded regex, so it replaced the upper-case name in prose but let nine lowercase identifiers built on it through, in `skills-evals`' `scripts/automatic_spend.py` and `test/issues/test_issue_automatic_spend.py` (a function, a parameter and its uses, a test method and a test class). The owner's private scan caught them; the public `leak_scan` rule was case-sensitive too.
+
+Both rules now spell the name one letter class at a time (`[Xx][Yy]...`), so the kit's own text no longer holds it in any letter case (the owner chose to remove it going forward and leave git history alone), and neither has a word boundary, so both match in every letter case and inside identifiers. The substitution is a `regex` rule with `forms: true`, a new `export.py` form: its one-word `to` takes the matched text's case style, as the literal `forms` catch-all already did. That is one deterministic function of the matched text, so a definition and every caller, and code and its tests, get the same name and still parse:
+
+| Form in the source | Replacement |
+|---|---|
+| the name in capitals (prose, `NAME_X`, `X-NAME`) | `WORKSTATION` |
+| lowercase (a word, a parameter, `scan_<name>_tasks`, `<name>Tasks`, `<name>-x`) | `workstation` |
+| capitalized (`scan<Name>Tasks`, `<Name>Tasks`) and any other mixed case | `Workstation` |
+
+**Departure:** a longer unrelated word that holds the name is replaced inside too. That is intended for a machine name: the private scan matches it anywhere in any case, so leaving it would publish the name, and the sources at their pins hold no such word (only the identifiers above). A new one would show in a re-pin's `--check` diff, where a maintainer can read it. Paths are substituted by the same rules (step 4 of `export.py`); no tracked path holds the name, so nothing else changes. `export/tests/test_name_case_forms.py` covers every case style, a path, a definition and its callers (parsed with `ast`), and the longer-word decision with an invented stand-in name; `test_no_leaks.py` checks the real substitution and `leak_scan` rules against every form, with samples built at run time from the rules' own letter classes, so the test never spells the name either; it fails when the rules are put back in the old word-bounded, case-sensitive form.
+
+The source still uses the name in those identifiers at the `skills-evals` pin; renaming them there is a separate `skills-evals` pull request, and until the kit's pin moves past it, this rule is what keeps the shipped copy clean.
+
+Reverse: restore the word-bounded regex rule and the case-sensitive `leak_scan` entry, remove the `regex` + `forms` branch from `compile_rules`, delete the new test file and the two `test_no_leaks.py` tests, and re-run the export.
+
+## Kit-only blocks in the source (2026-11-25, Adam-S-Daniel/_agent-guidance#644)
+
+The source's fleet-worker spec (`docs/routines/fleet-worker.md`) gains a rule that lets the owner's fleet worker merge the kit's own re-sync pull requests (heads `resync/auto` and `resync-fix/*`), fenced by `<!-- kit-only:begin -->` and `<!-- kit-only:end -->` lines, and `repos.yml` gains a top-level `kit_resync` key (`repo`, `app_slug`) under a comment block. An adopter's fleet has no kit, so neither ships.
+
+- `export/patches/_agent-guidance/kit_only.py` cuts every marker-fenced region from the Markdown files under `docs/routines/` (markers and one blank line after the end marker included, so the paragraphs around it stay one blank line apart) and the `kit_resync` key with the comment block directly above it from `repos.yml`. It runs first among the patches, on the substituted tree, while the marker text is intact.
+- It landed before the source change, which is why it is a patch and not an `edits` entry (an edit's old text must match at the pin). With no markers and no key it changes nothing, so the starters are unchanged at the current pin. An unbalanced, nested or out-of-order marker stops the export, naming the file, instead of shipping half a block.
+- `export/tests/test_kit_only.py` covers the patch and holds the shipped fleet-worker spec to no marker, no `resync/auto` and no `resync-fix/`, and the shipped `repos.yml` to no `kit_resync`.
+
+Reverse: delete the patch, its manifest entry and its test file. The next re-pin then ships the owner's merge rule and key as exported.
