@@ -1243,6 +1243,18 @@ assert_eq "add-content --items none exits 0" "$rc" 0
 assert_eq "--items none records an empty choice" "$(jq -c .installed "$CHOICES")" '[]'
 
 # ======================================================== update-kit.sh
+# macOS's paste needs a file operand (`-` for stdin); GNU's reads stdin
+# without one. A paste that refuses like the BSD one, first on PATH, catches
+# a call without `-` on this machine too.
+BSDBIN="$T/bsd-bin"; mkdir -p "$BSDBIN"; REALPASTE=$(command -v paste)
+cat > "$BSDBIN/paste" <<EOF
+#!$BASH
+for a in "\$@"; do case \$a in -s|-d*|-sd*) ;; *) exec "$REALPASTE" "\$@" ;; esac; done
+echo "usage: paste [-s] [-d delimiters] file ..." >&2; exit 1
+EOF
+chmod +x "$BSDBIN/paste"
+assert_not "the BSD-like paste refuses stdin without -" bash -c 'printf "a\nb\n" | "$1/paste" -sd" "' _ "$BSDBIN"
+assert_eq "and takes it with -" "$(printf 'a\nb\n' | "$BSDBIN/paste" -sd' ' -)" "a b"
 # A local "origin" holding the kit, cloned the way an adopter clones it; the
 # upstream moves on after the clone has had add-content.sh run in it.
 UP="$T/upd"; mkdir -p "$UP/origin" "$UP/state"
@@ -1307,6 +1319,8 @@ assert "it keeps add-content's per-tree counts" grep -qE '^  starter/[a-z-]+: ad
 assert "it ends with a Do this now block" grep -qx 'Do this now:' "$OUT"
 assert "its first item is the TIME_ZONE this fleet.env lacks" grep -qE "^  1\. Set TIME_ZONE in $UK/fleet\.env \(your IANA time zone name, such as Europe/Berlin" "$OUT"
 assert "it names the existing repos that need a pull request for the content" grep -qE '^  [0-9]+\. Open a pull request on acme-example/[a-z_-]+ \(never a push' "$OUT"
+assert "the registry's line names the repo, the tree, the log and the next task, exactly" has "$OUT" ". Open a pull request on acme-example/acsi-agentskills (never a push to its default branch) that adds the starter/agent-skills files listed in $ULOG, with your names as copy-starter.sh writes them. When it merges, run bash bootstrap/regenerate.sh --config $UK/fleet.env skills-locks."
+assert_not "add-content's own advice, which points at lines above, is left out" has "$OUT" "files listed above"
 assert "the block comes after add-content's output" bash -c '[ "$(grep -n "^Do this now:$" "$1" | cut -d: -f1)" -gt "$(grep -n "file(s) added or changed in starter/" "$1" | cut -d: -f1)" ]' _ "$OUT"
 assert_eq "Next: is still the last line" "$(tail -n1 "$OUT")" "Next: bash bootstrap/status.sh --config $UK/fleet.env"
 COPY_STEP=$(jq -r '[.steps[] | select(.run | test("copy-starter[.]sh"))][0].id' "$K/bootstrap/steps.json")
@@ -1331,6 +1345,10 @@ assert_not "a current kit lists no fleet.env key (this fleet.env sets few of the
 assert_eq "a second run changes no status" "$(git -C "$UK" status --porcelain)" "$st1"
 assert_eq "a second run keeps HEAD" "$(git -C "$UK" rev-parse HEAD)" "$h1"
 assert_not "it does not say nothing changed after re-applying the choices" has "$OUT" "Nothing to change"
+rm -f "$UP"/state/update-kit-*.log
+uk "$UK" --config "$UK/fleet.env" --dry-run; rc=$?
+assert_eq "a dry run on a current kit exits 0" "$rc" 0
+assert_not "a dry run writes no log into the state folder" bash -c 'ls "$1"/update-kit-*.log' _ "$UP/state"
 # Hand edits inside starter/ are not add-content's, so they are refused.
 bump "upstream again"
 assert "the hand-edited file is tracked" git -C "$UK" ls-files --error-unmatch starter/repo-settings/README.md
@@ -1595,8 +1613,8 @@ cp "$K/bootstrap/status.sh" "$O5/bootstrap/status.sh" && ugit -C "$O5" commit -q
 new_config "$UP/k5.env" free zz-fresh-owner; sed -i '/^TIME_ZONE=/d' "$UP/k5.env"
 run env ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/status.sh" --config "$UP/k5.env"
 assert "under the old kit step 0 is done without TIME_ZONE" grep -qE '^done +0 ' "$OUT"
-run env ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/update-kit.sh" --config "$UP/k5.env"; rc=$?
-assert_eq "the update that reopens step 0 exits 0" "$rc" 0
+run env PATH="$BSDBIN:$PATH" ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/update-kit.sh" --config "$UP/k5.env"; rc=$?
+assert_eq "the update that reopens step 0 exits 0, with a paste that needs its - (macOS)" "$rc" 0
 assert "it names step 0" has "$OUT" "  step 0, Write fleet.env:"
 assert "it says why: TIME_ZONE, as status.sh and the key report do" has "$OUT" "    why: $UP/k5.env: TIME_ZONE is required: set TIME_ZONE in fleet.env"
 assert "Do this now says to set TIME_ZONE for step 0" has "$OUT" ". Step 0 (Write fleet.env) is not done under the newer kit: $UP/k5.env: TIME_ZONE is required: set TIME_ZONE in fleet.env"
@@ -1637,8 +1655,8 @@ assert "with gh's sign-in, step 7 is not done before the answer" grep -qE '^next
 assert_not "the kit's folder has no fleet.env" test -e "$K/fleet.env"
 run env ADOPT_STATE_FILE="$SB7" bash -c 'cd "$1" && eval "$2"' _ "$K" "$MARK7"; rc=$?
 assert_eq "the printed --mark 7 runs as printed (the installation step takes an answer)" "$rc" 0
-run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
-assert_eq "verify passes the installations you confirmed" "$rc" 0
+run env -u GH_STUB_APP_USER_TOKEN PATH="$BSDBIN:$PATH" ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
+assert_eq "verify passes the installations you confirmed (with a paste that needs its -)" "$rc" 0
 assert "it says they were confirmed by you" has "$OUT" "confirmed by you (status.sh --mark 7); gh's sign-in cannot read installations (HTTP 403)"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
 assert "with gh's sign-in, step 7 is done once answered" grep -qE '^done +7 ' "$OUT"
