@@ -2955,6 +2955,59 @@ The workflow edits are `edits` entries in `export/manifests/_agent-guidance.yml`
 
 Reverse: delete the "Base-only track" block of `edits` in `export/manifests/_agent-guidance.yml`, the two `REPO_VARIABLES` entries and their `repo_variable_value` cases in `bootstrap/lib/common.sh`, the `create-environments.sh` and `verify.sh` branches for them and their tests, restore steps 27 and 24 and drop step 41 in `bootstrap/steps.json` (and re-run `bootstrap/render-quickstart.py`), restore the docs sentences that name `EVALS_REPO`, and re-run the export.
 
+### Review fixes (2026-11-25)
+
+An independent review, and a sweep of every workflow in the five base starters (parsed with PyYAML, `bootstrap/tests/check-evals-refs.py`), found more that was red for a base-only adopter on GitHub Free, or red until a later step:
+
+- **`_agent-guidance` `ci.yml`, job `checks` (feeds the required `test`)** checked out `<owner>/skills-evals` with no condition, so every pull request and push failed without it; and its eval-protection gate fetched the explorer from skills-evals, so any pull request that touched a guidance section failed closed. A decision step reads `EVALS_REPO` (through `env:`): `none` skips the checkout, runs `check-guidance-coverage.js` without `--skills-evals` and `eval-protected.js` with `--no-evidence`, each with a notice naming what it did not check; unset fails naming it; otherwise both read the repository `EVALS_REPO` names.
+- **`acsi-agentskills` `ci.yml`, job `pytest` (feeds `merge-gate`)** ran the same eval-protection gate on every pull request. The same decision step gates it, so `EVALS_REPO` is now also a repository variable on `acsi-agentskills` (`REPO_VARIABLES`; `create-environments.sh` sets it, `verify.sh` checks it).
+- **`scheduled-run-health.yml` in `repo-settings`, `acsi-agentskills` and `wsl-automation`** called the reusable at the forty-zero placeholder, so the daily run failed at "Set up job" from the starter merge until step 16. A job `if:` cannot help (the reference is resolved before any job), so the starter ships the caller with no schedule and `regenerate.sh run-health-sha` adds `47 8 * * *` in the same pull request that sets the pin (its `--check` is not done while the schedule is missing). `skills-evals`' copy is unchanged (evals track).
+- **`repo-settings.yml`, job `plan`** minted from the settings-read App with no gate, red from the starter merge (step 4) until `create-apps.sh` (step 6) and every Monday between. A first step reads `REPO_SETTINGS_READ_APP_CLIENT_ID`: unset prints a "not set up yet" notice and the mints, diffs and nudges are skipped, so the plan reports no drift and no apply runs; set, a bad key still fails the mint. The source keeps the plan ungated on purpose ("a missing App fails the mint"); the kit narrows that to "a set-up App that fails".
+- **The `ci` label.** `drift-report.yml` and `repo-settings.yml` file their issues with `gh issue create --label ci`, which fails on a repo without the label; only the run-health audit creates it, later in the day. `create-repos.sh` now creates `ci` with `agent-ready` and `on-hold` (`LABELS`).
+- **The session miner and the usage census** (machine jobs, not workflows) clone skills-evals for their own code, and `config/settings.env.example` named the adopter's `skills-evals`, so every daily run on a base machine failed. `SKILLS_EVALS_URL=none` turns both off with a logged notice and exit 0 (the miner in `export/overlay/wsl-automation/scripts/run-session-miner.sh`, the census by an `edits` entry); unset still fails, and the miner's message says `none` is the way to turn it off. The example ships `none`; step 22 says what a base machine schedules on each system (on Linux and macOS, nothing), and a new evals step, 42, sets the URL and runs the first dry run. No script writes `settings.env` (the adopter copies it), so there is no verify check for it.
+- **Step 7 could never read done with an ordinary `gh auth login`.** `GET user/installations` answers HTTP 403 to gh's own OAuth token (it takes a GitHub App user token), and the kit keeps no App private key locally to ask as the App. Steps 7 and 34 carry `"by_hand": true`: `verify.sh` keeps the API route when the token can use it; on a 403 it names each App and the repos it needs, points at https://github.com/settings/installations, and passes once `status.sh --mark <id>` has recorded the answer for every such step on the selected track. The gh stub now answers 403 there unless `GH_STUB_APP_USER_TOKEN=1`.
+- **`PLAN=paid` on a GitHub Free account** made `create-environments.sh` stop on a bare 403. For a private repo it now says environments there need a paid plan and to set `PLAN=free` in `bootstrap/fleet.env` and run it again (never the response body).
+- **`verify.sh --track base` accepts `EVALS_REPO` as `none` or `<owner>/skills-evals`** (finding 2 of the review): the base track checked the exact value, so creating `skills-evals` turned step 8 back to not done until step 37. Unset or malformed still fails naming it; the evals track and `all` check the exact value, so step 37 now confirms the flip.
+
+What each base starter workflow on `schedule`, `push` or `pull_request` does on a base-only setup (`EVALS_REPO=none`, `ARTICLE_WATCH_FEED_URL=none`, `PLAN=free`), once the base steps are done:
+
+| Repo | Workflow | Triggers | With `EVALS_REPO=none` |
+|---|---|---|---|
+| `_agent-guidance` | `agent-checks.yml` | pull_request, push | reads nothing outside the repo: green |
+| `_agent-guidance` | `ci.yml` | pull_request, push | `checks`: no skills-evals checkout; coverage without fixture paths and eval protection with `--no-evidence`, each with a notice; `test` green |
+| `_agent-guidance` | `article-watch.yml` | schedule (hourly) | `ARTICLE_WATCH_FEED_URL=none`: notice, exit 0 |
+| `_agent-guidance` | `dependabot-auto-merge.yml` | schedule | its own repo's Dependabot PRs only: green |
+| `_agent-guidance` | `dependabot-config-health.yml` | schedule | guidance-sync App (steps 6-7): green |
+| `_agent-guidance` | `drift-report.yml` | schedule | guidance-sync App; files under `ci`, which now exists: green (it may nudge about `skills-evals` in `repos.yml`, see below) |
+| `_agent-guidance` | `fleet-worker-fire.yml` | schedule | Loop worker leg: notice, exit 0; Fleet worker leg fires once step 27 set its URL and bearer (red on its slot before that: the one expected failure, `docs/settings-and-apps.md`) |
+| `_agent-guidance` | `impact-report.yml` | schedule | gate: notice, publish=false, every later step skipped, run green |
+| `_agent-guidance` | `scheduled-run-health.yml` | schedule | its own repo, local reusable: green |
+| `_agent-guidance` | `skills-lock-bump.yml` | schedule | guidance-sync App, `acsi-agentskills` checkout: green |
+| `_agent-guidance` | `sync.yml` | push | guidance-sync App: green |
+| `_agent-guidance` | `vendor-discrepancy-alert.yml` | push | reads nothing outside the repo: green |
+| `acsi-agentskills` | `agent-checks.yml` | pull_request, push | green |
+| `acsi-agentskills` | `ci.yml` | pull_request, push, schedule | `pytest`: eval-protection gate skipped with a notice; `privacy` reads `PRIVACY_DENYLIST` (step 3); green |
+| `acsi-agentskills` | `dependabot-auto-merge.yml` | schedule | green |
+| `acsi-agentskills` | `scheduled-run-health.yml` | schedule from step 16 | no schedule before the pin; then the audit |
+| `acsi-agentskills` | `skill-freshness.yml` | schedule | its own repo: green |
+| `acsi-agentskills-private` | `agent-checks.yml` | pull_request, push | green |
+| `repo-settings` | `agent-checks.yml` | pull_request, push | green |
+| `repo-settings` | `dependabot-auto-merge.yml` | schedule | green |
+| `repo-settings` | `repo-settings.yml` | pull_request, push, schedule | `plan`: "not set up yet" notice until step 6, then plans with the read App; apply jobs skipped on Free (no `REPO_SETTINGS_APP_CLIENT_ID`) |
+| `repo-settings` | `scheduled-run-health.yml` | schedule from step 16 | no schedule before the pin; then the audit |
+| `repo-settings` | `tests.yml` | pull_request, push | green |
+| `wsl-automation` | `agent-checks.yml` | pull_request, push | green |
+| `wsl-automation` | `ci.yml` | pull_request, push | green |
+| `wsl-automation` | `dependabot-auto-merge.yml` | schedule | green |
+| `wsl-automation` | `scheduled-run-health.yml` | schedule from step 16 | no schedule before the pin; then the audit |
+| machine | session miner, usage census | daily | `SKILLS_EVALS_URL=none`: logged notice, exit 0 |
+
+`bootstrap/tests/check-evals-refs.py` fails when a base starter workflow checks out, mints a token for, calls a reusable in, or clones or fetches (a URL in a `run:` script) the eval repository outside a step or job gated on `EVALS_REPO`; its `ALLOW` list names the two steps that gate inside their own script, each tested by `check-workflow-gates.py`, which also runs the new decision, coverage, eval-protection and read-App steps.
+
+Left as they are (wrong, not red): `_agent-guidance`'s `repos.yml` lists `skills-evals` under `cron_coverage.fleet` and `skills_bootstrap.out_of_scope`, so on a base-only setup the drift report keeps one nudge issue open about a name it cannot find, and the fleet worker attaches a repository that does not exist; step 11 could drop it until the evals track. On Windows, the optional waiting feed task fails each minute until `waiting-feed` exists and `WAITING_FEED_URL` is set (it is in step 22's text). `acsi-agentskills`' eval-protection gate checks out `_agent-guidance` at a commit of the source owner's repository (`ref:` in `ci.yml`), which an adopter's copy does not have, so once `EVALS_REPO` names a repository that step fails; no `regenerate.sh` task pins it yet.
+
+Reverse: drop these `edits` entries (the "review fix" blocks in `export/manifests/_agent-guidance.yml`, `agentskills.yml`, `repo-settings.yml`, `wsl-automation.yml`), the overlay's `none` branch and its tests, the `acsi-agentskills|EVALS_REPO` and `ci` registry entries, `installs_by_hand` and `by_hand`, the `GH_403_HINT`, steps 41 and 42 (restore step 24's Loop worker half), `check-evals-refs.py`, and re-run the export.
+
 ## Starter suites each get their own Python environment (2026-11-25)
 
 `starter-suites` (and `starter/run-all-tests.sh`, and `export/run_suites.py` under it) start every tree's suite at once, and all of them shared one Python environment. `skills-evals`' setup (`scripts/dev_setup.sh`) pip-installs `markdown-it-py==4.2.0` while `agent-skills` and `repo-settings` pin `4.3.0`, so pip uninstalled and reinstalled the package while another suite's pytest workers imported it. That fails at random (`No module named markdown_it.rules_core.normalize`): [Actions run 45702656563](https://github.com/Adam-S-Daniel/acsi-kit/actions/runs/45702656563/job/139516488078), job 139516488078, on [PR #104](https://github.com/Adam-S-Daniel/acsi-kit/pull/104), and three local failures under load on 2026-11-25 that passed alone. Because `starter-suites` is a required check, it stranded re-sync pull requests.

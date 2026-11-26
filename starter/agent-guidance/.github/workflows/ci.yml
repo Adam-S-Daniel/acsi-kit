@@ -318,15 +318,52 @@ jobs:
       # No `ref:` — this tracks skills-evals' default branch. That means once
       # any row here is `covered`, a fixture rename on that branch reds THIS
       # repo's CI on the next run, with no change on this side at all.
+      #
+      # EVALS_REPO (a repository variable, no default) says whether there is
+      # a skills-evals to read: `none` skips the checkout and both reads of
+      # it below, each with a notice naming what it did not check; unset
+      # fails here naming it. This job feeds the required `test`, so it
+      # still reports success without the repository.
+      - name: Decide whether there is an eval repository to read
+        id: evals
+        env:
+          EVALS_REPO: ${{ vars.EVALS_REPO }}
+        run: |
+          set -euo pipefail
+          case "${EVALS_REPO:-}" in
+            none)
+              echo "::notice::EVALS_REPO is none, so there is no skills-evals: its fixture paths and eval results are not read below"
+              echo "on=false" >> "$GITHUB_OUTPUT" ;;
+            "")
+              echo "::error::not configured: variable EVALS_REPO. It has no default; set it in this repository's Actions settings to none (no eval loop) or to <owner>/skills-evals. bootstrap/create-environments.sh sets it."
+              exit 1 ;;
+            *)
+              if [[ ! "$EVALS_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+                echo "::error::variable EVALS_REPO must be none or <owner>/skills-evals"
+                exit 1
+              fi
+              echo "on=true" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Check out skills-evals (read-only, for fixture existence)
+        if: steps.evals.outputs.on == 'true'
         uses: actions/checkout@v7.0.1
         with:
-          repository: example-adopter/skills-evals
+          repository: ${{ vars.EVALS_REPO }}
           path: skills-evals
           persist-credentials: false
 
       - name: Section manifest covers every guidance heading
-        run: node scripts/check-guidance-coverage.js --skills-evals skills-evals --check-bytes
+        env:
+          EVALS_ON: ${{ steps.evals.outputs.on }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVALS_ON" == true ]]; then
+            node scripts/check-guidance-coverage.js --skills-evals skills-evals --check-bytes
+          else
+            echo "::notice::not checked: that each covered row's fixture exists (EVALS_REPO is none, so there is no skills-evals to look in); every other part of the manifest is"
+            node scripts/check-guidance-coverage.js --check-bytes
+          fi
 
       # ADR 0043: the contributor half of base.md, built from the sections
       # eval-coverage.yml marks `audience: contributor`. Like AGENTS.md, the
@@ -359,6 +396,8 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
+          EVALS_ON: ${{ steps.evals.outputs.on }}
+          EVALS_REPO: ${{ vars.EVALS_REPO }}
         run: |
           set -euo pipefail
           d="$RUNNER_TEMP/eval-protected"
@@ -369,8 +408,16 @@ jobs:
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/files?per_page=100" \
             | jq 'add // []' > "$d/files.json"
           git show "$head:agents-md/base.md" > "$d/base.md"
+          if [[ "$EVALS_ON" != true ]]; then
+            # No eval loop, so no eval results: nothing is protected.
+            echo "::notice::not checked: eval protection of guidance sections (EVALS_REPO is none, so there are no eval results to protect)"
+            node scripts/eval-protected.js ci --repo "$GITHUB_REPOSITORY" \
+              --pr-json "$d/pr.json" --files "$d/files.json" --base-md "$d/base.md" \
+              --no-evidence
+            exit 0
+          fi
           curl -fsSL --retry 3 -o "$d/explorer.json" \
-            https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/explorer/latest.json \
+            "https://raw.githubusercontent.com/$EVALS_REPO/persistent/eval-results/explorer/latest.json" \
             || rm -f "$d/explorer.json"
           node scripts/eval-protected.js ci --repo "$GITHUB_REPOSITORY" \
             --pr-json "$d/pr.json" --files "$d/files.json" --base-md "$d/base.md" \

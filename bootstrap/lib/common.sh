@@ -474,6 +474,7 @@ ENVIRONMENTS=(
 LABELS=(
   "agent-ready|0e8a16|An agent may fix this (the fleet worker's queue)."
   "on-hold|b60205|Paused by the owner. Only the owner adds or removes it."
+  "ci|d93f0b|Opened by a scheduled workflow (drift report, run health, settings coverage)."
 )
 
 # Every GitHub App the exported workflows mint a token from, named as the
@@ -525,10 +526,10 @@ value_group() { case $1 in PRIVACY_DENYLIST) echo privacy ;; *) echo routine-fir
 # SITE_REPO is required and has no default anywhere (settings-schema-design
 # rule 4): fleet.env.example ships it as none, the explicit "no website".
 # Two sources are not a fleet.env key. `evals:state` is EVALS_REPO on
-# _agent-guidance: none while skills-evals does not exist (a base-only setup)
-# and <owner>/skills-evals once it does, so the evals track's run of
-# create-environments.sh flips it; fleet-worker-fire.yml and impact-report.yml
-# read it and have no default. `unset:none` is a value written only while the
+# _agent-guidance and acsi-agentskills: none while skills-evals does not exist
+# (a base-only setup) and <owner>/skills-evals once it does, so the evals
+# track's run of create-environments.sh flips it; fleet-worker-fire.yml,
+# impact-report.yml and both repos' ci.yml read it and have no default. `unset:none` is a value written only while the
 # variable is not set at all: ARTICLE_WATCH_FEED_URL is none (the optional
 # article watch is off) until the adopter sets a feed URL, which is never
 # overwritten, so verify.sh checks only that it is set.
@@ -543,6 +544,7 @@ REPO_VARIABLES=(
   "_agent-guidance|FLEET_WORKER_EVERY_HOURS|plan:fleet-worker-hours|variables"
   "_agent-guidance|LOOP_WORKER_EVERY_HOURS|plan:loop-worker-hours|variables"
   "_agent-guidance|EVALS_REPO|evals:state|variables"
+  "acsi-agentskills|EVALS_REPO|evals:state|variables"
   "_agent-guidance|ARTICLE_WATCH_FEED_URL|unset:none|variables"
 )
 

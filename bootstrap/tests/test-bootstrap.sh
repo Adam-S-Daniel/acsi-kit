@@ -104,7 +104,7 @@ for s in "${SCRIPTS[@]}"; do
   assert "$s --help prints its usage" bash -c '"$1" "$2" --help | grep -qF "$3"' _ bash "$B/$s" "$s ["
 done
 for p in lib/substitute.py lib/plan_sizing.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
-         tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/mdlinks.py tests/stubs/gh_stub.py; do
+         tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/check-evals-refs.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
 # The bash >= 4.4 guard: the version test, and that a too-old bash stops before anything runs.
@@ -397,7 +397,7 @@ assert_eq "no results branch without skills-evals" "$(jqs '[.repos[] | .branches
 # whole-setup check checks the base and says so, and the evals track fails.
 run bash "$B/verify.sh" --config "$CFG" --track base --only repos,labels; rc=$?
 assert_eq "verify --track base passes without skills-evals" "$rc" 0
-assert "the base track checks the five repos" grep -qE '^20 passed, 0 failed, 0 skipped$' "$OUT"
+assert "the base track checks the five repos" grep -qE '^25 passed, 0 failed, 0 skipped$' "$OUT"
 assert_not "the base track never names skills-evals" has "$OUT" skills-evals
 run bash "$B/verify.sh" --config "$CFG" --only repos,labels; rc=$?
 assert_eq "verify of the whole setup passes a base-only setup" "$rc" 0
@@ -425,12 +425,12 @@ assert "the refusal says to create skills-evals first" has "$ERR" "the evals tra
 n=$(log_lines "$GH_LOG")
 run bash "$B/create-repos.sh" --config "$CFG" skills-evals; rc=$?
 assert_eq "create-repos skills-evals exits 0" "$rc" 0
-assert_eq "it makes the repo, its README, two labels and the branch's tree, commit and ref" "$(since "$n")" 7
+assert_eq "it makes the repo, its README, three labels and the branch's tree, commit and ref" "$(since "$n")" 8
 assert_eq "now there are six repos" "$(jqs '[.repos | keys[]] | sort | join(" ")')" \
   "acme-example/_agent-guidance acme-example/acsi-agentskills acme-example/acsi-agentskills-private acme-example/repo-settings acme-example/skills-evals acme-example/wsl-automation"
 run bash "$B/verify.sh" --config "$CFG" --track evals --only repos,labels,branches; rc=$?
 assert_eq "verify --track evals passes once it exists" "$rc" 0
-assert "the evals track checks skills-evals alone" grep -qE '^5 passed, 0 failed, 0 skipped$' "$OUT"
+assert "the evals track checks skills-evals alone" grep -qE '^6 passed, 0 failed, 0 skipped$' "$OUT"
 for r in _agent-guidance acsi-agentskills skills-evals wsl-automation; do
   assert_eq "free: $r is public" "$(jqs ".repos[\"$O/$r\"].visibility")" public
 done
@@ -445,7 +445,7 @@ assert_eq "persistent/eval-results exists on skills-evals only" "$(jqs '[.repos 
 assert_eq "the results branch is an orphan commit" "$(jqs '.repos["acme-example/skills-evals"] | .commits[.branches["persistent/eval-results"]].parents | length')" 0
 assert_eq "the results branch holds a README and nothing else" "$(jqs '.repos["acme-example/skills-evals"] | .trees[.commits[.branches["persistent/eval-results"]].tree] | map(.path) | join(",")')" README.md
 assert "the results README says what the branch holds" jq -e '.repos["acme-example/skills-evals"] | .trees[.commits[.branches["persistent/eval-results"]].tree][0].content | contains("never merges into main")' "$GH_STUB_STATE"
-assert_eq "labels agent-ready and on-hold on all six" "$(jqs '[.repos[] | select([.labels[].name] | index("agent-ready") and index("on-hold"))] | length')" 6
+assert_eq "labels agent-ready, on-hold and ci on all six" "$(jqs '[.repos[] | select([.labels[].name] | index("agent-ready") and index("on-hold") and index("ci"))] | length')" 6
 assert_eq "it leaves merge and Actions settings to fleet.yml" "$(jqs '[.repos[] | select(.allow_squash_merge and (.actions.sha_pinning_required | not))] | length')" 6
 n=$(log_lines "$GH_LOG")
 run bash "$B/create-repos.sh" --config "$CFG"; rc=$?
@@ -1004,6 +1004,10 @@ assert_eq "regenerate run-health-sha exits 0" "$RC" 0
 ag=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
 for r in repo-settings skills-evals acsi-agentskills wsl-automation; do
   assert "$r calls your _agent-guidance's reusable at its commit" bash -c 'git --git-dir="$1" show main:.github/workflows/scheduled-run-health.yml | grep -qF "scheduled-run-health-reusable.yml@$2"' _ "$T/remotes/$O/$r.git" "$ag"
+  # The schedule arrives with the pin (the starter has none at the placeholder).
+  git --git-dir="$T/remotes/$O/$r.git" show main:.github/workflows/scheduled-run-health.yml > "$T/rh.yml"
+  assert "$r's caller runs daily once pinned" python3 -I -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); on = d.get("on", d.get(True)); sys.exit(0 if [c["cron"] for c in on["schedule"]] == ["47 8 * * *"] and "workflow_dispatch" in on else 1)' "$T/rh.yml"
+  assert_not "$r's caller keeps no schedule marker" grep -q "schedule-starts-with-the-pin" "$T/rh.yml"
 done
 regen_and_merge hook-pin
 assert_eq "regenerate hook-pin exits 0" "$RC" 0
@@ -1337,7 +1341,14 @@ assert "it says the evals track was left out" has "$OUT" "SKIP: acme-example/ski
 # The shipped workflows' "off" branches, run from their parsed YAML.
 run python3 -I "$B/tests/check-workflow-gates.py"; rc=$?
 assert_eq "check-workflow-gates passes on the kit" "$rc" 0
-assert "it ran its 28 assertions" grep -qE '^28 assertions passed, 0 failed$' "$OUT"
+assert "it ran its 64 assertions" grep -qE '^64 assertions passed, 0 failed$' "$OUT"
+# No base starter workflow reads skills-evals unless EVALS_REPO gates it
+# (parsed YAML); its self-test proves the scan can fail.
+run python3 -I "$B/tests/check-evals-refs.py"; rc=$?
+assert_eq "check-evals-refs passes on the kit" "$rc" 0
+assert "it ran its 8 assertions" grep -qE '^8 assertions passed, 0 failed$' "$OUT"
+run python3 -I "$B/tests/check-evals-refs.py" --self-test; rc=$?
+assert_eq "check-evals-refs finds an ungated checkout and clone" "$rc" 0
 run bash "$B/regenerate.sh" --config "$CFGB" --check run-health-sha; rc=$?
 assert_eq "regenerate --check run-health-sha passes without skills-evals" "$rc" 0
 assert "it says skills-evals is left out" has "$OUT" "skip: acme-example/skills-evals does not exist yet"

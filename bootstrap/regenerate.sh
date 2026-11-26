@@ -26,7 +26,9 @@
 #   run-health-sha the forty-zero placeholder in scheduled-run-health.yml
 #                  (repo-settings, skills-evals, acsi-agentskills, wsl-automation) becomes your
 #                  _agent-guidance default branch's commit: a cross-repo
-#                  reusable workflow takes a full sha.
+#                  reusable workflow takes a full sha. In the base repos' copies
+#                  it also turns the commented schedule line into the daily
+#                  schedule, which the starter leaves off until the pin.
 #   codex-pin      wsl-automation scripts/sync-codex-cloud-environments.sh:
 #                  bootstrap_revision and bootstrap_sha256 become your
 #                  acsi-agentskills HEAD and its hook's digest, then the script's
@@ -216,10 +218,21 @@ task_hook_pin() {
 
 # ------------------------------------------------------------ run-health-sha
 RH=.github/workflows/scheduled-run-health.yml
+# The starter ships the caller with no schedule (a schedule at the
+# placeholder sha fails every day): the marker line becomes it with the pin.
+RH_MARK="  # schedule-starts-with-the-pin: - cron: '47 8 * * *'"
 edit_run_health() {
   # -i.bak, then removing the backup: the one in-place form GNU and BSD (macOS) sed share.
   sed -i.bak "s|scheduled-run-health-reusable.yml@$ZERO40|scheduled-run-health-reusable.yml@$AG_SHA|" "$1/$RH"
   rm -f "$1/$RH.bak"
+  python3 -I - "$1/$RH" "$RH_MARK" <<'PY'
+import sys
+path, mark = sys.argv[1], sys.argv[2]
+text = open(path, encoding="utf-8").read()
+if mark + "\n" in text:
+    text = text.replace(mark + "\n", "  schedule:\n    - cron: '47 8 * * *'\n", 1)
+    open(path, "w", encoding="utf-8").write(text)
+PY
 }
 task_run_health_sha() {
   local r pinned
@@ -229,12 +242,13 @@ task_run_health_sha() {
     in_task "$r" || continue
     need "$r" "$RH"
     pinned=$(grep -oE 'scheduled-run-health-reusable\.yml@[0-9a-f]{40}' "$CLONE/$RH" | head -n1 | cut -d@ -f2 || true)
-    if [ -n "$pinned" ] && [ "$pinned" != "$ZERO40" ] && git -C "$ag" cat-file -e "$pinned^{commit}" 2>/dev/null; then
+    if [ -n "$pinned" ] && [ "$pinned" != "$ZERO40" ] && git -C "$ag" cat-file -e "$pinned^{commit}" 2>/dev/null &&
+      ! grep -qxF -- "$RH_MARK" "$CLONE/$RH"; then
       current "$O/$r $RH calls your _agent-guidance at $pinned"; continue
     fi
-    if [ "$CHECK" = 1 ]; then notdone "$O/$r $RH still calls the reusable at ${pinned:-no} sha"; continue; fi
+    if [ "$CHECK" = 1 ]; then notdone "$O/$r $RH still calls the reusable at ${pinned:-no} sha, or has no schedule yet"; continue; fi
     propose "$r" "Call your _agent-guidance's scheduled-run-health reusable" \
-      "Replaces the export's forty-zero placeholder with $AG_SHA, your _agent-guidance default branch (a cross-repo reusable workflow takes a full sha; the kit's export/REGENERATE.md)." \
+      "Replaces the export's forty-zero placeholder with $AG_SHA, your _agent-guidance default branch (a cross-repo reusable workflow takes a full sha; the kit's export/REGENERATE.md), and starts the daily schedule, which waits for the pin." \
       edit_run_health "$RH"
   done
 }

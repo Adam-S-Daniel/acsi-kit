@@ -285,6 +285,77 @@ edits:
 # blocks, parameters, `It` blocks and README/AGENTS.md sections); each patch
 # asserts every anchor it edits occurs exactly once, so a source refresh that
 # moves one fails the export instead of silently skipping it.
+  # ---- Base-only track, review fix (DECISIONS "Base-only track runs green"):
+  # no schedule until regenerate.sh run-health-sha pins the reusable.
+  - path: .github/workflows/scheduled-run-health.yml
+    stage: output
+    old: |
+      on:
+        schedule:
+          # Off-peak offset minute (house precedent). GitHub cron lag (measured
+          # 4-5h on daily crons) is absorbed by the reusable's 48h scan window.
+          - cron: '47 8 * * *'
+        workflow_dispatch:
+    new: |
+      on:
+        # The schedule starts with the pin: bootstrap/regenerate.sh run-health-sha
+        # replaces the forty-zero sha below and turns the next line into the daily
+        # schedule (47 8 * * *, an off-peak minute; GitHub's cron lag is absorbed
+        # by the reusable's 48h scan window). A schedule at the placeholder would
+        # fail at "Set up job" every day until then.
+        # schedule-starts-with-the-pin: - cron: '47 8 * * *'
+        workflow_dispatch:
+    why: 'kit departure: base-only track. The caller ships at a placeholder sha that only regenerate.sh (step 16) replaces, so its daily run failed from the starter merge until then; the schedule now arrives with the pin, in the same pull request.'
+
+  # ---- Base-only track, review fix (DECISIONS "Base-only track runs green"):
+  # the two jobs that clone skills-evals, off with SKILLS_EVALS_URL=none.
+  - path: config/settings.env.example
+    stage: output
+    old: |
+      # the 'Session Miner' task (scripts/run-session-miner.sh): the skills-evals
+      # repository they shallow-clone.
+      SKILLS_EVALS_URL=https://github.com/example-adopter/skills-evals.git
+    new: |
+      # the 'Session Miner' task (scripts/run-session-miner.sh): the skills-evals
+      # repository they shallow-clone, or none while you have no skills-evals
+      # (the kit's base track): both tasks then log that they skipped and exit 0.
+      # When you add skills-evals (the kit's evals track), set your repository:
+      # SKILLS_EVALS_URL=https://github.com/example-adopter/skills-evals.git
+      SKILLS_EVALS_URL=none
+    why: 'kit departure: base-only track. Both jobs clone skills-evals for their own code, so on a machine of a setup without it every daily run failed; none turns them off, and the evals track sets the URL.'
+  - path: scripts/publish-usage-census.sh
+    stage: output
+    old: |
+      url=$SKILLS_EVALS_URL
+    new: |
+      # SKILLS_EVALS_URL=none: no skills-evals (the kit's base track), so the
+      # census has nowhere to publish; skip, logged, and exit 0.
+      if [[ $SKILLS_EVALS_URL == none ]]; then
+          out='usage census: skipped: SKILLS_EVALS_URL is none, so there is no skills-evals to publish to'
+          printf '%s exit=0 %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$out" >>"$log"
+          printf '%s\n' "$out"
+          exit 0
+      fi
+      url=$SKILLS_EVALS_URL
+    why: 'kit departure: base-only track. An explicit none turns the census off before the clone, like the session miner.'
+  - path: tests/publish-usage-census.test.sh
+    stage: output
+    old: |
+      printf 'PASS: %s assertions\n' "$passed"
+    new: |
+      # --- SKILLS_EVALS_URL=none turns the census off (the kit's base track) ------
+      rc=0
+      before=$(wc -l <"$log_file" | tr -d ' ')
+      out=$(SKILLS_EVALS_URL=none bash "$script" 2>&1) || rc=$?
+      assert_eq "$rc" 0 'SKILLS_EVALS_URL=none exits 0'
+      assert_eq "$out" 'usage census: skipped: SKILLS_EVALS_URL is none, so there is no skills-evals to publish to' 'SKILLS_EVALS_URL=none says it skipped'
+      assert_eq "$(wc -l <"$log_file" | tr -d ' ')" "$((before + 1))" 'SKILLS_EVALS_URL=none logs one line'
+      assert_match "$(tail -n 1 "$log_file")" ' exit=0 usage census: skipped: SKILLS_EVALS_URL is none' 'the skip is logged with exit 0'
+      assert_match "$(grep '^SKILLS_EVALS_URL=' "$repository_root/config/settings.env.example")" '^SKILLS_EVALS_URL=none$' 'the settings example starts with the census and miner off'
+
+      printf 'PASS: %s assertions\n' "$passed"
+    why: 'kit departure: base-only track. Covers the none branch and the example''s value.'
+
 patches:
   - file: tasks_installer.py
     why: >-

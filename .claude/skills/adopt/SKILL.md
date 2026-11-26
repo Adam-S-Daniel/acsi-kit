@@ -116,6 +116,11 @@ is in `docs/quick-start.md`.
   (`/adopt-evals`, step 41) creates it. `create-environments.sh` has set
   `EVALS_REPO` to `none`, so the workflow skips the Loop worker's fire and
   stays green.
+- **Expected red until a later step**: only the Fleet worker leg of
+  `fleet-worker-fire.yml` on its scheduled slot, until step 27 sets its URL
+  and bearer (the one list is in `docs/settings-and-apps.md`, "Merging the
+  starter pull requests"). Tell the user so when they ask about a failure
+  email; any other failure is real.
 - **Step 30** (memory curation): for the machine task, ask which system
   holds that machine's Claude Code sessions. On macOS, or on Windows with
   Claude Code running natively, offer a Claude desktop app scheduled task

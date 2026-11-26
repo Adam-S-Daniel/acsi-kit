@@ -11,9 +11,11 @@ runs). [Free or paid](before-you-start.md#free-or-paid-github-plan) decides
 which are private.
 
 Each repo gets a first commit, a generated README that `copy-starter.sh`
-later replaces. The script also creates the two labels no settings file
-declares: `agent-ready` (the fleet worker's queue) and `on-hold` (paused by
-you, and only you add or remove it).
+later replaces. The script also creates the three labels no settings file
+declares: `agent-ready` (the fleet worker's queue), `on-hold` (paused by
+you, and only you add or remove it) and `ci` (the label the scheduled
+workflows file their issues under; creating an issue with a label the repo
+lacks fails, so a first nudge would otherwise turn its run red).
 
 In `skills-evals`, it creates the branch `persistent/eval-results` as an
 orphan commit holding only a README. The weekly plan, the ingest, the
@@ -232,22 +234,36 @@ workflow isn't on the base branch yet:
   repo has none, so it never reports on the first pull request;
 - anything that verifies `actions.lock` against GitHub, the hook pin or the
   scheduled-run-health pin: steps 15 to 18;
-- the daily `scheduled-run-health.yml` of `repo-settings`, `acsi-agentskills`,
-  `wsl-automation` and `skills-evals`: each calls `_agent-guidance`'s reusable
-  workflow at a sha that ships as forty zeros, so the run fails at startup
-  until step 16 pins it;
-- `repo-settings`' `plan` job, which runs when you merge its pull request (step
-  4): it mints a token from the settings-read App's client id and key, which
-  step 6 creates, so it fails until then.
+- `skills-evals`' daily `scheduled-run-health.yml` (evals track): it calls
+  `_agent-guidance`'s reusable workflow at a sha that ships as forty zeros,
+  so the run fails at startup until step 38 pins it. The base repos' copies
+  ship with no schedule; step 16 pins the sha and adds the daily schedule in
+  the same pull request, so they never run at the placeholder.
 
-Nothing is protected before step 20, so these don't block the merge. Any
-other failure is real, so read it before you merge.
+Nothing is protected before step 20, so these don't block the merge.
+
+Two things wait for a later step without failing: `repo-settings`' `plan` job
+prints a "not set up yet" notice and plans nothing until `create-apps.sh`
+sets `REPO_SETTINGS_READ_APP_CLIENT_ID` (step 6), and the scheduled runs that
+read `skills-evals` print a notice while `EVALS_REPO` is `none`
+([routines](routines.md#fleet-worker)).
+
+One scheduled run is expected to fail until a later step, and nothing else
+is:
+
+- `_agent-guidance`'s `fleet-worker-fire.yml`, Fleet worker leg, on its slot
+  (weekly on Pro, Tuesday 00:20 UTC): it fails naming `FLEET_WORKER_FIRE_URL`
+  and `FLEET_WORKER_FIRE_BEARER` until step 27 creates the routine and sets
+  them. The routine needs the cloud environment of step 23, which needs the
+  repos of steps 10 and 12, so the step cannot move earlier.
+
+Any other failure is real, so read it before you merge.
 
 On `PLAN=free`, `create-apps.sh` skips the `settings-admin` App, so
 `REPO_SETTINGS_APP_CLIENT_ID` is never set in `repo-settings`. Both apply
 jobs in `repo-settings.yml` (`apply-auto` and `repo-settings`) check that
-variable and are skipped. The weekly `plan` job doesn't, so it still runs
-with the read App and reports drift. You apply from your machine with
+variable and are skipped. The weekly `plan` job doesn't need it: it runs with
+the read App and reports drift. You apply from your machine with
 `bash bootstrap/apply-settings.sh`.
 
 Until step 20, `repo-settings.yml`'s apply job waits for your approval on

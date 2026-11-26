@@ -33,6 +33,113 @@ edits:
     new: "    # The audit script is copied into _agent-guidance too (the adoption\n    # kit's DECISIONS C4).\n"
     why: C4. The kit has no platform repo and no release pin; the script lives in _agent-guidance.
 
+  # ---- Base-only track, review fix (DECISIONS "Base-only track runs green"):
+  # no schedule until regenerate.sh run-health-sha pins the reusable.
+  - path: .github/workflows/scheduled-run-health.yml
+    stage: output
+    old: |
+      on:
+        schedule:
+          # Off-peak offset minute (house precedent). GitHub cron lag (measured
+          # 4-5h on daily crons) is absorbed by the reusable's 48h scan window.
+          - cron: '47 8 * * *'
+        workflow_dispatch:
+    new: |
+      on:
+        # The schedule starts with the pin: bootstrap/regenerate.sh run-health-sha
+        # replaces the forty-zero sha below and turns the next line into the daily
+        # schedule (47 8 * * *, an off-peak minute; GitHub's cron lag is absorbed
+        # by the reusable's 48h scan window). A schedule at the placeholder would
+        # fail at "Set up job" every day until then.
+        # schedule-starts-with-the-pin: - cron: '47 8 * * *'
+        workflow_dispatch:
+    why: 'kit departure: base-only track. The caller ships at a placeholder sha that only regenerate.sh (step 16) replaces, so its daily run failed from the starter merge until then; the schedule now arrives with the pin, in the same pull request.'
+
+  # ---- Base-only track, review fix (DECISIONS "Base-only track runs green"):
+  # the plan job before the settings-read App exists.
+  - path: .github/workflows/repo-settings.yml
+    stage: output
+    old: |2
+            - name: Mint read-only GitHub App token for example-adopter
+              id: token_example_adopter
+              uses: actions/create-github-app-token@v3.3.0
+    new: |2
+            # Not set up yet: until create-apps.sh has made the settings-read App
+            # and set its client id, there is nothing to plan with. A notice says
+            # so and the plan reports no drift, so no apply runs; once the
+            # variable is set, a missing key or installation fails the mint.
+            - name: Is the read App set up yet?
+              id: read_app
+              env:
+                READ_APP_CLIENT_ID: ${{ vars.REPO_SETTINGS_READ_APP_CLIENT_ID }}
+              run: |
+                if [[ -n "$READ_APP_CLIENT_ID" ]]; then
+                  echo "ready=true" >> "$GITHUB_OUTPUT"
+                else
+                  echo "::notice::not set up yet: variable REPO_SETTINGS_READ_APP_CLIENT_ID is not set, so nothing was planned. bootstrap/create-apps.sh sets it when it creates the settings-read App."
+                  echo "ready=false" >> "$GITHUB_OUTPUT"
+                fi
+
+            - name: Mint read-only GitHub App token for example-adopter
+              id: token_example_adopter
+              if: steps.read_app.outputs.ready == 'true'
+              uses: actions/create-github-app-token@v3.3.0
+    why: 'kit departure: base-only track. The plan minted from the settings-read App with no gate, so it was red from the starter merge (step 4) until create-apps.sh set the App up, and every Monday in between. Unlike the source, an unset client id now reads as not set up (a notice, no drift), not as a failure; a set one still fails on a bad key.'
+  - path: .github/workflows/repo-settings.yml
+    stage: output
+    old: |2
+            - name: Mint read-only GitHub App token for example-adopter-two
+              id: token_example_adopter_two
+              uses: actions/create-github-app-token@v3.3.0
+    new: |2
+            - name: Mint read-only GitHub App token for example-adopter-two
+              id: token_example_adopter_two
+              if: steps.read_app.outputs.ready == 'true'
+              uses: actions/create-github-app-token@v3.3.0
+    why: 'kit departure: base-only track. Gated like the first owner''s mint.'
+  - path: .github/workflows/repo-settings.yml
+    stage: output
+    old: |2
+            - name: Plan for example-adopter
+              id: plan_example_adopter
+    new: |2
+            - name: Plan for example-adopter
+              id: plan_example_adopter
+              if: steps.read_app.outputs.ready == 'true'
+    why: 'kit departure: base-only track. No token to plan with until the read App is set up.'
+  - path: .github/workflows/repo-settings.yml
+    stage: output
+    old: |2
+            - name: Plan for example-adopter-two
+              id: plan_example_adopter_two
+    new: |2
+            - name: Plan for example-adopter-two
+              id: plan_example_adopter_two
+              if: steps.read_app.outputs.ready == 'true'
+    why: 'kit departure: base-only track. No token to plan with until the read App is set up.'
+  - path: .github/workflows/repo-settings.yml
+    stage: output
+    old: |2
+            - name: Which repos does fleet.yml not declare?
+              id: coverage
+              continue-on-error: true
+    new: |2
+            - name: Which repos does fleet.yml not declare?
+              id: coverage
+              if: steps.read_app.outputs.ready == 'true'
+              continue-on-error: true
+    why: 'kit departure: base-only track. Only the read App''s token can enumerate.'
+  - path: .github/workflows/repo-settings.yml
+    stage: output
+    old: |2
+            - name: Nudge on repos fleet.yml does not declare
+              continue-on-error: true
+    new: |2
+            - name: Nudge on repos fleet.yml does not declare
+              if: steps.read_app.outputs.ready == 'true'
+              continue-on-error: true
+    why: 'kit departure: base-only track. Nothing was enumerated to nudge about.'
+
   - path: .gitignore
     old: "pytest-cache*\n"
     new: "pytest-cache*\n# The adoption kit's copy-starter.sh skips these when it copies the tree;\n# ignoring them here keeps them out of the adopter's first commits too.\nnode_modules/\n.DS_Store\n"

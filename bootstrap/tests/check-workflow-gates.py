@@ -44,8 +44,8 @@ def check(desc, ok):
         print(f"FAIL: {desc}")
 
 
-def load(name):
-    return yaml.safe_load((WF / name).read_text(encoding="utf-8"))
+def load(name, tree="agent-guidance"):
+    return yaml.safe_load((KIT / "starter" / tree / ".github" / "workflows" / name).read_text(encoding="utf-8"))
 
 
 def step_of(doc, job, prefix):
@@ -54,12 +54,12 @@ def step_of(doc, job, prefix):
     return steps[0]
 
 
-def run_step(step, env, event_name="schedule"):
+def run_step(step, env, event_name="schedule", fakes=("curl", "git", "gh", "python3")):
     """Run the step's script with env; return (rc, stdout, calls made to a fake tool, GITHUB_OUTPUT)."""
     with tempfile.TemporaryDirectory(prefix="gates-") as d:
         d = Path(d)
         log = d / "calls.log"
-        for tool in ("curl", "git", "gh", "python3"):
+        for tool in fakes:
             f = d / "bin" / tool
             f.parent.mkdir(exist_ok=True)
             f.write_text(f'#!/usr/bin/env bash\necho "{tool} $*" >> "$CALL_LOG"\ncat >/dev/null || true\n'
@@ -73,7 +73,8 @@ def run_step(step, env, event_name="schedule"):
                    "GITHUB_EVENT_NAME": event_name, "GITHUB_EVENT_PATH": str(event),
                    "GITHUB_OUTPUT": str(out), "GITHUB_REPOSITORY": "acme/_agent-guidance", "GITHUB_SHA": "0" * 40,
                    "RUNNER_TEMP": str(d), "HOME": str(d), **env}
-        p = subprocess.run(["bash", "-c", step["run"]], env=run_env, capture_output=True, text=True, timeout=60)
+        p = subprocess.run(["bash", "-c", step["run"]], env=run_env, capture_output=True, text=True, timeout=60,
+                           stdin=subprocess.DEVNULL)
         calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
         return p.returncode, p.stdout + p.stderr, calls, out.read_text(encoding="utf-8")
 
@@ -142,6 +143,99 @@ rc, out, calls, gh_out = run_step(gate, {"EVALS_REPO": "acme/skills-evals"})
 check("impact report, <owner>/skills-evals: publish=true", rc == 0 and gh_out.strip() == "publish=true")
 rc, out, calls, gh_out = run_step(gate, {"EVALS_REPO": "acme"})
 check("impact report, malformed: exits 1", rc == 1 and gh_out == "")
+
+# ---- the EVALS_REPO decision step two required checks share
+EVALS_NOTICE_NONE = "EVALS_REPO is none"
+
+
+def check_evals_decision(where, step):
+    check(f"{where}: decision env keys are EVALS_REPO only", set(step.get("env") or {}) == {"EVALS_REPO"})
+    check(f"{where}: EVALS_REPO comes from the repository variable", step["env"]["EVALS_REPO"] == "${{ vars.EVALS_REPO }}")
+    rc, out, calls, gh_out = run_step(step, {"EVALS_REPO": "none"}, event_name="pull_request")
+    check(f"{where}, none: exits 0, on=false, with a notice", rc == 0 and gh_out.strip() == "on=false" and EVALS_NOTICE_NONE in out)
+    rc, out, calls, gh_out = run_step(step, {"EVALS_REPO": ""}, event_name="pull_request")
+    check(f"{where}, unset: exits 1 naming EVALS_REPO and what to set",
+          rc == 1 and "variable EVALS_REPO" in out and "none" in out and gh_out == "")
+    rc, out, calls, gh_out = run_step(step, {"EVALS_REPO": "acme/skills-evals"}, event_name="pull_request")
+    check(f"{where}, <owner>/skills-evals: on=true", rc == 0 and gh_out.strip() == "on=true")
+    rc, out, calls, gh_out = run_step(step, {"EVALS_REPO": "acme"}, event_name="pull_request")
+    check(f"{where}, malformed: exits 1", rc == 1 and gh_out == "")
+
+
+# _agent-guidance ci.yml, job checks (it feeds the required `test`).
+ci_doc = load("ci.yml")
+csteps = ci_doc["jobs"]["checks"]["steps"]
+dec = step_of(ci_doc, "checks", "Decide whether there is an eval repository")
+check_evals_decision("_agent-guidance ci.yml checks", dec)
+co = step_of(ci_doc, "checks", "Check out skills-evals")
+check("_agent-guidance ci.yml: the skills-evals checkout waits on the decision",
+      co.get("if") == "steps.evals.outputs.on == 'true'" and dec.get("id") == "evals")
+check("_agent-guidance ci.yml: the checkout reads the repository EVALS_REPO names",
+      co["with"]["repository"] == "${{ vars.EVALS_REPO }}")
+check("_agent-guidance ci.yml: the decision comes before the checkout", csteps.index(dec) < csteps.index(co))
+cov = step_of(ci_doc, "checks", "Section manifest covers")
+COV_ENV = {"EVALS_ON": ""}
+check("_agent-guidance ci.yml coverage: env keys are the ones this test supplies", set(cov["env"]) == set(COV_ENV))
+WITH_NODE = ("curl", "git", "gh", "python3", "node", "jq")
+rc, out, calls, _ = run_step(cov, {"EVALS_ON": "false"}, event_name="pull_request", fakes=WITH_NODE)
+check("_agent-guidance ci.yml coverage, evals off: runs the check without --skills-evals, with a notice",
+      rc == 0 and "::notice::not checked: that each covered row's fixture exists" in out
+      and calls == ["node scripts/check-guidance-coverage.js --check-bytes"])
+rc, out, calls, _ = run_step(cov, {"EVALS_ON": "true"}, event_name="pull_request", fakes=WITH_NODE)
+check("_agent-guidance ci.yml coverage, evals on: checks the fixtures in the checkout",
+      rc == 0 and calls == ["node scripts/check-guidance-coverage.js --skills-evals skills-evals --check-bytes"])
+ep = step_of(ci_doc, "checks", "Eval-protected sections")
+check("_agent-guidance ci.yml eval protection: off means --no-evidence and no explorer fetch",
+      "--no-evidence" in ep["run"] and set(ep["env"]) == {"GH_TOKEN", "EVALS_ON", "EVALS_REPO"})
+rc, out, calls, _ = run_step(ep, {"GH_TOKEN": "placeholder", "EVALS_ON": "false", "EVALS_REPO": "none"},
+                             event_name="pull_request", fakes=WITH_NODE)
+check("_agent-guidance ci.yml eval protection, evals off: exits 0 with a notice, runs --no-evidence, fetches nothing",
+      rc == 0 and "::notice::not checked: eval protection" in out and not any(c.startswith("curl ") for c in calls)
+      and any(c.startswith("node scripts/eval-protected.js ci") and c.endswith("--no-evidence") for c in calls))
+rc, out, calls, _ = run_step(ep, {"GH_TOKEN": "placeholder", "EVALS_ON": "true", "EVALS_REPO": "acme/skills-evals"},
+                             event_name="pull_request", fakes=WITH_NODE)
+check("_agent-guidance ci.yml eval protection, evals on: reads the explorer of the repository EVALS_REPO names",
+      rc == 0 and any("raw.githubusercontent.com/acme/skills-evals/persistent/eval-results/explorer/latest.json" in c
+                      for c in calls if c.startswith("curl ")))
+
+# acsi-agentskills ci.yml, job pytest (it feeds merge-gate).
+as_doc = load("ci.yml", "agent-skills")
+asteps = as_doc["jobs"]["pytest"]["steps"]
+adec = step_of(as_doc, "pytest", "Decide whether there is an eval repository")
+check_evals_decision("acsi-agentskills ci.yml pytest", adec)
+for prefix in ("Check out the eval-protection gate", "Eval-protected skills"):
+    st = step_of(as_doc, "pytest", prefix)
+    check(f"acsi-agentskills ci.yml: {prefix!r} waits on the decision",
+          st.get("if") == "github.event_name == 'pull_request' && steps.evals.outputs.on == 'true'"
+          and asteps.index(adec) < asteps.index(st))
+
+# The scheduled-run-health callers: no schedule while the reusable sits at
+# the forty-zero placeholder (regenerate.sh run-health-sha adds both).
+for tree in ("agent-skills", "repo-settings", "wsl-automation"):
+    doc = load("scheduled-run-health.yml", tree)
+    on = doc.get("on", doc.get(True))
+    uses = doc["jobs"]["audit"]["uses"]
+    check(f"{tree} scheduled-run-health.yml: no schedule while it calls the placeholder sha",
+          not ("@" + "0" * 40 in uses and "schedule" in on))
+
+# repo-settings.yml's plan job before the settings-read App exists.
+rs_doc = load("repo-settings.yml", "repo-settings")
+plan = rs_doc["jobs"]["plan"]["steps"]
+ra = step_of(rs_doc, "plan", "Is the read App set up yet")
+check("repo-settings plan: the read App check comes before every mint", all(
+    plan.index(ra) < plan.index(s) for s in plan if "create-github-app-token" in str(s.get("uses", ""))))
+for s in plan:
+    if "create-github-app-token" in str(s.get("uses", "")) or str(s.get("id", "")).startswith("plan_") \
+            or s.get("id") == "coverage" or "gh issue" in str(s.get("run", "")):
+        check(f"repo-settings plan: {s.get('name')!r} waits on the read App check",
+              s.get("if") == "steps.read_app.outputs.ready == 'true'")
+check("repo-settings plan: read App check env is the client id variable",
+      ra.get("env") == {"READ_APP_CLIENT_ID": "${{ vars.REPO_SETTINGS_READ_APP_CLIENT_ID }}"})
+rc, out, calls, gh_out = run_step(ra, {"READ_APP_CLIENT_ID": ""})
+check("repo-settings plan, read App unset: exits 0, ready=false, a not-set-up notice naming the variable",
+      rc == 0 and gh_out.strip() == "ready=false" and "REPO_SETTINGS_READ_APP_CLIENT_ID" in out and "not set up yet" in out)
+rc, out, calls, gh_out = run_step(ra, {"READ_APP_CLIENT_ID": "Iv1.placeholder"})
+check("repo-settings plan, read App set: ready=true", rc == 0 and gh_out.strip() == "ready=true")
 
 print(f"{passed} assertions passed, {failed} failed")
 sys.exit(1 if failed else 0)

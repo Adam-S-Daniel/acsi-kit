@@ -316,6 +316,88 @@ edits:
     new: "# Scheduled, not a pull-request check: the cited repos (the fleet's other\n# repos) change"
     why: C11. The kit's freshness config names no platform repo or site registry.
 
+  # ---- Base-only track, review fix (DECISIONS "Base-only track runs green"):
+  # the eval-protection gate read skills-evals' explorer on every pull request.
+  - path: .github/workflows/ci.yml
+    stage: output
+    old: |2
+            - name: Check out the eval-protection gate
+              if: github.event_name == 'pull_request'
+    new: |2
+            #
+            # EVALS_REPO (a repository variable, no default) says whether there is
+            # a skills-evals with eval results: `none` skips the gate with a notice
+            # (no eval loop, so nothing is protected); unset fails here naming it.
+            - name: Decide whether there is an eval repository to read
+              id: evals
+              if: github.event_name == 'pull_request'
+              env:
+                EVALS_REPO: ${{ vars.EVALS_REPO }}
+              run: |
+                set -euo pipefail
+                case "${EVALS_REPO:-}" in
+                  none)
+                    echo "::notice::not checked: eval protection of skills (EVALS_REPO is none, so there are no eval results to protect)"
+                    echo "on=false" >> "$GITHUB_OUTPUT" ;;
+                  "")
+                    echo "::error::not configured: variable EVALS_REPO. It has no default; set it in this repository's Actions settings to none (no eval loop) or to <owner>/skills-evals. bootstrap/create-environments.sh sets it."
+                    exit 1 ;;
+                  *)
+                    if [[ ! "$EVALS_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+                      echo "::error::variable EVALS_REPO must be none or <owner>/skills-evals"
+                      exit 1
+                    fi
+                    echo "on=true" >> "$GITHUB_OUTPUT" ;;
+                esac
+            - name: Check out the eval-protection gate
+              if: github.event_name == 'pull_request' && steps.evals.outputs.on == 'true'
+    why: 'kit departure: base-only track; source follow-up proposed. Without skills-evals the explorer can never be fetched, so every pull request that touched a skill failed closed; EVALS_REPO none skips the gate with a notice, and unset fails naming it.'
+  - path: .github/workflows/ci.yml
+    stage: output
+    old: |2
+            - name: Eval-protected skills take correctness fixes only
+              if: github.event_name == 'pull_request'
+              env:
+                GH_TOKEN: ${{ github.token }}
+    new: |2
+            - name: Eval-protected skills take correctness fixes only
+              if: github.event_name == 'pull_request' && steps.evals.outputs.on == 'true'
+              env:
+                GH_TOKEN: ${{ github.token }}
+                EVALS_REPO: ${{ vars.EVALS_REPO }}
+    why: 'kit departure: base-only track; source follow-up proposed. Gated on the decision above; the explorer is read from the repository EVALS_REPO names.'
+  - path: .github/workflows/ci.yml
+    stage: output
+    old: |2
+                  https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/explorer/latest.json \
+                  || rm -f "$d/explorer.json"
+    new: |2
+                  "https://raw.githubusercontent.com/$EVALS_REPO/persistent/eval-results/explorer/latest.json" \
+                  || rm -f "$d/explorer.json"
+    why: 'kit departure: base-only track; source follow-up proposed. The explorer comes from the repository EVALS_REPO names, read through env.'
+
+  # ---- Base-only track, review fix (DECISIONS "Base-only track runs green"):
+  # no schedule until regenerate.sh run-health-sha pins the reusable.
+  - path: .github/workflows/scheduled-run-health.yml
+    stage: output
+    old: |
+      on:
+        schedule:
+          # Off-peak offset minute (house precedent). GitHub cron lag (measured
+          # 4-5h on daily crons) is absorbed by the reusable's 48h scan window.
+          - cron: '47 8 * * *'
+        workflow_dispatch:
+    new: |
+      on:
+        # The schedule starts with the pin: bootstrap/regenerate.sh run-health-sha
+        # replaces the forty-zero sha below and turns the next line into the daily
+        # schedule (47 8 * * *, an off-peak minute; GitHub's cron lag is absorbed
+        # by the reusable's 48h scan window). A schedule at the placeholder would
+        # fail at "Set up job" every day until then.
+        # schedule-starts-with-the-pin: - cron: '47 8 * * *'
+        workflow_dispatch:
+    why: 'kit departure: base-only track. The caller ships at a placeholder sha that only regenerate.sh (step 16) replaces, so its daily run failed from the starter merge until then; the schedule now arrives with the pin, in the same pull request.'
+
 # DECISIONS X9 and Content tiers: the plugins ship with the four core skills
 # (see each patch's docstring).
 patches:
