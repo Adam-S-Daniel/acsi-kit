@@ -133,8 +133,15 @@ test("pathsFromJson reads strings and GitHub file objects, renames included", ()
   assert.throws(() => mod.pathsFromJson([1]));
 });
 
+// The CLI tests run against the New York bounds, not the shipped file's zone.
+const NY_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bmw-ny-"));
+const NY_FILE = path.join(NY_DIR, "window.yml");
+fs.writeFileSync(NY_FILE, 'timezone: America/New_York\nweekday: 1\nstart: "12:00"\nend: "14:00"\n');
+process.on("exit", () => fs.rmSync(NY_DIR, { recursive: true, force: true }));
+
 function run(args) {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+  const argv = args.includes("--window") ? args : [...args, "--window", NY_FILE];
+  const r = spawnSync(process.execPath, [SCRIPT, ...argv], { encoding: "utf8" });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 

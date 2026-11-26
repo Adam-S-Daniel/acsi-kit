@@ -2,6 +2,8 @@
 # Format: <page>: <span>  # reason. An entry no page misses any more fails
 # test_docs_paths.py, so delete it when the page changes.
 docs/before-you-start.md: app-manifests/  # folder create-apps.sh writes in the adopter's checkout at run time
+docs/before-you-start.md: Europe/Berlin  # an IANA time zone name, not a path
+docs/before-you-start.md: zoneinfo/  # the folder name in the path `readlink /etc/localtime` prints on macOS
 docs/evals-and-loop.md: eval-results/  # lane directory on the claude/eval-* branch, not in the kit
 docs/evals-and-loop.md: eval-improve/  # lane directory on the claude/eval-improve-* branch
 docs/evals-and-loop.md: eval-guidance-improve/  # lane directory on the claude/eval-guidance-improve-* branch
