@@ -49,11 +49,19 @@ re-pins on the next run.
 **Fix routine.** A held source also fires a Claude cloud routine that
 follows the change and pushes a `resync-fix/` branch
 ([`export/FIX-ROUTINE.md`](export/FIX-ROUTINE.md) is its guide). It fires at
-most once per UTC day, and never while such a pull request is open. The
+most once per UTC day, and not while such a pull request is open and still
+follows the held sources' heads. If a held source's head has moved past the
+pins of the open one (it follows old heads), the re-sync closes it with a
+comment and fires the routine again, still once per UTC day; closing needs the
+re-sync App, and without one nothing fires. The
 routine can push, but it can't open pull requests or comment, so
 `.github/workflows/resync-fix-pr.yml` opens the pull request from the pushed
 commit's message, labels it, and links it on the issue. Review and merge it
 like any other.
+
+The owner's fleet worker may also merge re-sync pull requests after its own
+review, under the rule in the source spec's kit-only block, which the export
+strips (`export/DECISIONS.md`, "Kit-only blocks in the source").
 
 Two workflows keep the App key off the branch. `resync-fix-pushed.yml` runs
 on the push, holds no secrets, and only announces it. `resync-fix-pr.yml`

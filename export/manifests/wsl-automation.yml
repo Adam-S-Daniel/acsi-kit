@@ -127,7 +127,7 @@ edits:
       each path copy-starter.sh skips; none was present here.
   - path: .github/workflows/ci.yml
     old: " scripts/run-memory-curation.sh tests/run-memory-curation.test.sh scripts/wsl-restic-backup.sh tests/wsl-restic-backup.test.sh scripts/publish-waiting-feed.sh tests/publish-waiting-feed.test.sh scripts/publish-task-health.sh tests/publish-task-health.test.sh\n"
-    new: " scripts/run-memory-curation.sh tests/run-memory-curation.test.sh scripts/publish-waiting-feed.sh tests/publish-waiting-feed.test.sh scripts/unix/run-task.sh scripts/unix/install-schedule.sh tests/unix-schedule.test.sh\n"
+    new: " scripts/run-memory-curation.sh tests/run-memory-curation.test.sh scripts/publish-waiting-feed.sh tests/publish-waiting-feed.test.sh scripts/unix/run-task.sh scripts/unix/tool-path.sh scripts/unix/install-schedule.sh tests/unix-schedule.test.sh\n"
     why: >-
       X10 drops the restic script and its test from ShellCheck, and the task
       health publisher with them (DECISIONS "Re-pin (2026-11-03)"); the kit's

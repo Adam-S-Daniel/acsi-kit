@@ -768,6 +768,20 @@ macOS needs `brew install flock coreutils` (the runner refuses to start a job
 without `flock` and `timeout`), and the waiting feed needs GNU `date`, which
 coreutils' `gnubin` directory provides; the runner puts it first on `PATH`.
 
+The installer checks all of that before it writes anything: `flock`, `timeout`
+(or `gtimeout`), for the waiting feed a `date` that accepts `-d @0`, and for
+`systemd` a reachable user bus (`systemctl --user show-environment`; on WSL set
+`systemd=true` under `[boot]` in `/etc/wsl.conf`, then run `wsl.exe --shutdown`
+from Windows, or use `cron`). It prints every missing piece with the command
+that fixes it and exits 1. `launchd` loads into your login session, so run it
+from a Terminal on the Mac, not over SSH; a failed `launchctl bootstrap` removes
+that job's plist and exits 1.
+
+The waiting feed is supported on Linux and WSL only. It reads
+`~/.claude/.credentials.json`, and Claude Code's documentation says "On macOS,
+credentials are stored in the encrypted macOS Keychain" (the file is only a
+fallback), so on macOS the installer skips that job and installs the others.
+
 ```bash
 bash scripts/unix/install-schedule.sh systemd                 # Linux: user timers
 bash scripts/unix/install-schedule.sh launchd                 # macOS: LaunchAgents
