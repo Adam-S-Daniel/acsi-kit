@@ -370,6 +370,7 @@ group_tracks() {
   local g=$1 e r n src grp app installed out=""
   case $g in
     repos|labels|settings) out="base evals" ;;
+    fleet-worker) out=base ;;
     branches) out=$(repo_track "$EVAL_RESULTS_REPO") ;;
     environments) for e in "${ENVIRONMENTS[@]}"; do out+=" $(repo_track "${e%%|*}")"; done ;;
     variables|federation)
@@ -444,6 +445,8 @@ gh_write_api() { # METHOD endpoint [json]
   fi
   GH_OUT=""
   local s; s=$(_status_from "$err")
+  # GH_403_HINT: what a caller knows a 403 there most likely means.
+  if [ "$s" = 403 ] && [ -n "${GH_403_HINT:-}" ]; then die "gh api -X $method $endpoint failed (HTTP 403): $GH_403_HINT"; fi
   die "gh api -X $method $endpoint failed (HTTP ${s:-unknown})"
 }
 
@@ -516,6 +519,7 @@ ENVIRONMENTS=(
 LABELS=(
   "agent-ready|0e8a16|An agent may fix this (the fleet worker's queue)."
   "on-hold|b60205|Paused by the owner. Only the owner adds or removes it."
+  "ci|d93f0b|Opened by a scheduled workflow (drift report, run health, settings coverage)."
 )
 
 # Every GitHub App the exported workflows mint a token from, named as the
@@ -569,6 +573,18 @@ value_group() { case $1 in PRIVACY_DENYLIST) echo privacy ;; *) echo routine-fir
 # named (--only federation), and an empty fleet.env key is skipped.
 # SITE_REPO is required and has no default anywhere (settings-schema-design
 # rule 4): fleet.env.example ships it as none, the explicit "no website".
+# Two sources are not a fleet.env key. `evals:state` is EVALS_REPO on
+# _agent-guidance and acsi-agentskills: none while skills-evals does not exist
+# (a base-only setup) and <owner>/skills-evals once it does, so the evals
+# track's run of create-environments.sh flips it; fleet-worker-fire.yml,
+# impact-report.yml and both repos' ci.yml read it and have no default. `unset:none` is a value written only while the
+# variable is not set at all: ARTICLE_WATCH_FEED_URL is none (the optional
+# article watch is off) until the adopter sets a feed URL, and
+# FLEET_WORKER_FIRE_URL and LOOP_WORKER_FIRE_URL are none (fleet-worker-fire.yml
+# skips that fire as not set up yet) until steps 27 and 41 set the routines'
+# fire URLs. A value the adopter set is never overwritten, so verify.sh's
+# variables group checks only that it is set (step 27's fleet-worker group
+# checks the Fleet worker's URL is no longer none).
 REPO_VARIABLES=(
   "repo-settings|GUIDANCE_SYNC_APP_ID|cfg:GUIDANCE_SYNC_APP_ID|variables"
   "repo-settings|ROSTER_WRITER_APP_ID|cfg:ROSTER_WRITER_APP_ID|variables"
@@ -578,6 +594,12 @@ REPO_VARIABLES=(
   "skills-evals|ANTHROPIC_WORKSPACE_ID|cfg:ANTHROPIC_WORKSPACE_ID|federation"
   "skills-evals|SITE_REPO|cfg:SITE_REPO|variables"
   "_agent-guidance|FLEET_WORKER_EVERY_HOURS|plan:fleet-worker-hours|variables"
+  "_agent-guidance|LOOP_WORKER_EVERY_HOURS|plan:loop-worker-hours|variables"
+  "_agent-guidance|EVALS_REPO|evals:state|variables"
+  "acsi-agentskills|EVALS_REPO|evals:state|variables"
+  "_agent-guidance|ARTICLE_WATCH_FEED_URL|unset:none|variables"
+  "_agent-guidance|FLEET_WORKER_FIRE_URL|unset:none|variables"
+  "_agent-guidance|LOOP_WORKER_FIRE_URL|unset:none|variables"
 )
 
 # fleet_worker_hours <claude plan>: how often fleet-worker-fire.yml fires the
@@ -595,9 +617,25 @@ fleet_worker_hours() {
   esac
 }
 
+# loop_worker_hours <claude plan>: how often fleet-worker-fire.yml fires the
+# Loop worker (its LOOP_WORKER_EVERY_HOURS, required, no default there). One
+# loop fire a week is about 1% of a Pro week at the measured $1.85 a fire;
+# daily is about 2% of a Max 5x week; 24 is the source owner's own setting on
+# Ultra. A scheduled loop fire is also skipped while the account is ahead of
+# its weekly pace, so the cadence is a ceiling. Set on every track: harmless
+# while EVALS_REPO is none, because the fire is skipped then.
+loop_worker_hours() {
+  case $1 in
+    pro) echo 168 ;;
+    max5x|ultra|max20x) echo 24 ;;
+    *) die "unknown CLAUDE_PLAN: $1" ;;
+  esac
+}
+
 # variable_empty_hint <name> <group>: what to do about an empty fleet.env key.
 variable_empty_hint() {
   if [ "$1" = SITE_REPO ]; then echo "required: none for no website, or the site's owner/name; docs/routines.md#dashboard-refresh"
+  elif [ "$1" = EVALS_REPO ]; then echo "set by create-environments.sh"
   elif [ "$2" = federation ]; then echo "optional; docs/evals-and-loop.md#workload-identity-federation"
   else echo "run create-apps.sh, then this again"; fi
 }
@@ -607,6 +645,11 @@ repo_variable_value() {
   case $1 in
     cfg:*) local k="CFG_${1#cfg:}"; printf '%s' "${!k}" ;;
     plan:fleet-worker-hours) fleet_worker_hours "$CFG_CLAUDE_PLAN" ;;
+    plan:loop-worker-hours) loop_worker_hours "$CFG_CLAUDE_PLAN" ;;
+    # EVALS_HERE: 1 when OWNER/skills-evals exists, set by the calling script.
+    evals:state) [ -n "${EVALS_HERE:-}" ] || die "EVALS_HERE is not set"
+      if [ "$EVALS_HERE" = 1 ]; then printf '%s' "$CFG_OWNER/$EVALS_REPO"; else printf none; fi ;;
+    unset:none) printf none ;;
     *) die "bad REPO_VARIABLES source: $1" ;;
   esac
 }

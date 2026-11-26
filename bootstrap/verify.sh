@@ -12,7 +12,12 @@
 #   environments    fleet-apply, plugin-runtime-review, routine-fire exist,
 #                   with their reviewer and branch policy (ENVIRONMENTS)
 #   variables       repo-settings' GUIDANCE_SYNC_APP_ID and (evals)
-#                   ROSTER_WRITER_APP_ID and SITE_REPO match fleet.env
+#                   ROSTER_WRITER_APP_ID and SITE_REPO match fleet.env, and
+#                   _agent-guidance's EVALS_REPO is none while skills-evals
+#                   does not exist and <owner>/skills-evals once it does
+#                   (on --track base either value passes, so adding evals
+#                   never undoes a base step; the evals track and all want
+#                   the exact one); its ARTICLE_WATCH_FEED_URL is set
 #                   (REPO_VARIABLES)
 #   federation      skills-evals' four ANTHROPIC_* federation ids match
 #                   fleet.env (REPO_VARIABLES; optional, so only when named)
@@ -20,9 +25,18 @@
 #                   and private key are stored where the workflows read them
 #                   (by NAME only)
 #   installs:<app>  that App is installed on OWNER's repos it needs (read
-#                   from your installations: GET user/installations)
+#                   from your installations: GET user/installations). gh's
+#                   own sign-in gets HTTP 403 there (the endpoint takes a
+#                   GitHub App user token), so then it is your answer
+#                   instead: this says what to check at
+#                   https://github.com/settings/installations, and passes
+#                   once status.sh --mark records the step (steps.json's
+#                   "by_hand" verify checks)
 #   values:<group>  privacy (PRIVACY_DENYLIST in acsi-agentskills) or routine-fire
 #                   (the eval routine's bearer and trigger id), by name only
+#   fleet-worker    _agent-guidance's FLEET_WORKER_FIRE_URL is set and is not
+#                   none (create-environments.sh's "not set up yet" value),
+#                   and its FLEET_WORKER_FIRE_BEARER secret is set (by name)
 #   settings        repo-settings' engine reports no drift from fleet.yml
 #                   (apply-settings.sh --check, which clones repo-settings)
 #   regen:<task>    a regenerate.sh task is done on your default branches
@@ -77,12 +91,12 @@ if [ -n "$ONLY" ]; then
   IFS=',' read -r -a only_list <<<"$ONLY"
   for g in "${only_list[@]}"; do
     case $g in
-      repos|labels|branches|environments|variables|federation|settings|content) ;;
+      repos|labels|branches|environments|variables|federation|settings|content|fleet-worker) ;;
       apps:*) app_known "${g#apps:}" || die "unknown App in --only: ${g#apps:}" ;;
       installs:*) app_known "${g#installs:}" || die "unknown App in --only: ${g#installs:}" ;;
       values:*) group_known "${g#values:}" || die "unknown values group in --only: ${g#values:}" ;;
       regen:*) task_known "${g#regen:}" || die "unknown regenerate task in --only: ${g#regen:}" ;;
-      *) die "unknown group in --only: $g (repos, labels, branches, environments, variables, federation, apps:<app>, installs:<app>, values:<group>, settings, regen:<task>, content)" ;;
+      *) die "unknown group in --only: $g (repos, labels, branches, environments, variables, federation, apps:<app>, installs:<app>, values:<group>, settings, fleet-worker, regen:<task>, content)" ;;
     esac
     SEL[$g]=1
   done
@@ -113,6 +127,8 @@ ONLY_CONTENT=0
 [ "$ONLY" != content ] || ONLY_CONTENT=1
 
 # A base-only setup has no skills-evals: the whole setup is then the base.
+# ASKED_TRACK keeps what was asked for: EVALS_REPO's check is exact on all.
+ASKED_TRACK=$TRACK
 if [ "$TRACK" = all ] && [ "$ONLY_CONTENT" = 0 ] && ! evals_repo_exists; then
   TRACK=base
   skp "$O/$EVALS_REPO and the evals track's checks ($EVALS_REPO is not created yet; the evals track creates it: /adopt-evals)"
@@ -186,7 +202,10 @@ declare -A REPO_VARS
 for entry in "${REPO_VARIABLES[@]}"; do
   IFS='|' read -r r name src group <<<"$entry"
   if [ "$group" = federation ]; then sel federation off || continue; else sel "$group" || continue; fi
-  tracked "$(variable_track "$r" "$src")" || continue
+  # EVALS_REPO lives in a base repo but says whether evals are on, so every
+  # track checks it: the evals track confirms its flip (step 37).
+  [ "$src" = evals:state ] || tracked "$(variable_track "$r" "$src")" || continue
+  if [[ $src == evals:state && -z "${EVALS_HERE:-}" ]]; then EVALS_HERE=1; evals_repo_exists || EVALS_HERE=0; fi
   want=$(repo_variable_value "$src")
   if [ -z "$want" ]; then
     if [ "$group" = federation ] || [ "$name" = SITE_REPO ]; then fail "$O/$r variable $name: ${src#cfg:} is empty in fleet.env ($(variable_empty_hint "$name" "$group"))"
@@ -198,8 +217,25 @@ for entry in "${REPO_VARIABLES[@]}"; do
     if ! repo_variables "$O/$r"; then fail "$O/$r variables readable (HTTP $GH_HTTP)"; continue; fi
     REPO_VARS[$r]=$REPO_VARS_OUT
   fi
-  if grep -qxF -- "$name"$'\t'"$want" <<<"${REPO_VARS[$r]}"; then
+  if [[ $src == evals:state && $ASKED_TRACK == base ]]; then
+    # The base track accepts either well-formed value, so creating
+    # skills-evals (step 35) never turns a base step back to not done before
+    # create-environments.sh flips EVALS_REPO (step 37).
+    if ! grep -qxF -- "$name" <<<"$(cut -f1 <<<"${REPO_VARS[$r]}")"; then
+      fail "$O/$r variable $name is not set (run create-environments.sh)"
+    else
+      v=$(awk -F'\t' -v n="$name" '$1 == n { print substr($0, length(n) + 2); exit }' <<<"${REPO_VARS[$r]}")
+      if [ "$v" = none ] || [ "$v" = "$O/$EVALS_REPO" ]; then pass "$O/$r variable $name is $v"
+      else fail "$O/$r variable $name is not none or $O/$EVALS_REPO (run create-environments.sh)"; fi
+    fi
+  elif [[ $src == unset:* ]]; then
+    # Only that it is set: a value the adopter chose (a feed URL) is theirs.
+    if grep -qxF -- "$name" <<<"$(cut -f1 <<<"${REPO_VARS[$r]}")"; then pass "$O/$r variable $name is set"
+    else fail "$O/$r variable $name is not set (create-environments.sh sets it to $want)"; fi
+  elif grep -qxF -- "$name"$'\t'"$want" <<<"${REPO_VARS[$r]}"; then
     pass "$O/$r variable $name matches fleet.env"
+  elif [ "$src" = evals:state ]; then
+    fail "$O/$r variable $name should be $want ($([ "$EVALS_HERE" = 1 ] && echo "$EVALS_REPO exists" || echo "$EVALS_REPO does not exist")); it is missing or differs (run create-environments.sh)"
   else
     fail "$O/$r variable $name is missing or differs from fleet.env (run create-environments.sh)"
   fi
@@ -208,6 +244,24 @@ done
 has_name() { # kind repo env name
   if ! value_names "$1" "$O/$2" "$3"; then fail "$O/$2$(where "$3") ${1}s readable (HTTP $GH_HTTP)"; return; fi
   if grep -qxF -- "$4" <<<"$NAMES_OUT"; then pass "$O/$2$(where "$3") has $1 $4"; else fail "$O/$2$(where "$3") has $1 $4"; fi
+}
+# installs_by_hand <app> <installed>: GET user/installations answers 403 to
+# gh's own sign-in (it takes a GitHub App user token), so the installation is
+# then the user's answer: status.sh --mark on the steps that check it (a
+# verify check with "by_hand": true in steps.json, on the selected track).
+installs_by_hand() {
+  local app=$1 installed=$2 ids id missing="" repos
+  ids=$(jq -r --arg g "installs:$app" '.steps[] | select(.check.by_hand == true and (.check.groups | index($g))) | "\(.id) \(.track)"' "$HERE/steps.json" \
+    | while read -r id t; do if on_track "$TRACK" "$t"; then printf '%s\n' "$id"; fi; done)
+  local done_ids=""
+  if [ -f "${STATE:-}" ]; then done_ids=$(jq -r '.done[]?' "$STATE" 2>/dev/null || true); fi
+  for id in $ids; do grep -qxF -- "$id" <<<"$done_ids" || missing+="$id "; done
+  if [ "$installed" = fleet ]; then repos=$(track_repos "$TRACK" | sed "s|^|$O/|" | paste -sd, - | sed 's/,/, /g'); else repos=""; for id in $installed; do repos+="${repos:+, }$O/$id"; done; fi
+  if [ -n "$ids" ] && [ -z "$missing" ]; then
+    pass "$app App's installation on $repos: confirmed by you (status.sh --mark $(paste -sd' ' <<<"$ids")); gh's sign-in cannot read installations (HTTP 403)"
+  else
+    fail "$app App's installation: gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: ${CFG_APP_NAME_PREFIX}-$app must have access to $repos. Then: bash bootstrap/status.sh --mark ${missing% }"
+  fi
 }
 INSTALLS=""
 installs() { # sets INSTALLS to "app_id<TAB>installation id" lines, once
@@ -235,7 +289,12 @@ for entry in "${APPS[@]}"; do
     fi
   fi
   sel "installs:$app" || continue
-  if ! installs; then fail "$app App: your installations readable (HTTP $GH_HTTP)"; continue; fi
+  if ! installs; then
+    if [ "$GH_HTTP" = 403 ]; then installs_by_hand "$app" "$installed"
+    elif [ "$GH_HTTP" = 401 ]; then fail "$app App: your installations readable (HTTP 401: gh's sign-in has expired or was revoked; run gh auth login, then this again)"
+    else fail "$app App: your installations readable (HTTP $GH_HTTP: GitHub did not answer; check the network and run this again)"; fi
+    continue
+  fi
   iid=$(awk -F'\t' -v a="${!cfg}" -v o="${O,,}" '$1 == a && tolower($3) == o {print $2; exit}' <<<"$INSTALLS")
   if [ -z "$iid" ]; then fail "$app App is installed on $O (create-apps.sh printed the link)"; continue; fi
   if ! gh_read "user/installations/$iid/repositories?per_page=100"; then fail "$app App: its repositories readable (HTTP $GH_HTTP)"; continue; fi
@@ -253,6 +312,21 @@ for entry in "${OTHER_VALUES[@]}"; do
   [ "${EXISTS[$r]:-0}" = 1 ] || continue
   has_name "$kind" "$r" "$e" "$name"
 done
+
+# The Fleet worker's fire URL and bearer (step 27, by hand from the routine's
+# API trigger). Until then create-environments.sh leaves the URL `none` and
+# fleet-worker-fire.yml skips the fire with a notice, so this is where the
+# step shows as not done. The URL is a variable (its value is compared with
+# none, never printed); the bearer is a secret (its name only).
+if sel fleet-worker && tracked base && [ "${EXISTS[_agent-guidance]:-0}" = 1 ]; then
+  if repo_variables "$O/_agent-guidance"; then
+    url=$(awk -F'\t' '$1 == "FLEET_WORKER_FIRE_URL" { print substr($0, length($1) + 2); exit }' <<<"$REPO_VARS_OUT")
+    if [ -z "$url" ]; then fail "$O/_agent-guidance variable FLEET_WORKER_FIRE_URL is not set (step 27 sets it to the Fleet worker routine's fire URL)"
+    elif [ "$url" = none ]; then fail "$O/_agent-guidance variable FLEET_WORKER_FIRE_URL is still none: step 27 creates the Fleet worker routine and sets its fire URL"
+    else pass "$O/_agent-guidance variable FLEET_WORKER_FIRE_URL is set"; fi
+  else fail "$O/_agent-guidance variables readable (HTTP $GH_HTTP)"; fi
+  has_name secret _agent-guidance - FLEET_WORKER_FIRE_BEARER
+fi
 
 sub_check() { # description cmd...
   local out="$BOOT_WORK/sub.out" d=$1; shift

@@ -47,6 +47,7 @@ test('fires on the schedule or by hand, with no permissions, no uses and no inte
     EVERY_VAR: '${{ matrix.every_var }}',
     EVERY_REQUIRED: '${{ matrix.every_required }}',
     FIRE_TEXT: '${{ matrix.text }}',
+    EVALS_REPO: '${{ vars.EVALS_REPO }}',
   });
 });
 
@@ -75,14 +76,15 @@ test('actions.lock lists the workflow with no actions', () => {
 });
 
 // The step's env: with the matrix entry and the three configured values.
-function stepEnv(role, { url, bearer, every }) {
+function stepEnv(role, { url, bearer, every, evals }) {
   const e = entry(role);
   const out = {};
   for (const [name, expr] of Object.entries(step().env)) {
     const lookup = expr.match(/^\$\{\{ (vars|secrets)\[matrix\.(\w+)\] \}\}$/);
     const plain = expr.match(/^\$\{\{ matrix\.(\w+) \}\}$/);
     const named = expr.match(/^\$\{\{ secrets\.(\w+) \}\}$/);
-    if (named) out[name] = named[1] === e.bearer_var ? bearer : 'other-task-value';
+    if (expr === '${{ vars.EVALS_REPO }}') out[name] = evals;
+    else if (named) out[name] = named[1] === e.bearer_var ? bearer : 'other-task-value';
     else if (lookup) out[name] = ({ [e.url_var]: url, [e.bearer_var]: bearer, [e.every_var]: every })[e[lookup[2]]];
     else if (plain) out[name] = e[plain[1]];
     else throw new Error(`unresolved env expression ${expr}`);
@@ -92,7 +94,7 @@ function stepEnv(role, { url, bearer, every }) {
 
 function runFire({ role = 'fleet', url = 'https://api.example.com/fire', bearer = 'placeholder-value', status = 200,
   every = role === 'loop' ? '6' : '', event = 'schedule', line = '20 3,9,15,21 * * *', hour = '9',
-  hold = 'pace_hold=false', gitStatus = 0 } = {}) {
+  hold = 'pace_hold=false', gitStatus = 0, evals = 'example-adopter/skills-evals' } = {}) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-fire-test-'));
   try {
     const log = path.join(temp, 'calls.jsonl');
@@ -133,7 +135,7 @@ process.exit(2);
     fs.writeFileSync(eventPath, JSON.stringify(event === 'schedule' ? { schedule: line } : {}));
     const result = spawnSync('bash', ['-c', step().run], { encoding: 'utf8', env: {
       PATH: [temp, process.env.PATH].join(path.delimiter), TEST_LOG: log, TEST_STATUS: String(status),
-      ...stepEnv(role, { url, bearer, every }), GITHUB_EVENT_NAME: event,
+      ...stepEnv(role, { url, bearer, every, evals }), GITHUB_EVENT_NAME: event,
       GITHUB_EVENT_PATH: eventPath, TEST_HOUR: hour, TEST_HOLD: hold, TEST_GIT_LOG: gitLog,
       TEST_GIT_STATUS: String(gitStatus) } });
     const lines = f => fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)) : [];
@@ -161,6 +163,21 @@ test('an unconfigured URL or bearer fails naming it, and fires nothing', () => {
     assert.equal(result.status, 1);
     assert.equal(curl.length, 0);
     assert.ok(result.stdout.includes(name), `error must name ${name}`);
+  }
+});
+
+test('a fire URL of none is not set up yet for either worker: exit 0, a notice naming the step, nothing fired', () => {
+  for (const [role, extra, name, step] of [['fleet', {}, 'FLEET_WORKER_FIRE_URL', 27],
+    ['loop', { line: '20 6,18 * * *' }, 'LOOP_WORKER_FIRE_URL', 41]]) {
+    for (const bearer of [undefined, '']) {
+      const over = { role, url: 'none', ...extra, ...(bearer === undefined ? {} : { bearer }) };
+      const { result, curl, git } = runFire(over);
+      assert.equal(result.status, 0, JSON.stringify(over) + result.stdout + result.stderr);
+      assert.equal(curl.length, 0);
+      assert.equal(git.length, 0, 'nothing is cloned');
+      assert.ok(result.stdout.includes(`::notice::not set up yet: variable ${name} is none`), result.stdout);
+      assert.ok(result.stdout.includes(`Step ${step} of the kit`), result.stdout);
+    }
   }
 });
 
@@ -300,6 +317,31 @@ test('LOOP_WORKER_EVERY_HOURS gates scheduled loop fires on the cron line, and a
     assert.equal(result.status, 1, every);
     assert.equal(curl.length, 0, every);
     assert.ok(result.stdout.includes('LOOP_WORKER_EVERY_HOURS'), every);
+  }
+});
+
+test('EVALS_REPO none skips the loop worker before any other check, and fires and clones nothing', () => {
+  for (const extra of [{}, { every: '' }, { event: 'workflow_dispatch' }, { url: '', bearer: '' }]) {
+    const { result, curl, git } = runFire({ role: 'loop', evals: 'none', ...extra });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.ok(result.stdout.includes('::notice::skipped: EVALS_REPO is none, so there is no eval loop for the Loop worker to serve'), result.stdout);
+    assert.equal(curl.length, 0, 'nothing fires');
+    assert.equal(git.length, 0, 'nothing is cloned');
+  }
+});
+
+test('an unset, empty or malformed EVALS_REPO fails the loop worker naming it, and the fleet worker ignores it', () => {
+  for (const evals of ['', 'not-a-repo']) {
+    const { result, curl } = runFire({ role: 'loop', evals });
+    assert.equal(result.status, 1);
+    assert.ok(result.stdout.includes('EVALS_REPO'), result.stdout);
+    if (evals === '') assert.ok(result.stdout.includes('none') && result.stdout.includes('skills-evals'), result.stdout);
+    assert.equal(curl.length, 0);
+  }
+  for (const evals of ['', 'none']) {
+    const { result, curl } = runFire({ role: 'fleet', evals });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.equal(curl.length, 1, 'the fleet worker still fires');
   }
 });
 

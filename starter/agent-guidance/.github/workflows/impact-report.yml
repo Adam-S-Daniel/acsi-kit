@@ -12,6 +12,12 @@ name: Impact report
 # read-only per owner for the sweep, and Contents: write on skills-evals
 # alone for the publish. The job itself holds only contents: read.
 # A failed run is caught by scheduled-run-health.yml, like every cron here.
+#
+# The repository variable EVALS_REPO (no default) is `none` for a setup without
+# the eval repository, or <owner>/skills-evals. The first step decides; with
+# `none` every later step is skipped and the run still succeeds, so
+# scheduled-run-health.yml sees a green run, not a skipped one. Unset fails
+# naming it.
 run-name: >-
   ${{ github.event_name == 'schedule'
         && format('scheduled — {0}', github.event.schedule)
@@ -32,15 +38,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      PUBLISH_REPO: example-adopter/skills-evals
+      PUBLISH_REPO: ${{ vars.EVALS_REPO }}
       PUBLISH_BRANCH: persistent/eval-results
       PUBLISH_PATH: usage/weekly-ci.json
     steps:
+      - name: Decide whether there is an eval repository to publish to
+        id: gate
+        env:
+          EVALS_REPO: ${{ vars.EVALS_REPO }}
+        run: |
+          set -euo pipefail
+          case "${EVALS_REPO:-}" in
+            none)
+              echo "::notice::skipped: EVALS_REPO is none, so there is no skills-evals repository to publish the impact report to"
+              echo "publish=false" >> "$GITHUB_OUTPUT" ;;
+            "")
+              echo "::error::not configured: variable EVALS_REPO. It has no default; set it in this repository's Actions settings to none (no eval loop) or to <owner>/skills-evals. bootstrap/create-environments.sh sets it."
+              exit 1 ;;
+            *)
+              if [[ ! "$EVALS_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+                echo "::error::variable EVALS_REPO must be none or <owner>/skills-evals"
+                exit 1
+              fi
+              echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - uses: actions/checkout@v7.0.1
+        if: steps.gate.outputs.publish == 'true'
         with:
           persist-credentials: false
 
       - uses: actions/setup-node@v7.1.0
+        if: steps.gate.outputs.publish == 'true'
         with:
           node-version: "20"
 
@@ -48,6 +77,7 @@ jobs:
       # when either is missing, so a partial fleet is never published as whole.
       - name: Mint read token for example-adopter
         id: token_example_adopter
+        if: steps.gate.outputs.publish == 'true'
         continue-on-error: true
         uses: actions/create-github-app-token@v3.3.0
         with:
@@ -62,6 +92,7 @@ jobs:
 
       - name: Mint read token for example-adopter-two
         id: token_example_adopter_two
+        if: steps.gate.outputs.publish == 'true'
         continue-on-error: true
         uses: actions/create-github-app-token@v3.3.0
         with:
@@ -76,6 +107,7 @@ jobs:
 
       - name: Mint publish token for skills-evals
         id: token_publish
+        if: steps.gate.outputs.publish == 'true'
         uses: actions/create-github-app-token@v3.3.0
         with:
           client-id: ${{ vars.APP_CLIENT_ID }}
@@ -85,6 +117,7 @@ jobs:
           permission-contents: write
 
       - name: Clone the results branch
+        if: steps.gate.outputs.publish == 'true'
         env:
           PUBLISH_TOKEN: ${{ steps.token_publish.outputs.token }}
         run: |
@@ -95,6 +128,7 @@ jobs:
             "https://github.com/$PUBLISH_REPO.git" "$RUNNER_TEMP/results"
 
       - name: Measure the fleet
+        if: steps.gate.outputs.publish == 'true'
         env:
           GH_TOKEN_EXAMPLE_ADOPTER: ${{ steps.token_example_adopter.outputs.token }}
           GH_TOKEN_EXAMPLE_ADOPTER_TWO: ${{ steps.token_example_adopter_two.outputs.token }}
@@ -106,6 +140,7 @@ jobs:
           node scripts/impact-report.js --require-owner-tokens --previous "$dest" --out "$dest"
 
       - name: Publish usage/weekly-ci.json
+        if: steps.gate.outputs.publish == 'true'
         env:
           PUBLISH_TOKEN: ${{ steps.token_publish.outputs.token }}
         working-directory: ${{ runner.temp }}/results

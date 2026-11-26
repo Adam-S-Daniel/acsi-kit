@@ -18,6 +18,20 @@
 
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1   # no __pycache__ in a tree that copy-starter.sh may copy
+# The tools the scripts under test need (their require_tools lines) and this
+# test's own: a missing one fails here in one line, not as hundreds of FAILs.
+# TEST_BOOTSTRAP_TOOLS_ONLY=1 runs only this check (the test below runs it).
+check_tools() {
+  local t miss=()
+  for t in git jq python3 node npm; do command -v "$t" >/dev/null 2>&1 || miss+=("$t"); done
+  if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import yaml' >/dev/null 2>&1; then miss+=("python3's yaml module (PyYAML)"); fi
+  if [ "${#miss[@]}" -gt 0 ]; then
+    printf 'test-bootstrap.sh: not run: missing %s on PATH; install it and run this again\n' "$(printf '%s, ' "${miss[@]}" | sed 's/, $//')" >&2
+    return 2
+  fi
+}
+check_tools || exit 2
+[ -z "${TEST_BOOTSTRAP_TOOLS_ONLY:-}" ] || exit 0
 B=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 K=$(cd "$B/.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-test.XXXXXX")
@@ -48,6 +62,9 @@ jqset()       { jq "$1" "$GH_STUB_STATE" > "$T/s" && mv "$T/s" "$GH_STUB_STATE";
 export PATH="$B/tests/stubs:$PATH"
 export TMPDIR="$T/tmp" HOME="$T/home"; mkdir -p "$TMPDIR" "$HOME"
 export GH_LOG="$T/gh.log" GH_STUB_STATE="$T/gh-state.json"
+# Most cases read App installations as a GitHub App user token can; the
+# "gh's own sign-in" case below unsets it and gets the real 403.
+export GH_STUB_APP_USER_TOKEN=1
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$T/gitconfig"
 export BOOTSTRAP_GIT_BASE="file://$T/remotes"
 export GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z
@@ -105,7 +122,7 @@ for s in "${SCRIPTS[@]}"; do
   assert "$s --help prints its usage" bash -c '"$1" "$2" --help | grep -qF "$3"' _ bash "$B/$s" "$s ["
 done
 for p in lib/substitute.py lib/plan_sizing.py lib/time_zone.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
-         tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/mdlinks.py tests/stubs/gh_stub.py; do
+         tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/check-evals-refs.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
 # The bash >= 4.4 guard: the version test, and that a too-old bash stops before anything runs.
@@ -181,16 +198,37 @@ for plan in pro max5x ultra max20x; do
   assert_eq "fleet_worker_hours $plan" "$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
     "$(case $plan in pro) echo 168;; max5x) echo 12;; ultra|max20x) echo 3;; esac)"
 done
+for plan in pro max5x ultra max20x; do
+  assert_eq "loop_worker_hours $plan" "$(bash -c '. "$1"; loop_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
+    "$(case $plan in pro) echo 168;; *) echo 24;; esac)"
+done
 # The starter's fire workflow must accept each plan's value: run its step by
-# hand with nothing configured, so it stops at "not configured", after the
-# value check and before any network call.
+# hand with a URL but no bearer, so it stops at "not configured", after the
+# value check and before any network call (with no URL at all, the Fleet
+# worker is "not set up yet" and exits 0 before that point).
 python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["jobs"]["fire"]["steps"][0]["run"])' \
   "$B/../starter/agent-guidance/.github/workflows/fleet-worker-fire.yml" > "$T/fire-step.sh"
 for plan in pro max5x max20x; do
   hours=$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")
-  WORKER=fleet EVERY_REQUIRED=false EVERY_VAR=FLEET_WORKER_EVERY_HOURS URL_VAR=FLEET_WORKER_FIRE_URL BEARER_VAR=FLEET_WORKER_FIRE_BEARER FLEET_BEARER= LOOP_BEARER= EVERY_HOURS=$hours GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL= bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
-  assert "the starter's fire workflow accepts $plan's $hours hours" has "$T/fire-step.out" "not configured"
+  WORKER=fleet EVERY_REQUIRED=false EVERY_VAR=FLEET_WORKER_EVERY_HOURS URL_VAR=FLEET_WORKER_FIRE_URL BEARER_VAR=FLEET_WORKER_FIRE_BEARER FLEET_BEARER= LOOP_BEARER= EVERY_HOURS=$hours GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL=https://api.example.com/fire bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
+  assert "the starter's fire workflow accepts $plan's $hours hours" has "$T/fire-step.out" "not configured: secret FLEET_WORKER_FIRE_BEARER"
 done
+for plan in pro max5x max20x; do
+  hours=$(bash -c '. "$1"; loop_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")
+  WORKER=loop EVERY_REQUIRED=true EVERY_VAR=LOOP_WORKER_EVERY_HOURS URL_VAR=LOOP_WORKER_FIRE_URL BEARER_VAR=LOOP_WORKER_FIRE_BEARER FLEET_BEARER= LOOP_BEARER= EVERY_HOURS=$hours EVALS_REPO=acme/skills-evals GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL= bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
+  assert "the starter's fire workflow accepts the Loop worker's $hours hours on $plan" has "$T/fire-step.out" "not configured: variable"
+  assert_not "the Loop worker's $hours hours on $plan are not refused" has "$T/fire-step.out" "must be 3, 6"
+done
+
+# ======================================================== the tool check
+# With jq missing from PATH the test stops at once, naming it.
+tb="$T/toolbin"; mkdir -p "$tb"
+for t in bash git python3 node npm sed printf; do src=$(command -v "$t") && ln -sf "$src" "$tb/$t"; done
+run env -i HOME="$HOME" PATH="$tb" TEST_BOOTSTRAP_TOOLS_ONLY=1 "$BASH" "$B/tests/test-bootstrap.sh"; rc=$?
+assert_eq "the tool check exits 2 without jq" "$rc" 2
+assert "it names jq in one line" grep -qx "test-bootstrap.sh: not run: missing jq on PATH; install it and run this again" "$ERR"
+run env TEST_BOOTSTRAP_TOOLS_ONLY=1 "$BASH" "$B/tests/test-bootstrap.sh"; rc=$?
+assert_eq "the tool check passes with every tool" "$rc" 0
 
 # ======================================================== preflight.sh
 # Tools are stubbed by a bin dir that is the whole PATH: symlinks to what
@@ -463,7 +501,7 @@ assert_eq "no results branch without skills-evals" "$(jqs '[.repos[] | .branches
 # whole-setup check checks the base and says so, and the evals track fails.
 run bash "$B/verify.sh" --config "$CFG" --track base --only repos,labels; rc=$?
 assert_eq "verify --track base passes without skills-evals" "$rc" 0
-assert "the base track checks the five repos" grep -qE '^20 passed, 0 failed, 0 skipped$' "$OUT"
+assert "the base track checks the five repos" grep -qE '^25 passed, 0 failed, 0 skipped$' "$OUT"
 assert_not "the base track never names skills-evals" has "$OUT" skills-evals
 run bash "$B/verify.sh" --config "$CFG" --only repos,labels; rc=$?
 assert_eq "verify of the whole setup passes a base-only setup" "$rc" 0
@@ -491,12 +529,12 @@ assert "the refusal says to create skills-evals first" has "$ERR" "the evals tra
 n=$(log_lines "$GH_LOG")
 run bash "$B/create-repos.sh" --config "$CFG" skills-evals; rc=$?
 assert_eq "create-repos skills-evals exits 0" "$rc" 0
-assert_eq "it makes the repo, its README, two labels and the branch's tree, commit and ref" "$(since "$n")" 7
+assert_eq "it makes the repo, its README, three labels and the branch's tree, commit and ref" "$(since "$n")" 8
 assert_eq "now there are six repos" "$(jqs '[.repos | keys[]] | sort | join(" ")')" \
   "acme-example/_agent-guidance acme-example/acsi-agentskills acme-example/acsi-agentskills-private acme-example/repo-settings acme-example/skills-evals acme-example/wsl-automation"
 run bash "$B/verify.sh" --config "$CFG" --track evals --only repos,labels,branches; rc=$?
 assert_eq "verify --track evals passes once it exists" "$rc" 0
-assert "the evals track checks skills-evals alone" grep -qE '^5 passed, 0 failed, 0 skipped$' "$OUT"
+assert "the evals track checks skills-evals alone" grep -qE '^6 passed, 0 failed, 0 skipped$' "$OUT"
 for r in _agent-guidance acsi-agentskills skills-evals wsl-automation; do
   assert_eq "free: $r is public" "$(jqs ".repos[\"$O/$r\"].visibility")" public
 done
@@ -511,7 +549,7 @@ assert_eq "persistent/eval-results exists on skills-evals only" "$(jqs '[.repos 
 assert_eq "the results branch is an orphan commit" "$(jqs '.repos["acme-example/skills-evals"] | .commits[.branches["persistent/eval-results"]].parents | length')" 0
 assert_eq "the results branch holds a README and nothing else" "$(jqs '.repos["acme-example/skills-evals"] | .trees[.commits[.branches["persistent/eval-results"]].tree] | map(.path) | join(",")')" README.md
 assert "the results README says what the branch holds" jq -e '.repos["acme-example/skills-evals"] | .trees[.commits[.branches["persistent/eval-results"]].tree][0].content | contains("never merges into main")' "$GH_STUB_STATE"
-assert_eq "labels agent-ready and on-hold on all six" "$(jqs '[.repos[] | select([.labels[].name] | index("agent-ready") and index("on-hold"))] | length')" 6
+assert_eq "labels agent-ready, on-hold and ci on all six" "$(jqs '[.repos[] | select([.labels[].name] | index("agent-ready") and index("on-hold") and index("ci"))] | length')" 6
 assert_eq "it leaves merge and Actions settings to fleet.yml" "$(jqs '[.repos[] | select(.allow_squash_merge and (.actions.sha_pinning_required | not))] | length')" 6
 n=$(log_lines "$GH_LOG")
 run bash "$B/create-repos.sh" --config "$CFG"; rc=$?
@@ -556,6 +594,12 @@ assert "the federation ids are skipped as optional" has "$OUT" "ANTHROPIC_WORKSP
 assert "an empty SITE_REPO is skipped and named as required" has "$OUT" "variable SITE_REPO: SITE_REPO is empty in fleet.env (required: none for no website"
 
 CFGP="$T/fleet-paid.env"; new_config "$CFGP" paid
+# PLAN=paid on an account that is on GitHub Free: GitHub answers a bare 403
+# to an environment in a private repo; the script says what to change.
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "PLAN=paid on a Free account fails" "$rc" 1
+assert "the 403 says the plan is likely wrong and what to set" has "$ERR" "(HTTP 403): environments in a private repository need a paid GitHub plan. If your account is on GitHub Free, set PLAN=free in bootstrap/fleet.env and run this again"
+assert_not "the 403's body is not printed" grep -q "BODY-MUST-NOT-BE-PRINTED" "$OUT" "$ERR"
 export GH_STUB_PLAN=paid
 run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
 assert_eq "create-environments (paid) exits 0" "$rc" 0
@@ -565,6 +609,75 @@ n=$(log_lines "$GH_LOG")
 run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
 assert_eq "create-environments second run makes no write calls" "$(since "$n")" 0
 assert "create-environments second run says nothing to change" has "$OUT" "Nothing to change"
+# EVALS_REPO and ARTICLE_WATCH_FEED_URL on _agent-guidance, the two switches of
+# the base-only track. skills-evals exists here, so EVALS_REPO names it.
+AG='.values["acme-example/_agent-guidance||variable"]'
+assert_eq "EVALS_REPO names skills-evals once it exists" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+assert_eq "the optional article watch starts off (ARTICLE_WATCH_FEED_URL is none)" "$(jqs "$AG.ARTICLE_WATCH_FEED_URL")" none
+assert_eq "the fleet worker's cadence is still set" "$(jqs "$AG.FLEET_WORKER_EVERY_HOURS" | grep -cE '^(3|12|168)$')" 1
+assert_eq "LOOP_WORKER_EVERY_HOURS is set from CLAUDE_PLAN (max20x)" "$(jqs "$AG.LOOP_WORKER_EVERY_HOURS")" 24
+jqset "$AG.LOOP_WORKER_EVERY_HOURS = \"168\""
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify fails a LOOP_WORKER_EVERY_HOURS that differs from the plan's" has "$OUT" "FAIL: acme-example/_agent-guidance variable LOOP_WORKER_EVERY_HOURS is missing or differs from fleet.env"
+n=$(log_lines "$GH_LOG")
+run bash "$B/create-environments.sh" --config "$CFGP" --dry-run; rc=$?
+assert "the dry run prints the LOOP_WORKER_EVERY_HOURS correction" has "$OUT" "would have: set variable LOOP_WORKER_EVERY_HOURS in acme-example/_agent-guidance"
+assert_eq "the dry run writes nothing" "$(since "$n")" 0
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "create-environments corrects LOOP_WORKER_EVERY_HOURS" "$(jqs "$AG.LOOP_WORKER_EVERY_HOURS")" 24
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify passes LOOP_WORKER_EVERY_HOURS" has "$OUT" "PASS: acme-example/_agent-guidance variable LOOP_WORKER_EVERY_HOURS matches fleet.env"
+assert "verify passes EVALS_REPO when it matches whether skills-evals exists" has "$OUT" "PASS: acme-example/_agent-guidance variable EVALS_REPO matches fleet.env"
+assert "verify passes a set ARTICLE_WATCH_FEED_URL" has "$OUT" "PASS: acme-example/_agent-guidance variable ARTICLE_WATCH_FEED_URL is set"
+jqset "del($AG.EVALS_REPO)"
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify fails a missing EVALS_REPO" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be acme-example/skills-evals"
+jqset "$AG.EVALS_REPO = \"none\""
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify fails EVALS_REPO=none while skills-evals exists" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be acme-example/skills-evals (skills-evals exists)"
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "create-environments flips EVALS_REPO once skills-evals exists" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+# Adding evals never undoes a base step: between creating skills-evals (step
+# 35) and the flip (step 37) EVALS_REPO is still none, which the base track
+# accepts; the evals track and --track all want the exact value.
+for v in none acme-example/skills-evals; do
+  jqset "$AG.EVALS_REPO = \"$v\""
+  run bash "$B/verify.sh" --config "$CFGP" --track base --only variables
+  assert "verify --track base passes EVALS_REPO=$v while skills-evals exists" has "$OUT" "PASS: acme-example/_agent-guidance variable EVALS_REPO is $v"
+  assert_not "verify --track base fails nothing about EVALS_REPO=$v" grep -q "^FAIL: .*variable EVALS_REPO" "$OUT"
+done
+jqset "$AG.EVALS_REPO = \"none\""
+for tr in evals all; do
+  run bash "$B/verify.sh" --config "$CFGP" --track "$tr" --only variables
+  assert "verify --track $tr names the value EVALS_REPO should have" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be acme-example/skills-evals (skills-evals exists)"
+done
+jqset "$AG.EVALS_REPO = \"acme-example/skills-evals\""
+run bash "$B/verify.sh" --config "$CFGP" --track evals --only variables
+assert "verify --track evals passes the flipped EVALS_REPO" has "$OUT" "PASS: acme-example/_agent-guidance variable EVALS_REPO matches fleet.env"
+for v in other-owner/skills-evals acme-example/other '' ; do
+  if [ -n "$v" ]; then jqset "$AG.EVALS_REPO = \"$v\""; else jqset "del($AG.EVALS_REPO)"; fi
+  run bash "$B/verify.sh" --config "$CFGP" --track base --only variables
+  assert "verify --track base names EVALS_REPO='$v' and what it may be" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO is $([ -n "$v" ] && echo "not none or acme-example/skills-evals" || echo "not set") (run create-environments.sh)"
+done
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "create-environments restores EVALS_REPO" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+# A feed URL the adopter set is theirs: never overwritten, and verify only needs it set.
+jqset "$AG.ARTICLE_WATCH_FEED_URL = \"https://feeds.example.com/articles.xml\""
+n=$(log_lines "$GH_LOG")
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "an adopter-set feed URL is not overwritten" "$(jqs "$AG.ARTICLE_WATCH_FEED_URL")" https://feeds.example.com/articles.xml
+assert_eq "an adopter-set feed URL makes no write call" "$(since "$n")" 0
+assert "an adopter-set feed URL is reported as left alone" has "$OUT" "variable ARTICLE_WATCH_FEED_URL (already set; left alone)"
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify accepts the adopter's feed URL" has "$OUT" "PASS: acme-example/_agent-guidance variable ARTICLE_WATCH_FEED_URL is set"
+jqset "del($AG.ARTICLE_WATCH_FEED_URL)"
+run bash "$B/verify.sh" --config "$CFGP" --only variables
+assert "verify fails an unset ARTICLE_WATCH_FEED_URL with the hint" has "$OUT" "FAIL: acme-example/_agent-guidance variable ARTICLE_WATCH_FEED_URL is not set (create-environments.sh sets it to none)"
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "an unset ARTICLE_WATCH_FEED_URL is set to none" "$(jqs "$AG.ARTICLE_WATCH_FEED_URL")" none
+n=$(log_lines "$GH_LOG")
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "the second run after both changes makes no write calls" "$(since "$n")" 0
 jqset '.envs["acme-example/skills-evals"]["routine-fire"].policies += [{"id": 1, "name": "feature/*", "type": "branch"}]'
 run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
 assert_eq "an extra branch policy fails the run" "$rc" 1
@@ -748,6 +861,11 @@ run bash "$B/copy-starter.sh" --config "$CFGP" --dry-run starter/repo-settings "
 assert_eq "copy-starter dry run exits 0" "$rc" 0
 assert_eq "copy-starter dry run pushes nothing" "$(git --git-dir="$T/remotes/$O/repo-settings.git" for-each-ref | wc -l)" "$before"
 assert_eq "copy-starter dry run opens nothing" "$(since "$n")" 0
+# Before any starter is merged no repo has its actions.lock: step 18's check
+# is not done yet (it once passed vacuously from step 2 on).
+run bash "$B/regenerate.sh" --config "$CFGP" --check actions-lock; rc=$?
+assert_eq "actions-lock --check is not done before the starters are merged" "$rc" 1
+assert "it says which lock is missing and why" has "$OUT" "acme-example/repo-settings has no .github/workflows/actions.lock yet (merge its starter pull request first)"
 for r in "${FLEET[@]}"; do
   t=$(tree_of "$r")
   run bash "$B/copy-starter.sh" --config "$CFGP" "starter/$t" "$O/$r"; rc=$?
@@ -892,6 +1010,31 @@ assert "step 7, the App installations, is next" grep -q '^Next: 7 ' "$OUT"
 assert "status names the section to read" grep -qF 'Read: docs/settings-and-apps.md#installing-the-apps' "$OUT"
 run bash "$B/verify.sh" --config "$CFGP" --only installs:guidance-sync; rc=$?
 assert_eq "verify fails an App that is not installed" "$rc" 1
+# gh's own sign-in (an OAuth token, no GitHub App user token) gets HTTP 403
+# from user/installations, so step 7 is then the user's answer: verify says
+# what to check and which step to mark, and --mark makes it done.
+SB7="$T/state-oauth/adopt.json"; mkdir -p "$T/state-oauth"; cp "$CHOICES" "$T/state-oauth/adopt.content-choices.json"
+INST=installs:guidance-sync,installs:settings-admin,installs:settings-read
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
+assert_eq "verify fails an installation gh's sign-in cannot read" "$rc" 1
+assert "it says to check by hand at settings/installations" has "$OUT" "gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: acme-example-guidance-sync must have access to acme-example/_agent-guidance, "
+assert "it names the step to mark" has "$OUT" "Then: bash bootstrap/status.sh --mark 7"
+assert_not "the 403's body is not printed" grep -q "BODY-MUST-NOT-BE-PRINTED" "$OUT" "$ERR"
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
+assert "with gh's sign-in, step 7 is not done before the answer" grep -qE '^next +7 ' "$OUT"
+run env ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --mark 7; rc=$?
+assert_eq "status --mark 7 is accepted (the installation step takes an answer)" "$rc" 0
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
+assert_eq "verify passes the installations you confirmed" "$rc" 0
+assert "it says they were confirmed by you" has "$OUT" "confirmed by you (status.sh --mark 7); gh's sign-in cannot read installations (HTTP 403)"
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
+assert "with gh's sign-in, step 7 is done once answered" grep -qE '^done +7 ' "$OUT"
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track evals --only installs:guidance-sync; rc=$?
+assert "the evals track's installation step needs its own answer" has "$OUT" "Then: bash bootstrap/status.sh --mark 34"
+run env GH_STUB_INSTALLATIONS_STATUS=401 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
+assert "a 401 says to sign in again" has "$OUT" "HTTP 401: gh's sign-in has expired or was revoked; run gh auth login, then this again"
+run env GH_STUB_INSTALLATIONS_STATUS=502 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
+assert "another status says to retry" has "$OUT" "HTTP 502: GitHub did not answer; check the network and run this again"
 # Install every App where it is needed.
 inst='[]'; i=0
 while IFS='|' read -r app _ installed _ _ _ _ key _; do
@@ -901,6 +1044,19 @@ while IFS='|' read -r app _ installed _ _ _ _ key _; do
   inst=$(jq -c --argjson a "$id" --argjson i "$((70000 + i))" --argjson r "$repos" '. + [{id: $i, app_id: $a, account: {login: "acme-example"}, repos: $r}]' <<<"$inst")
 done < <(bash -c '. "$1/lib/common.sh"; printf "%s\n" "${APPS[@]}"' _ "$B")
 jqset ".installations = $inst"
+# Step 27's check: the Fleet worker's URL and bearer (fleet-worker-fire.yml
+# itself only notes an empty URL as "not set up yet").
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "verify --only fleet-worker fails before step 27" "$rc" 1
+assert "create-environments.sh left the URL none, and verify says step 27 sets it" has "$OUT" "FAIL: acme-example/_agent-guidance variable FLEET_WORKER_FIRE_URL is still none: step 27 creates the Fleet worker routine and sets its fire URL"
+assert_eq "create-environments.sh wrote the Loop worker's URL as none too" "$(jqs "$AG.LOOP_WORKER_FIRE_URL")" none
+assert "it names the missing bearer secret" has "$OUT" "FAIL: acme-example/_agent-guidance has secret FLEET_WORKER_FIRE_BEARER"
+printf 'https://api.example.com/fire' | gh variable set FLEET_WORKER_FIRE_URL --repo "$O/_agent-guidance" >/dev/null 2>&1
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "the URL alone is not enough" "$rc" 1
+printf 'fleet-bearer-placeholder' | gh secret set FLEET_WORKER_FIRE_BEARER --repo "$O/_agent-guidance" >/dev/null 2>&1
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "verify --only fleet-worker passes once both are set" "$rc" 0
 run bash "$B/verify.sh" --config "$CFGP"; rc=$?
 assert_eq "verify passes once everything is in place" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'
@@ -1006,6 +1162,10 @@ assert_eq "regenerate run-health-sha exits 0" "$RC" 0
 ag=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
 for r in repo-settings skills-evals acsi-agentskills wsl-automation; do
   assert "$r calls your _agent-guidance's reusable at its commit" bash -c 'git --git-dir="$1" show main:.github/workflows/scheduled-run-health.yml | grep -qF "scheduled-run-health-reusable.yml@$2"' _ "$T/remotes/$O/$r.git" "$ag"
+  # The schedule arrives with the pin (the starter has none at the placeholder).
+  git --git-dir="$T/remotes/$O/$r.git" show main:.github/workflows/scheduled-run-health.yml > "$T/rh.yml"
+  assert "$r's caller runs daily once pinned" python3 -I -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); on = d.get("on", d.get(True)); sys.exit(0 if [c["cron"] for c in on["schedule"]] == ["47 8 * * *"] and "workflow_dispatch" in on else 1)' "$T/rh.yml"
+  assert_not "$r's caller keeps no schedule marker" grep -q "schedule-starts-with-the-pin" "$T/rh.yml"
 done
 regen_and_merge hook-pin
 assert_eq "regenerate hook-pin exits 0" "$RC" 0
@@ -1092,7 +1252,7 @@ done
 run bash "$B/status.sh" --config "$CFGP" --track base
 assert "status --track base picks the next base step" grep -q '^Next: 9 ' "$OUT"
 run bash "$B/status.sh" --config "$CFGP" --track evals
-assert "status --track evals picks the next evals step" grep -q '^Next: 39 ' "$OUT"
+assert "status --track evals picks the next evals step" grep -q '^Next: 42 ' "$OUT"
 assert "status --track evals says the base is not done" has "$OUT" "The base track is not done yet"
 run bash "$B/status.sh" --config "$CFGP" --track some; rc=$?
 assert_eq "status refuses an unknown track" "$rc" 1
@@ -1294,6 +1454,34 @@ PY
 git -C "$w" commit -qam "fleet.yml without the example repos" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
 export BASE_ENGINE_LOG="$T/base-engine.log" REAL_ENGINE="$K/starter/repo-settings/scripts/repo_settings.py"; : > "$BASE_ENGINE_LOG"
 SB="$T/state-base/adopt.json"; mkdir -p "$T/state-base"; printf '{"installed": []}\n' > "$T/state-base/adopt.content-choices.json"
+# The two variables on _agent-guidance follow skills-evals: it is gone, but
+# EVALS_REPO still names it. The base track accepts either well-formed value
+# (it never looks at skills-evals); --track all wants the exact one until
+# create-environments.sh flips it to none (a base-only run writes nothing that
+# needs skills-evals).
+assert_eq "EVALS_REPO still names the gone skills-evals" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+run bash "$B/verify.sh" --config "$CFGB" --track base --only variables; rc=$?
+assert_eq "verify --track base accepts EVALS_REPO naming skills-evals" "$rc" 0
+run bash "$B/verify.sh" --config "$CFGB" --only variables
+assert "verify --track all fails EVALS_REPO naming a skills-evals that does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none (skills-evals does not exist)"
+run bash "$B/create-environments.sh" --config "$CFGB" --dry-run; rc=$?
+assert_eq "create-environments dry run on a base-only setup exits 0" "$rc" 0
+assert "the dry run prints the EVALS_REPO write" has "$OUT" "would have: set variable EVALS_REPO in acme-example/_agent-guidance"
+assert_eq "the dry run writes nothing" "$(jqs "$AG.EVALS_REPO")" acme-example/skills-evals
+jqset "del($AG.EVALS_REPO, $AG.ARTICLE_WATCH_FEED_URL)"
+run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
+assert_eq "create-environments on a base-only setup exits 0" "$rc" 0
+assert_eq "a base-only setup sets EVALS_REPO to none" "$(jqs "$AG.EVALS_REPO")" none
+assert_eq "a base-only setup sets ARTICLE_WATCH_FEED_URL to none" "$(jqs "$AG.ARTICLE_WATCH_FEED_URL")" none
+n=$(log_lines "$GH_LOG")
+run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
+assert_eq "a second base-only run makes no write calls" "$(since "$n")" 0
+assert "a second base-only run says nothing to change" has "$OUT" "Nothing to change"
+jqset "$AG.EVALS_REPO = \"acme-example/skills-evals\""
+run bash "$B/verify.sh" --config "$CFGB" --only variables
+assert "verify --track all fails EVALS_REPO naming skills-evals when it does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none"
+run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
+assert_eq "EVALS_REPO is none again" "$(jqs "$AG.EVALS_REPO")" none
 read -r -a asks <<<"$(jq -r '[.steps[] | select(.track == "base" and .check.type == "ask" and .check.record == null) | "--mark", .id] | join(" ")' "$B/steps.json")"
 run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" "${asks[@]}"; rc=$?
 assert_eq "the base ask steps are marked" "$rc" 0
@@ -1308,6 +1496,17 @@ run env ADOPT_STATE_FILE="$SB" bash "$B/verify.sh" --config "$CFGB"; rc=$?
 assert_eq "verify of the whole setup passes a base-only setup" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'
 assert "it says the evals track was left out" has "$OUT" "SKIP: acme-example/skills-evals and the evals track's checks"
+# The shipped workflows' "off" branches, run from their parsed YAML.
+run python3 -I "$B/tests/check-workflow-gates.py"; rc=$?
+assert_eq "check-workflow-gates passes on the kit" "$rc" 0
+assert "it ran its 81 assertions" grep -qE '^81 assertions passed, 0 failed$' "$OUT"
+# No base starter workflow reads skills-evals unless EVALS_REPO gates it
+# (parsed YAML); its self-test proves the scan can fail.
+run python3 -I "$B/tests/check-evals-refs.py"; rc=$?
+assert_eq "check-evals-refs passes on the kit" "$rc" 0
+assert "it ran its 8 assertions" grep -qE '^8 assertions passed, 0 failed$' "$OUT"
+run python3 -I "$B/tests/check-evals-refs.py" --self-test; rc=$?
+assert_eq "check-evals-refs finds an ungated checkout and clone" "$rc" 0
 run bash "$B/regenerate.sh" --config "$CFGB" --check run-health-sha; rc=$?
 assert_eq "regenerate --check run-health-sha passes without skills-evals" "$rc" 0
 assert "it says skills-evals is left out" has "$OUT" "skip: acme-example/skills-evals does not exist yet"
@@ -1358,10 +1557,10 @@ kb tests/check-links.py "$T/kit"
 assert "check-links fails on a missing file" has "$OUT" "docs/nope.md does not exist"
 assert "check-links fails on a missing anchor" has "$OUT" "has no heading #no-such-heading"
 mk_kit
-sed -i 's/40 steps (27 base,/41 steps (27 base,/' "$T/kit/docs/before-you-start.md"
+sed -i 's/42 steps (27 base,/43 steps (27 base,/' "$T/kit/docs/before-you-start.md"
 kb tests/check-steps.py "$T/kit"; rc=$?
 assert_eq "check-steps fails on a wrong step count in before-you-start.md" "$rc" 1
-assert "check-steps names the expected counts" has "$OUT" "40 steps (27 base, 13 evals)"
+assert "check-steps names the expected counts" has "$OUT" "42 steps (27 base, 15 evals)"
 mk_kit
 jq '.steps[3].link = "docs/settings-and-apps.md#no-such-heading" | .steps[4].phase = 3 | .steps[5].check.groups = ["rulesets"]' \
   "$K/bootstrap/steps.json" > "$T/kit/bootstrap/steps.json"

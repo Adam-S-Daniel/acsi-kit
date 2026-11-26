@@ -20,8 +20,10 @@
 #     with no desktop session (`gh auth git-credential` and a file-stored
 #     token, not a desktop credential manager);
 #   - the skills-evals repository to clone the miner from (SKILLS_EVALS_URL,
-#     required, no default). Both name your own repositories, so neither has
-#     a fallback: unset, the wrapper exits 2 naming the key;
+#     required, no default; `none` when you have no skills-evals turns the
+#     job off: it logs that it skipped and exits 0). Both name your own
+#     repositories, so neither has a fallback: unset, the wrapper exits 2
+#     naming the key;
 #   - python3 with PyYAML;
 #   - one run by hand with --dry-run. Until one has succeeded, a scheduled run
 #     (no arguments) refuses with exit 3 and mines nothing.
@@ -128,11 +130,19 @@ if [[ -f $config ]]; then
     done <"$config"
 fi
 
+# The miner's code lives in skills-evals: SKILLS_EVALS_URL=none (a setup with
+# no skills-evals, the kit's base track) turns the job off, before anything
+# else is required, so a scheduled run stays green.
+if [[ ${SKILLS_EVALS_URL:-} == none ]]; then
+    finish 0 'session miner: skipped: SKILLS_EVALS_URL is none, so there is no skills-evals to run the miner from'
+fi
 export PRIVACY_DENYLIST_FILE=${PRIVACY_DENYLIST_FILE:-$HOME/.config/privacy-denylist.txt}
 # These two name your own repositories: no fallback, set them explicitly.
-for key in LESSONS_CLONE SKILLS_EVALS_URL; do
+for key in SKILLS_EVALS_URL LESSONS_CLONE; do
     if [[ -z ${!key:-} ]]; then
-        finish 2 "session miner: $key is not set; set it in ~/.config/wsl-automation/settings.env (WSL_AUTOMATION_SETTINGS; see config/settings.env.example) or the environment"
+        hint=''
+        if [[ $key == SKILLS_EVALS_URL ]]; then hint=', or to none if you have no skills-evals repository'; fi
+        finish 2 "session miner: $key is not set; set it in ~/.config/wsl-automation/settings.env (WSL_AUTOMATION_SETTINGS; see config/settings.env.example) or the environment$hint"
     fi
     export "${key?}"
 done

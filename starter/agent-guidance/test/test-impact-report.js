@@ -395,7 +395,10 @@ test("workflow: the publish commits only usage/weekly-ci.json to persistent/eval
   const env = WF.jobs.report.env;
   assert.equal(env.PUBLISH_PATH, "usage/weekly-ci.json");
   assert.equal(env.PUBLISH_BRANCH, "persistent/eval-results");
-  assert.equal(env.PUBLISH_REPO, "example-adopter/skills-evals");
+  assert.equal(env.PUBLISH_REPO, "${{ vars.EVALS_REPO }}");
+  // The first step decides; every later step waits on its output.
+  assert.equal(steps[0].id, "gate");
+  for (const s of steps.slice(1)) assert.equal(s.if, "steps.gate.outputs.publish == 'true'", `${s.name || s.uses} is not gated`);
   const publish = steps.find((s) => s.name === "Publish usage/weekly-ci.json");
   const adds = publish.run.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("git add"));
   assert.deepEqual(adds, ['git add -- "$PUBLISH_PATH"']);

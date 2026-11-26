@@ -459,6 +459,501 @@ edits:
       weekday and hours and that a zone is present, not which one.
 
 
+  # ---- Base-only track (DECISIONS "Base-only track runs green"): EVALS_REPO and
+  # ARTICLE_WATCH_FEED_URL turn the eval-dependent and optional workflows off.
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |
+      #   LOOP_WORKER_FIRE_URL and LOOP_WORKER_FIRE_BEARER.
+    new: |
+      #   LOOP_WORKER_FIRE_URL and LOOP_WORKER_FIRE_BEARER.
+      # * EVALS_REPO (a repository variable, no default) says whether there is an
+      #   eval loop for the Loop worker to serve: `none`, or <owner>/skills-evals.
+      #   `none` skips the Loop worker's fire with a notice, before the cadence and
+      #   missing-value checks, so a setup without the eval repository stays green.
+      #   Unset or empty fails the Loop worker's fire naming it. The pace hold below
+      #   reads the repository it names. The Fleet worker ignores it.
+    why: 'kit departure: base-only track; source follow-up proposed. The Loop worker''s fire is red without a skills-evals repository, so a variable says whether one exists.'
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |2
+                FIRE_TEXT: ${{ matrix.text }}
+              run: |
+    new: |2
+                FIRE_TEXT: ${{ matrix.text }}
+                EVALS_REPO: ${{ vars.EVALS_REPO }}
+              run: |
+    why: 'kit departure: base-only track; source follow-up proposed. EVALS_REPO reaches the step through env, never interpolated into run.'
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |2
+                  *) echo "::error::unknown worker: $WORKER"; exit 1 ;;
+                esac
+    new: |2
+                  *) echo "::error::unknown worker: $WORKER"; exit 1 ;;
+                esac
+                if [[ "$WORKER" == loop ]]; then
+                  case "${EVALS_REPO:-}" in
+                    none)
+                      echo "::notice::skipped: EVALS_REPO is none, so there is no eval loop for the Loop worker to serve"
+                      exit 0 ;;
+                    "")
+                      echo "::error::not configured: variable EVALS_REPO. It has no default; set it in this repository's Actions settings to none (no eval loop) or to <owner>/skills-evals. bootstrap/create-environments.sh sets it."
+                      exit 1 ;;
+                  esac
+                  if [[ ! "$EVALS_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+                    echo "::error::variable EVALS_REPO must be none or <owner>/skills-evals"
+                    exit 1
+                  fi
+                fi
+    why: 'kit departure: base-only track; source follow-up proposed. The Loop worker''s fire, and only it, stops before the cadence and missing-value checks when there is no eval loop.'
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |2
+                  src=https://github.com/example-adopter/skills-evals.git
+    new: |2
+                  src="https://github.com/$EVALS_REPO.git"
+    why: 'kit departure: base-only track; source follow-up proposed. The pace hold reads the repository EVALS_REPO names, so the repository is set in one place.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |
+      # A failed run is caught by scheduled-run-health.yml, like every cron here.
+    new: |
+      # A failed run is caught by scheduled-run-health.yml, like every cron here.
+      #
+      # The repository variable EVALS_REPO (no default) is `none` for a setup without
+      # the eval repository, or <owner>/skills-evals. The first step decides; with
+      # `none` every later step is skipped and the run still succeeds, so
+      # scheduled-run-health.yml sees a green run, not a skipped one. Unset fails
+      # naming it.
+    why: 'kit departure: base-only track; source follow-up proposed. This workflow only publishes to skills-evals; without that repository the daily run was red.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |2
+            PUBLISH_REPO: example-adopter/skills-evals
+    new: |2
+            PUBLISH_REPO: ${{ vars.EVALS_REPO }}
+    why: 'kit departure: base-only track; source follow-up proposed. The publish target is the variable''s value, set in one place.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |2
+          steps:
+            - uses: actions/checkout@v7.0.1
+              with:
+    new: |2
+          steps:
+            - name: Decide whether there is an eval repository to publish to
+              id: gate
+              env:
+                EVALS_REPO: ${{ vars.EVALS_REPO }}
+              run: |
+                set -euo pipefail
+                case "${EVALS_REPO:-}" in
+                  none)
+                    echo "::notice::skipped: EVALS_REPO is none, so there is no skills-evals repository to publish the impact report to"
+                    echo "publish=false" >> "$GITHUB_OUTPUT" ;;
+                  "")
+                    echo "::error::not configured: variable EVALS_REPO. It has no default; set it in this repository's Actions settings to none (no eval loop) or to <owner>/skills-evals. bootstrap/create-environments.sh sets it."
+                    exit 1 ;;
+                  *)
+                    if [[ ! "$EVALS_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+                      echo "::error::variable EVALS_REPO must be none or <owner>/skills-evals"
+                      exit 1
+                    fi
+                    echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+                esac
+
+            - uses: actions/checkout@v7.0.1
+              if: steps.gate.outputs.publish == 'true'
+              with:
+    why: 'kit departure: base-only track; source follow-up proposed. The gate is the first step; the checkout and every later step wait on its output.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |2
+            - uses: actions/setup-node@v7.1.0
+              with:
+    new: |2
+            - uses: actions/setup-node@v7.1.0
+              if: steps.gate.outputs.publish == 'true'
+              with:
+    why: 'kit departure: base-only track; source follow-up proposed. Gated on the first step''s output.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |2
+              id: token_example_adopter
+    new: |2
+              id: token_example_adopter
+              if: steps.gate.outputs.publish == 'true'
+    why: 'kit departure: base-only track; source follow-up proposed. Gated on the first step''s output.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |2
+              id: token_example_adopter_two
+    new: |2
+              id: token_example_adopter_two
+              if: steps.gate.outputs.publish == 'true'
+    why: 'kit departure: base-only track; source follow-up proposed. Gated on the first step''s output.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |2
+              id: token_publish
+    new: |2
+              id: token_publish
+              if: steps.gate.outputs.publish == 'true'
+    why: 'kit departure: base-only track; source follow-up proposed. Gated on the first step''s output.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |2
+            - name: Clone the results branch
+    new: |2
+            - name: Clone the results branch
+              if: steps.gate.outputs.publish == 'true'
+    why: 'kit departure: base-only track; source follow-up proposed. Gated on the first step''s output.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |2
+            - name: Measure the fleet
+    new: |2
+            - name: Measure the fleet
+              if: steps.gate.outputs.publish == 'true'
+    why: 'kit departure: base-only track; source follow-up proposed. Gated on the first step''s output.'
+  - path: .github/workflows/impact-report.yml
+    stage: output
+    old: |2
+            - name: Publish usage/weekly-ci.json
+    new: |2
+            - name: Publish usage/weekly-ci.json
+              if: steps.gate.outputs.publish == 'true'
+    why: 'kit departure: base-only track; source follow-up proposed. Gated on the first step''s output.'
+  - path: .github/workflows/article-watch.yml
+    stage: output
+    old: |
+      # * No `uses:` step, so actions.lock lists this file with no actions. The
+      #   script is read at this run's own commit.
+    new: |
+      # * ARTICLE_WATCH_FEED_URL set to `none` turns the watch off: the run exits 0
+      #   with a notice before anything else. Unset still fails naming it.
+      # * No `uses:` step, so actions.lock lists this file with no actions. The
+      #   script is read at this run's own commit.
+    why: 'kit departure: base-only track; source follow-up proposed. The watch is an optional feature, so an explicit none turns it off without a red hourly run.'
+  - path: .github/workflows/article-watch.yml
+    stage: output
+    old: |2
+                if [[ -z "$FEED_URL" ]]; then
+                  echo "::error::repository variable ARTICLE_WATCH_FEED_URL is not set; set it to the feed's URL"
+                  exit 1
+                fi
+    new: |2
+                if [[ "$FEED_URL" == none ]]; then
+                  echo "::notice::skipped: ARTICLE_WATCH_FEED_URL is none, so the article watch is off"
+                  exit 0
+                fi
+                if [[ -z "$FEED_URL" ]]; then
+                  echo "::error::repository variable ARTICLE_WATCH_FEED_URL is not set; set it to the feed's URL, or to none to turn the watch off"
+                  exit 1
+                fi
+    why: 'kit departure: base-only track; source follow-up proposed. An explicit none skips the run before the missing-value check.'
+  - path: test/test-fleet-worker-fire.js
+    stage: output
+    old: |2-
+          FIRE_TEXT: '${{ matrix.text }}',
+        });
+    new: |2-
+          FIRE_TEXT: '${{ matrix.text }}',
+          EVALS_REPO: '${{ vars.EVALS_REPO }}',
+        });
+    why: 'kit departure: base-only track; source follow-up proposed. The step''s env now carries EVALS_REPO.'
+  - path: test/test-fleet-worker-fire.js
+    stage: output
+    old: function stepEnv(role, { url, bearer, every }) {
+    new: function stepEnv(role, { url, bearer, every, evals }) {
+    why: 'kit departure: base-only track; source follow-up proposed. stepEnv resolves EVALS_REPO.'
+  - path: test/test-fleet-worker-fire.js
+    stage: output
+    old: '    if (named) out[name] = named[1]'
+    new: |2-
+          if (expr === '${{ vars.EVALS_REPO }}') out[name] = evals;
+          else if (named) out[name] = named[1]
+    why: 'kit departure: base-only track; source follow-up proposed. stepEnv resolves EVALS_REPO.'
+  - path: test/test-fleet-worker-fire.js
+    stage: output
+    old: '  hold = ''pace_hold=false'', gitStatus = 0 } = {}) {'
+    new: '  hold = ''pace_hold=false'', gitStatus = 0, evals = ''example-adopter/skills-evals'' } = {}) {'
+    why: 'kit departure: base-only track; source follow-up proposed. runFire takes EVALS_REPO, defaulting to an eval loop that exists.'
+  - path: test/test-fleet-worker-fire.js
+    stage: output
+    old: '...stepEnv(role, { url, bearer, every })'
+    new: '...stepEnv(role, { url, bearer, every, evals })'
+    why: 'kit departure: base-only track; source follow-up proposed. runFire takes EVALS_REPO.'
+  - path: test/test-fleet-worker-fire.js
+    stage: output
+    old: test('a scheduled loop fire is skipped while skills-evals reports the pace hold', () => {
+    new: |-
+      test('EVALS_REPO none skips the loop worker before any other check, and fires and clones nothing', () => {
+        for (const extra of [{}, { every: '' }, { event: 'workflow_dispatch' }, { url: '', bearer: '' }]) {
+          const { result, curl, git } = runFire({ role: 'loop', evals: 'none', ...extra });
+          assert.equal(result.status, 0, result.stdout + result.stderr);
+          assert.ok(result.stdout.includes('::notice::skipped: EVALS_REPO is none, so there is no eval loop for the Loop worker to serve'), result.stdout);
+          assert.equal(curl.length, 0, 'nothing fires');
+          assert.equal(git.length, 0, 'nothing is cloned');
+        }
+      });
+
+      test('an unset, empty or malformed EVALS_REPO fails the loop worker naming it, and the fleet worker ignores it', () => {
+        for (const evals of ['', 'not-a-repo']) {
+          const { result, curl } = runFire({ role: 'loop', evals });
+          assert.equal(result.status, 1);
+          assert.ok(result.stdout.includes('EVALS_REPO'), result.stdout);
+          if (evals === '') assert.ok(result.stdout.includes('none') && result.stdout.includes('skills-evals'), result.stdout);
+          assert.equal(curl.length, 0);
+        }
+        for (const evals of ['', 'none']) {
+          const { result, curl } = runFire({ role: 'fleet', evals });
+          assert.equal(result.status, 0, result.stdout + result.stderr);
+          assert.equal(curl.length, 1, 'the fleet worker still fires');
+        }
+      });
+
+      test('a scheduled loop fire is skipped while skills-evals reports the pace hold', () => {
+    why: 'kit departure: base-only track; source follow-up proposed. Covers the new EVALS_REPO branches.'
+  - path: test/run-tests.sh
+    stage: output
+    old: |-
+      "$pass_n" == "18" && "$fail_n" == "0" ]]; then
+              pass "fleet worker fire workflow: 18 passed"
+          else
+              fail "fleet worker fire workflow: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=18, fail=0)
+    new: |-
+      "$pass_n" == "21" && "$fail_n" == "0" ]]; then
+              pass "fleet worker fire workflow: 21 passed"
+          else
+              fail "fleet worker fire workflow: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=21, fail=0)
+    why: 'kit departure: base-only track; source follow-up proposed. Three tests added.'
+  - path: test/test-impact-report.js
+    stage: output
+    old: |2
+        assert.equal(env.PUBLISH_REPO, "example-adopter/skills-evals");
+    new: |2
+        assert.equal(env.PUBLISH_REPO, "${{ vars.EVALS_REPO }}");
+        // The first step decides; every later step waits on its output.
+        assert.equal(steps[0].id, "gate");
+        for (const s of steps.slice(1)) assert.equal(s.if, "steps.gate.outputs.publish == 'true'", `${s.name || s.uses} is not gated`);
+    why: 'kit departure: base-only track; source follow-up proposed. The publish target comes from EVALS_REPO and every step after the gate waits on it.'
+
+  # ---- Base-only track, review fix (DECISIONS "Base-only track runs green"):
+  # ci.yml's `checks` job feeds the required `test`, and read skills-evals
+  # with no condition.
+  - path: .github/workflows/ci.yml
+    stage: output
+    old: |2
+            - name: Check out skills-evals (read-only, for fixture existence)
+              uses: actions/checkout@v7.0.1
+              with:
+                repository: example-adopter/skills-evals
+                path: skills-evals
+                persist-credentials: false
+
+            - name: Section manifest covers every guidance heading
+              run: node scripts/check-guidance-coverage.js --skills-evals skills-evals --check-bytes
+    new: |2
+            #
+            # EVALS_REPO (a repository variable, no default) says whether there is
+            # a skills-evals to read: `none` skips the checkout and both reads of
+            # it below, each with a notice naming what it did not check; unset
+            # fails here naming it. This job feeds the required `test`, so it
+            # still reports success without the repository.
+            - name: Decide whether there is an eval repository to read
+              id: evals
+              env:
+                EVALS_REPO: ${{ vars.EVALS_REPO }}
+              run: |
+                set -euo pipefail
+                case "${EVALS_REPO:-}" in
+                  none)
+                    echo "::notice::EVALS_REPO is none, so there is no skills-evals: its fixture paths and eval results are not read below"
+                    echo "on=false" >> "$GITHUB_OUTPUT" ;;
+                  "")
+                    echo "::error::not configured: variable EVALS_REPO. It has no default; set it in this repository's Actions settings to none (no eval loop) or to <owner>/skills-evals. bootstrap/create-environments.sh sets it."
+                    exit 1 ;;
+                  *)
+                    if [[ ! "$EVALS_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+                      echo "::error::variable EVALS_REPO must be none or <owner>/skills-evals"
+                      exit 1
+                    fi
+                    echo "on=true" >> "$GITHUB_OUTPUT" ;;
+                esac
+
+            - name: Check out skills-evals (read-only, for fixture existence)
+              if: steps.evals.outputs.on == 'true'
+              uses: actions/checkout@v7.0.1
+              with:
+                repository: ${{ vars.EVALS_REPO }}
+                path: skills-evals
+                persist-credentials: false
+
+            - name: Section manifest covers every guidance heading
+              env:
+                EVALS_ON: ${{ steps.evals.outputs.on }}
+              run: |
+                set -euo pipefail
+                if [[ "$EVALS_ON" == true ]]; then
+                  node scripts/check-guidance-coverage.js --skills-evals skills-evals --check-bytes
+                else
+                  echo "::notice::not checked: that each covered row's fixture exists (EVALS_REPO is none, so there is no skills-evals to look in); every other part of the manifest is"
+                  node scripts/check-guidance-coverage.js --check-bytes
+                fi
+    why: 'kit departure: base-only track; source follow-up proposed. The checks job feeds the required test, and its unconditional checkout of skills-evals failed every pull request and push of a setup without that repository, so EVALS_REPO gates the checkout and the fixture-path check.'
+  - path: .github/workflows/ci.yml
+    stage: output
+    old: |2
+              env:
+                GH_TOKEN: ${{ github.token }}
+              run: |
+                set -euo pipefail
+                d="$RUNNER_TEMP/eval-protected"
+                mkdir -p "$d"
+                n="$(jq -r .pull_request.number "$GITHUB_EVENT_PATH")"
+                head="$(jq -r .pull_request.head.sha "$GITHUB_EVENT_PATH")"
+                gh api "repos/$GITHUB_REPOSITORY/pulls/$n" > "$d/pr.json"
+                gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/files?per_page=100" \
+                  | jq 'add // []' > "$d/files.json"
+                git show "$head:agents-md/base.md" > "$d/base.md"
+                curl -fsSL --retry 3 -o "$d/explorer.json" \
+                  https://raw.githubusercontent.com/example-adopter/skills-evals/persistent/eval-results/explorer/latest.json \
+                  || rm -f "$d/explorer.json"
+                node scripts/eval-protected.js ci --repo "$GITHUB_REPOSITORY" \
+                  --pr-json "$d/pr.json" --files "$d/files.json" --base-md "$d/base.md" \
+                  --explorer "$d/explorer.json"
+    new: |2
+              env:
+                GH_TOKEN: ${{ github.token }}
+                EVALS_ON: ${{ steps.evals.outputs.on }}
+                EVALS_REPO: ${{ vars.EVALS_REPO }}
+              run: |
+                set -euo pipefail
+                d="$RUNNER_TEMP/eval-protected"
+                mkdir -p "$d"
+                n="$(jq -r .pull_request.number "$GITHUB_EVENT_PATH")"
+                head="$(jq -r .pull_request.head.sha "$GITHUB_EVENT_PATH")"
+                gh api "repos/$GITHUB_REPOSITORY/pulls/$n" > "$d/pr.json"
+                gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$n/files?per_page=100" \
+                  | jq 'add // []' > "$d/files.json"
+                git show "$head:agents-md/base.md" > "$d/base.md"
+                if [[ "$EVALS_ON" != true ]]; then
+                  # No eval loop, so no eval results: nothing is protected.
+                  echo "::notice::not checked: eval protection of guidance sections (EVALS_REPO is none, so there are no eval results to protect)"
+                  node scripts/eval-protected.js ci --repo "$GITHUB_REPOSITORY" \
+                    --pr-json "$d/pr.json" --files "$d/files.json" --base-md "$d/base.md" \
+                    --no-evidence
+                  exit 0
+                fi
+                curl -fsSL --retry 3 -o "$d/explorer.json" \
+                  "https://raw.githubusercontent.com/$EVALS_REPO/persistent/eval-results/explorer/latest.json" \
+                  || rm -f "$d/explorer.json"
+                node scripts/eval-protected.js ci --repo "$GITHUB_REPOSITORY" \
+                  --pr-json "$d/pr.json" --files "$d/files.json" --base-md "$d/base.md" \
+                  --explorer "$d/explorer.json"
+    why: 'kit departure: base-only track; source follow-up proposed. Without skills-evals the explorer can never be fetched, so a pull request that touched a guidance section failed closed; with EVALS_REPO none the gate runs with --no-evidence (nothing is protected) and says so, and otherwise reads the explorer from the repository EVALS_REPO names.'
+
+  # ---- Base-only track, review fix: a worker's fire URL before its step.
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |
+      #   Unset or empty fails the Loop worker's fire naming it. The pace hold below
+      #   reads the repository it names. The Fleet worker ignores it.
+    new: |
+      #   Unset or empty fails the Loop worker's fire naming it. The pace hold below
+      #   reads the repository it names. The Fleet worker ignores it.
+      # * A fire URL of `none` means that task is not set up yet: its fire exits 0
+      #   with a notice naming the variable and the kit step that sets it, after
+      #   the cadence check. bootstrap/create-environments.sh writes `none` only
+      #   while the variable is not set at all, and the step that creates the
+      #   routine overwrites it. An empty URL (never set, or deleted) still fails.
+    why: 'kit departure: base-only track. The Fleet worker leg failed on its slot from the _agent-guidance merge (step 10) until step 27 set its URL (its routine needs step 23 first), and the Loop worker leg could fail the same way between an EVALS_REPO flip and step 41.'
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |2
+                missing=()
+                [[ -n "$FIRE_URL" ]] || missing+=("variable $URL_VAR")
+    new: |2
+                if [[ "$FIRE_URL" == none ]]; then
+                  if [[ "$WORKER" == fleet ]]; then setup_step=27; else setup_step=41; fi
+                  echo "::notice::not set up yet: variable $URL_VAR is none, so the $WORKER worker was not fired. Step $setup_step of the kit's quick start creates its routine and sets $URL_VAR and $BEARER_VAR."
+                  exit 0
+                fi
+                missing=()
+                [[ -n "$FIRE_URL" ]] || missing+=("variable $URL_VAR")
+    why: 'kit departure: base-only track. An explicit none (written by create-environments.sh until the routine exists) skips the fire with a notice; the source has no such value. Empty still fails naming the variable, so a URL deleted after setup stays red.'
+  - path: test/test-fleet-worker-fire.js
+    stage: output
+    old: test('a failed fire fails the run with the status code only', () => {
+    new: |-
+      test('a fire URL of none is not set up yet for either worker: exit 0, a notice naming the step, nothing fired', () => {
+        for (const [role, extra, name, step] of [['fleet', {}, 'FLEET_WORKER_FIRE_URL', 27],
+          ['loop', { line: '20 6,18 * * *' }, 'LOOP_WORKER_FIRE_URL', 41]]) {
+          for (const bearer of [undefined, '']) {
+            const over = { role, url: 'none', ...extra, ...(bearer === undefined ? {} : { bearer }) };
+            const { result, curl, git } = runFire(over);
+            assert.equal(result.status, 0, JSON.stringify(over) + result.stdout + result.stderr);
+            assert.equal(curl.length, 0);
+            assert.equal(git.length, 0, 'nothing is cloned');
+            assert.ok(result.stdout.includes(`::notice::not set up yet: variable ${name} is none`), result.stdout);
+            assert.ok(result.stdout.includes(`Step ${step} of the kit`), result.stdout);
+          }
+        }
+      });
+
+      test('a failed fire fails the run with the status code only', () => {
+    why: 'kit departure: base-only track. Covers the none branch for both workers; the empty-URL failure stays covered by the source''s own test.'
+
+  # ---- Base-only track, review fix: step 7 is the adopter's answer when gh
+  # cannot read installations, so a missing install must be named where it bites.
+  - path: .github/workflows/drift-report.yml
+    stage: output
+    old: |2
+            - name: Generate drift report
+    new: |2
+            # The kit: quick start step 7 (the App installations) can be marked done
+            # by hand, so a missing installation is named here, with what to do.
+            - name: Name a missing App installation
+              env:
+                GH_TOKEN_EXAMPLE_ADOPTER: ${{ steps.token_example_adopter.outputs.token }}
+                GH_TOKEN_EXAMPLE_ADOPTER_TWO: ${{ steps.token_example_adopter_two.outputs.token }}
+                SYNC_OWNERS: "example-adopter example-adopter-two"
+              run: |
+                for owner in $SYNC_OWNERS; do
+                  key="GH_TOKEN_$(tr 'a-z-' 'A-Z_' <<<"$owner")"
+                  if [[ -z "${!key:-}" ]]; then
+                    echo "::warning::No installation token for $owner, so this report reads only its public repos: is the guidance-sync App installed there? Check https://github.com/settings/installations. If the kit's quick start step 7 was marked done by hand, run bash bootstrap/status.sh --unmark 7 and install it."
+                  fi
+                done
+
+            - name: Generate drift report
+    why: 'kit departure: base-only track. Step 7 can now be marked by hand (gh''s sign-in cannot read installations), so the runs that mint from the App name a missing installation and how to undo the mark.'
+  - path: .github/workflows/dependabot-config-health.yml
+    stage: output
+    old: |2
+            # NO plain GH_TOKEN / github.token fallback: the default token cannot
+    new: |2
+            # The kit: quick start step 7 (the App installations) can be marked done
+            # by hand, so a missing installation is named here, with what to do.
+            - name: Name a missing App installation
+              env:
+                GH_TOKEN_EXAMPLE_ADOPTER: ${{ steps.token_example_adopter.outputs.token }}
+                GH_TOKEN_EXAMPLE_ADOPTER_TWO: ${{ steps.token_example_adopter_two.outputs.token }}
+                SYNC_OWNERS: "example-adopter example-adopter-two"
+              run: |
+                for owner in $SYNC_OWNERS; do
+                  key="GH_TOKEN_$(tr 'a-z-' 'A-Z_' <<<"$owner")"
+                  if [[ -z "${!key:-}" ]]; then
+                    echo "::error::No installation token for $owner: is the guidance-sync App installed there? Check https://github.com/settings/installations. If the kit's quick start step 7 was marked done by hand, run bash bootstrap/status.sh --unmark 7 and install it."
+                  fi
+                done
+
+            # NO plain GH_TOKEN / github.token fallback: the default token cannot
+    why: 'kit departure: base-only track. Step 7 can now be marked by hand, so a missing installation is named with how to undo the mark; the sweep still fails on its own (--require-owner-tokens).'
+
+
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).
   - path: test/test-base-md-merge-window.js

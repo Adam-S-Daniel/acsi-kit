@@ -75,6 +75,21 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: example-adopter-two
 
+      # The kit: quick start step 7 (the App installations) can be marked done
+      # by hand, so a missing installation is named here, with what to do.
+      - name: Name a missing App installation
+        env:
+          GH_TOKEN_EXAMPLE_ADOPTER: ${{ steps.token_example_adopter.outputs.token }}
+          GH_TOKEN_EXAMPLE_ADOPTER_TWO: ${{ steps.token_example_adopter_two.outputs.token }}
+          SYNC_OWNERS: "example-adopter example-adopter-two"
+        run: |
+          for owner in $SYNC_OWNERS; do
+            key="GH_TOKEN_$(tr 'a-z-' 'A-Z_' <<<"$owner")"
+            if [[ -z "${!key:-}" ]]; then
+              echo "::warning::No installation token for $owner, so this report reads only its public repos: is the guidance-sync App installed there? Check https://github.com/settings/installations. If the kit's quick start step 7 was marked done by hand, run bash bootstrap/status.sh --unmark 7 and install it."
+            fi
+          done
+
       - name: Generate drift report
         env:
           # Base fallback: github.token can still read this repo's owner's

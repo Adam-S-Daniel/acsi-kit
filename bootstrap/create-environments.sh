@@ -20,7 +20,14 @@
 # as ruleset bypass actors (export/DECISIONS.md C12), and skills-evals' four
 # ANTHROPIC_* federation ids eval.yml's token exchange reads, and its
 # SITE_REPO, which the site workflows require (none: no website), and
-# _agent-guidance's FLEET_WORKER_EVERY_HOURS, from CLAUDE_PLAN (168, 12 or 3). A key that is
+# _agent-guidance's FLEET_WORKER_EVERY_HOURS, from CLAUDE_PLAN (168, 12 or 3), its
+# LOOP_WORKER_EVERY_HOURS, from CLAUDE_PLAN (168 on Pro, else 24),
+# its EVALS_REPO (none while skills-evals does not exist, <owner>/skills-evals
+# once it does, which flips on the evals track's run of this script;
+# fleet-worker-fire.yml and impact-report.yml read it) and its
+# ARTICLE_WATCH_FEED_URL (none, which turns the optional hourly article watch
+# off, only while the variable is not set at all: a feed URL you set is never
+# overwritten). A key that is
 # still empty in fleet.env is left alone, so run this again after
 # create-apps.sh, and after filling in the federation ids.
 #
@@ -86,9 +93,18 @@ ensure_env() { # repo env reviewer branches
   else
     die "could not read $O/$r (HTTP $GH_HTTP); run create-repos.sh first"
   fi
+  # PLAN=paid on an account that is on GitHub Free: GitHub refuses
+  # environments in a private repo with a 403 that says nothing more.
+  # local: bash scopes it to this call and what it calls (gh_write_api), so
+  # a 403 elsewhere in the run never gets this hint.
+  local GH_403_HINT=""
+  if [ "$(repo_visibility "$r")" = private ]; then
+    GH_403_HINT="environments in a private repository need a paid GitHub plan. If your account is on GitHub Free, set PLAN=free in bootstrap/fleet.env and run this again (it then skips $e; docs/settings-and-apps.md#environments)"
+  fi
   if gh_read "repos/$O/$r/environments/$e"; then
     cur=$GH_OUT
   else
+    if [ "$GH_HTTP" = 403 ] && [ -n "$GH_403_HINT" ]; then die "could not read environment $e in $O/$r (HTTP 403): $GH_403_HINT"; fi
     [ "$GH_HTTP" = 404 ] || die "could not read environment $e in $O/$r (HTTP $GH_HTTP)"
     cur='{}'; fresh=1
   fi
@@ -145,7 +161,7 @@ for entry in "${ENVIRONMENTS[@]}"; do
 done
 declare -A HAVE_VARS
 ensure_repo_variable() { # repo name source group
-  local r=$1 name=$2 src=$3 group=$4 want hint
+  local r=$1 name=$2 src=$3 group=$4 want hint set_names
   hint=$(variable_empty_hint "$name" "$group")
   [[ $src == cfg:*_APP_ID ]] && [ "$(variable_track "$r" "$src")" != base ] && hint="the evals track's App; /adopt-evals creates it"
   absent_evals_repo "$r" "variable $name" && return 0
@@ -158,7 +174,13 @@ ensure_repo_variable() { # repo name source group
     elif [ "$GH_HTTP" = 404 ] && [ "$DRY_RUN" = 1 ]; then HAVE_VARS[$r]=""
     else die "could not list the variables of $O/$r (HTTP $GH_HTTP); run create-repos.sh first"; fi
   fi
-  if grep -qxF -- "$name"$'\t'"$want" <<<"${HAVE_VARS[$r]}"; then
+  if [[ $src == unset:* ]]; then
+    # Written only while the variable is not set at all, so a value the adopter set stays.
+    set_names=$(cut -f1 <<<"${HAVE_VARS[$r]}")
+    if grep -qxF -- "$name" <<<"$set_names"; then
+      skip "$O/$r variable $name (already set; left alone)"; return 0
+    fi
+  elif grep -qxF -- "$name"$'\t'"$want" <<<"${HAVE_VARS[$r]}"; then
     skip "$O/$r variable $name"; return 0
   fi
   set_value variable "$O/$r" - "$name" < <(printf '%s' "$want")
