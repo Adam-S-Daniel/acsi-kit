@@ -29,7 +29,7 @@ suite_report() {  # suite_report <name>
   local name=$1 rc summary
   rc=$(cat "$logs/$name.rc" 2>/dev/null || echo 1)
   if [ "$rc" = 0 ]; then
-    summary=$(grep -E '^trees: |^[0-9]+ assertions passed|^[0-9]+ passed|^checked: ' "$logs/$name.log" | tail -n 1)
+    summary=$(grep -E '^runs: |^[0-9]+ assertions passed|^[0-9]+ passed|^checked: ' "$logs/$name.log" | tail -n 1)
     echo "PASS $name: ${summary:-exit 0}"
   elif [ "$rc" = 3 ]; then
     echo "SKIP $name: $(tail -n 1 "$logs/$name.log")"
