@@ -370,7 +370,7 @@
     {
       "id": "23",
       "title": "Set up your cloud environments",
-      "run": "At https://claude.ai/code, give each cloud environment the setup script from acsi-agentskills' `docs/multi-repo-delivery.md` and the network allowlist from _agent-guidance's `docs/reference/network-allowlist-claude-environments.txt`",
+      "run": "At https://claude.ai/code, give each cloud environment the setup script from acsi-agentskills' `docs/multi-repo-delivery.md`, and network access **Limited** with **Allow package managers** checked and _agent-guidance's `docs/reference/network-allowlist-claude-environments.txt` as its allowed domains",
       "kind": "browser",
       "part": "machine",
       "track": "base",

@@ -146,6 +146,13 @@ pins, and both ship as placeholders that fail closed:
 script's own test with the new pins and proposes the change. `--check`
 reports each pin on its own line. Skip the step if you do not use Codex.
 
+`_agent-guidance`'s `docs/codex-cloud.md` shows the same guidance pin in a
+block you paste into a Codex Cloud environment by hand. No task edits it: its
+`fleet_pin_commit` ships as forty zeros, which fail closed, and its
+`fleet_pin_sha256` already matches your installer. Before you paste the
+block, set the commit to your `_agent-guidance`'s main commit
+(`git rev-parse origin/main`), as its comment says.
+
 ## The action lockfiles
 
 Every repo pins its actions through `.github/workflows/actions.lock`, with

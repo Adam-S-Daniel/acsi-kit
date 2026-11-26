@@ -78,8 +78,11 @@ and a workflow token that can approve pull requests, which is the only
 exception to the default above. It and `_agent-guidance` also get a
 deletion-only ruleset on `persistent/**`.
 
-**`pull_request_target`.** From 2026-11-02, GitHub blocks that event on public
-repos by default unless an Actions policy allows it. `fleet.yml` allows it
+**`pull_request_target`.** From 2026-12-02 (moved from 2026-11-02, by
+GitHub's
+[changelog](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2)),
+GitHub blocks that event on public repos by default unless an Actions
+policy allows it. `fleet.yml` allows it
 for a single workflow,
 `acsi-agentskills`' `.github/workflows/plugin-runtime-review.yml`, which
 publishes the required `plugin-runtime-approval` check, and the engine

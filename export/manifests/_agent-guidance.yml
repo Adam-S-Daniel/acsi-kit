@@ -1032,6 +1032,106 @@ edits:
       shipped file; they now pass their own bounds file unless a test names one.
 
 
+  # ---- Third pass (DECISIONS "An adopter's own cloud allowlist, zone and Codex pin")
+  - path: docs/reference/network-allowlist-claude-environments.txt
+    stage: output
+    old: |
+      acsi-usage-sink-2026-11.s3.us-east-1.amazonaws.com
+      *.example-site-a
+      example-site-a
+    new: ""
+    why: >-
+      kit departure: the adopter's list. The usage-sink bucket is the source
+      owner's (ADR 0037; the kit's acsi-agentskills-private has no
+      usage-sink stack), and example-site-a is the source owner's website,
+      so neither is a host an adopter's sessions reach.
+  - path: docs/reference/network-allowlist-claude-environments.txt
+    stage: output
+    old: |
+      *.example-site-b
+      example-site-b
+    new: ""
+    why: >-
+      kit departure: the adopter's list. example-site-b is the second source owner's website.
+  - path: docs/reference/network-allowlist-claude-environments.txt
+    stage: output
+    old: |
+      playwright.dev
+      substack.com
+    new: |
+      playwright.dev
+      raw.githubusercontent.com
+      substack.com
+    why: >-
+      kit departure: the adopter's list. acsi-agentskills' cloud setup script
+      (scripts/cloud-env-setup.sh, the one docs/multi-repo-delivery.md wires)
+      downloads the guidance installer from raw.githubusercontent.com. The
+      default allowlist holds it, but this list names what the setup needs so
+      it keeps working with "Allow package managers" cleared, as the source
+      lists api.anthropic.com for the same reason.
+  - path: docs/reference/network-allowlist-claude-environments.CHANGELOG.md
+    stage: output
+    old: |2
+        S3 to every session in the environment. Not yet probed from inside the
+        environment.
+    new: |2
+        S3 to every session in the environment. Not yet probed from inside the
+        environment.
+
+      ---
+
+      ## The adoption kit's starter list
+
+      **Environment:** yours (the kit's docs/machine.md, "Cloud environments")
+      **Change:** the kit ships this list without the hosts only the source owner
+      reaches, and with one the setup script needs:
+
+      ```
+      - acsi-usage-sink-2026-11.s3.us-east-1.amazonaws.com
+      - *.example-site-a, example-site-a, *.example-site-b, example-site-b
+      + raw.githubusercontent.com
+      ```
+
+      - The usage-sink bucket and the two sites are the source owner's; the
+        entries above that add them describe the source owner's environment.
+      - **`raw.githubusercontent.com`**: acsi-agentskills'
+        `scripts/cloud-env-setup.sh` downloads the guidance installer from it.
+        Anthropic's default allowlist holds it too; it is listed so the setup
+        keeps working with **Allow package managers** cleared.
+      - Add your own website's hosts (as a `*.` and apex pair) if a routine or
+        session needs them, with an entry here.
+    why: >-
+      kit departure: the adopter's list. The sidecar is the only place a line's reason can live (network-allowlists.md), so the kit's changes get an entry.
+  - path: docs/routines/memory-curation.md
+    stage: output
+    old: |
+      - **Project task:** weekly, Monday 9:00 AM US Eastern
+        (`CRON_TZ=America/New_York 0 9 * * 1`: 14:00 UTC in winter, 13:00 UTC in
+        summer), fresh session per fire, push
+    new: |
+      - **Project task:** weekly, Monday morning in your own time zone
+        (fleet.env's `TIME_ZONE`; the source owner's is Monday 9:00 AM US
+        Eastern, `CRON_TZ=America/New_York 0 9 * * 1`), fresh session per fire, push
+    why: >-
+      kit departure: the adopter's zone. The source owner's trigger time is US
+      Eastern; an adopter sets the task in their own zone, and time_zone.py
+      writes TIME_ZONE only into files a script reads.
+  - path: docs/codex-cloud.md
+    stage: output
+    old: |
+      # The pin is these two variables and nothing else. To bump it, fetch first,
+      # then take this repository's current main commit and that file's digest:
+    new: |
+      # The pin is these two variables and nothing else. The starter ships the
+      # commit as forty zeros, which fails closed: before you paste this block,
+      # and to bump it later, fetch first, then take this repository's current
+      # main commit and that file's digest:
+    why: >-
+      kit departure: the adopter's pin. The source's fleet_pin_commit is a
+      commit only the source owner's repo has; the regenerate step below
+      writes zeros there and this comment says what to put in its place
+      (fleet_pin_sha256 already follows the kit's hook, acsi-kit#74).
+
 patches:
   - file: kit_only.py
     why: >-
@@ -1106,12 +1206,16 @@ regenerate:
       h=hashlib.sha256(pathlib.Path(".claude/hooks/fleet-memory.sh").read_bytes()).hexdigest();
       p=pathlib.Path("docs/codex-cloud.md"); t=p.read_text();
       n=re.subn(r"(?m)^(fleet_pin_sha256=)[0-9a-f]{64}$", lambda m: m.group(1)+h, t);
-      assert n[1]==1, n[1]; p.write_text(n[0])'
+      assert n[1]==1, n[1];
+      c=re.subn(r"(?m)^(fleet_pin_commit=)[0-9a-f]{40}$", lambda m: m.group(1)+"0"*40, n[0]);
+      assert c[1]==1, c[1]; p.write_text(c[0])'
     why: >-
       Acsi-kit#74. docs/codex-cloud.md pins the sha256 of fleet-memory.sh and
       test_codex_cloud_recipe holds it to the working-tree hook; the kit's hook
       differs from the source's (C2 folds the first owner), so the pin follows
-      the kit's copy. The pinned commit is the source's: REGENERATE.md.
+      the kit's copy. The source's pinned commit is not in the adopter's repo,
+      so it becomes forty zeros, which fail closed (the edit above says what to
+      put there; the test skips a commit not in history).
 # P2 citation spans that are really test data: protecting them would leave
 # the fixture on the source owner while the assertion beside it is
 # substituted. Both files get the plain substitution instead.
