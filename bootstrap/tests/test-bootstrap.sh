@@ -1772,20 +1772,36 @@ assert "it says the name could not be checked, with the status" has "$OUT" "name
 assert_not "and never that neither owner has it" has "$OUT" "wsl-automation, which neither owner has"
 # A list emptied to `repos:` is an empty list; a name that is not a repo name never reaches an API path.
 ag_main=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
-ag_edit() { # <python, given repos.yml's path>: commit that edit to _agent-guidance's main
-  local w="$T/tmp/ag-edit"
+ag_edit() { # <python, given repos.yml's path>: commit that edit to _agent-guidance's main; fails when nothing was pushed
+  local w="$T/tmp/ag-edit" rc=0
   rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/_agent-guidance.git" "$w"
-  python3 -I -c "$1" "$w/repos.yml" && git -C "$w" commit -qam "test edit" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
+  python3 -I -c "$1" "$w/repos.yml" && git -C "$w" commit -qam "test edit" && git -C "$w" push -q origin HEAD:main || rc=1
+  rm -rf "$w"; return "$rc"
 }
-ag_edit 'import re, sys; p = sys.argv[1]; t = open(p).read(); t = re.sub(r"(?m)^  repos:\n(    - \S+\n)+", "  repos:\n", t, count=1); open(p, "w").write(t)'
+ag_repos_yml() { git --git-dir="$T/remotes/$O/_agent-guidance.git" show main:repos.yml; }
+# Every element line of skills_bootstrap.repos goes, found by the parser's
+# position (comment lines sit between the key and its elements).
+ag_edit '
+import sys, yaml
+p = sys.argv[1]; t = open(p).read()
+root = yaml.compose(t)
+key = lambda n, k: next(v for kn, v in n.value if kn.value == k)
+lines = {e.start_mark.line for e in key(key(root, "skills_bootstrap"), "repos").value}
+open(p, "w").write("".join(l for i, l in enumerate(t.splitlines(True)) if i not in lines))'
+assert "the test emptied skills_bootstrap.repos on _agent-guidance's main (a null list)" python3 -I -c '
+import sys, yaml
+doc = yaml.safe_load(sys.stdin)
+sys.exit(0 if doc["skills_bootstrap"]["repos"] is None and doc["cron_coverage"]["fleet"] else 1)' < <(ag_repos_yml)
 run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
 assert_eq "an emptied skills_bootstrap.repos passes" "$rc" 0
 git --git-dir="$T/remotes/$O/_agent-guidance.git" update-ref refs/heads/main "$ag_main"
-ag_edit 'import sys; p = sys.argv[1]; t = open(p).read(); t = t.replace("    - wsl-automation\n", "    - ../wsl-automation\n", 1); open(p, "w").write(t)'
-run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
-assert_eq "a name that is not a repo name fails" "$rc" 1
-assert "it says the list is not one of repo names" has "$OUT" "repos.yml: skills_bootstrap.repos is not a list of repo names"
-git --git-dir="$T/remotes/$O/_agent-guidance.git" update-ref refs/heads/main "$ag_main"
+for bad in ../wsl-automation .. .; do
+  assert "the test wrote $bad into skills_bootstrap.repos" ag_edit "import sys; p = sys.argv[1]; t = open(p).read(); t = t.replace('    - wsl-automation\\n', '    - \"$bad\"\\n', 1); open(p, 'w').write(t)"
+  run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+  assert_eq "a name that is not a repo name ($bad) fails" "$rc" 1
+  assert "it says the list is not one of repo names ($bad)" has "$OUT" "repos.yml: skills_bootstrap.repos is not a list of repo names"
+  git --git-dir="$T/remotes/$O/_agent-guidance.git" update-ref refs/heads/main "$ag_main"
+done
 run bash "$B/verify.sh" --config "$CFGP"; rc=$?
 assert_eq "verify passes once everything is in place" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'

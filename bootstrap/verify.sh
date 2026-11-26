@@ -367,7 +367,8 @@ for key, sub in (("cron_coverage", "fleet"), ("skills_bootstrap", "repos")):
     section = doc.get(key) if isinstance(doc, dict) else None
     names = section.get(sub, []) if isinstance(section, dict) else None
     names = [] if names is None else names        # `repos:` with every name removed
-    if not isinstance(names, list) or not all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,100}", n) for n in names):
+    if not isinstance(names, list) or not all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,100}", n)
+                                              and n not in (".", "..") for n in names):
         sys.exit(f"{key}.{sub} is not a list of repo names")
     for n in names:
         print(f"{key}.{sub}\t{n}")
