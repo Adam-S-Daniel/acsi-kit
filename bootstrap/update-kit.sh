@@ -238,7 +238,7 @@ config_refusal() {
 # since a newer steps.json can renumber) that status.sh no longer counts done,
 # each with its command and, for status.sh's next step, status.sh's reason.
 reopened() {
-  local id title run next n=0
+  local id title run next after n=0
   printf '%s\n' "$DONE_BEFORE" > "$BOOT_WORK/done.before"
   log ""
   log "Checking which setup steps are still done under the newer kit (bootstrap/status.sh, read-only)..."
@@ -247,9 +247,10 @@ reopened() {
     return 0
   fi
   next=$(sed -nE 's/^Next: ([^ ]+) .*/\1/p' "$BOOT_WORK/status.txt" | head -n1)
+  after=$(cut -f2- "$BOOT_WORK/done.after")
   while IFS=$'\t' read -r _ title; do
     [ -n "$title" ] || continue
-    cut -f2- "$BOOT_WORK/done.after" | grep -qxF -- "$title" && continue
+    ! grep -qxF -- "$title" <<<"$after" || continue
     id=$(jq -r --arg t "$title" '[.steps[] | select(.title == $t) | .id][0] // ""' "$B/steps.json")
     [ -n "$id" ] || continue   # the newer kit dropped or renamed that step
     run=$(jq -r --arg t "$title" '[.steps[] | select(.title == $t) | .run][0] // ""' "$B/steps.json")

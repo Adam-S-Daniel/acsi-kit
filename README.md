@@ -124,6 +124,14 @@ that already ran them:
   it in four repos (the registry, `_agent-guidance`, `repo-settings`,
   `wsl-automation`), so a setup that stored it before shows step 3 as not
   done again. Run step 3 again; it skips the repo that already has it.
+- Step 0 (fleet.env): while `TIME_ZONE` is empty and a base step that runs
+  `copy-starter.sh` is still open, step 0 shows as not done again; set
+  `TIME_ZONE` in your `fleet.env` (the update names it as a new key and
+  shows the same reason).
+- Step 35 (creating `skills-evals`, on the evals track): it now also stores
+  the privacy list in `skills-evals`. If you created it before, run
+  `bash bootstrap/set-secrets.sh --only privacy --denylist <the same file>`
+  again; it stores only the copy that is missing.
 - Step 22 (the machine jobs): `~/.config/wsl-automation/settings.env` now
   needs `WSL_AUTOMATION_AGENT_OWNER_ROOTS`, the folder that holds your clones
   (on Windows, a user environment variable of that name instead;
