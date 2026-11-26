@@ -92,6 +92,12 @@ q() { printf '%q' "$1"; }
 CONFIG_ARG=$(config_arg)
 # TODO: the "Do this now" lines rest() prints before its "Next:" line.
 TODO=()
+# abs_config_arg: " --config <absolute path>" for a command run from another
+# folder (a fresh clone), when the config exists; fleet.env stays where it is.
+abs_config_arg() {
+  [ -f "$CONFIG" ] || { printf '%s' "$CONFIG_ARG"; return 0; }
+  printf ' --config %q' "$(cd "$(dirname "$CONFIG")" && pwd -P)/$(basename "$CONFIG")"
+}
 # next_cmd: how to run the update again from where the kit is now.
 next_cmd() {
   if [ -f "$B/update-kit.sh" ]; then
@@ -416,9 +422,8 @@ top=$(git -C "$KIT" rev-parse --show-toplevel 2>/dev/null) || top=""
 if [ -z "$top" ] || [ "$(cd "$top" && pwd -P)" != "$kit_real" ]; then
   {
     printf 'ERROR: %s is not a git clone of the kit (a downloaded copy, or a folder inside another repository), so it cannot be updated in place.\n' "$KIT"
-    printf 'Instead: clone the kit fresh beside it, copy your fleet.env into the new clone, and run\n'
-    printf '  bash bootstrap/add-content.sh --items <ids>\n'
-    printf 'there again.\n'
+    printf 'Instead: clone the kit fresh beside it, and in the new clone run\n'
+    printf '  bash bootstrap/add-content.sh%s --items <ids>\n' "$(abs_config_arg)"
     if [ -n "$IDS" ]; then printf 'Your recorded content choices: %s\n' "$IDS"; fi
   } >&2
   exit 1

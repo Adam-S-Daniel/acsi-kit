@@ -1624,7 +1624,8 @@ mkdir -p "$UP/dl"; cp -R "$UK/bootstrap" "$UK/starter" "$UK/library" "$UP/dl/"
 uk "$UP/dl" --config "$UK/fleet.env"; rc=$?
 assert_eq "a kit that is not a git clone exits 1" "$rc" 1
 assert "it says it is not a git clone" has "$ERR" "not a git clone"
-assert "it says to clone fresh and re-run add-content.sh" has "$ERR" "bootstrap/add-content.sh --items <ids>"
+assert "it says to clone fresh and re-run add-content.sh, with fleet.env where it is" has "$ERR" "bootstrap/add-content.sh --config $(cd "$UK" && pwd -P)/fleet.env --items <ids>"
+assert_not "it never says to copy fleet.env into the kit" has "$ERR" "copy your fleet.env"
 assert "it prints the recorded ids" has "$ERR" "Your recorded content choices:"
 
 # ======================================================== status.sh (part 1) and verify.sh
