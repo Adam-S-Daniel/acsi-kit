@@ -138,7 +138,21 @@ hosts, and account ids. The list is the repository secret
 without the secret, including on a fork's pull request.
 
 Write the list to a file outside every repo, with one regular expression per
-line, and store it before the `acsi-agentskills` starter pull request:
+line, and store it before the `acsi-agentskills` starter pull request. Each
+line is a Python regular expression, matched in any letter case. Blank lines
+and lines that start with `#` are skipped. A sample, with invented values:
+
+```text
+# names and handles
+example[ ._-]?adopter
+# email domains and machine names
+example\.net
+example-laptop
+```
+
+A plain word is a valid pattern, so start with the literal names and add a
+character class only where the same name is spelled several ways. Escape a
+`.` in a domain (`\.`), or it matches any character.
 
 ```bash
 bash bootstrap/set-secrets.sh --only privacy --denylist ~/private/denylist

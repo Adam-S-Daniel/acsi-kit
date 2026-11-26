@@ -713,6 +713,15 @@ chmod 600 "$T/private/denylist"
 run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate --denylist "$T/private/denylist"; rc=$?
 assert_eq "set-secrets privacy --rotate exits 0" "$rc" 0
 assert_not "a mode 600 denylist is not warned about" has "$ERR" "readable by other users"
+# Asked for the path, the script says what the file holds and where to read more.
+printf '%s\n' "$T/private/denylist" | run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate; rc=$?
+assert_eq "set-secrets takes the denylist path from its prompt" "$rc" 0
+assert "the prompt says the file holds one regular expression per line" has "$ERR" "one regular expression per line"
+assert "the prompt points at docs/skills.md" has "$ERR" 'docs/skills.md, "The privacy check"'
+printf '%s\n' "$T/private/no-such-file" | run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate; rc=$?
+assert_eq "a path that is not a file is refused" "$rc" 1
+assert "the refusal says what to write" has "$ERR" "write one regular expression per line to a file outside every repo"
+assert "the usage text says so too" bash -c 'bash "$1" --help | grep -qF "docs/skills.md, \"The privacy check\""' _ "$B/set-secrets.sh"
 assert_not "the mode check does not use find's GNU-only -perm /mode" grep -qE '^[^#]*find .*-perm /' "$B/set-secrets.sh"
 n=$(log_lines "$GH_LOG")
 run bash "$B/set-secrets.sh" --config "$CFGP" --only routine-fire --dry-run </dev/null; rc=$?
