@@ -23,16 +23,30 @@
 #                  computed it). Refuses when your registry's hook bytes
 #                  differ. Afterwards the nightly skills-lock-bump.yml keeps it
 #                  current with scripts/bump-hook-pin.sh.
-#   run-health-sha the forty-zero placeholder in scheduled-run-health.yml
-#                  (repo-settings, skills-evals, acsi-agentskills, wsl-automation) becomes your
-#                  _agent-guidance default branch's commit: a cross-repo
-#                  reusable workflow takes a full sha. In the base repos' copies
-#                  it also turns the commented schedule line into the daily
-#                  schedule, which the starter leaves off until the pin.
+#   run-health-sha every place the base repos name a commit of the source
+#                  owner's _agent-guidance becomes your _agent-guidance default
+#                  branch's commit. In scheduled-run-health.yml (repo-settings,
+#                  skills-evals, acsi-agentskills, wsl-automation) the
+#                  forty-zero placeholder: a cross-repo reusable workflow takes
+#                  a full sha. In the base repos' copies it also turns the
+#                  commented schedule line into the daily schedule, which the
+#                  starter leaves off until the pin. In acsi-agentskills, in the
+#                  same pull request: scripts/cloud-env-setup.sh's
+#                  fleet_pin_commit (the commit cloud sessions download the
+#                  fleet-guidance installer at; until it is yours they print
+#                  "fleet-guidance: setup skipped") and, in
+#                  .github/workflows/ci.yml, the ref of the step that checks
+#                  out the eval-protection gate (lib/guidance_pins.py).
+#                  Refuses, changing nothing, when .claude/hooks/fleet-memory.sh
+#                  at that commit does not have the sha256 cloud-env-setup.sh
+#                  records (fleet_pin_sha256, which it never writes).
 #   codex-pin      wsl-automation scripts/sync-codex-cloud-environments.sh:
 #                  bootstrap_revision and bootstrap_sha256 become your
-#                  acsi-agentskills HEAD and its hook's digest, then the script's
-#                  own test (tests/sync-codex-cloud-environments.test.sh) runs.
+#                  acsi-agentskills HEAD and its hook's digest, and
+#                  fleet_pin_commit and fleet_pin_sha256 your _agent-guidance
+#                  HEAD and the digest of its .claude/hooks/fleet-memory.sh;
+#                  then the script's own test
+#                  (tests/sync-codex-cloud-environments.test.sh) runs.
 #   actions-lock   `gh actions-lock --no-narrow` in each repo that has
 #                  .github/workflows/actions.lock, proposing any change;
 #                  --check runs `gh actions-lock --verify`. Needs the gh
@@ -55,8 +69,8 @@
 # Each task needs the starter pull requests of the repos it reads merged.
 # Idempotent: a repo already current gets no commit and no pull request.
 # Pushes only to regenerate/<task>, never with force, and checks the commit
-# reached it (lib/pr.sh). Needs: git, gh, jq, python3 (PyYAML for hook-pin and
-# evals-fleet).
+# reached it (lib/pr.sh). Needs: git, gh, jq, python3 (PyYAML for hook-pin,
+# run-health-sha and evals-fleet).
 
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -234,50 +248,137 @@ if mark + "\n" in text:
     open(path, "w", encoding="utf-8").write(text)
 PY
 }
+# The two more places acsi-agentskills names a commit of _agent-guidance
+# (lib/guidance_pins.py finds and rewrites them): the commit cloud sessions
+# download the fleet-guidance installer at, and the eval-protection gate's
+# checkout in ci.yml.
+REG=acsi-agentskills
+CES=scripts/cloud-env-setup.sh
+CI_YML=.github/workflows/ci.yml
+FM=.claude/hooks/fleet-memory.sh
+PINS="$HERE/lib/guidance_pins.py"
+# pins <command> <file> <label> [args]: prints what it read; on a file of the
+# wrong shape it prints one ERROR line naming <label> and returns 2.
+pins() { python3 -I -B "$PINS" "$@"; }
+# fm_sha_at <_agent-guidance clone> <commit>: the installer's sha256 there, or "" when it has none.
+fm_sha_at() { git -C "$1" cat-file -e "$2:$FM" 2>/dev/null || return 0; git -C "$1" show "$2:$FM" | sha256_stdin; }
+# in_guidance <_agent-guidance clone> <sha>: whether that is a commit of the clone.
+in_guidance() { git -C "$1" cat-file -e "$2^{commit}" 2>/dev/null; }
+# registry_pins <_agent-guidance clone>: read both places from the registry's
+# default branch, before anything is written anywhere. Sets RP_FLEET and
+# RP_GATE to "" when that part is current, else to what is wrong with it.
+# Any commit of your _agent-guidance passes, not only its HEAD: a later bump
+# is still current.
+registry_pins() {
+  local ag=$1 reg commit sum ref at
+  need "$REG" "$CES"; reg=$CLONE
+  [ -e "$reg/$CI_YML" ] || die "$O/$REG has no $CI_YML on its default branch: merge its starter pull request first"
+  commit=$(pins setup-read "$reg/$CES" "$O/$REG $CES") || exit 1
+  sum=${commit#* } commit=${commit%% *}
+  ref=$(pins gate-read "$reg/$CI_YML" "$O/$REG $CI_YML" "$O") || exit 1
+  RP_FLEET="" RP_GATE=""
+  if ! in_guidance "$ag" "$commit"; then
+    RP_FLEET="fleet_pin_commit ${commit:0:12} is not a commit of your _agent-guidance, so cloud sessions cannot download the fleet-guidance installer"
+  elif [ "$(fm_sha_at "$ag" "$commit")" != "$sum" ]; then
+    RP_FLEET="$FM at fleet_pin_commit ${commit:0:12} does not have the sha256 fleet_pin_sha256 records (${sum:0:12})"
+  fi
+  in_guidance "$ag" "$ref" || RP_GATE="the step \"Check out the eval-protection gate\" checks out ${ref:0:12}, which is not a commit of your _agent-guidance"
+  [ "$CHECK" = 0 ] && [ -n "$RP_FLEET" ] || return 0
+  # About to write fleet_pin_commit: the installer at the new commit must be
+  # the one the registry's digest line names, or cloud sessions would refuse it.
+  at=$(fm_sha_at "$ag" "$AG_SHA")
+  [ "$at" = "$sum" ] \
+    || die "$O/_agent-guidance $FM at ${AG_SHA:0:12} has sha256 ${at:0:12}$([ -n "$at" ] || echo '(no such file)'), and $O/$REG $CES records ${sum:0:12} (fleet_pin_sha256): the two copies of the fleet-guidance installer have drifted. Nothing was changed. Bring the repo that is on the older kit up to the newer one (bootstrap/copy-starter.sh for that repo, then merge its pull request) and run this again."
+}
+edit_registry_pins() {
+  edit_run_health "$1"
+  if [ -n "$RP_FLEET" ]; then pins setup-set "$1/$CES" "$O/$REG $CES" "$AG_SHA" || exit 1; fi
+  if [ -n "$RP_GATE" ]; then pins gate-set "$1/$CI_YML" "$O/$REG $CI_YML" "$O" "$AG_SHA" || exit 1; fi
+}
 task_run_health_sha() {
-  local r pinned
+  local r pinned health
   need _agent-guidance .github/workflows/scheduled-run-health-reusable.yml
   AG_SHA=$(git -C "$CLONE" rev-parse HEAD); local ag=$CLONE
+  RP_FLEET="" RP_GATE=""
+  if in_task "$REG"; then registry_pins "$ag"; fi
   for r in $(regen_repos run-health-sha); do
     in_task "$r" || continue
     need "$r" "$RH"
     pinned=$(grep -oE 'scheduled-run-health-reusable\.yml@[0-9a-f]{40}' "$CLONE/$RH" | head -n1 | cut -d@ -f2 || true)
-    if [ -n "$pinned" ] && [ "$pinned" != "$ZERO40" ] && git -C "$ag" cat-file -e "$pinned^{commit}" 2>/dev/null &&
-      ! grep -qxF -- "$RH_MARK" "$CLONE/$RH"; then
-      current "$O/$r $RH calls your _agent-guidance at $pinned"; continue
+    health=""
+    if [ -z "$pinned" ] || [ "$pinned" = "$ZERO40" ] || ! in_guidance "$ag" "$pinned" || grep -qxF -- "$RH_MARK" "$CLONE/$RH"; then
+      health="$RH still calls the reusable at ${pinned:-no} sha, or has no schedule yet"
     fi
-    if [ "$CHECK" = 1 ]; then notdone "$O/$r $RH still calls the reusable at ${pinned:-no} sha, or has no schedule yet"; continue; fi
-    propose "$r" "Call your _agent-guidance's scheduled-run-health reusable" \
-      "Replaces the export's forty-zero placeholder with $AG_SHA, your _agent-guidance default branch (a cross-repo reusable workflow takes a full sha; the kit's export/REGENERATE.md), and starts the daily schedule, which waits for the pin." \
-      edit_run_health "$RH"
+    if [ "$r" != "$REG" ]; then
+      if [ -z "$health" ]; then current "$O/$r $RH calls your _agent-guidance at $pinned"; continue; fi
+      if [ "$CHECK" = 1 ]; then notdone "$O/$r $health"; continue; fi
+      propose "$r" "Call your _agent-guidance's scheduled-run-health reusable" \
+        "Replaces the export's forty-zero placeholder with $AG_SHA, your _agent-guidance default branch (a cross-repo reusable workflow takes a full sha; the kit's export/REGENERATE.md), and starts the daily schedule, which waits for the pin." \
+        edit_run_health "$RH"
+      continue
+    fi
+    # The registry: three files, one pull request; each part has its own line.
+    if [ -z "$health$RP_FLEET$RP_GATE" ]; then
+      current "$O/$r $RH calls your _agent-guidance at $pinned, and $CES and $CI_YML name commits of it"; continue
+    fi
+    if [ "$CHECK" = 1 ]; then
+      if [ -n "$health" ]; then notdone "$O/$r $health"; fi
+      if [ -n "$RP_FLEET" ]; then notdone "$O/$r $CES: $RP_FLEET"; fi
+      if [ -n "$RP_GATE" ]; then notdone "$O/$r $CI_YML: $RP_GATE"; fi
+      continue
+    fi
+    propose "$r" "Name your _agent-guidance's commit in the three places that pin it" \
+      "Sets $AG_SHA, your _agent-guidance default branch, wherever this repo still names a commit your _agent-guidance does not have: the scheduled-run-health reusable in $RH (a cross-repo reusable workflow takes a full sha), with its daily schedule; fleet_pin_commit in $CES, the commit cloud sessions download the fleet-guidance installer at ($FM there has the sha256 fleet_pin_sha256 already records, which is not changed); and the ref of the eval-protection gate's checkout in $CI_YML (the kit's export/REGENERATE.md)." \
+      edit_registry_pins "$RH" "$CES" "$CI_YML"
   done
 }
 
 # ------------------------------------------------------------ codex-pin
 CX=scripts/sync-codex-cloud-environments.sh
+# Two pins in one file: the registry's skills-bootstrap hook (CX_BOOT) and
+# _agent-guidance's fleet-guidance installer (CX_FLEET). Each is "" when
+# current, else what is wrong; the edit writes only the ones that are not.
 edit_codex_pin() {
-  sed -i.bak -e "s/^readonly bootstrap_revision='[0-9a-f]\{40\}'/readonly bootstrap_revision='$CX_REV'/" \
-    -e "s/^readonly bootstrap_sha256='[0-9a-f]\{64\}'/readonly bootstrap_sha256='$CX_SUM'/" "$1/$CX"
-  rm -f "$1/$CX.bak"
+  if [ -n "$CX_BOOT" ]; then
+    sed -i.bak -e "s/^readonly bootstrap_revision='[0-9a-f]\{40\}'/readonly bootstrap_revision='$CX_REV'/" \
+      -e "s/^readonly bootstrap_sha256='[0-9a-f]\{64\}'/readonly bootstrap_sha256='$CX_SUM'/" "$1/$CX"
+    rm -f "$1/$CX.bak"
+  fi
+  if [ -n "$CX_FLEET" ]; then pins codex-set "$1/$CX" "$O/wsl-automation $CX" "$CX_FLEET_REV" "$CX_FLEET_SUM" || exit 1; fi
   (cd "$1" && bash tests/sync-codex-cloud-environments.test.sh >"$BOOT_WORK/cx-test.out" 2>&1) \
     || { tail -n 20 "$BOOT_WORK/cx-test.out" >&2; die "tests/sync-codex-cloud-environments.test.sh failed with the new pin"; }
   log "tests/sync-codex-cloud-environments.test.sh passed with the new pin"
 }
 task_codex_pin() {
-  local rev sum
+  local rev sum ag frev fsum
   need acsi-agentskills "$HOOK"; REG_DIR=$CLONE
+  need _agent-guidance "$FM"; ag=$CLONE
   need wsl-automation "$CX"
   rev=$(sed -n "s/^readonly bootstrap_revision='\([0-9a-f]\{40\}\)'$/\1/p" "$CLONE/$CX")
   sum=$(sed -n "s/^readonly bootstrap_sha256='\([0-9a-f]\{64\}\)'$/\1/p" "$CLONE/$CX")
   [ -n "$rev" ] && [ -n "$sum" ] || die "$CX has no bootstrap_revision/bootstrap_sha256 lines"
-  if [ "$rev" != "$ZERO40" ] && git -C "$REG_DIR" cat-file -e "$rev^{commit}" 2>/dev/null && [ "$(hook_sha_at "$rev")" = "$sum" ]; then
-    current "$O/wsl-automation $CX pins your acsi-agentskills hook"; return 0
+  frev=$(pins codex-read "$CLONE/$CX" "$O/wsl-automation $CX") || exit 1
+  fsum=${frev#* } frev=${frev%% *}
+  CX_BOOT="" CX_FLEET=""
+  if [ "$rev" = "$ZERO40" ]; then CX_BOOT="bootstrap pin is still zeros"
+  elif ! git -C "$REG_DIR" cat-file -e "$rev^{commit}" 2>/dev/null || [ "$(hook_sha_at "$rev")" != "$sum" ]; then CX_BOOT="bootstrap pin is not your registry"; fi
+  if [[ $frev =~ ^1+$ ]] || [[ $fsum =~ ^1+$ ]]; then CX_FLEET="fleet-guidance pin is still the placeholder"
+  elif ! in_guidance "$ag" "$frev"; then CX_FLEET="fleet_pin_commit ${frev:0:12} is not a commit of your _agent-guidance"
+  elif [ "$(fm_sha_at "$ag" "$frev")" != "$fsum" ]; then CX_FLEET="$FM at fleet_pin_commit ${frev:0:12} does not have the sha256 fleet_pin_sha256 records"; fi
+  if [ -z "$CX_BOOT$CX_FLEET" ]; then
+    current "$O/wsl-automation $CX pins your acsi-agentskills hook and your _agent-guidance's fleet-guidance installer"; return 0
   fi
-  if [ "$CHECK" = 1 ]; then notdone "$O/wsl-automation $CX (bootstrap pin is $([ "$rev" = "$ZERO40" ] && echo 'still zeros' || echo 'not your registry'))"; return 0; fi
+  if [ "$CHECK" = 1 ]; then
+    if [ -n "$CX_BOOT" ]; then notdone "$O/wsl-automation $CX ($CX_BOOT)"; fi
+    if [ -n "$CX_FLEET" ]; then notdone "$O/wsl-automation $CX ($CX_FLEET)"; fi
+    return 0
+  fi
   CX_REV=$(git -C "$REG_DIR" rev-parse HEAD)
   CX_SUM=$(hook_sha_at "$CX_REV")
-  propose wsl-automation "Pin the Codex Cloud bootstrap to your acsi-agentskills" \
-    "Sets bootstrap_revision to $CX_REV and bootstrap_sha256 to its $HOOK digest (the kit's export/REGENERATE.md). tests/sync-codex-cloud-environments.test.sh passes with it." \
+  CX_FLEET_REV=$(git -C "$ag" rev-parse HEAD)
+  CX_FLEET_SUM=$(fm_sha_at "$ag" "$CX_FLEET_REV")
+  propose wsl-automation "Pin the Codex Cloud bootstrap to your acsi-agentskills and _agent-guidance" \
+    "Sets whichever of the two pins is not yours yet: bootstrap_revision to $CX_REV with bootstrap_sha256, its $HOOK digest; and fleet_pin_commit to $CX_FLEET_REV with fleet_pin_sha256, the digest of your _agent-guidance's $FM there (the kit's export/REGENERATE.md). tests/sync-codex-cloud-environments.test.sh passes with it." \
     edit_codex_pin "$CX"
 }
 
