@@ -63,7 +63,7 @@ Follow `/adopt`'s "Each turn" section, with `--track evals` wherever it
 says `--track base`: run `bash bootstrap/status.sh --track evals`, explain
 the next step and link its `Read:` section, do it by its kind (dry run
 first for a script), then close it by its check type. Only an **`ask`**
-step is marked by hand: run `bash bootstrap/status.sh --mark <id>` once the
+step is marked by hand: run `bash bootstrap/status.sh --track evals --mark <id>` once the
 user says it is done. A `verify` step is never marked: status.sh refuses
 `--mark` for it, so run `bash bootstrap/status.sh --track evals` again
 until it reads done. The browser steps that create or install the eval

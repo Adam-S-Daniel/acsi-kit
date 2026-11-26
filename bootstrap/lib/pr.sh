@@ -8,11 +8,14 @@
 #       default branch. Make the changes after this.
 #   open_pr <clone dir> <owner/repo> <default branch> <branch> <title> <body> <path>...
 #       stage exactly <path>... (git add -A, so a deletion is staged too),
-#       commit (refusing if a hook refused), push HEAD:refs/heads/<branch>
-#       without force, check the commit is on the remote branch with
+#       commit (refusing if a hook refused) as OWNER_NAME and the signed-in
+#       account's GitHub noreply address (kit_git_identity), never as git's own
+#       user.name and user.email, push HEAD:refs/heads/<branch> without
+#       force, check the commit is on the remote branch with
 #       git merge-base --is-ancestor (a refused commit can still let a push
-#       succeed), and open a pull request unless one is open for the branch.
-#       In a dry run it commits nothing and prints what it would do.
+#       succeed), and open a pull request unless one is open for the branch,
+#       printing its URL. In a dry run it commits nothing and prints what it
+#       would do.
 
 start_branch() {
   local dir=$1 default=$2 branch=$3 G=(git -C "$1")
@@ -36,12 +39,15 @@ open_pr() {
     fi
     log "branch $branch already carries these changes"
   elif [ "$DRY_RUN" = 1 ]; then
+    kit_git_identity
     WRITES=$((WRITES + 1))
-    printf 'DRY-RUN: git commit on %s (%s), then git push origin HEAD:refs/heads/%s\n' \
-      "$branch" "$("${G[@]}" diff --cached --name-only | wc -l | tr -d ' ') file(s)" "$branch"
+    printf 'DRY-RUN: git commit on %s (%s) as %s, then git push origin HEAD:refs/heads/%s\n' \
+      "$branch" "$("${G[@]}" diff --cached --name-only | wc -l | tr -d ' ') file(s)" "$KIT_GIT_NAME <$KIT_GIT_EMAIL>" "$branch"
   else
+    kit_git_identity
     base=$("${G[@]}" rev-parse HEAD)
-    "${G[@]}" commit --quiet -m "$title" -m "$body" || die "the commit was refused (a hook?)"
+    GIT_AUTHOR_NAME=$KIT_GIT_NAME GIT_AUTHOR_EMAIL=$KIT_GIT_EMAIL GIT_COMMITTER_NAME=$KIT_GIT_NAME GIT_COMMITTER_EMAIL=$KIT_GIT_EMAIL \
+      "${G[@]}" commit --quiet -m "$title" -m "$body" || die "the commit was refused (a hook?)"
     sha=$("${G[@]}" rev-parse HEAD)
     [ "$sha" != "$base" ] || die "no commit was made"
     [ "$("${G[@]}" rev-parse --abbrev-ref HEAD)" = "$branch" ] || die "not on $branch"
@@ -51,7 +57,7 @@ open_pr() {
     "${G[@]}" fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch"
     "${G[@]}" merge-base --is-ancestor "$sha" "origin/$branch" \
       || die "the commit $sha is not on origin/$branch after the push"
-    log "pushed $sha to $repo $branch (verified on the remote branch)"
+    log "pushed $sha to $repo $branch as $KIT_GIT_NAME <$KIT_GIT_EMAIL> (verified on the remote branch)"
   fi
   if [ "$DRY_RUN" = 1 ]; then
     WRITES=$((WRITES + 1))
@@ -68,7 +74,8 @@ open_pr() {
     # rule fails a pull request whose description does not.
     run_write_stdin "$GH" pr create --repo "$repo" --base "$default" --head "$branch" \
       --title "$title" --body-file - < <(printf '## TLDR\n\n%s\n' "$body")
-    did "opened a pull request for $branch in $repo"
+    url=$(printf '%s\n' "$RUN_OUT" | grep -oE 'https://[^[:space:]]+/pull/[0-9]+' | tail -n 1) || url=""
+    did "opened a pull request for $branch in $repo: ${url:-gh printed no URL; gh pr list --repo $repo --head $branch shows it}"
   fi
 }
 

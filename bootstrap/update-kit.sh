@@ -666,7 +666,10 @@ fi
 n=$(git -C "$KIT" rev-list --count "$old..$new")
 summary="${old:0:12} -> ${new:0:12}, $n commit(s)"
 if [ "$DRY_RUN" = 1 ]; then
-  [ ${#starter_paths[@]} -eq 0 ] || did "save ${#starter_paths[@]} starter/ change(s) to ~/kit-starter-backup-${old:0:12} and discard them (add-content.sh rewrites its own afterward)"
+  if [ ${#starter_paths[@]} -gt 0 ]; then
+    did "save ${#starter_paths[@]} starter/ change(s) to ~/kit-starter-backup-${old:0:12} and discard them (add-content.sh rewrites its own afterward)"
+    WRITES=$((WRITES + 1))
+  fi
   did "fast-forward $target: $summary"
   WRITES=$((WRITES + 1))
   log ""

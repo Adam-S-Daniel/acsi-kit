@@ -27,7 +27,8 @@ returns. `gh auth status` exits 0 (prints a fake token on stderr, which a test
 checks is never shown) unless GH_STUB_AUTH=0. `gh api user` answers the login
 GH_STUB_LOGIN (default acme-example); with -i it also sends the header
 X-OAuth-Scopes: $GH_STUB_SCOPES (default "repo, workflow"; "none" sends no
-such header, like a fine-grained token); --jq .login prints just the login.
+such header, like a fine-grained token); --jq .login or --jq .id prints just
+the login or its id (the id users/<login> gives).
 Errors look like gh's: a JSON body on stdout, "gh: ... (HTTP n)" on
 stderr, exit 1.
 """
@@ -99,16 +100,17 @@ def repo_view(r):
 
 def api(args):
     include = "-i" in args or "--include" in args
-    jq_login = False
+    jq = None
     if "--jq" in args:
         i = args.index("--jq")
-        jq_login = args[i + 1] == ".login"
+        jq = args[i + 1]
         args = args[:i] + args[i + 2:]
     args = [a for a in args if a not in ("-i", "--include")]
     if args[:1] == ["user"]:
         login = os.environ.get("GH_STUB_LOGIN", "acme-example")
-        if jq_login:
-            print(login)
+        uid = 5000 + sum(map(ord, login))   # the same id users/<login> gives
+        if jq in (".login", ".id"):
+            print(login if jq == ".login" else uid)
             sys.exit(0)
         scopes = os.environ.get("GH_STUB_SCOPES", "repo, workflow")
         if include:
@@ -117,7 +119,7 @@ def api(args):
                 print("X-Oauth-Scopes: " + scopes)
             print("X-Accepted-Oauth-Scopes: ")
             print()
-        print(json.dumps({"login": login, "secret_looking_body": "BODY-MUST-NOT-BE-PRINTED"}))
+        print(json.dumps({"login": login, "id": uid, "secret_looking_body": "BODY-MUST-NOT-BE-PRINTED"}))
         sys.exit(0)
     method = (opt(args, "-X") or opt(args, "--method") or "GET").upper()
     body = None

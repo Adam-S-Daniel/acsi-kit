@@ -466,6 +466,24 @@ gh_read_or_die() {
   gh_read "$1" || die "could not read $2 (HTTP $GH_HTTP)"
 }
 
+# kit_git_identity: set KIT_GIT_NAME and KIT_GIT_EMAIL, the identity the kit's
+# own commits use: OWNER_NAME (a public handle, default OWNER) and the
+# signed-in account's GitHub noreply address, <id>+<login>@users.noreply.github.com,
+# read with `gh api user`. Never git's own user.name and user.email: they may
+# be a real name and a private email, which a public repo's history keeps for
+# good and which the privacy scan then flags on every pull request.
+kit_git_identity() {
+  [ -z "${KIT_GIT_EMAIL:-}" ] || return 0
+  local id login
+  gh_read user || die "could not read the GitHub account gh is signed in as (HTTP $GH_HTTP), whose noreply address the kit commits as"
+  id=$(printf '%s' "$GH_OUT" | jq -r '.id // empty')
+  login=$(printf '%s' "$GH_OUT" | jq -r '.login // empty')
+  [[ $id =~ ^[1-9][0-9]{0,11}$ && $login =~ ^[A-Za-z0-9-]{1,39}$ ]] \
+    || die "gh api user gave no numeric id and login, so the kit cannot commit as your GitHub noreply address"
+  KIT_GIT_NAME=$CFG_OWNER_NAME
+  KIT_GIT_EMAIL="$id+$login@users.noreply.github.com"
+}
+
 _print_cmd() { printf 'DRY-RUN:'; printf ' %q' "$@"; printf '\n'; }
 
 gh_write_api() { # METHOD endpoint [json]
@@ -501,10 +519,12 @@ run_write() { # cmd...
 
 # run_write_stdin <cmd...>: the value comes on this function's stdin, so it is
 # never in an argument list. In a dry run stdin is drained, not read into memory.
+# The command's stdout is kept in RUN_OUT, never printed here (gh pr create
+# prints the new pull request's URL there; open_pr prints that).
 run_write_stdin() {
-  WRITES=$((WRITES + 1))
+  WRITES=$((WRITES + 1)); RUN_OUT=""
   if [ "$DRY_RUN" = 1 ]; then cat >/dev/null; _print_cmd "$@"; printf '         (value on stdin, not shown)\n'; return 0; fi
-  "$@" >/dev/null 2>"$BOOT_WORK/err" || die "${*:1:3} failed (HTTP $(_status_from "$BOOT_WORK/err"))"
+  RUN_OUT=$("$@" 2>"$BOOT_WORK/err") || die "${*:1:3} failed (HTTP $(_status_from "$BOOT_WORK/err"))"
 }
 
 finish() {
@@ -541,6 +561,11 @@ config_arg() {
   case ${CONFIG:-./fleet.env} in ./fleet.env|fleet.env|"$PWD/fleet.env") return 0 ;; esac
   printf ' --config %q' "$CONFIG"
 }
+# track_arg [track]: " --track <track>" for a printed command, unless the
+# track is all (the default; TRACK when no argument is given). A hint run as
+# printed then stays on the track it came from: status.sh --mark lists that
+# track and names its next step, never one of the other track's.
+track_arg() { local t=${1:-${TRACK:-all}}; [ "$t" = all ] || printf ' --track %s' "$t"; }
 # with_config_arg <text>: the text with config_arg after every
 # bootstrap/<script>.sh it names (a steps.json run text, which names the
 # scripts without their --config).

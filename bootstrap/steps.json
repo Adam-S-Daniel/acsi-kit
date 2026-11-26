@@ -48,7 +48,7 @@
     {
       "id": "3",
       "title": "Store the privacy denylist",
-      "run": "`bootstrap/set-secrets.sh --only privacy --denylist <file outside every repo>`",
+      "run": "`bootstrap/set-secrets.sh --only privacy --denylist ~/.config/privacy-denylist.txt` (the file this machine's pre-push check and write-marker hook read); commit in these repos as the kit does, under `OWNER_NAME` and your GitHub noreply address (the linked section says how)",
       "kind": "script",
       "part": "skills",
       "track": "base",

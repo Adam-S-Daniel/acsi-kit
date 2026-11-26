@@ -30,6 +30,11 @@
 #      `bash _agent-guidance/scripts/register-codex-hook.sh`; then trust the
 #      hook once in Codex with /hooks.
 #
+# Then it warns when this machine has no privacy denylist at
+# ~/.config/privacy-denylist.txt (or at PRIVACY_DENYLIST_FILE): the pre-push
+# privacy check and the write-marker hook read it there, and the session miner
+# refuses to run without it.
+#
 # Each installer is idempotent, so a second run changes nothing. --dry-run
 # makes the clones' reads and prints the commands, running none of them.
 # Merge the acsi-agentskills and _agent-guidance starter pull requests first: the
@@ -138,6 +143,13 @@ if (ensure_clone wsl-automation config/settings.env.example; printf '%s %s\n' "$
 else
   grep -v '^ERROR: ' "$BOOT_WORK/wa.err" >&2 || true
   warn "no usable wsl-automation clone in $DIR ($(sed -n 's/^ERROR: //p' "$BOOT_WORK/wa.err" | head -n 1)); this step is done without it, and step 22 needs one: fix that, then run this again or clone it yourself"
+fi
+# The local denylist, where the hooks just installed and the session miner
+# read it. A warning only: without it they check this machine's own names.
+if [ -n "${PRIVACY_DENYLIST_FILE:-}" ]; then
+  [ -r "$PRIVACY_DENYLIST_FILE" ] || warn "PRIVACY_DENYLIST_FILE names $PRIVACY_DENYLIST_FILE, which cannot be read: the pre-push privacy check and the write-marker hook check only this machine's own names, and the session miner (step 22) refuses to run"
+elif [ ! -r "$HOME/.config/privacy-denylist.txt" ]; then
+  warn "no privacy denylist at ~/.config/privacy-denylist.txt: without it the pre-push privacy check and the write-marker hook check only this machine's own names, and the session miner (step 22) refuses to run. Copy step 3's file there (docs/skills.md, \"The privacy check\")"
 fi
 detect_os
 if [ "$IS_WSL" = 1 ]; then

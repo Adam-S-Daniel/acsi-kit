@@ -124,6 +124,14 @@ that already ran them:
   it in four repos (the registry, `_agent-guidance`, `repo-settings`,
   `wsl-automation`), so a setup that stored it before shows step 3 as not
   done again. Run step 3 again; it skips the repo that already has it.
+- Step 3, and your own commits: the kit's own commits (`copy-starter.sh`,
+  `regenerate.sh`) now use `OWNER_NAME` and your GitHub noreply address,
+  not git's own `user.name` and `user.email`. Commit in these repos under
+  the same identity ([the privacy check](docs/skills.md#the-privacy-check)
+  says how; `bash bootstrap/preflight.sh` warns until you do), and keep
+  the list at `~/.config/privacy-denylist.txt`, where this machine's checks
+  read it (`bash bootstrap/install-machine.sh` warns while it is missing).
+  Commits already made keep the identity they were made with.
 - Steps 12 and 20 (the registry's `privacy` job): the `acsi-agentskills`
   starter no longer has its own `privacy` CI job, and `fleet.yml` no longer
   requires it; each repo's `agent-checks` scans for personal data instead

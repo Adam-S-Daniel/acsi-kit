@@ -139,7 +139,7 @@ off", is the one list, with the reasons.
 
    Then close the step by its check type (status.sh shows it; it is
    `check.type` in `bootstrap/steps.json`). Only an **`ask`** step is
-   marked by hand: run `bash bootstrap/status.sh --mark <id>` once the user
+   marked by hand: run `bash bootstrap/status.sh --track base --mark <id>` once the user
    says it is done (for a machine step, on every machine). A `verify`,
    `files` or `config` step is never marked: status.sh reads the real state
    and refuses `--mark` for it, so run
@@ -151,7 +151,7 @@ off", is the one list, with the reasons.
    verify.sh says step 7 must be checked by hand, have the user open
    https://github.com/settings/installations, confirm each App it names has
    access to the repos it names, and then run
-   `bash bootstrap/status.sh --mark 7`.
+   `bash bootstrap/status.sh --track base --mark 7`.
 4. When a script fails, read the error, find the cause in the script or the
    docs, and help fix it. Then run the step again, dry run first.
 5. At the end of each sitting, name the next step and its time estimate, so
@@ -210,7 +210,7 @@ off", is the one list, with the reasons.
   claude.ai Projects, a public beta that is rolling out gradually, so ask
   whether the user's account has Projects. If it does not, there is no
   project memory to curate: create the machine task only, and the step is
-  done (it is an `ask` step, so run `bash bootstrap/status.sh --mark 30`
+  done (it is an `ask` step, so run `bash bootstrap/status.sh --track base --mark 30`
   once the machine task exists). For the machine task, ask which system
   holds that machine's Claude Code sessions. On macOS, or on Windows with
   Claude Code running natively, offer a Claude desktop app scheduled task

@@ -156,10 +156,16 @@ in `acsi-agentskills`, `_agent-guidance`, `repo-settings` and
 script stores the secret there, so its `agent-checks.yml` does not pass it
 to the scan, which only warns there.
 
-Write the list to a file outside every repo, with one regular expression per
-line, and store it before the first starter pull request: each starter pull
-request adds every file of its starter, so its scan reads them all. Each
-line is a Python regular expression, matched in any letter case. Blank lines
+Write the list to `~/.config/privacy-denylist.txt`, outside every repo, with
+one regular expression per line. That is the file this machine's own checks
+read: the pre-push `privacy` check and the write-marker hook
+([guidance](guidance.md)), and the session miner
+([machines](machine.md#scheduled-jobs-wsl-automation)). Kept anywhere else
+without `PRIVACY_DENYLIST_FILE` naming it, those checks look only for this
+machine's own names, and the miner refuses to run. Store it before the
+first starter pull request: each starter pull request adds every file of
+its starter, so its scan reads them all. Each line is a Python regular
+expression, matched in any letter case. Blank lines
 and lines that start with `#` are skipped. List your real name, emails, hosts,
 and private ids. Never list your GitHub login or the public handle in
 `OWNER_NAME`: `copy-starter.sh` writes them, and the Apps' names built from
@@ -181,19 +187,36 @@ character class only where the same name is spelled several ways. Escape a
 `.` in a domain (`\.`), or it matches any character.
 
 ```bash
-bash bootstrap/set-secrets.sh --only privacy --denylist ~/private/denylist
+bash bootstrap/set-secrets.sh --only privacy --denylist ~/.config/privacy-denylist.txt
 ```
 
 The script refuses a path inside a git work tree, checks that every line
 compiles, and sends the file to `gh` on stdin. To scan a branch before you
 push it, run
-`PRIVACY_DENYLIST_FILE=<path> bash .githooks/agent-checks ci "$(git rev-parse origin/main)" HEAD`
-in any of your clones. Give the base as a commit id: the scan reads the
+`bash .githooks/agent-checks ci "$(git rev-parse origin/main)" HEAD`
+in any of your clones (it reads the same file). Give the base as a commit id: the scan reads the
 lines the range adds only from a hex base, and from any other it reads only
 the last commit's. It scans the range's added lines and its commit messages
 and identities, and runs the other CI checks too; the branch name and the
 pull request's title and body are scanned only in CI. Everything in the public repos uses invented
 data: `example.com`, made-up names, and `<user>` placeholders.
+
+Commit under a public name too. The kit's own commits (`copy-starter.sh`,
+`regenerate.sh`) use `OWNER_NAME` and your GitHub noreply address,
+`<id>+<login>@users.noreply.github.com`, never git's own `user.name` and
+`user.email`, which may be your real name and a private email. A commit's
+name and email stay in public history for good, and once your list names
+your real name, the scan flags every commit that carries it. Use the same
+identity for the commits you make in these repos:
+
+```bash
+git config --global user.name '<OWNER_NAME>'
+git config --global user.email "$(gh api user --jq .id)+$(gh api user --jq .login)@users.noreply.github.com"
+```
+
+(or set both without `--global` in each clone of these repos).
+`bash bootstrap/preflight.sh` warns while git's identity is not a noreply
+address, or matches your local list.
 
 ## The private registry and lessons
 
