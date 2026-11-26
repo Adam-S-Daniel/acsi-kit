@@ -11,16 +11,19 @@ track has created the repo:
 
   check   exit 0 when the list names <repo name>; exit 1 with one
           "NOT DONE: ..." line when it does not.
-  add     append `- <repo name>` to the list, after its last element and at
-          that element's indentation; a list that already names it is left
-          as it is. The result is parsed again, and nothing is written
-          unless the list is the old one plus that name and the rest of the
-          document is unchanged.
+  add     put `- <repo name>` in the list; a list that already names it is
+          left as it is. The starter's list holds the repo's place with a
+          comment ("# <repo name> is not listed while ..."): the name
+          replaces that comment, so the file does not go on saying the repo
+          is not listed. A list without the comment gets the name after its
+          last element. The result is parsed again, and nothing is written
+          unless the list is the old one plus that name, in that place, and
+          the rest of the document is unchanged.
 
 The list is found by parsing the file with PyYAML (`cron_coverage` must be a
 mapping whose `fleet` is a block sequence of plain names); the edit is made
 at the line the parser gives for the last element, so comments stay where
-they are. <label> is how messages name the file. A file of another shape is
+they are (but for the one the name replaces). <label> is how messages name the file. A file of another shape is
 an error (exit 2, one "ERROR: <label>: ..." line), never a skip.
 """
 import copy
@@ -28,6 +31,9 @@ import re
 import sys
 
 NAME = re.compile(r"[A-Za-z0-9._-]{1,100}")
+#: How the comment that holds a repo's place begins, after "# <name> ".
+#: export/patches/_agent-guidance/kit_repos.py writes it into the starter.
+MARKER = "is not listed while"
 
 
 class ShapeError(Exception):
@@ -59,8 +65,28 @@ def names(text):
     return [v.value for v in _fleet_node(text).value]
 
 
+def _marker(lines, fleet, name):
+    """(first, last) line indexes of the comment that holds `name`'s place in
+    the list, or None. The starter writes it where the source lists the repo:
+    a run of comment lines among the elements (or right under the last) whose first begins
+    "# <name> is not listed while ..."."""
+    first, last = fleet.value[0].start_mark.line, fleet.value[-1].start_mark.line
+    while last + 1 < len(lines) and lines[last + 1].strip().startswith("#"):
+        last += 1                       # comments right under the last element belong to the list too
+    for n in range(first, last + 1):
+        if lines[n].strip().startswith(f"# {name} {MARKER}"):
+            end = n
+            while end + 1 <= last and lines[end + 1].strip().startswith("#"):
+                end += 1
+            return n, end
+    return None
+
+
 def add(text, name):
-    """The text with `name` appended to cron_coverage.fleet (unchanged when it is there)."""
+    """The text with `name` in cron_coverage.fleet (unchanged when it is
+    there): in place of the comment that marks its place when the list has
+    one, else after the last element. Every other line, comments included,
+    stays as it is."""
     import yaml
     fleet = _fleet_node(text)
     have = [v.value for v in fleet.value]
@@ -72,10 +98,17 @@ def add(text, name):
     m = re.fullmatch(r"(\s*)- " + re.escape(last.value) + r"\s*(#.*)?", line)
     if not m:
         raise ShapeError(f"writes the last cron_coverage.fleet element in a form this cannot extend: {line.strip()[:60]!r}")
-    lines.insert(last.start_mark.line + 1, f"{m.group(1)}- {name}")
+    entry = f"{m.group(1)}- {name}"
+    mark = _marker(lines, fleet, name)
+    if mark:
+        at = sum(v.start_mark.line < mark[0] for v in fleet.value)   # the elements above the comment
+        lines[mark[0]:mark[1] + 1] = [entry]
+    else:
+        at = len(have)
+        lines.insert(last.start_mark.line + 1, entry)
     new = "\n".join(lines)
     want = copy.deepcopy(yaml.safe_load(text))
-    want["cron_coverage"]["fleet"] = have + [name]
+    want["cron_coverage"]["fleet"] = have[:at] + [name] + have[at:]
     if yaml.safe_load(new) != want:
         raise ShapeError("the edit would change something other than the list, so nothing was written")
     return new

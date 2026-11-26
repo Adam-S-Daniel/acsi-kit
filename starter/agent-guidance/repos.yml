@@ -287,7 +287,8 @@ cron_coverage:
     - repo-settings
     # skills-evals is not listed while you have no such repo: a name neither
     # owner has fails dependabot-config-health.yml every day. The adoption
-    # kit's bootstrap/regenerate.sh evals-fleet adds it with the evals track.
+    # kit's bootstrap/regenerate.sh evals-fleet puts it here, in place of
+    # this comment, with the evals track.
     - wsl-automation
 
   # Deliberately NOT audited, and not expected to be checked out. Recorded so

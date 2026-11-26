@@ -128,12 +128,16 @@ change. `skills-evals` joins once it exists, when step 38 runs it again.
 `--check` runs `gh actions-lock --verify`. Review an `actions.lock` diff as
 you would a sha pin.
 
-Each repo's `agent-checks` workflow checks its lockfile with the
+Each repo checks its lockfile on every pull request with the
 [`verify-actions-lock`](https://github.com/Adam-S-Daniel/verify-actions-lock)
-action, under the kit owner's name. That name stays as it is: it is a public
-action meant to be used directly, as you use GitHub's own checkout action,
-so you don't copy or fork it, and `copy-starter.sh` leaves its owner name
-alone on purpose.
+action, under the kit owner's name: from `agent-checks.yml` in
+`_agent-guidance`, `repo-settings` and `acsi-agentskills-private`, and from
+`ci.yml` in `acsi-agentskills`, `wsl-automation` and `skills-evals`. That
+name stays as it is. It is a public action meant to be used directly, as you
+use GitHub's own checkout action, so you don't copy or fork it. The export
+keeps the name on purpose (rule C5 in
+[`export/manifests/_common.yml`](../export/manifests/_common.yml)), and
+`copy-starter.sh` replaces only the invented owners, so it never touches it.
 
 ## Example repos in fleet.yml
 

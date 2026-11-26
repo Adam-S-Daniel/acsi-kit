@@ -18,10 +18,13 @@ you like, such as `Fleet allowlist`. "Your `_agent-guidance`" means
 
 Four things hold for every routine below:
 
-- **Model.** Pick the model each table names in the task's model selector.
-  Never leave it on **Default**: that is your account's default model, which
-  is Opus on Pro and weighs more per token than Sonnet ([which
-  plan](before-you-start.md#on-pro-what-to-set-and-what-to-leave-off)).
+- **Model.** Pick the model each table names in the task's model selector,
+  and don't leave it on **Default**. Default follows your account's default
+  model, which Anthropic's [model configuration
+  page](https://code.claude.com/docs/en/model-config) lists as Opus on Pro,
+  and Opus weighs more per token than Sonnet ([which
+  plan](before-you-start.md#on-pro-what-to-set-and-what-to-leave-off)). So
+  pick Sonnet explicitly.
 - **Connectors.** A new routine includes every connector your account has
   connected, and a run can write through any of them. Remove each one the
   table doesn't name.
@@ -221,15 +224,19 @@ in `_agent-guidance`:
 | Setting | Value |
 |---|---|
 | Schedule | weekly: the project task on Monday at 14:00 UTC, the machine task once a week on each durable machine |
-| Model | Sonnet for both. The project task runs on the project's **Threads** model, not on a model picked on the task, so set that to Sonnet in **Project settings > General**. On a machine, `wsl-automation`'s job names Sonnet itself; a desktop app task or your own `claude -p` line needs it picked (`--model sonnet`) |
+| Model | Sonnet for both. For the project task, set **Threads** to Sonnet in **Project settings > General** (see below; that setting is the lever you have). On a machine, `wsl-automation`'s job names Sonnet itself; a desktop app task or your own `claude -p` line needs it picked (`--model sonnet`) |
 | Notifications | push on (the project task) |
 | Spec | `_agent-guidance` [`docs/routines/memory-curation.md`](../starter/agent-guidance/docs/routines/memory-curation.md) |
 
-A new project runs Opus for its threads until you change that setting
-([Projects](https://code.claude.com/docs/en/claude-projects), read
-2026-11-25), which is why the spec says the project task runs on Opus
-whatever its own page shows. With **Threads** set to Sonnet it runs on
-Sonnet.
+Anthropic's [Projects
+page](https://code.claude.com/docs/en/claude-projects) (read 2026-11-25)
+says a scheduled task made in a project runs as threads in that project,
+that **Threads** in **Project settings > General** sets the model and effort
+for new threads, and that a new project runs Opus everywhere. It doesn't
+say which model a scheduled run uses. The spec records that the owner's
+project task ran on Opus whatever its own page showed, which fits a project
+left at its defaults. So set **Threads** to Sonnet, and check the model on
+the first run's thread.
 
 Projects are a public beta that is rolling out gradually on Pro, Max, and
 Ultra (the same page). If your account has no Projects yet, there is no

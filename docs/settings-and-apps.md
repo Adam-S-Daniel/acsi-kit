@@ -269,6 +269,13 @@ until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
 scheduled runs that read `skills-evals` skip while `EVALS_REPO` is `none`
 ([routines](routines.md#fleet-worker)).
 
+One issue is expected on the evals track, and no run fails for it. Between
+step 35, which creates `skills-evals`, and step 40, which lists it in
+`repos.yml`'s `cron_coverage.fleet`, `_agent-guidance`'s daily
+`drift-report.yml` opens "Unclassified for cron coverage" naming
+`skills-evals`. The first report after step 40's pull request is merged
+closes it.
+
 These are expected to fail until a later step or a kit update, and nothing
 else is:
 

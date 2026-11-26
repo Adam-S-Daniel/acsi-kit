@@ -220,8 +220,9 @@ this page" means every routine and scheduled task in [routines](routines.md).
   ([routines](https://code.claude.com/docs/en/routines), read 2026-11-25).
 - **Schedule and leave off.** Schedule the changelog watcher weekly (`3 1 * * 1`).
   For memory curation, set the project's **Threads** model to Sonnet
-  (**Project settings > General**): the project task runs on that setting,
-  which is Opus in a new project, not on a model picked on the task
+  (**Project settings > General**): a scheduled task made in a project runs
+  as threads in that project, a new project runs Opus, and that setting is
+  the one that sets the model for new threads
   ([memory curation](routines.md#memory-curation)). Leave the optional dashboard
   refresh off. [Article lift](routines.md#article-lift) is off by default:
   `create-environments.sh` sets `ARTICLE_WATCH_FEED_URL` to `none`, so each

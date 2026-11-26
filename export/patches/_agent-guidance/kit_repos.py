@@ -78,11 +78,13 @@ REPOS_YML_LINES = [
     ("    - ai-usage-dashboard\n    - claude-memory-map\n", ""),
     # The base track has no skills-evals, and a name neither owner has fails
     # dependabot-config-health.yml every day. The evals track adds it
-    # (bootstrap/regenerate.sh evals-fleet), so the list says where it goes.
+    # (bootstrap/regenerate.sh evals-fleet), in place of this comment: its
+    # first words are bootstrap/lib/coverage_fleet.py's MARKER.
     ("    - skills-evals\n",
      "    # skills-evals is not listed while you have no such repo: a name neither\n"
      "    # owner has fails dependabot-config-health.yml every day. The adoption\n"
-     "    # kit's bootstrap/regenerate.sh evals-fleet adds it with the evals track.\n"),
+     "    # kit's bootstrap/regenerate.sh evals-fleet puts it here, in place of\n"
+     "    # this comment, with the evals track.\n"),
     ("    - fastmail-actions\n", ""),
     ("    - rss-inator\n", ""),
     # The source owner's small public library (re-pin 2026-11-23), added to

@@ -47,13 +47,20 @@ off", is the one list, with the reasons.
   `docs/machine.md`, "What every session carries", and how to turn each
   part off.
 - **Steps 27, 28, and 29** (the routines): Sonnet in each task's model
-  selector, never **Default**, which is Opus on Pro. Before the first one,
-  have the user check usage credits at https://claude.ai/settings/usage:
-  off, or a monthly cap they accept.
+  selector, picked explicitly. **Default** follows the account's default
+  model, which Anthropic's model configuration page lists as Opus on Pro.
+  Never a Fable model or a 1M-context variant of a 4.6 model: on Pro those
+  bill usage credits. Before the first routine, have the user check usage
+  credits at https://claude.ai/settings/usage: off, or a monthly cap they
+  accept.
 - **Step 29** (the changelog watcher): weekly, `3 1 * * 1`, not daily.
 - **Step 30** (memory curation): set the project's **Threads** model to
-  Sonnet in **Project settings > General**, because the project task runs
-  on that setting and a new project runs Opus.
+  Sonnet in **Project settings > General**. A scheduled task made in a
+  project runs as threads in that project, a new project runs Opus, and
+  that setting is the one that sets the model for new threads; have the
+  user check the model on the first run's thread.
+- **Leave off**: the optional dashboard refresh (evals step 32) and article
+  lift, which ships off.
 
 ## First sitting
 

@@ -1409,9 +1409,10 @@ assert "evals-fleet --check names the coverage list" has "$OUT" "NOT DONE: acme-
 assert "evals-fleet --check counts both lists" has "$OUT" "evals-fleet: 2 item(s) not done"
 regen_and_merge evals-fleet
 assert_eq "regenerate evals-fleet exits 0" "$RC" 0
-assert_eq "evals-fleet appends skills-evals to the coverage list" "$(on_main _agent-guidance repos.yml | cov_names | tr ' ' '\n' | tail -n 1)" skills-evals
-assert_eq "the coverage pull request changes repos.yml alone, by one line" \
-  "$(git --git-dir="$T/remotes/$O/_agent-guidance.git" diff --numstat main~1 main | tr '\t' ' ')" "1 0 repos.yml"
+assert "evals-fleet lists skills-evals where the starter's comment held its place" bash -c 'grep -q "repo-settings skills-evals wsl-automation" <<<"$1"' _ "$(on_main _agent-guidance repos.yml | cov_names)"
+assert_not "and the comment that said it is not listed is gone" bash -c 'git --git-dir="$1" show main:repos.yml | grep -qF "skills-evals is not listed"' _ "$T/remotes/$O/_agent-guidance.git"
+assert_eq "the coverage pull request changes repos.yml alone: one line in, the comment out" \
+  "$(git --git-dir="$T/remotes/$O/_agent-guidance.git" diff --numstat main~1 main | tr '\t' ' ')" "1 4 repos.yml"
 assert_eq "evals-fleet opens one pull request in each of the two repos" "$(jqs '[.prs[][] | select(.head == "regenerate/evals-fleet")] | length')" 2
 assert_eq "evals-fleet appends skills-evals to fleet.yml's repos" "$(on_main repo-settings repo-settings/fleet.yml | fleet_names | tr ' ' '\n' | tail -n 1)" acme-example/skills-evals
 assert_not "evals-fleet deletes the fragment" git --git-dir="$T/remotes/$O/repo-settings.git" cat-file -e main:repo-settings/fleet.evals.yml

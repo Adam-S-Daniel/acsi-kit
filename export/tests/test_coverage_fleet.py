@@ -44,14 +44,26 @@ def test_the_shipped_list_names_kit_repos_and_not_skills_evals():
     assert set(names) <= set(COMMON["kit_repos"]) and "_agent-guidance" in names
 
 
-def test_the_evals_state_is_the_shipped_list_plus_skills_evals_and_nothing_else():
+def test_the_shipped_list_marks_where_skills_evals_goes():
+    # The comment kit_repos.py writes begins with the words coverage_fleet.py looks for.
+    text = REPOS_YML.read_text(encoding="utf-8")
+    assert text.count(f"    # skills-evals {cf.MARKER}") == 1
+
+
+def test_the_evals_state_puts_skills_evals_where_the_comment_was_and_says_nothing_stale():
     before = REPOS_YML.read_text(encoding="utf-8")
     after = cf.add(before, "skills-evals")
-    assert cf.names(after) == cf.names(before) + ["skills-evals"]
+    names = cf.names(before)
+    at = names.index("repo-settings") + 1                  # where the source lists it
+    assert cf.names(after) == names[:at] + ["skills-evals"] + names[at:]
+    assert cf.MARKER not in after and "in place of" not in after        # the file no longer says it is not listed
     want = yaml.safe_load(before)
-    want["cron_coverage"]["fleet"].append("skills-evals")
+    want["cron_coverage"]["fleet"].insert(at, "skills-evals")
     assert yaml.safe_load(after) == want
-    assert len(after.split("\n")) == len(before.split("\n")) + 1
+    # One line in, the comment's lines out, and every other line as it was.
+    gone = [l for l in before.split("\n") if l not in after.split("\n")]
+    assert all(l.strip().startswith("#") for l in gone) and gone[0].strip().startswith("# skills-evals " + cf.MARKER)
+    assert [l for l in after.split("\n") if l not in before.split("\n")] == ["    - skills-evals"]
     assert cf.add(after, "skills-evals") == after          # a second add changes nothing
 
 
@@ -66,8 +78,40 @@ def test_the_commands_report_both_states(tmp_path, capsys):
 
 # ---------------------------------------------------------------- invented files
 
-def test_the_name_goes_after_the_last_element_and_comments_stay():
+def test_without_a_marker_the_name_goes_after_the_last_element_and_comments_stay():
     assert cf.add(SMALL, "three") == SMALL.replace("    - two   # the last one\n", "    - two   # the last one\n    - three\n")
+
+
+MARKED = """\
+cron_coverage:
+  fleet:
+    - one
+    # a comment about one stays
+    - two
+    # three is not listed while you have no such repo: some reason,
+    # continued on a second line.
+    - zebra   # trailing
+  # after the list
+  out_of_scope: []
+"""
+
+
+def test_the_name_replaces_its_marker_comment_and_only_that():
+    after = cf.add(MARKED, "three")
+    assert after == MARKED.replace("    # three is not listed while you have no such repo: some reason,\n"
+                                   "    # continued on a second line.\n", "    - three\n")
+    assert cf.names(after) == ["one", "two", "three", "zebra"]
+    assert cf.add(after, "three") == after
+
+
+def test_a_marker_for_another_name_is_left_alone():
+    after = cf.add(MARKED, "four")
+    assert cf.names(after) == ["one", "two", "zebra", "four"] and "# three is not listed while" in after
+
+
+def test_a_marker_under_the_last_element_is_replaced_too():
+    text = "cron_coverage:\n  fleet:\n    - one\n    # two is not listed while it does not exist.\n  out_of_scope: []\n"
+    assert cf.add(text, "two") == "cron_coverage:\n  fleet:\n    - one\n    - two\n  out_of_scope: []\n"
 
 
 @pytest.mark.parametrize("text, said", [

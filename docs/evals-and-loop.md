@@ -69,7 +69,10 @@ scripts as the base, which include the repo once it exists:
    `cron_coverage.fleet`, the list of repos the Dependabot health check,
    the fleet worker and the prompt-audit sweep cover. The starter's list
    leaves the name out, because that health check fails on a repo neither
-   owner has.
+   owner has. If a day passes between step 35 and this one, the daily drift
+   report opens an "Unclassified for cron coverage" issue naming
+   `skills-evals`; the first report after this pull request merges closes
+   it.
 8. `bootstrap/apply-settings.sh` again, which now protects `skills-evals`
    too (step 39).
 
