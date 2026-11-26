@@ -125,6 +125,17 @@ def test_the_next_keys_comment_right_under_the_marker_stays(next_comment):
     assert cf.add(text, "two") == want
 
 
+def test_a_marker_wrapped_after_a_period_is_replaced_whole():
+    # The starter's marker has a sentence end mid-line ("every day."); wrapped
+    # so a line ends there, the rest of the marker must still go with it.
+    text = ("cron_coverage:\n  fleet:\n    - one\n    # two is not listed while you have no such repo: a name\n"
+            "    # neither owner has fails the health check every day.\n"
+            "    # The kit's regenerate.sh puts it here, with the evals track.\n"
+            "  # the next key's comment\n  out_of_scope: []\n")
+    want = "cron_coverage:\n  fleet:\n    - one\n    - two\n  # the next key's comment\n  out_of_scope: []\n"
+    assert cf.add(text, "two") == want
+
+
 def test_a_compact_list_keeps_the_next_keys_comment_at_the_same_indent():
     # `- one` at the key's own indent: the next key's comment is as deep as the
     # marker, and only the marker's closing period tells them apart.
