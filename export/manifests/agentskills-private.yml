@@ -91,6 +91,22 @@ edits:
       kit leaves hooks/ out (DECISIONS "Re-pin of the private registry,
       2026-11-26").
 
+  - path: .github/workflows/agent-checks.yml
+    stage: output
+    old: |2
+              env:
+                PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
+                BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+    new: |2
+              env:
+                BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+    why: >-
+      kit departure: no script stores PRIVACY_DENYLIST in this repo
+      (set-secrets.sh's OTHER_VALUES), and bootstrap/tests/check-refs.py
+      fails on a secret a workflow reads that nothing sets. Without the
+      secret the runner skips the scan with a warning, as before this re-pin.
+      Storing it here is a later bootstrap change (DECISIONS "Re-pin of the
+      private registry, 2026-11-26").
 # overlay/agentskills-private/ adds NOTICE and .gitignore (the source has
 # no .gitignore; the kit's bootstrap test wants every starter tree to ignore
 # what copy-starter.sh skips).
