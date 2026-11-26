@@ -138,13 +138,16 @@ hosts, and account ids. The list is the repository secret
 without the secret, including on a fork's pull request.
 
 In `acsi-agentskills` the secret is required: that job is set up in step 3
-and fails closed without it. For the other two scans below it is optional.
+and fails closed without it. The same holds in `skills-evals` on the evals
+track: its required `test` job scans every tracked file and fails closed
+without it, so step 35 stores it there right after creating the repo. For the
+two scans below it is optional.
 With it, each repo's `agent-checks` job also scans a pull request's added lines, commit messages,
 branch name, title and body, and the `privacy-comment-alert` workflow scans
 issues and comments. Without it, both scan nothing and only add a warning;
 neither ever fails a check for a missing secret. `set-secrets.sh` stores it
 in `acsi-agentskills`, `_agent-guidance`, `repo-settings` and
-`wsl-automation`. For another repo, run
+`wsl-automation`, and in `skills-evals` once that repo exists. For another repo, run
 `gh secret set PRIVACY_DENYLIST --repo <you>/<repo> < <file>`.
 
 Write the list to a file outside every repo, with one regular expression per

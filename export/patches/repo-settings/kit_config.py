@@ -87,8 +87,6 @@ FLEET_EDITS = [
 ]
 
 ENGINE_EDITS = [
-    # The engine imports os itself since repo-settings#232 (re-pin round 23).
-    ("import json\nimport os\nimport re\n", "import json\nimport os\nimport re\n"),
     ('''def _bypass_entries(actors: list | None) -> list[dict]:''',
      '''# An account-specific id (a GitHub App's) is written in fleet.yml as
 # "${NAME}" and read from the environment variable NAME when the ruleset is
@@ -142,9 +140,10 @@ jobs:'''),
 ]
 
 # Re-pin round 23 (DECISIONS): the source fans its privacy denylist out to
-# every repo as a `secrets` surface (repo-settings#232). In the kit only
-# acsi-agentskills reads that secret, and bootstrap/set-secrets.sh stores it
-# there, so the kit's fleet.yml declares no fan-out and its read-only plan
+# every repo as a `secrets` surface (repo-settings#232). In the kit,
+# bootstrap/set-secrets.sh stores that secret directly in each repo that reads
+# it (OTHER_VALUES in bootstrap/lib/common.sh), so the kit's fleet.yml declares
+# no fan-out and its read-only plan
 # tokens do not ask for Secrets: read, which the kit's settings Apps are not
 # granted (bootstrap/create-apps.sh): asking for it would fail every plan. The
 # workflow's fan-out wiring (the value and its timestamp) goes with it.

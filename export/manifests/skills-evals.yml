@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: 1492367482275c10c02c25d9ef1c9a16608a2def
+source_sha: 33dc3119a3be6da5930ed340e46cedab9ae7934e
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -662,6 +662,13 @@ patches:
       `retire` into `retire-exempt` before it picks the one retirement, and
       retire_skill.py opens nothing for one, for skills and guidance
       sections alike.
+  - file: display_config.py
+    why: >-
+      Re-pin round 24. explorer/display.json (skills-evals#1176) names the
+      source owner's time zone and repos; the kit ships the neutral zone UTC,
+      which copy-starter.sh replaces with TIME_ZONE, and only the kit's own
+      repos in issue_repos, the data repo first. The regenerate step below
+      builds the pages from it.
 
 protect_except:
   - path: test/issues/test_issue_70_retire.py
