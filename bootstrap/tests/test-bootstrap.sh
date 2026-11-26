@@ -132,6 +132,7 @@ for p in lib/substitute.py lib/plan_sizing.py lib/time_zone.py lib/repin.py lib/
          tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/check-evals-refs.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
+assert "lib/guidance_pins.py parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/lib/guidance_pins.py"
 # The bash >= 4.4 guard: the version test, and that a too-old bash stops before anything runs.
 guard() { bash -c '. "$1"; bash_version_ok "$2" "$3"' _ "$B/lib/common.sh" "$1" "$2"; }
 assert "bash 4.4 passes the version guard" guard 4 4
@@ -1370,9 +1371,141 @@ regen_and_merge() { # task
   done
   return 0
 }
+# edit_main <repo> <python> [arg ...]: commit an edit straight to a repo's
+# main (the python gets the clone's path, then the args) and print the commit
+# main had before;
+# restore_main <repo> <commit> puts main back.
+edit_main() {
+  local w="$T/tmp/edit-main" before
+  before=$(git --git-dir="$T/remotes/$O/$1.git" rev-parse main)
+  rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/$1.git" "$w" || return 1
+  python3 -I -c "$2" "$w" "${@:3}" || return 1
+  git -C "$w" commit -qam "test edit" && git -C "$w" push -q origin HEAD:main || return 1
+  rm -rf "$w"; printf '%s' "$before"
+}
+restore_main() { git --git-dir="$T/remotes/$O/$1.git" update-ref refs/heads/main "$2"; }
+no_regen_branch() { # task: no repo has a regenerate/<task> branch
+  local r
+  for r in "${FLEET[@]}"; do
+    git --git-dir="$T/remotes/$O/$r.git" rev-parse -q --verify "refs/heads/regenerate/$1" >/dev/null && return 1
+  done
+  return 0
+}
+# run-health-sha also names your _agent-guidance's commit in two more places
+# of acsi-agentskills (the fleet-guidance installer's commit and the
+# eval-protection gate's checkout): --check gives each part its own line.
+AS="$O/acsi-agentskills" CES=scripts/cloud-env-setup.sh CIY=.github/workflows/ci.yml FM=.claude/hooks/fleet-memory.sh
+GATE='Check out the eval-protection gate'
+refs_of() { # ci.yml: "<the gate step's ref> <the twin step's ref>", parsed
+  python3 -I -c '
+import sys, yaml
+steps = [s for j in yaml.safe_load(open(sys.argv[1]))["jobs"].values() for s in j.get("steps", [])]
+print(*[s["with"]["ref"] for n in sys.argv[2:] for s in steps if s.get("name") == n])' "$1" "$GATE" "Another checkout of the same commit"
+}
+old_sum=$(on_main acsi-agentskills "$CES" | sed -n 's/^fleet_pin_sha256=//p')
+old_ref=$(on_main acsi-agentskills "$CIY" > "$T/ci.yml"; refs_of "$T/ci.yml")
+assert "the registry's starter names a 40-hex gate ref and a 64-hex digest" bash -c '[[ $1 =~ ^[0-9a-f]{40}$ && $2 =~ ^[0-9a-f]{64}$ ]]' _ "$old_ref" "$old_sum"
+assert_eq "copy-starter left the registry's digest at its own installer's (lib/repin.py)" \
+  "$(on_main _agent-guidance "$FM" | sha256sum | cut -d' ' -f1)" "$old_sum"
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha
+assert "--check names the registry's reusable pin" has "$OUT" "NOT DONE: $AS .github/workflows/scheduled-run-health.yml still calls the reusable"
+assert "--check names the registry's fleet-guidance pin" has "$OUT" "NOT DONE: $AS $CES: fleet_pin_commit"
+assert "--check names the registry's eval-protection ref" has "$OUT" "NOT DONE: $AS $CIY: the step \"$GATE\" checks out ${old_ref:0:12}, which is not a commit of your _agent-guidance"
+assert "--check counts each part (three repos, and three parts of the registry)" has "$OUT" "run-health-sha: 6 item(s) not done"
+# A second step that checks out the same commit is not the gate's: it stays.
+edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+open(p, "w", encoding="utf-8").write(t + """  twin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Another checkout of the same commit
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: acme-example/_agent-guidance
+          ref: """ + sys.argv[2] + "\n")' "$old_ref" >/dev/null
+on_main acsi-agentskills "$CIY" > "$T/ci.yml"
+assert_eq "the fixture has a twin step at the gate's commit" "$(refs_of "$T/ci.yml")" "$old_ref $old_ref"
+# A drifted installer: your _agent-guidance's copy no longer has the digest
+# the registry records. The task refuses before it writes anything anywhere.
+ag_before=$(edit_main _agent-guidance 'import sys; open(sys.argv[1] + "/.claude/hooks/fleet-memory.sh", "a", encoding="utf-8").write("# drifted\n")')
+drift_sum=$(on_main _agent-guidance "$FM" | sha256sum | cut -d' ' -f1)
+n=$(log_lines "$GH_LOG")
+run bash "$B/regenerate.sh" --config "$CFGP" run-health-sha; rc=$?
+assert_eq "a drifted fleet-guidance installer is refused" "$rc" 1
+assert "the refusal names both files" bash -c 'grep -F "$2/_agent-guidance $3" "$1" | grep -qF "$2/acsi-agentskills $4"' _ "$ERR" "$O" "$FM" "$CES"
+assert "the refusal shows the first 12 characters of both digests" bash -c 'grep -F "has sha256 $2," "$1" | grep -qF "records $3 "' _ "$ERR" "${drift_sum:0:12}" "${old_sum:0:12}"
+assert "the refusal says how to fix it" has "$ERR" "bootstrap/copy-starter.sh for that repo"
+assert_eq "the refusal opens nothing" "$(since "$n")" 0
+assert "the refusal pushes no branch, not even in the repos before the registry" no_regen_branch run-health-sha
+restore_main _agent-guidance "$ag_before"
+# The gate step missing or doubled, or a doubled pin line, is an error that
+# names the file, in --check and in the task; the evals track never looks.
+as_before=$(edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+assert t.count("- name: Check out the eval-protection gate\n") == 1
+open(p, "w", encoding="utf-8").write(t.replace("- name: Check out the eval-protection gate\n", "- name: Check out the gate\n"))')
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails when the gate step is missing" "$rc" 1
+assert "the error names the file and the step" has "$ERR" "ERROR: $AS $CIY: has 0 step(s) named \"$GATE\", want exactly 1"
+n=$(log_lines "$GH_LOG")
+run bash "$B/regenerate.sh" --config "$CFGP" run-health-sha; rc=$?
+assert_eq "the task fails when the gate step is missing" "$rc" 1
+assert_eq "and opens nothing" "$(since "$n")" 0
+assert "and pushes no branch" no_regen_branch run-health-sha
+run bash "$B/regenerate.sh" --config "$CFGP" --check --track evals run-health-sha; rc=$?
+assert_eq "--track evals reports only skills-evals" "$(grep -c '^NOT DONE: ' "$OUT")" 1
+assert "--track evals names skills-evals" has "$OUT" "NOT DONE: $O/skills-evals"
+assert_not "--track evals never reads the registry" grep -qF acsi-agentskills "$OUT" "$ERR"
+restore_main acsi-agentskills "$as_before"
+as_before=$(edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+open(p, "w", encoding="utf-8").write(t + """  double:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the eval-protection gate
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: acme-example/_agent-guidance
+          ref: 2222222222222222222222222222222222222222
+""")')
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails when the gate step is doubled" "$rc" 1
+assert "the error counts the steps" has "$ERR" "ERROR: $AS $CIY: has 2 step(s) named \"$GATE\", want exactly 1"
+restore_main acsi-agentskills "$as_before"
+# A gate step the rewrite could not prove (its ref written twice) is refused
+# when the file is read, so no other repo's pull request is opened first.
+as_before=$(edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+i = t.index("- name: Check out the eval-protection gate\n")
+j = t.index("          ref: " + sys.argv[2] + "\n", i)
+open(p, "w", encoding="utf-8").write(t[:j] + "          ref: 2222222222222222222222222222222222222222\n" + t[j:])' "$old_ref")
+n=$(log_lines "$GH_LOG")
+run bash "$B/regenerate.sh" --config "$CFGP" run-health-sha; rc=$?
+assert_eq "the task fails when the gate step writes its ref twice" "$rc" 1
+assert "the error names the file and the doubled key" has "$ERR" "ERROR: $AS $CIY: the step \"$GATE\" writes a key of its \`with\` twice: ref"
+assert_eq "and opens nothing, in any repo" "$(since "$n")" 0
+assert "and pushes no branch, in any repo" no_regen_branch run-health-sha
+restore_main acsi-agentskills "$as_before"
+as_before=$(edit_main acsi-agentskills 'import sys
+open(sys.argv[1] + "/scripts/cloud-env-setup.sh", "a", encoding="utf-8").write("fleet_pin_commit=2222222222222222222222222222222222222222\n")')
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails when the pin line is doubled" "$rc" 1
+assert "the error names the script" has "$ERR" "ERROR: $AS $CES: has 2 \`fleet_pin_commit=<40 hex>\` line(s), want exactly 1"
+restore_main acsi-agentskills "$as_before"
 regen_and_merge run-health-sha
 assert_eq "regenerate run-health-sha exits 0" "$RC" 0
 ag=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
+assert_eq "the registry's fleet_pin_commit is your _agent-guidance's commit" "$(on_main acsi-agentskills "$CES" | sed -n 's/^fleet_pin_commit=//p')" "$ag"
+assert_eq "the registry's digest line is not written" "$(on_main acsi-agentskills "$CES" | sed -n 's/^fleet_pin_sha256=//p')" "$old_sum"
+on_main acsi-agentskills "$CIY" > "$T/ci.yml"
+assert_eq "the gate step's ref is your commit, and the twin step's is untouched" "$(refs_of "$T/ci.yml")" "$ag $old_ref"
+assert_eq "one pull request carries the registry's three files" \
+  "$(git --git-dir="$T/remotes/$O/acsi-agentskills.git" diff --name-only main~1 main | paste -sd' ' -)" "$CIY .github/workflows/scheduled-run-health.yml $CES"
+assert_eq "the registry got one run-health-sha pull request" "$(jqs "[.prs[\"$AS\"][] | select(.head == \"regenerate/run-health-sha\")] | length")" 1
 for r in repo-settings skills-evals acsi-agentskills wsl-automation; do
   assert "$r calls your _agent-guidance's reusable at its commit" bash -c 'git --git-dir="$1" show main:.github/workflows/scheduled-run-health.yml | grep -qF "scheduled-run-health-reusable.yml@$2"' _ "$T/remotes/$O/$r.git" "$ag"
   # The schedule arrives with the pin (the starter has none at the placeholder).
@@ -1384,8 +1517,17 @@ regen_and_merge hook-pin
 assert_eq "regenerate hook-pin exits 0" "$RC" 0
 as=$(git --git-dir="$T/remotes/$O/acsi-agentskills.git" rev-parse main)
 assert "repos.yml pins your acsi-agentskills" bash -c 'git --git-dir="$1" show main:repos.yml | grep -qx "  ref: $2"' _ "$T/remotes/$O/_agent-guidance.git" "$as"
+CXS=scripts/sync-codex-cloud-environments.sh
+run bash "$B/regenerate.sh" --config "$CFGP" --check codex-pin
+assert "--check names the Codex bootstrap pin" has "$OUT" "NOT DONE: $O/wsl-automation $CXS (bootstrap pin is still zeros)"
+assert "--check names the Codex fleet-guidance pin" has "$OUT" "NOT DONE: $O/wsl-automation $CXS (fleet-guidance pin is still the placeholder)"
 regen_and_merge codex-pin
 assert_eq "regenerate codex-pin exits 0 (the script's own test passed)" "$RC" 0
+ag2=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
+on_main wsl-automation "$CXS" > "$T/cx.sh"
+assert "the Codex fleet pin names your _agent-guidance's commit" grep -qx "readonly fleet_pin_commit='$ag2'" "$T/cx.sh"
+assert "and the digest of its installer there" grep -qx "readonly fleet_pin_sha256='$(git --git-dir="$T/remotes/$O/_agent-guidance.git" show "$ag2:$FM" | sha256sum | cut -d' ' -f1)'" "$T/cx.sh"
+assert_not "no placeholder of ones is left in the Codex script" grep -qE "='1{40,}'" "$T/cx.sh"
 assert "the Codex pin names your acsi-agentskills" bash -c 'git --git-dir="$1" show main:scripts/sync-codex-cloud-environments.sh | grep -qx "readonly bootstrap_revision=.$2."' _ "$T/remotes/$O/wsl-automation.git" "$as"
 regen_and_merge skills-locks
 assert_eq "regenerate skills-locks (registry) exits 0" "$RC" 0
@@ -1431,6 +1573,45 @@ n=$(log_lines "$GH_LOG")
 run bash "$B/regenerate.sh" --config "$CFGP" run-health-sha; rc=$?
 assert_eq "a second regenerate run-health-sha exits 0" "$rc" 0
 assert_eq "a second regenerate run-health-sha opens nothing" "$(since "$n")" 0
+# Any commit of your _agent-guidance is current, not only its newest one.
+assert_not "your _agent-guidance has moved on since the pin" test "$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)" = "$ag"
+assert "the registry's three parts read as current at the older commit" has "$OUT" "current: $AS .github/workflows/scheduled-run-health.yml calls your _agent-guidance at $ag, and $CES and $CIY name commits of it"
+# Each part can fail on its own after the pin: a digest the installer at the
+# pinned commit does not have, and a gate ref that is not your commit.
+as_before=$(edit_main acsi-agentskills 'import re, sys
+p = sys.argv[1] + "/scripts/cloud-env-setup.sh"
+t, n = re.subn(r"(?m)^fleet_pin_sha256=[0-9a-f]{64}$", "fleet_pin_sha256=" + "f" * 64, open(p, encoding="utf-8").read())
+assert n == 1
+open(p, "w", encoding="utf-8").write(t)')
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails a digest the pinned installer does not have" "$rc" 1
+assert "it says which part" has "$OUT" "NOT DONE: $AS $CES: $FM at fleet_pin_commit ${ag:0:12} does not have the sha256 fleet_pin_sha256 records (ffffffffffff)"
+assert_eq "and only that part" "$(grep -c '^NOT DONE: ' "$OUT")" 1
+restore_main acsi-agentskills "$as_before"
+as_before=$(edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+assert t.count("ref: " + sys.argv[2] + "\n") == 1
+open(p, "w", encoding="utf-8").write(t.replace("ref: " + sys.argv[2] + "\n", "ref: " + "a" * 40 + "\n"))' "$ag")
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails a gate ref that is not your commit" "$rc" 1
+assert "it says which part" has "$OUT" "NOT DONE: $AS $CIY: the step \"$GATE\" checks out aaaaaaaaaaaa"
+assert_eq "and only that part" "$(grep -c '^NOT DONE: ' "$OUT")" 1
+restore_main acsi-agentskills "$as_before"
+n=$(log_lines "$GH_LOG")
+run bash "$B/regenerate.sh" --config "$CFGP" codex-pin; rc=$?
+assert_eq "a second regenerate codex-pin exits 0" "$rc" 0
+assert_eq "a second regenerate codex-pin opens nothing" "$(since "$n")" 0
+ws_before=$(edit_main wsl-automation 'import re, sys
+p = sys.argv[1] + "/scripts/sync-codex-cloud-environments.sh"
+t, n = re.subn(r"(?m)^readonly fleet_pin_sha256=.[0-9a-f]{64}.$", "readonly fleet_pin_sha256=\x27" + "a" * 64 + "\x27", open(p, encoding="utf-8").read())
+assert n == 1
+open(p, "w", encoding="utf-8").write(t)')
+run bash "$B/regenerate.sh" --config "$CFGP" --check codex-pin; rc=$?
+assert_eq "codex-pin --check fails a fleet digest the pinned installer does not have" "$rc" 1
+assert "it says which pin" has "$OUT" "NOT DONE: $O/wsl-automation $CXS ($FM at fleet_pin_commit ${ag2:0:12} does not have the sha256 fleet_pin_sha256 records)"
+assert_not "the bootstrap pin stays current" grep -qF "bootstrap pin" "$OUT"
+restore_main wsl-automation "$ws_before"
 # actions-lock through the gh extension (stubbed).
 run env GH_STUB_NO_ACTIONS_LOCK=1 bash "$B/regenerate.sh" --config "$CFGP" actions-lock; rc=$?
 assert_eq "actions-lock without the gh extension fails" "$rc" 1

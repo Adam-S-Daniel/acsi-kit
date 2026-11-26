@@ -258,12 +258,13 @@ edits:
   # digest, which an adopter's repository will not have.
   - path: scripts/sync-codex-cloud-environments.sh
     old: "readonly fleet_pin_commit='0ef732fdbd825e35ad6bd853855fe158b61ada2b'\nreadonly fleet_pin_sha256='cfc01078b9d06990c2e458bade9aebffe10e7e25a97eaec23a59e2d3f28a2241'\n"
-    new: "# These placeholders fail closed: the download 404s or the digest mismatches,\n# and setup fails. Set both from your _agent-guidance main (commands above) before the\n# first sync.\nreadonly fleet_pin_commit='1111111111111111111111111111111111111111'\nreadonly fleet_pin_sha256='1111111111111111111111111111111111111111111111111111111111111111'\n"
+    new: "# These placeholders fail closed: the download 404s or the digest mismatches,\n# and setup fails. Before the first sync, set both from your _agent-guidance\n# main: the adoption kit's bootstrap/regenerate.sh codex-pin does it, with the\n# commands above.\nreadonly fleet_pin_commit='1111111111111111111111111111111111111111'\nreadonly fleet_pin_sha256='1111111111111111111111111111111111111111111111111111111111111111'\n"
     why: >-
       A pin of the source owner's file cannot be substituted; placeholders
       fail closed, as the bootstrap pin's zeros do (the test's fake sha256sum
-      tells the two digests apart, so they cannot both be zeros). No regenerate.sh task sets this pin
-      yet (see DECISIONS, re-pin round).
+      tells the two digests apart, so they cannot both be zeros). The kit's
+      bootstrap/regenerate.sh codex-pin sets both after adoption (DECISIONS,
+      "Guidance pins"), and the comment says so.
 
   # ---- X10: comments in kept code that named the left-out tasks.
   - path: src/WslAutomation/Private/Get-WslAutomationDefaultPwshPath.ps1
