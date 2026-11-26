@@ -3147,7 +3147,7 @@ Reverse: drop these `edits` entries (the "review fix" blocks in `export/manifest
 
 ## Re-pin round 24 (2026-11-26): skills-evals past its display config and privacy scan
 
-Only `skills-evals` moved (`149236748227` → `33dc3119a3be`). The daily re-sync would have held it on `export/tests/test_time_zone_shipped.py`: the new `explorer/display.json` named the source owner's time zone, and the allowlisted `explorer/src/core/rules.js` no longer did. `_agent-guidance` #655 had not merged, so `_agent-guidance` stays at `aca2f1a`.
+`skills-evals` moved (`149236748227` → `3a3f6ceda87f`, through `33dc311` and #1178), and so did `_agent-guidance` (`aca2f1a` → `c8cdbd4`, its #655). The daily re-sync would have held it on `export/tests/test_time_zone_shipped.py`: the new `explorer/display.json` named the source owner's time zone, and the allowlisted `explorer/src/core/rules.js` no longer did. 
 
 - **`explorer/display.json` (skills-evals #1176).** The pages read their time zone and issue repos from this file, and `DATA_REPO` is its first repo. `export/patches/skills-evals/display_config.py` ships it neutral:
   - `time_zone` is `UTC`.
@@ -3161,12 +3161,16 @@ Only `skills-evals` moved (`149236748227` → `33dc3119a3be`). The daily re-sync
   - `verify.sh` already filters each entry by `repo_track`, so on the base track `values:privacy` checks the four base repos and never skills-evals, and adding evals cannot undo step 3. The evals track checks skills-evals; both tracks check five.
   - `test-bootstrap.sh` checks the skip, the five writes, and the counts on each track. `docs/skills.md` says skills-evals' job requires the secret like the registry's.
 - **Two wording fixes from #125's merge comment.** The repo-settings README edit, `kit_config.py`'s comment and round 23's repo-settings bullet now say that `set-secrets.sh` stores the secret in each repo that reads it, not only in the skills registry. `ENGINE_EDITS` loses its pair with equal old and new text: the engine has imported `os` itself since repo-settings #232, and nothing needed the pair as an anchor.
+- skills-evals #1178 pins the explorer and tool tests to a test display file (`explorer/test/display.test.json`) and moves the explorer tests into `explorer/test/suite.js`. Before it, about 22 tests passed only with the owner's zone committed in `display.json`, and that was fixed in the source rather than patched here. The kit's two round-11 edits that split the live pull request URLs, and the names-no-person substitution, now point at `explorer/test/suite.js`, where their text moved unchanged.
+- `_agent-guidance` #655 makes the merge-window zone check accept a zone name that Intl renames. The kit's edits on `test/test-base-md-merge-window.js` still apply, and the change ships as exported.
+- Step 35's text names `--denylist <the same file as step 3>`, because `set-secrets.sh` keeps no copy of the list. It sets only the missing skills-evals copy and leaves the base repos' copies alone (it is idempotent unless run with `--rotate`).
 - The rest of 33dc311 ships as exported: the agent-checks delivery (the CI privacy scan, which only warns), the new privacy tests, and the explorer's zone module.
 
 | Source | Before | After |
 |---|---|---|
-| skills-evals | `149236748227` | `33dc3119a3be` |
-| _agent-guidance, agentskills, repo-settings, wsl-automation | as on main | unchanged |
+| skills-evals | `149236748227` | `3a3f6ceda87f` |
+| _agent-guidance | `aca2f1a2d5d7` | `c8cdbd4fd31b` |
+| agentskills, repo-settings, wsl-automation | as on main | unchanged |
 | agentskills-private | `c5b1bc9dfaae` | unchanged |
 
-Reverse: re-pin skills-evals to `149236748227`, remove `display_config.py` and its manifest entry, restore the four allowlist entries, take the `display.json` target out of `time_zone.py` and the rebuild out of `copy-starter.sh`, remove the skills-evals `OTHER_VALUES` entry, the track skip in `set-secrets.sh` and step 35's addition, and re-run the full export.
+Reverse: re-pin skills-evals to `149236748227` and `_agent-guidance` to `aca2f1a2d5d7`, point the round-11 edits and the substitution back at `explorer/test/run.js`, remove `display_config.py` and its manifest entry, restore the four allowlist entries, take the `display.json` target out of `time_zone.py` and the rebuild out of `copy-starter.sh`, remove the skills-evals `OTHER_VALUES` entry, the track skip in `set-secrets.sh` and step 35's addition, and re-run the full export.

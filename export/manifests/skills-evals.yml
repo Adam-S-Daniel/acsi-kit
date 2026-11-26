@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: 33dc3119a3be6da5930ed340e46cedab9ae7934e
+source_sha: 3a3f6ceda87f11a0311599ebacd4c70de69c6c49
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -42,7 +42,7 @@ substitutions:
   - {name: skills-evals guidance removal rule test name, literal: test_the_committed_guidance_removal_rule_is_adams, to: test_the_committed_guidance_removal_rule_is_the_owners}
   - {name: skills-evals guidance removal notice test name, literal: test_auto_mode_notifies_adam_with_the_removal_and_its_reversal, to: test_auto_mode_notifies_the_owner_with_the_removal_and_its_reversal}
   - {name: skills-evals registry size constant, literal: _ADAM_AGENTSKILLS_NOW, to: _ACSI_AGENTSKILLS_NOW}
-  - {name: skills-evals explorer page names-no-person check, literal: "!/\\bAdam(?:'s|\\s)/.test(html)", to: "!/\\bExample Adopter(?:'s|\\s)/.test(html)", paths: [explorer/test/run.js]}
+  - {name: skills-evals explorer page names-no-person check, literal: "!/\\bAdam(?:'s|\\s)/.test(html)", to: "!/\\bExample Adopter(?:'s|\\s)/.test(html)", paths: [explorer/test/suite.js]}
   - {name: skills-evals Google-key-shaped test strings split so secret scanning does not read them as live keys, regex: '"AIza(?=[0-9A-Za-z_-]{30,}")', to: '"AI" + "za', paths: [test/run_tests.py]}
 
 exclude:
@@ -157,7 +157,7 @@ edits:
       owner's pull request URL, matched by fixture_pr_gate.py's substituted
       owner pattern; as one literal after github.com/ the test's URL read as
       a citation (P2) and kept the source owner's name, so it was not blanked.
-  - path: explorer/test/run.js
+  - path: explorer/test/suite.js
     old: "url: 'https://github.com/Adam-S-Daniel/adam-agentskills/pull/142' };\n"
     new: "url: 'https://github.com/' + 'Adam-S-Daniel/adam-agentskills/pull/142' };\n"
     why: >-
@@ -165,7 +165,7 @@ edits:
       document lists for the same pull request, so it must follow the C1
       renames; as one literal after github.com/ it read as a citation (P2) and
       kept the source owner's name, so the two rows were not recognized as one.
-  - path: explorer/test/run.js
+  - path: explorer/test/suite.js
     old: "url: 'https://github.com/Adam-S-Daniel/adam-agentskills/pull/160' };\n"
     new: "url: 'https://github.com/' + 'Adam-S-Daniel/adam-agentskills/pull/160' };\n"
     why: Round 11. The same split for the second live pull request in that test.
