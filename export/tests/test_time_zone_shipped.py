@@ -30,13 +30,6 @@ ALLOWED = [
     "starter/skills-evals/scripts/guidance_merge_window.py",
     "starter/skills-evals/harness/budget.py",
     "starter/skills-evals/evals/budget.yml",
-    # The skills-evals explorer's own TIME_ZONE constant, and the pages built
-    # from it. The source repo is fixing it in another pull request; remove
-    # these entries when the kit re-pins past that fix.
-    "starter/skills-evals/explorer/src/core/rules.js",
-    "starter/skills-evals/explorer/dist/artifact/index.html",
-    "starter/skills-evals/dashboard/page/index.html",
-    "starter/skills-evals/tool/index.html",
 ]
 
 
@@ -72,3 +65,16 @@ def test_every_allowlist_entry_still_matches_a_file():
     files = tracked_hits()
     stale = [g for g in ALLOWED if not any(fnmatch.fnmatchcase(f, g) for f in files)]
     assert not stale, f"allowlist entries that match no file naming the zone: {stale}"
+
+
+def test_the_explorer_display_config_is_neutral():
+    # Re-pin round 24 (export/patches/skills-evals/display_config.py): the zone
+    # copy-starter.sh replaces, and only the kit's own repos, data repo first.
+    import json
+    import yaml
+    d = json.loads((KIT / "starter/skills-evals/explorer/display.json").read_text(encoding="utf-8"))
+    assert d["time_zone"] == "UTC"
+    common = yaml.safe_load((KIT / "export/manifests/_common.yml").read_text(encoding="utf-8"))
+    owner = common["kit_owners"][0]
+    assert d["issue_repos"][0] == f"{owner}/skills-evals"
+    assert all(r.split("/", 1)[0] == owner and r.split("/", 1)[1] in common["kit_repos"] for r in d["issue_repos"]), d

@@ -182,8 +182,9 @@ configured, the workflow **skips itself** (guarded on
 The `secrets` surface can copy a privacy denylist into every repo as the
 Actions secret `PRIVACY_DENYLIST`, because a personal account has no
 organization secrets. The adoption kit's `fleet.yml` declares no fan-out,
-and its plan jobs do not ask for Secrets: Read, because only your skills
-registry reads that secret and the kit's bootstrap stores it there. To fan
+and its plan jobs do not ask for Secrets: Read: the kit's bootstrap
+stores that secret directly in each of your repos that reads it
+(`bootstrap/set-secrets.sh --only privacy`). To fan
 it out, add `secrets: [{name: PRIVACY_DENYLIST}]` under `defaults` in
 `fleet.yml`; in `.github/workflows/repo-settings.yml`, add
 `permission-secrets: read` to the three read-only token steps, the

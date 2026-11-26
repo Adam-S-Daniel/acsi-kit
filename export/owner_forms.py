@@ -15,9 +15,12 @@ One-owner fleets). `stage()` gives a copied tree one of three forms:
             documented "drop the example repos" step done (below).
 
 For `one` and `two` it runs bootstrap/lib/substitute.py, plan_sizing.py
-(`--plan pro`), time_zone.py (a zone that is not the export's UTC, ZONES) and
-repin.py in that order, as copy-starter.sh does; repin.py is last, because a
-pin is the digest of a file as the steps before it left it. Form `two` then
+(`--plan pro`), time_zone.py (a zone that is not the export's UTC, ZONES),
+the explorer page rebuild for a tree with explorer/display.json (npm ci and
+node build.js, then build.js --check, as copy-starter.sh step 2c does: the
+pages embed the zone), and repin.py in that order, as copy-starter.sh does;
+repin.py is last, because a pin is the digest of a file as the steps before it
+left it. Form `two` then
 removes the example repos' rows:
 
   repo-settings   repo-settings/fleet.yml: the `repos:` elements named
@@ -34,6 +37,7 @@ error: a tree that no longer has them needs this table changed.
 from __future__ import annotations
 
 import copy
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -190,6 +194,20 @@ def _run(argv, env=None):
         raise FormError(f"{Path(argv[0]).name} exited {p.returncode}: {(p.stderr or p.stdout).strip()[-1500:]}")
 
 
+def rebuild_explorer(tree: Path, env=None) -> None:
+    """Rebuild skills-evals' explorer pages from explorer/display.json, as
+    copy-starter.sh does after it writes the zone; a tree without it is left alone."""
+    explorer = tree / "explorer"
+    if not (explorer / "display.json").is_file():
+        return
+    for argv in (["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--silent"],
+                 ["node", "build.js"], ["node", "build.js", "--check"]):
+        p = subprocess.run(argv, cwd=explorer, capture_output=True, text=True, env=env)
+        if p.returncode != 0:
+            raise FormError(f"explorer/: {' '.join(argv)} exited {p.returncode}: {(p.stderr or p.stdout).strip()[-1500:]}")
+    shutil.rmtree(explorer / "node_modules", ignore_errors=True)
+
+
 def stage(tree: Path, kit_name: str, form: str, env=None) -> None:
     """Give the copied tree at `tree` the names and edits of `form`."""
     if form not in CHOICES:
@@ -201,6 +219,7 @@ def stage(tree: Path, kit_name: str, form: str, env=None) -> None:
           "--name", name, "--noreply", noreply], env)
     _run([str(BOOTSTRAP_LIB / "plan_sizing.py"), str(tree), "--plan", "pro"], env)
     _run([str(BOOTSTRAP_LIB / "time_zone.py"), str(tree), "--zone", ZONES[form]], env)
+    rebuild_explorer(tree, env)
     _run([str(BOOTSTRAP_LIB / "repin.py"), str(tree)], env)
     if form == "two":
         drop_example_repos(tree, kit_name)
