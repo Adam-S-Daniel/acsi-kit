@@ -11,8 +11,10 @@ goes through) and `walk.env.example` (its settings). Everything that names the
 test account stays outside the repo.
 
 Out of scope: the Claude side (the test runs on the maintainer's own Claude
-plan), the evals track, and every claude.ai step. Mark those by hand with
-`status.sh --mark N`, and leave the fire URLs at `none`.
+plan), the evals track, and every claude.ai step. Mark the claude.ai `ask`
+steps by hand with `status.sh --mark N` and leave the fire URLs at `none`;
+steps 27 and 28 are checked against real routines, so they stay red
+(Steps, End).
 
 ## Before starting
 
@@ -55,7 +57,7 @@ cp "$W/kit/export/real-free-walk/walk.env.example" "$W/walk.env"   # fill it in
 cp "$W/kit/bootstrap/fleet.env.example" "$W/fleet.env"            # fill it in
 export REAL_WALK_ENV="$W/walk.env"
 walk() { "$W/kit/export/real-free-walk/walk.sh" "$@"; }
-walk true; echo $?                   # 3: refuses, gh not signed in there yet
+walk true; echo $?                   # 3: refuses, not signed in as the test login
 ```
 
 `fleet.env` for the walk: `OWNER` and `OWNER_TWO` the test login,
@@ -72,14 +74,16 @@ Then, with the test account signed in to the browser (read the login on the
 page before every write; a write as the maintainer is the worst outcome):
 
 ```bash
-walk --auth gh auth login --web -s repo,workflow   # enter the code at github.com/login/device
+walk --auth gh auth login --web -s repo,workflow --insecure-storage   # code at github.com/login/device
 walk --auth gh auth setup-git
 walk gh extension install github/gh-actions-lock
 walk bash "$W/kit/bootstrap/preflight.sh" --config "$W/fleet.env"
 ```
 
-Prefer a browser profile signed in only to the test account. In a shared
-profile, use GitHub's account switcher.
+`--insecure-storage` keeps the token in `$W/home/.config/gh` instead of the
+OS keyring, which a changed HOME does not move; `walk.sh` refuses a login
+without it. Prefer a browser profile signed in only to the test account. In a
+shared profile, use GitHub's account switcher.
 
 ## Steps
 
@@ -94,6 +98,7 @@ predicted and what happened.
 
 What to watch:
 
+- **1 add-content:** record the choices made.
 - **2 create-repos:** private repos on Free, labels, default branch, and any
   name clash (Before starting, item 6).
 - **3 set-secrets:** use `$W/home/denylist.txt`; record whether it refuses
@@ -109,6 +114,8 @@ What to watch:
   into the script's prompt within the hour. Never write the code anywhere
   else. Install each App on the repos it names; record whether a private App
   installs on private repos on Free, and whether step 7 needs the manual mark.
+- **9, 11:** drop the example repos from `fleet.yml` (mark 9) and
+  `repos.yml` (checked).
 - **14 to 18 regenerate:** pull requests open and merge.
 - **20 apply-settings:** each setting's result on the private repos
   (rulesets' HTTP status, auto-merge, fork approval, secret scanning, CodeQL
@@ -116,9 +123,11 @@ What to watch:
   `walk bash "$W/kit/bootstrap/verify.sh" --config "$W/fleet.env" --only settings`.
 - **21 install-machine:** only through `walk`, so it writes under
   `$W/home`. Record what it cloned and wrote under `$W/home/.claude/`.
-- **22, 23, 27 to 30:** mark by hand.
+- **22, 23, 29, 30:** mark by hand (no claude.ai routine or cloud
+  environment is made for the test account).
 - **End:** `verify.sh --track base` and `status.sh --track base`; record
-  the counts and exit codes.
+  the counts and exit codes. 27 and 28 fail as expected while their fire
+  URLs are `none`; any other red is a finding.
 
 Then let it run for one to two days: read the test account's email for
 GitHub's failure notices (which workflows, how often, startup failures
@@ -145,7 +154,8 @@ Within two weeks, and after the fixes merge:
    Rename back anything renamed in Before starting, item 6.
 4. An account made for the walk is deleted by the maintainer (Settings,
    Account); an existing second account stays.
-5. `rm -rf "$W"`: it holds the test account's gh token.
+5. `walk --auth gh auth logout -h github.com`, then `rm -rf "$W"`: it holds
+   the test account's gh token.
 
 ## Privacy
 

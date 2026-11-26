@@ -24,10 +24,16 @@ def setup(tmp_path: Path, login: str, env_text: str | None = None) -> dict[str, 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     gh = bin_dir / "gh"
-    # Answers `gh api user --jq .login` with FAKE_LOGIN; empty means signed out.
+    # Answers `gh api user --jq .login` with FAKE_LOGIN (empty: signed out),
+    # but only when asked from inside the walk's isolation; from anywhere
+    # else it answers as the maintainer, so a check moved above the isolation
+    # fails the tests.
     gh.write_text(
         '#!/usr/bin/env bash\n'
-        'if [ "$1 $2" = "api user" ] && [ -n "$FAKE_LOGIN" ]; then echo "$FAKE_LOGIN"; exit 0; fi\n'
+        'if [ "$1 $2" != "api user" ]; then echo "gh $*"; exit 0; fi\n'
+        'if [ "$GH_CONFIG_DIR" != "$FAKE_WALK_HOME/.config/gh" ] || [ -n "${GH_TOKEN-}${GITHUB_TOKEN-}" ]; then\n'
+        '  echo maintainer; exit 0; fi\n'
+        'if [ -n "$FAKE_LOGIN" ]; then echo "$FAKE_LOGIN"; exit 0; fi\n'
         'echo "not logged in" >&2; exit 1\n', encoding="utf-8")
     gh.chmod(0o755)
     env_file = tmp_path / "walk.env"
@@ -36,7 +42,10 @@ def setup(tmp_path: Path, login: str, env_text: str | None = None) -> dict[str, 
                         encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")}
     env.update(PATH=f"{bin_dir}:{env['PATH']}", REAL_WALK_ENV=str(env_file),
-               FAKE_LOGIN=login, HOME=str(tmp_path / "real-home"), GH_TOKEN="should-be-unset")
+               FAKE_LOGIN=login, FAKE_WALK_HOME=str(walk_dir / "home"),
+               HOME=str(tmp_path / "real-home"), GH_TOKEN="should-be-unset",
+               GITHUB_TOKEN="should-be-unset", CLAUDE_CONFIG_DIR=str(tmp_path / "real-claude"),
+               GIT_CONFIG_PARAMETERS="'credential.helper=leak'")
     return env
 
 
@@ -46,7 +55,9 @@ def run(env: dict[str, str], *args: str) -> subprocess.CompletedProcess:
 
 
 UID = "42"  # built, not written out: the leak scan flags a literal noreply id
-SHOW = ["bash", "-c", 'echo "$HOME|$GH_CONFIG_DIR|$GIT_CONFIG_GLOBAL|$GIT_AUTHOR_EMAIL|${GH_TOKEN-unset}"']
+SHOW = ["bash", "-c", 'echo "$HOME|$GH_CONFIG_DIR|$GIT_CONFIG_GLOBAL|$GIT_AUTHOR_EMAIL|'
+        '${GH_TOKEN-unset}|${GITHUB_TOKEN-unset}|${CLAUDE_CONFIG_DIR-unset}|'
+        '${GIT_CONFIG_PARAMETERS-unset}|$GIT_CONFIG_NOSYSTEM"']
 
 
 def test_runs_as_test_login_in_isolated_home(tmp_path):
@@ -55,7 +66,7 @@ def test_runs_as_test_login_in_isolated_home(tmp_path):
     home = tmp_path / "walk" / "home"
     assert p.stdout.strip() == "|".join([
         str(home), f"{home}/.config/gh", f"{home}/.gitconfig",
-        f"{UID}+free-test@users.noreply.github.com", "unset"])
+        f"{UID}+free-test@users.noreply.github.com", "unset", "unset", "unset", "unset", "1"])
 
 
 @pytest.mark.parametrize("login, shown", [("someone-else", "someone-else"), ("", "nobody")])
@@ -66,10 +77,34 @@ def test_refuses_any_other_login(tmp_path, login, shown):
     assert not (tmp_path / "ran").exists()
 
 
-def test_auth_skips_the_check_but_keeps_the_isolation(tmp_path):
-    p = run(setup(tmp_path, ""), "--auth", *SHOW)
+def test_matches_login_case_insensitively(tmp_path):
+    p = run(setup(tmp_path, "Free-Test"), "true")
     assert p.returncode == 0, p.stderr
-    assert p.stdout.startswith(str(tmp_path / "walk" / "home") + "|")
+
+
+@pytest.mark.parametrize("args", [
+    ("gh", "auth", "login", "--web", "--insecure-storage"),
+    ("gh", "auth", "setup-git"),
+    ("gh", "auth", "logout", "-h", "github.com"),
+])
+def test_auth_runs_gh_auth_without_the_check(tmp_path, args):
+    p = run(setup(tmp_path, ""), "--auth", *args)
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == " ".join(args)
+
+
+@pytest.mark.parametrize("args, message", [
+    (("touch", "RAN"), "--auth runs only"),
+    (("gh", "api", "user"), "--auth runs only"),
+    (("gh", "auth", "token"), "--auth runs only"),
+    (("gh", "auth", "login", "--web"), "--insecure-storage"),
+])
+def test_auth_refuses_anything_else(tmp_path, args, message):
+    args = tuple(str(tmp_path / "ran") if a == "RAN" else a for a in args)
+    p = run(setup(tmp_path, ""), "--auth", *args)
+    assert p.returncode == 2
+    assert message in p.stderr
+    assert not (tmp_path / "ran").exists()
 
 
 @pytest.mark.parametrize("text, message", [
@@ -78,6 +113,7 @@ def test_auth_skips_the_check_but_keeps_the_isolation(tmp_path):
     ("WALK_DIR={w}\nTEST_LOGIN=free-test\nTEST_USER_ID=0\n", "numeric id"),
     ("WALK_DIR={w}\nTEST_LOGIN=free-test\nTEST_USER_ID=42\nGH_TOKEN=x\n", "unknown key GH_TOKEN"),
     ("WALK_DIR={w}\nTEST_LOGIN free-test\n", "not KEY=value"),
+    ("WALK_DIR={w}\nTEST_LOGIN=free-test\nTEST_LOGIN=other\nTEST_USER_ID=42\n", "set twice"),
     ("WALK_DIR={w}/nowhere\nTEST_LOGIN=free-test\nTEST_USER_ID=42\n", "create it first"),
 ])
 def test_bad_settings_exit_2(tmp_path, text, message):
