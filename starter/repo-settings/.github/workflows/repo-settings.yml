@@ -109,11 +109,16 @@ on:
 permissions:
   contents: read
 
-# Account-specific App ids that fleet.yml names as "${NAME}" (the adoption
-# kit's DECISIONS C12): repository variables the kit's bootstrap sets. The
-# engine refuses to render a ruleset whose id is unset, so a missing variable
-# fails the plan instead of dropping a bypass.
+# When the source PRIVACY_DENYLIST was last stored (a timestamp, not a value;
+# scripts/set_privacy_denylist.py sets it). Every job that plans or applies the
+# `secrets` surface reads it to tell a stale copy from a current one. The VALUE
+# is passed only to the two apply steps below.
 env:
+  PRIVACY_DENYLIST_UPDATED_AT: ${{ vars.PRIVACY_DENYLIST_UPDATED_AT }}
+  # Account-specific App ids that fleet.yml names as "${NAME}" (the adoption
+  # kit's DECISIONS C12): repository variables the kit's bootstrap sets. The
+  # engine refuses to render a ruleset whose id is unset, so a missing variable
+  # fails the plan instead of dropping a bypass.
   GUIDANCE_SYNC_APP_ID: ${{ vars.GUIDANCE_SYNC_APP_ID }}
   ROSTER_WRITER_APP_ID: ${{ vars.ROSTER_WRITER_APP_ID }}
 
@@ -523,6 +528,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           OWNER: ${{ matrix.owner }}
+          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
         run: |
           set -uo pipefail
           # Under RUNNER_TEMP, never the checkout: the last step must only
@@ -784,6 +790,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           OWNER: ${{ matrix.owner }}
+          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
         run: python scripts/repo_settings.py apply --config repo-settings/fleet.yml --owner "$OWNER" --cms-label-only skip
 
       # Least privilege for the example-site-platform-managed repos (docs/decisions/0016).

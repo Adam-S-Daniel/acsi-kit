@@ -87,7 +87,8 @@ FLEET_EDITS = [
 ]
 
 ENGINE_EDITS = [
-    ("import json\nimport re\n", "import json\nimport os\nimport re\n"),
+    # The engine imports os itself since repo-settings#232 (re-pin round 23).
+    ("import json\nimport os\nimport re\n", "import json\nimport os\nimport re\n"),
     ('''def _bypass_entries(actors: list | None) -> list[dict]:''',
      '''# An account-specific id (a GitHub App's) is written in fleet.yml as
 # "${NAME}" and read from the environment variable NAME when the ruleset is
@@ -118,22 +119,67 @@ def _bypass_entries(actors: list | None) -> list[dict]:'''),
 ]
 
 WORKFLOW_EDITS = [
-    ('''permissions:
-  contents: read
+    # The source has a top-level env block since repo-settings#232; the C12
+    # variables join it (a second `env:` key is invalid YAML).
+    ('''env:
+  PRIVACY_DENYLIST_UPDATED_AT: ${{ vars.PRIVACY_DENYLIST_UPDATED_AT }}
 
 jobs:''',
-     '''permissions:
-  contents: read
-
-# Account-specific App ids that fleet.yml names as "${NAME}" (the adoption
-# kit's DECISIONS C12): repository variables the kit's bootstrap sets. The
-# engine refuses to render a ruleset whose id is unset, so a missing variable
-# fails the plan instead of dropping a bypass.
-env:
+     '''env:
+  PRIVACY_DENYLIST_UPDATED_AT: ${{ vars.PRIVACY_DENYLIST_UPDATED_AT }}
+  # Account-specific App ids that fleet.yml names as "${NAME}" (the adoption
+  # kit's DECISIONS C12): repository variables the kit's bootstrap sets. The
+  # engine refuses to render a ruleset whose id is unset, so a missing variable
+  # fails the plan instead of dropping a bypass.
   GUIDANCE_SYNC_APP_ID: ${{ vars.GUIDANCE_SYNC_APP_ID }}
   ROSTER_WRITER_APP_ID: ${{ vars.ROSTER_WRITER_APP_ID }}
 
 jobs:'''),
+]
+
+# Re-pin round 23 (DECISIONS): the source fans its privacy denylist out to
+# every repo as a `secrets` surface (repo-settings#232). In the kit only
+# acsi-agentskills reads that secret, and bootstrap/set-secrets.sh stores it
+# there, so the kit's fleet.yml declares no fan-out and its read-only plan
+# tokens do not ask for Secrets: read, which the kit's settings Apps are not
+# granted (bootstrap/create-apps.sh): asking for it would fail every plan.
+# The engine's `secrets` surface ships, unused until an adopter declares it.
+FANOUT_CUT = ("  # why: the fleet's privacy denylist has to reach every repo's CI, and\n",
+              "  # Prerequisite for the Dependabot unattended-merge path")
+SECRETS_READ = "          permission-secrets: read\n"
+SECRETS_READ_COUNT = 3
+
+FANOUT_TEST_EDITS = {
+    "tests/test_repo_settings_workflow_token.py": [
+        ('''    "permission-metadata",
+    "permission-secrets",
+}''', '''    "permission-metadata",
+}'''),
+    ],
+    "tests/test_secrets_surface.py": [
+        ('''    def test_fleet_yml_declares_it_for_every_repo(self):
+        cfg = rs.load_config(str(Path(__file__).resolve().parent.parent
+                                 / "repo-settings" / "fleet.yml"))
+        self.assertEqual(cfg["defaults"]["secrets"], [{"name": NAME}])''',
+         '''    def test_the_kits_fleet_yml_declares_no_fan_out(self):
+        # The adoption kit's re-pin round 23: an adopter declares one himself.
+        cfg = rs.load_config(str(Path(__file__).resolve().parent.parent
+                                 / "repo-settings" / "fleet.yml"))
+        self.assertNotIn("secrets", cfg["defaults"])'''),
+    ],
+}
+
+# The setter's default repo is the source owner's; an adopter names his own.
+SETTER_EDITS = [
+    ("    ~/bin/show-denylist | python3 scripts/set_privacy_denylist.py\n"
+     "    python3 scripts/set_privacy_denylist.py --file ~/.config/privacy-denylist.txt\n",
+     "    ~/bin/show-denylist | python3 scripts/set_privacy_denylist.py --repo <owner>/repo-settings\n"
+     "    python3 scripts/set_privacy_denylist.py --repo <owner>/repo-settings \\\n"
+     "        --file ~/.config/privacy-denylist.txt\n"),
+    ('''    parser.add_argument("--repo", default=DEFAULT_REPO,
+                        help=f"repo holding the apply environments (default {DEFAULT_REPO})")''',
+     '''    parser.add_argument("--repo", required=True,
+                        help="repo holding the apply environments, as <owner>/repo-settings")'''),
 ]
 
 SCHEMA_EDITS = [
@@ -280,7 +326,7 @@ def apply(root: Path, ctx) -> None:
     fleet = root / "repo-settings" / "fleet.yml"
     text = fleet.read_text(encoding="utf-8")
     ids = _app_ids(text)
-    for start, end in FLEET_CUTS:
+    for start, end in FLEET_CUTS + [FANOUT_CUT]:
         text = _cut(text, start, end, "fleet.yml")
     text = _sub(text, FLEET_EDITS, "fleet.yml", ids)
     fleet.write_text(text, encoding="utf-8")
@@ -298,11 +344,19 @@ def apply(root: Path, ctx) -> None:
     for start, end in TEST_CUTS:
         text = _cut(text, start, end, "tests/test_repo_settings.py")
     tests.write_text(text, encoding="utf-8")
-    for rel, pairs in TEST_EDITS.items():
+    for rel, pairs in {**TEST_EDITS, **FANOUT_TEST_EDITS}.items():
         p = root / rel
         p.write_text(_sub(p.read_text(encoding="utf-8"), pairs, rel, ids), encoding="utf-8")
 
+    wf = root / ".github" / "workflows" / "repo-settings.yml"
+    text = wf.read_text(encoding="utf-8")
+    if text.count(SECRETS_READ) != SECRETS_READ_COUNT:
+        raise SystemExit(f"kit_config: repo-settings.yml: expected {SECRETS_READ_COUNT} of {SECRETS_READ!r}, "
+                         f"found {text.count(SECRETS_READ)}")
+    wf.write_text(text.replace(SECRETS_READ, ""), encoding="utf-8")
+
     for rel, pairs in (("scripts/repo_settings.py", ENGINE_EDITS),
+                       ("scripts/set_privacy_denylist.py", SETTER_EDITS),
                        (".github/workflows/repo-settings.yml", WORKFLOW_EDITS),
                        ("repo-settings/schema.md", SCHEMA_EDITS)):
         p = root / rel

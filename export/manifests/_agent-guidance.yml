@@ -6,7 +6,7 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: ff0a37a67c037a7c6dee612f8d32d1f7400f8dc5
+source_sha: d02d9b99eec2415d0d09787f670288d5c60668c4
 
 exclude:
   - path: docs/reference/adopt-the-whole-system.md
@@ -37,6 +37,12 @@ imports:
     sha: e0d772c22312cc6585d0b4f70de8bc22d0f18368
     path: scripts/audit-scheduled-runs.js
     why: C4. The reusable's audit step runs this script; the source fetches it from the platform repo, which is not in the kit.
+
+# Re-pin round 23: the privacy tests' invented account name. The kit's leak
+# scan allows only its own placeholder users in a home path (_common.yml), so
+# the fixture takes one of those, the same in every test that uses it.
+substitutions:
+  - {name: privacy fixture user, literal: exampleuser, to: fixtureuser}
 
 edits:
   # ---- C4: the reusable reads its scripts from this repo
@@ -415,6 +421,34 @@ edits:
 
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).
+
+  # ---- Re-pin round 23: the write-marker hook skips stock hostnames, as the runner does
+  - path: .claude/hooks/github-write-marker.sh
+    old: |2
+                       "gitpod", "git", "nobody"}
+    new: |2
+                       "gitpod", "git", "nobody"}
+      # Hostnames that are ordinary words or stock image names, as agent-checks'
+      # local_generic_hosts: a body naming "ubuntu-latest" is not a leak.
+      GENERIC_HOSTS = {"ubuntu", "debian", "fedora", "centos", "alpine", "arch",
+                       "raspberrypi", "build", "main", "master", "dev", "devbox",
+                       "server", "desktop", "laptop", "workstation", "runner",
+                       "home", "test"}
+    why: >-
+      Re-pin round 23. The hook's header says it follows agent-checks'
+      local-identity rules, where generic names are not checked, and the
+      runner skips stock hostnames (local_generic_hosts), but the hook had no
+      such list: with no denylist, a machine named like its image (ubuntu)
+      blocked every pull request body naming the ubuntu-latest runner. The
+      list is the runner's, word for word. The regression test is in
+      agentskills.yml (test_a_stock_hostname_is_not_treated_as_an_identity).
+  - path: .claude/hooks/github-write-marker.sh
+    old: |2
+          if ("\n" not in host and len(host) >= 4 and lower != "localhost"
+    new: |2
+          if ("\n" not in host and len(host) >= 4 and lower != "localhost"
+                  and lower not in GENERIC_HOSTS
+    why: Re-pin round 23. The check that uses GENERIC_HOSTS (above).
 
 patches:
   - file: blank_content.py
