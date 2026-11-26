@@ -117,8 +117,25 @@ a pull request with the result.
   sed -i -e "s/^readonly bootstrap_revision='0\{40\}'/readonly bootstrap_revision='$rev'/" \
     -e "s/^readonly bootstrap_sha256='0\{64\}'/readonly bootstrap_sha256='$sum'/" \
     scripts/sync-codex-cloud-environments.sh
+  ```
+
+  The same script downloads the fleet-guidance installer,
+  `.claude/hooks/fleet-memory.sh`, from your `_agent-guidance` at
+  `fleet_pin_commit` and checks it against `fleet_pin_sha256`. The export
+  ships both as ones (zeros would collide with the pin above in the test's
+  fake `sha256sum`), which fail closed: setup fails. Set them the same way,
+  then run the test:
+
+  ```bash
+  rev=$(git -C ../_agent-guidance rev-parse HEAD)
+  sum=$(git -C ../_agent-guidance show "$rev:.claude/hooks/fleet-memory.sh" | sha256sum | cut -d' ' -f1)
+  sed -i -e "s/^readonly fleet_pin_commit='1\{40\}'/readonly fleet_pin_commit='$rev'/" \
+    -e "s/^readonly fleet_pin_sha256='1\{64\}'/readonly fleet_pin_sha256='$sum'/" \
+    scripts/sync-codex-cloud-environments.sh
   bash tests/sync-codex-cloud-environments.test.sh
   ```
+
+  The bootstrap's `regenerate.sh codex-pin` does both.
 
 - **The waiting feed's commit identity** (DECISIONS C12).
   `scripts/publish-waiting-feed.sh` falls back to
@@ -206,3 +223,32 @@ a pull request with the result.
 - **`<your name>`** in `.claude-plugin/marketplace.json` and each plugin's
   two manifests is the kit's placeholder; `copy-starter.sh` fills it from
   `OWNER_NAME`.
+
+## `acsi-agentskills`
+
+Two more places name a commit of the source owner's `_agent-guidance`, which
+yours does not have. The bootstrap's `regenerate.sh run-health-sha` sets both
+to your `_agent-guidance` default branch's commit, in the pull request that
+pins the scheduled-run-health reusable.
+
+- **`scripts/cloud-env-setup.sh` `fleet_pin_commit`** is the commit a cloud
+  session downloads the fleet-guidance installer
+  (`.claude/hooks/fleet-memory.sh`) at, checked against `fleet_pin_sha256` on
+  the next line. With the source's commit the download fails and every cloud
+  session prints `fleet-guidance: setup skipped`. The digest line needs no
+  change: `copy-starter.sh` sets it to the digest of the registry's own copy
+  of the installer (`bootstrap/lib/repin.py`), which is the file your
+  `_agent-guidance` holds when both repos come from the same kit. By hand:
+
+  ```bash
+  rev=$(git -C ../_agent-guidance rev-parse origin/main)
+  git -C ../_agent-guidance show "$rev:.claude/hooks/fleet-memory.sh" | sha256sum   # must equal fleet_pin_sha256
+  sed -i "s/^fleet_pin_commit=[0-9a-f]\{40\}$/fleet_pin_commit=$rev/" scripts/cloud-env-setup.sh
+  ```
+
+- **`.github/workflows/ci.yml`'s eval-protection gate checkout** (the step
+  named "Check out the eval-protection gate") checks out
+  `<owner>/_agent-guidance` at a `ref` that is the source's commit. The step
+  runs only when `EVALS_REPO` names a repo (the evals track), and fails there
+  on every pull request until the ref is a commit of yours. Replace that
+  step's `ref:` value, and no other, with the same commit.

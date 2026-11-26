@@ -152,6 +152,12 @@ in it. Create one for your fleet work and give it:
   and `~`. The script must end with `exit 0`, because a failed setup script
   stops the session from starting.
 
+A cloud session installs the fleet guidance only once the pull request
+from quick start step 16 is merged in `acsi-agentskills`: until then
+`scripts/cloud-env-setup.sh` names a commit your `_agent-guidance` doesn't
+have, and the session prints `fleet-guidance: setup skipped` ([the
+pin](generated-files.md#the-scheduled-run-health-pin)).
+
 Each routine names its environment ([routines](routines.md)).
 `wsl-automation`'s `scripts/sync-codex-cloud-environments.sh` keeps Codex
 Cloud environments in step (see its README, "Codex Cloud environment sync

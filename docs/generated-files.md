@@ -49,6 +49,8 @@ handles it:
 | `acsi-agentskills-private` | `.github/workflows/actions.lock` | 18 |
 | `acsi-agentskills` | `<your name>` | 12 |
 | `acsi-agentskills-private` | `<your name>` | 12 |
+| `acsi-agentskills` | `scripts/cloud-env-setup.sh` `fleet_pin_commit` | 16 |
+| `acsi-agentskills` | `.github/workflows/ci.yml`'s eval-protection gate checkout | 16 |
 
 `REGENERATE.md` puts the two registries under one heading, but
 `acsi-agentskills-private` has no `scheduled-run-health.yml`, so step 16
@@ -97,19 +99,51 @@ ships forty zeros. `bash bootstrap/regenerate.sh run-health-sha` writes your
 three base repos in step 16, and `skills-evals` once the evals track creates
 it (step 38).
 
+In `acsi-agentskills` the same pull request sets that commit in two more
+places, which the export ships naming a commit of the source owner's
+`_agent-guidance` that yours doesn't have:
+
+- `fleet_pin_commit` in `scripts/cloud-env-setup.sh`. A cloud session
+  downloads the fleet-guidance installer (`.claude/hooks/fleet-memory.sh`)
+  from your `_agent-guidance` at that commit and checks it against
+  `fleet_pin_sha256` on the next line. Until the commit is yours, the
+  download fails and every cloud session prints
+  `fleet-guidance: setup skipped`, so it starts without the guidance.
+- The `ref` of the "Check out the eval-protection gate" step in
+  `.github/workflows/ci.yml`. The step runs only on the evals track
+  (`EVALS_REPO`), where it fails on every pull request until the ref is a
+  commit of yours.
+
+The task never writes `fleet_pin_sha256`: `copy-starter.sh` already set it
+to the digest of the registry's own copy of the installer. Before it changes
+anything, the task checks that your `_agent-guidance`'s copy at the new
+commit has that digest. If it doesn't, the two repos came from different
+versions of the kit, and the task stops and names both files. Run
+`bootstrap/copy-starter.sh` for the repo on the older kit, merge its pull
+request, and run the task again.
+
+`--check` reports each part on its own line. Any commit of your
+`_agent-guidance` counts as done, not only the newest, so a later bump of
+either pin doesn't turn the step back to not done. To bump one later, use
+the commands in the comments above `fleet_pin_commit`.
+
 ## The Codex Cloud pin
 
-`wsl-automation`'s `scripts/sync-codex-cloud-environments.sh` downloads your
-registry's skills-bootstrap hook at a reviewed commit and checks its digest;
-both ship as zeros, which fail closed (setup reports skills `DEGRADED`). The
-same script downloads the fleet-guidance installer from `_agent-guidance` at
-its own pin (`fleet_pin_commit`, `fleet_pin_sha256`) and fails setup if the
-download or digest check fails; the pin ships as placeholders too, so set both
-before you use Codex Cloud, by hand: `codex-pin` does not set them, and the
-commands to run are in the script's comments.
-`bash bootstrap/regenerate.sh codex-pin` sets them to your `acsi-agentskills`
-HEAD and its hook's sha256, runs the script's own test with the new pin,
-and proposes the change. Skip it if you do not use Codex.
+`wsl-automation`'s `scripts/sync-codex-cloud-environments.sh` holds two
+pins, and both ship as placeholders that fail closed:
+
+- `bootstrap_revision` and `bootstrap_sha256`: your registry's
+  skills-bootstrap hook at a reviewed commit, and its digest. They ship as
+  zeros (setup reports skills `DEGRADED`).
+- `fleet_pin_commit` and `fleet_pin_sha256`: the fleet-guidance installer
+  (`.claude/hooks/fleet-memory.sh`) in your `_agent-guidance` at a commit,
+  and its digest. They ship as ones (setup fails).
+
+`bash bootstrap/regenerate.sh codex-pin` sets the first pair to your
+`acsi-agentskills` HEAD and its hook's sha256, and the second to your
+`_agent-guidance` HEAD and the installer's sha256 there. It then runs the
+script's own test with the new pins and proposes the change. `--check`
+reports each pin on its own line. Skip the step if you do not use Codex.
 
 ## The action lockfiles
 
