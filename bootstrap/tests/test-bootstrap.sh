@@ -2072,9 +2072,39 @@ run bash "$B/verify.sh" --config "$CFGP" --only regen:hook-pin,regen:codex-pin; 
 assert_eq "verify regen:<task> passes for a done task" "$rc" 0
 
 # ======================================================== status.sh (part 2)
+# Step 11 is checked against repos.yml on _agent-guidance's default branch:
+# both lists still name the starter's example repos, which neither owner has.
+run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "verify --only repos-yml fails while repos.yml names the example repos" "$rc" 1
+for l in cron_coverage.fleet skills_bootstrap.repos; do
+  assert "it names $l's example repo" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml $l names example-site-a, which neither owner has: remove it in a pull request (step 11)"
+done
+run bash "$B/status.sh" --config "$CFGP" --mark 11; rc=$?
+assert_eq "status refuses to mark step 11, which it checks itself" "$rc" 1
+# Step 11 as its pull request does it: the example names out of both lists.
+drop_from_repos_yml() { # <name pattern> ...: drop matching list lines from repos.yml on _agent-guidance's main
+  local w="$T/tmp/step11"
+  rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/_agent-guidance.git" "$w"
+  python3 -I - "$w/repos.yml" "$@" <<'PY'
+import re, sys, yaml
+path, pats = sys.argv[1], sys.argv[2:]
+text = open(path, encoding="utf-8").read()
+keep = [l for l in text.splitlines(True) if not any(re.fullmatch(r"\s+- " + p + r"\s*", l) for p in pats)]
+new = "".join(keep)
+for key, sub in (("cron_coverage", "fleet"), ("skills_bootstrap", "repos")):
+    names = yaml.safe_load(new)[key][sub]
+    assert not any(re.fullmatch(p, n) for p in pats for n in names), (key, names)
+open(path, "w", encoding="utf-8").write(new)
+PY
+  git -C "$w" commit -qam "drop repos neither owner has from repos.yml" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
+}
+drop_from_repos_yml 'example-site-[a-z]+'
+run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "verify --only repos-yml passes once both lists name only repos you have" "$rc" 0
+assert "it says so" has "$OUT" "PASS: acme-example/_agent-guidance repos.yml names only repos you have"
 # The steps no script can see are answered with --mark.
-for i in 9 11; do bash "$B/status.sh" --config "$CFGP" --mark "$i" >/dev/null 2>&1; done
-assert_eq "the marks are kept in the state file" "$(jq -c .done "$ADOPT_STATE_FILE")" '["9","11"]'
+bash "$B/status.sh" --config "$CFGP" --mark 9 >/dev/null 2>&1
+assert_eq "the marks are kept in the state file" "$(jq -c .done "$ADOPT_STATE_FILE")" '["9"]'
 run bash "$B/status.sh" --config "$CFGP"; rc=$?
 assert "the regenerate steps read as done after their merges" bash -c 'for i in 14 15 16 17 18; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
 assert "step 20, the settings apply, is next" grep -q '^Next: 20 ' "$OUT"
@@ -2357,6 +2387,14 @@ run bash "$B/verify.sh" --config "$CFGB" --only variables
 assert "verify --track all fails EVALS_REPO naming skills-evals when it does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none"
 run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
 assert_eq "EVALS_REPO is none again" "$(jqs "$AG.EVALS_REPO")" none
+# evals-fleet put skills-evals in repos.yml's cron_coverage.fleet, and the repo
+# is gone: an _agent-guidance like an older kit's, on a base-only setup. Step 11
+# reports it (the daily Dependabot health check would fail on that name) and
+# says how it comes back.
+run bash "$B/verify.sh" --config "$CFGB" --track base --only repos-yml; rc=$?
+assert_eq "a base-only setup whose repos.yml lists skills-evals fails step 11" "$rc" 1
+assert "it names the line and how it comes back" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml cron_coverage.fleet names skills-evals, which neither owner has: remove that line in a pull request (the evals track's regenerate.sh evals-fleet adds it back once skills-evals exists)"
+drop_from_repos_yml skills-evals
 read -r -a asks <<<"$(jq -r '[.steps[] | select(.track == "base" and .check.type == "ask" and .check.record == null) | "--mark", .id] | join(" ")' "$B/steps.json")"
 run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" "${asks[@]}"; rc=$?
 assert_eq "the base ask steps are marked" "$rc" 0

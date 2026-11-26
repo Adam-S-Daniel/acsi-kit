@@ -192,13 +192,16 @@
     {
       "id": "11",
       "title": "Drop the example repos from repos.yml",
-      "run": "In a pull request on `<you>/_agent-guidance`, remove the `example-site-*` names from `repos.yml` `cron_coverage.fleet` and `skills_bootstrap.repos` (unless you have those repos)",
+      "run": "In a pull request on `<you>/_agent-guidance`, remove the `example-site-*` names from `repos.yml` `cron_coverage.fleet` and `skills_bootstrap.repos` (unless you have those repos), and `skills-evals` too if an older kit's copy lists it before you have that repo. This step's check is that both lists name only repos one of your owners has",
       "kind": "manual",
       "part": "guidance",
       "track": "base",
       "link": "docs/generated-files.md#example-repos-in-fleetyml",
       "check": {
-        "type": "ask"
+        "type": "verify",
+        "groups": [
+          "repos-yml"
+        ]
       },
       "minutes": 10
     },

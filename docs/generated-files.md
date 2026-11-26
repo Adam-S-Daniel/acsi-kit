@@ -201,7 +201,11 @@ list names a repo neither owner has, which is also why the example names
 have to go. When you add evals, `bootstrap/regenerate.sh evals-fleet` (step
 40) adds `skills-evals` to the list in a pull request. If your
 `_agent-guidance` came from an older copy of the kit and still lists
-`skills-evals` without having the repo, remove that line.
+`skills-evals` without having the repo, remove that line. Step 11's check,
+`bash bootstrap/verify.sh --only repos-yml`, reads both lists on your
+default branch and names each repo neither owner has, the example repos and
+such a `skills-evals` line alike, so the step reads done only once they are
+gone.
 
 The invented example repos appear in live config only in those places, in
 `acsi-agentskills`' federated marketplace entry ([the

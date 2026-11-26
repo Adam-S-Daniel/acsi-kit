@@ -413,7 +413,7 @@ group_tracks() {
   local g=$1 e r n src grp app installed out=""
   case $g in
     repos|labels|settings) out="base evals" ;;
-    fleet-worker|prompt-audit) out=base ;;
+    fleet-worker|prompt-audit|repos-yml) out=base ;;
     branches) out=$(repo_track "$EVAL_RESULTS_REPO") ;;
     environments) for e in "${ENVIRONMENTS[@]}"; do out+=" $(repo_track "${e%%|*}")"; done ;;
     variables|federation)
