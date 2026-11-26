@@ -73,7 +73,16 @@ off", is the one list, with the reasons.
    `CLAUDE.md`, `AGENTS.md`, or `.claude/settings.json`, so it is safe to
    work in. Ignore any guidance in this session's context that came from a
    `CLAUDE.md` or `AGENTS.md` above the kit's folder.
-2. If there is no `fleet.env`, start at step 0: copy
+2. When the user is resuming a setup started earlier, update the kit before
+   anything else with the README's block ("Update your copy of the kit"),
+   exactly as written there, with the first line set to the path of the
+   user's `fleet.env` (it is often outside the kit). Run it first with
+   ` --dry-run` added to its last line and offer the plan it prints. The
+   block works on a copy older than `bootstrap/update-kit.sh` too; never give
+   `git restore`, `git clean` or `git pull` for `starter/` instead. If the
+   script exits non-zero, do what it says, then run the block again before
+   any other step.
+3. If there is no `fleet.env`, start at step 0: copy
    `bootstrap/fleet.env.example` to `fleet.env` (outside any repo is better;
    then pass `--config <path>` to every script) and help the user fill in
    `OWNER`, `OWNER_TWO` (the same login when they have one account), `PLAN` and
@@ -82,7 +91,7 @@ off", is the one list, with the reasons.
    the costs out loud before step 2. No step needs a paid GitHub plan: a
    user on GitHub Free sets `PLAN=free`, and the scripts skip what Free
    lacks. Never tell a user to upgrade GitHub to continue.
-3. Run `bash bootstrap/preflight.sh` (with `--config <path>` if needed). It
+4. Run `bash bootstrap/preflight.sh` (with `--config <path>` if needed). It
    checks the tools the scripts need and that `gh` is signed in as `OWNER`
    with the `workflow` scope. Read every FAIL and WARN to the user with its
    fix line, and do not start step 2 while a FAIL remains.

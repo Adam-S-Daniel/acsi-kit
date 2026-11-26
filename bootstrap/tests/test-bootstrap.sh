@@ -83,7 +83,7 @@ git config --global init.defaultBranch main
 git config --global protocol.file.allow always
 
 SCRIPTS=(create-repos.sh create-environments.sh create-apps.sh set-secrets.sh copy-starter.sh
-         regenerate.sh apply-settings.sh install-machine.sh verify.sh status.sh add-content.sh preflight.sh)
+         regenerate.sh apply-settings.sh install-machine.sh verify.sh status.sh add-content.sh update-kit.sh preflight.sh)
 FLEET=(_agent-guidance repo-settings acsi-agentskills acsi-agentskills-private skills-evals wsl-automation)
 O=acme-example
 OUT="$T/out" ERR="$T/err"
@@ -1212,6 +1212,356 @@ assert "with no record the content step is next" grep -q '^Next: 1 ' "$OUT"
 run bash "$KC/bootstrap/add-content.sh" --config "$CFGP" --items none; rc=$?
 assert_eq "add-content --items none exits 0" "$rc" 0
 assert_eq "--items none records an empty choice" "$(jq -c .installed "$CHOICES")" '[]'
+
+# ======================================================== update-kit.sh
+# A local "origin" holding the kit, cloned the way an adopter clones it; the
+# upstream moves on after the clone has had add-content.sh run in it.
+UP="$T/upd"; mkdir -p "$UP/origin" "$UP/state"
+UCH="$UP/state/adopt.content-choices.json"
+ugit() { git -c user.name=t -c user.email=t@example.com "$@"; }
+uk() { local d=$1; shift; run env ADOPT_STATE_FILE="$UP/state/adopt.json" bash "$d/bootstrap/update-kit.sh" "$@"; }
+upstream() { ugit -C "$UP/origin" add -A && ugit -C "$UP/origin" commit -qm "$1"; }   # commit what the test changed in origin
+bump() { echo "$1" >> "$UP/origin/starter/wsl-automation/UPSTREAM-TEST.txt"; upstream "$1"; }
+workdirs() { find "$TMPDIR" -maxdepth 1 -name 'bootstrap.*' | wc -l | tr -d ' '; }   # common.sh's scratch folders
+cp -R "$K/bootstrap" "$K/starter" "$K/library" "$UP/origin/"
+# The adopter's kit predates TIME_ZONE: its example and fleet.env lack the key.
+sed -i '/^TIME_ZONE=/d' "$UP/origin/bootstrap/fleet.env.example"
+ugit -C "$UP/origin" init -q -b main && upstream "kit"
+ugit clone -q "$UP/origin" "$UP/kit"; UK="$UP/kit"
+grep -v '^TIME_ZONE=' "$CFGP" > "$UK/fleet.env"; printf 'REVIEWER=zqmarkerrev\n' >> "$UK/fleet.env"
+mkdir -p "$UK/app-manifests"; echo manifest > "$UK/app-manifests/x"
+run env ADOPT_STATE_FILE="$UP/state/adopt.json" bash "$UK/bootstrap/add-content.sh" --config "$UK/fleet.env" --items recommended; rc=$?
+assert_eq "the clone takes add-content recommended" "$rc" 0
+ITEM="starter/agent-skills/plugins/acsi-coding-anywhere/skills/review-bash-ci-reliability/SKILL.md"
+assert "an optional item is in the clone's starter/" test -f "$UK/$ITEM"
+assert "the choices are recorded outside the kit" test -f "$UCH"
+# The upstream moves on: a file add-content.sh also rewrites (stakes.yml), a
+# new file, a new optional config key and a removed one.
+echo "# upstream line" >> "$UP/origin/starter/skills-evals/evals/stakes.yml"
+echo "new upstream file" > "$UP/origin/starter/wsl-automation/UPSTREAM-TEST.txt"
+cp "$K/bootstrap/fleet.env.example" "$UP/origin/bootstrap/fleet.env.example"   # TIME_ZONE arrives
+echo "NEW_KEY_FOR_TEST=" >> "$UP/origin/bootstrap/fleet.env.example"
+sed -i '/^REPOS_DIR=/d' "$UP/origin/bootstrap/fleet.env.example"
+upstream "upstream moves"
+origin_head() { git -C "$UP/origin" rev-parse HEAD; }
+assert_not "a plain git pull fails once add-content has run" git -C "$UK" pull --ff-only
+st0=$(git -C "$UK" status --porcelain); h0=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UK/fleet.env" --dry-run; rc=$?
+assert_eq "update-kit --dry-run exits 0" "$rc" 0
+assert "the dry run prints the planned fast-forward" has "$OUT" "would have: fast-forward origin/main: ${h0:0:12} -> $(origin_head | cut -c1-12), 1 commit(s)"
+assert_eq "the dry run leaves git status alone" "$(git -C "$UK" status --porcelain)" "$st0"
+assert_eq "the dry run leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h0"
+# The new copy is started through a `bash` on PATH that only logs: the
+# script must use the bash it runs under ($BASH), since PATH's bash can be
+# macOS's 3.2 after the adopter started it with Homebrew's.
+mkdir -p "$UP/bashstub"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$UP/bash.log" "$BASH" > "$UP/bashstub/bash"; chmod +x "$UP/bashstub/bash"
+w0=$(workdirs)
+run env PATH="$UP/bashstub:$PATH" ADOPT_STATE_FILE="$UP/state/adopt.json" "$BASH" "$UK/bootstrap/update-kit.sh" --config "$UK/fleet.env"; rc=$?
+assert_eq "update-kit exits 0" "$rc" 0
+[ "$rc" = 0 ] || sed 's/^/    update-kit: /' "$ERR"
+assert_not "it never runs itself or add-content.sh through PATH's bash" grep -qE 'update-kit\.sh|add-content\.sh' "$UP/bash.log"
+assert_eq "it leaves no scratch folder behind, exec or not" "$(workdirs)" "$w0"
+assert_eq "HEAD is the upstream head" "$(git -C "$UK" rev-parse HEAD)" "$(origin_head)"
+assert "the upstream file is there" has "$UK/starter/wsl-automation/UPSTREAM-TEST.txt" "new upstream file"
+assert "the optional item is back in starter/" test -f "$UK/$ITEM"
+assert "it reports the fast-forward" has "$OUT" "${h0:0:12} -> $(origin_head | cut -c1-12), 1 commit(s)"
+assert "it names the new key as optional" has "$OUT" "new, optional: NEW_KEY_FOR_TEST"
+COPY_STEP=$(jq -r '[.steps[] | select(.run | test("copy-starter[.]sh"))][0].id' "$K/bootstrap/steps.json")
+assert "it names TIME_ZONE as needed before the copy step, not as blocking the update" has "$OUT" "new, needed before the copy step (step $COPY_STEP): TIME_ZONE (copy-starter.sh refuses until it is set in your fleet.env; this update does not need it)"
+assert_not "TIME_ZONE is not called optional" has "$OUT" "new, optional: TIME_ZONE"
+assert "the update reports that no step reopened" has "$OUT" "Every setup step that was done before this update is still done."
+assert "it names the removed key, which this fleet.env sets" has "$OUT" "removed: REPOS_DIR (your fleet.env sets it"
+assert_not "it lists no key the old example already had" has "$OUT" "VISIBILITY_AGENT_GUIDANCE"
+assert_not "it prints no config value" grep -rq zqmarkerrev "$OUT" "$ERR"
+assert "it points to status.sh" has "$OUT" "Next: bash bootstrap/status.sh --config $UK/fleet.env"
+assert "it says repos already filled are not updated" has "$OUT" "are NOT updated by this script"
+assert "an untracked fleet.env survives" test -f "$UK/fleet.env"
+assert "an untracked app-manifests/ survives" test -f "$UK/app-manifests/x"
+# Every recommended item, counted from the catalog so a new one needs no edit here.
+NREC=$(jq '[.items[] | select(.tier == "recommended")] | length' "$K/bootstrap/content-catalog.json")
+assert_eq "the recorded choices are the same" "$(jq -c '.installed | length' "$UCH")" "$NREC"
+st1=$(git -C "$UK" status --porcelain); h1=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a second update-kit run exits 0" "$rc" 0
+assert "a second run says the kit is current" has "$OUT" "the kit is current"
+assert_not "a current kit lists no fleet.env key (this fleet.env sets few of them)" grep -qE 'new, |removed: |VISIBILITY_AGENT_GUIDANCE' "$OUT"
+assert_eq "a second run changes no status" "$(git -C "$UK" status --porcelain)" "$st1"
+assert_eq "a second run keeps HEAD" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+assert_not "it does not say nothing changed after re-applying the choices" has "$OUT" "Nothing to change"
+# Hand edits inside starter/ are not add-content's, so they are refused.
+bump "upstream again"
+assert "the hand-edited file is tracked" git -C "$UK" ls-files --error-unmatch starter/repo-settings/README.md
+echo "my own edit" >> "$UK/starter/repo-settings/README.md"
+h1=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a hand edit in starter/ makes update-kit exit 1" "$rc" 1
+assert "it names the hand-edited path" has "$ERR" "starter/repo-settings/README.md"
+assert_not "it does not blame add-content's own files" has "$ERR" "fleet-guidance.md"
+assert "it says --discard-starter-edits saves them outside the clone first" has "$ERR" "to ~/kit-starter-backup-${h1:0:12}"
+assert "the edit is intact" has "$UK/starter/repo-settings/README.md" "my own edit"
+assert_eq "the refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+uk "$UK" --config "$UK/fleet.env" --discard-starter-edits; rc=$?
+assert_eq "--discard-starter-edits lets it go ahead" "$rc" 0
+assert_eq "HEAD is the upstream head again" "$(git -C "$UK" rev-parse HEAD)" "$(origin_head)"
+assert_not "the hand edit is gone" has "$UK/starter/repo-settings/README.md" "my own edit"
+assert "the optional item is still installed" test -f "$UK/$ITEM"
+assert "the hand edit was saved outside the clone" has "$HOME/kit-starter-backup-${h1:0:12}/starter-edits.patch" "my own edit"
+assert "it says where it saved starter/" has "$OUT" "Saved "
+# A changed executable bit is a hand edit too, never add-content.sh's.
+bump "upstream after the mode"
+chmod +x "$UK/starter/repo-settings/README.md"; h1=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a hand chmod +x in starter/ makes update-kit exit 1" "$rc" 1
+assert "it names the file whose mode changed" has "$ERR" "starter/repo-settings/README.md"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+chmod -x "$UK/starter/repo-settings/README.md"
+# A tracked edit outside starter/ is refused whatever else is true.
+bump "upstream third"
+echo "my note" >> "$UK/bootstrap/README.md"; h1=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a tracked edit outside starter/ makes update-kit exit 1" "$rc" 1
+assert "it names the path" has "$ERR" "bootstrap/README.md"
+assert "it says to restore or commit it" has "$ERR" "git restore <path>"
+assert "the edit is intact" has "$UK/bootstrap/README.md" "my note"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+git -C "$UK" restore bootstrap/README.md
+# A detached HEAD is refused, not fast-forwarded.
+git -C "$UK" switch -q --detach
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a detached HEAD makes update-kit exit 1" "$rc" 1
+assert "it says HEAD is detached" has "$ERR" "HEAD is detached"
+assert "it gives the way back" has "$ERR" "switch main"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+assert "the optional item is still there" test -f "$UK/$ITEM"
+git -C "$UK" switch -q main
+# A merge in progress is refused, with the way out.
+ugit -C "$UK" switch -q -c side && echo side > "$UK/side.txt" && ugit -C "$UK" add side.txt && ugit -C "$UK" commit -qm side
+git -C "$UK" switch -q main && ugit -C "$UK" merge -q --no-ff --no-commit side
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a merge in progress makes update-kit exit 1" "$rc" 1
+assert "it names the merge in progress" has "$ERR" "a merge is in progress"
+assert "it gives the way out" has "$ERR" "merge --abort"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+git -C "$UK" merge --abort && git -C "$UK" branch -qD side
+# Without node, the content choices cannot be put back: refused up front, with the install command.
+NN="$UP/nonode"; mkdir -p "$NN"
+for t in bash env uname grep sed cat dirname mktemp rm chmod tr cut od head wc git python3 jq tar sort comm mkdir; do ln -sf "$(command -v "$t")" "$NN/$t"; done
+run env PATH="$NN" PREFLIGHT_OS=debian ADOPT_STATE_FILE="$UP/state/adopt.json" "$BASH" "$UK/bootstrap/update-kit.sh" --config "$UK/fleet.env"; rc=$?
+assert_eq "update-kit without node exits 1" "$rc" 1
+assert "it says node is needed and how to install it" has "$ERR" "node is required to put your content choices back with add-content.sh"
+assert "it names the install command" has "$ERR" "sudo apt-get install -y nodejs npm"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+# When the proof's add-content.sh cannot run (npm fails), its output is shown and nothing changes.
+mkdir -p "$UP/badnpm"; printf '#!/bin/sh\necho "npm-stub: registry unreachable" >&2\nexit 1\n' > "$UP/badnpm/npm"; chmod +x "$UP/badnpm/npm"
+run env PATH="$UP/badnpm:$PATH" ADOPT_STATE_FILE="$UP/state/adopt.json" "$BASH" "$UK/bootstrap/update-kit.sh" --config "$UK/fleet.env"; rc=$?
+assert_eq "a proof that cannot run makes update-kit exit 1" "$rc" 1
+assert "it says add-content.sh could not be re-run" has "$ERR" "add-content.sh could not be re-run in a scratch copy"
+assert "it shows add-content.sh's last lines" has "$ERR" "| ERROR: \`npm ci"
+assert_not "it does not call them hand edits" has "$ERR" "your own edits"
+assert "the optional item is still there" test -f "$UK/$ITEM"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+# An untracked file where the newer kit adds one is refused before starter/ is touched.
+echo "kit file" > "$UP/origin/COLLIDE.txt"; upstream "a new top-level file"
+echo mine > "$UK/COLLIDE.txt"
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "an untracked file in the way makes update-kit exit 1" "$rc" 1
+assert "it names the file" has "$ERR" "COLLIDE.txt"
+assert "the optional item is still there" test -f "$UK/$ITEM"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+rm "$UK/COLLIDE.txt"
+# Local commits ahead of origin are refused.
+ugit clone -q "$UP/origin" "$UP/kit2"
+echo local > "$UP/kit2/local.txt"; ugit -C "$UP/kit2" add local.txt; ugit -C "$UP/kit2" commit -qm "local"
+bump "upstream fourth"
+h2=$(git -C "$UP/kit2" rev-parse HEAD)
+uk "$UP/kit2" --config "$UK/fleet.env"; rc=$?
+assert_eq "local commits make update-kit exit 1" "$rc" 1
+assert "it says HEAD is not an ancestor" has "$ERR" "is not an ancestor of origin/main"
+assert "it says how to see the commits" has "$ERR" "log --oneline origin/main..HEAD"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UP/kit2" rev-parse HEAD)" "$h2"
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "update-kit works again once the file is restored" "$rc" 0
+assert_eq "the clone caught up" "$(git -C "$UK" rev-parse HEAD)" "$(origin_head)"
+# The newer kit requires a new key: refused before anything changes, naming the key.
+sed -i -e 's/^  SITE_REPO$/  SITE_REPO NEWREQ_APP_ID/' -e 's/^CONFIG_REQUIRED=(\(.*\))$/CONFIG_REQUIRED=(\1 NEWREQ_APP_ID)/' "$UP/origin/bootstrap/lib/common.sh"
+echo "NEWREQ_APP_ID=" >> "$UP/origin/bootstrap/fleet.env.example"
+upstream "a new required key"
+assert "the test made NEWREQ_APP_ID required upstream" grep -q 'CONFIG_REQUIRED=(.* NEWREQ_APP_ID)' "$UP/origin/bootstrap/lib/common.sh"
+h1=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a fleet.env the newer kit refuses makes update-kit exit 1" "$rc" 1
+assert "it names the missing key" has "$ERR" "NEWREQ_APP_ID is required"
+assert "it lists the new key as required" has "$OUT" "new, required: NEWREQ_APP_ID"
+assert "it says nothing was changed" has "$ERR" "Nothing was changed"
+assert "it names the choices it kept" has "$ERR" "review-bash-ci-reliability"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+assert "the optional item is still there" test -f "$UK/$ITEM"
+echo "NEWREQ_APP_ID=42" >> "$UK/fleet.env"
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "with the key set it updates" "$rc" 0
+assert_eq "the clone caught up again" "$(git -C "$UK" rev-parse HEAD)" "$(origin_head)"
+assert "the optional item is back" test -f "$UK/$ITEM"
+# The new copy, handed the old copy's choices, refuses a fleet.env it cannot load and names them.
+printf 'OWNER=acme-example\nPLAN=free\nCLAUDE_PLAN=max20x\nNOT_A_KEY=1\n' > "$UP/bad.env"
+uk "$UK" --config "$UP/bad.env" --after-update "$h1" --ids security,git-habits; rc=$?
+assert_eq "after the update, a fleet.env that does not load exits 1" "$rc" 1
+assert "it names the choices that are not back" has "$ERR" "(security,git-habits) are NOT in it"
+assert "it says to run the script again" has "$ERR" "bash bootstrap/update-kit.sh --config $UP/bad.env"
+assert_not "it does not send the adopter on to status.sh" has "$OUT" "Next:"
+# On a current kit an invalid fleet.env is refused too, and changes nothing; a missing one is fine.
+uk "$UK" --config "$UP/bad.env"; rc=$?
+assert_eq "an invalid fleet.env makes update-kit exit 1" "$rc" 1
+assert "it says the config does not load" has "$ERR" "does not load under the current kit"
+assert "it names the unknown key to remove" has "$ERR" "NOT_A_KEY"
+# No fleet.env at --config while a record exists or starter/ has changes: refused,
+# naming --config, even with --discard-starter-edits (it would drop the choices).
+bump "upstream while the config is elsewhere"
+h1=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UP/none.env"; rc=$?
+assert_eq "a missing fleet.env with changes in starter/ makes update-kit exit 1" "$rc" 1
+assert "it names --config" has "$ERR" "--config /path/to/fleet.env"
+assert "it says starter/ has changes" has "$ERR" "starter/ has changes"
+uk "$UK" --config "$UP/none.env" --discard-starter-edits; rc=$?
+assert_eq "--discard-starter-edits does not get past a missing fleet.env" "$rc" 1
+assert "the optional item is still there" test -f "$UK/$ITEM"
+assert_eq "those refusals leave HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "with the right --config it updates" "$rc" 0
+git -C "$UK" stash list > "$UP/stash.txt"; assert_eq "it stashes nothing" "$(wc -l < "$UP/stash.txt" | tr -d ' ')" 0
+mkdir -p "$UP/clean"; ugit clone -q "$UP/origin" "$UP/clean/kit"
+run env ADOPT_STATE_FILE="$UP/state/adopt.json" bash "$UP/clean/kit/bootstrap/update-kit.sh" --config "$UP/none.env"; rc=$?
+assert_eq "a missing fleet.env with a record exits 1, even on a clean current kit" "$rc" 1
+assert "it says a record exists" has "$ERR" "a content choices record exists"
+run env ADOPT_STATE_FILE="$UP/nostate/adopt.json" bash "$UP/clean/kit/bootstrap/update-kit.sh" --config "$UP/none.env"; rc=$?
+assert_eq "a missing fleet.env with no record and a clean starter/ is fine" "$rc" 0
+# An item the newer catalog drops is named and dropped from the record; the rest come back.
+jq 'del(.items[] | select(.id == "security"))' "$UP/origin/bootstrap/content-catalog.json" > "$UP/cat.json" && mv "$UP/cat.json" "$UP/origin/bootstrap/content-catalog.json"
+upstream "the catalog drops security"
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a dropped catalog item does not stop update-kit" "$rc" 0
+[ "$rc" = 0 ] || sed 's/^/    update-kit: /' "$ERR"
+assert "it names the dropped item" has "$OUT" "no longer offers: security"
+assert_eq "the record keeps the other items" "$(jq -c '.installed | length' "$UCH")" "$((NREC - 1))"
+assert_eq "the record drops the item" "$(jq -c '.installed | index("security")' "$UCH")" null
+assert "the other items are back" test -f "$UK/$ITEM"
+assert_eq "the clone caught up once more" "$(git -C "$UK" rev-parse HEAD)" "$(origin_head)"
+# Ctrl-C while the choices are put back: it says where things stand and what to
+# run next. npm's second call (the re-apply; the first is the proof) interrupts
+# update-kit's own process group, which setsid made a new one; the stub refuses
+# any group that is not an integer above 1 or is the test's own (bash, since
+# dash's kill takes no --).
+REALNPM=$(command -v npm); TESTPG=$(ps -o pgid= -p $$ | tr -d ' ')
+mkdir -p "$UP/intnpm"; rm -f "$UP/npm.count"
+cat > "$UP/intnpm/npm" <<EOF
+#!$BASH
+n=\$((\$(cat "$UP/npm.count" 2>/dev/null || echo 0) + 1)); echo "\$n" > "$UP/npm.count"
+if [ "\$n" = 2 ]; then
+  pg=\$(ps -o pgid= -p \$\$ | tr -d ' ')
+  case \$pg in ''|*[!0-9]*) exit 1 ;; esac
+  if [ "\$pg" -le 1 ] || [ "\$pg" = "$TESTPG" ]; then exit 1; fi
+  kill -INT -- "-\$pg"; exit 130
+fi
+exec "$REALNPM" "\$@"
+EOF
+chmod +x "$UP/intnpm/npm"
+bump "upstream before the interrupt"
+run env PATH="$UP/intnpm:$PATH" ADOPT_STATE_FILE="$UP/state/adopt.json" setsid -w "$BASH" "$UK/bootstrap/update-kit.sh" --config "$UK/fleet.env"; rc=$?
+assert_eq "an interrupt during the re-apply exits 130" "$rc" 130
+assert "it says the kit is updated but the choices are not back" has "$ERR" "INTERRUPTED: the kit is updated, but your content choices"
+assert "it gives the command to run next" has "$ERR" "Next: cd $UK && bash bootstrap/update-kit.sh --config $UK/fleet.env"
+assert_eq "npm was called twice (the proof, then the re-apply)" "$(cat "$UP/npm.count")" 2
+assert_eq "the kit was updated before the interrupt" "$(git -C "$UK" rev-parse HEAD)" "$(origin_head)"
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "running it again finishes" "$rc" 0
+assert "the optional item is back after the interrupt" test -f "$UK/$ITEM"
+# The README's update block, as written, on a clone older than update-kit.sh,
+# with fleet.env outside the kit (a space in its path) and run by sh: a failed
+# fetch changes nothing; then it updates and puts the choice back.
+O3="$UP/o3"; mkdir -p "$O3"; cp -R "$K/bootstrap" "$K/starter" "$K/library" "$O3/"; rm "$O3/bootstrap/update-kit.sh"
+ugit -C "$O3" init -q -b main && ugit -C "$O3" add -A && ugit -C "$O3" commit -qm "a kit before update-kit.sh"
+ugit clone -q "$O3" "$UP/k3"
+cp "$K/bootstrap/update-kit.sh" "$O3/bootstrap/" && ugit -C "$O3" add -A && ugit -C "$O3" commit -qm "update-kit.sh arrives"
+mkdir -p "$UP/my config"; cp "$CFGP" "$UP/my config/fleet.env"
+run env ADOPT_STATE_FILE="$UP/state3/adopt.json" bash "$UP/k3/bootstrap/add-content.sh" --config "$UP/my config/fleet.env" --items security; rc=$?
+assert_eq "the old clone takes add-content" "$rc" 0
+SEC="starter/skills-evals/evals/guidance/security/search-query/fixture.yaml"
+assert "the item is in the old clone" test -f "$UP/k3/$SEC"
+assert_not "the old clone has no update-kit.sh" test -e "$UP/k3/bootstrap/update-kit.sh"
+awk '/^## Update your copy of the kit/{f=1} f&&/^```bash$/{g=1;next} g&&/^```$/{exit} g' "$K/README.md" > "$UP/block.sh"
+assert_eq "the README block's first line is the config path" "$(head -n1 "$UP/block.sh")" "cfg=./fleet.env"
+{ printf "cfg='%s'\n" "$UP/my config/fleet.env"; tail -n +2 "$UP/block.sh"; } > "$UP/block-mine.sh"
+h3=$(git -C "$UP/k3" rev-parse HEAD)
+git -C "$UP/k3" remote set-url origin "$UP/no-such-origin.git"
+run env ADOPT_STATE_FILE="$UP/state3/adopt.json" sh -c 'cd "$1" && sh "$2"' _ "$UP/k3" "$UP/block-mine.sh"; rc=$?
+assert_not "the block stops when the fetch fails" test "$rc" = 0
+assert "it shows why the fetch failed" has "$ERR" "no-such-origin"
+assert_eq "a failed fetch leaves HEAD alone" "$(git -C "$UP/k3" rev-parse HEAD)" "$h3"
+assert "a failed fetch leaves the item in place" test -f "$UP/k3/$SEC"
+git -C "$UP/k3" remote set-url origin "$O3"
+run env ADOPT_STATE_FILE="$UP/state3/adopt.json" sh -c 'cd "$1" && sh "$2"' _ "$UP/k3" "$UP/block-mine.sh"; rc=$?
+assert_eq "the README block updates a clone older than the script" "$rc" 0
+[ "$rc" = 0 ] || sed 's/^/    block: /' "$ERR"
+assert_eq "the old clone reached the upstream head" "$(git -C "$UP/k3" rev-parse HEAD)" "$(git -C "$O3" rev-parse HEAD)"
+assert "the item is back in the old clone" test -f "$UP/k3/$SEC"
+assert "it ends with status.sh and the config path" has "$OUT" "Next: bash bootstrap/status.sh --config"
+# A fetch that fails inside the script shows git's own lines and changes nothing.
+git -C "$UK" remote set-url origin "$UP/no-such-origin.git"; h1=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a failed fetch makes update-kit exit 1" "$rc" 1
+assert "it shows git's own fetch error" grep -q "^  | .*no-such-origin" "$ERR"
+assert_eq "a failed fetch leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+git -C "$UK" remote set-url origin "$UP/origin"
+# A newer kit whose check covers more reopens a step done before: step 3's
+# privacy list was stored in the registry alone, and the newer kit wants it in
+# four repos. The update says so, and status.sh shows step 3 not done.
+O4="$UP/o4"; mkdir -p "$O4"; cp -R "$K/bootstrap" "$K/starter" "$K/library" "$O4/"
+sed -i -E '/^  "acsi-agentskills\|/!{/\|-\|secret\|PRIVACY_DENYLIST\|file"/d;}' "$O4/bootstrap/lib/common.sh"
+assert_eq "the old kit stores the privacy list in the registry only" "$(grep -c 'PRIVACY_DENYLIST|file' "$O4/bootstrap/lib/common.sh")" 1
+ugit -C "$O4" init -q -b main && ugit -C "$O4" add -A && ugit -C "$O4" commit -qm "privacy list in the registry only"
+ugit clone -q "$O4" "$UP/k4"
+cp "$K/bootstrap/lib/common.sh" "$O4/bootstrap/lib/common.sh" && ugit -C "$O4" commit -qam "privacy list in four repos"
+cp "$GH_STUB_STATE" "$UP/stub-state.saved"
+jqset 'del(.values["acme-example/_agent-guidance||secret"].PRIVACY_DENYLIST, .values["acme-example/repo-settings||secret"].PRIVACY_DENYLIST, .values["acme-example/wsl-automation||secret"].PRIVACY_DENYLIST)'
+assert_not "the registry holds the privacy list" test "$(jqs '.values["acme-example/acsi-agentskills||secret"].PRIVACY_DENYLIST')" = null
+run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/status.sh" --config "$CFGP"
+assert "under the old kit step 3 is done" grep -qE '^done +3 ' "$OUT"
+run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/update-kit.sh" --config "$CFGP"; rc=$?
+assert_eq "the update with a reopened step exits 0" "$rc" 0
+cp "$OUT" "$UP/update-after.txt"
+[ "$rc" = 0 ] || sed 's/^/    update-kit: /' "$ERR"
+assert "it says which steps reopened" has "$OUT" "Steps that were done before this update and are NOT done under the newer kit (its checks ask for more):"
+assert "it names step 3 and the command to run again" has "$OUT" "  step 3, Store the privacy denylist: \`bootstrap/set-secrets.sh --only privacy"
+run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/status.sh" --config "$CFGP"
+assert_not "after the update status.sh shows step 3 not done" grep -qE '^done +3 ' "$OUT"
+cp "$OUT" "$UP/status-after.txt"
+OPT_STEP=$(sed -nE 's/^optional +([^ ]+) .*/\1/p' "$UP/status-after.txt" | head -n1)
+assert "status.sh lists an optional step that is not done (step 17 or another)" test -n "$OPT_STEP"
+assert_not "an optional step that is not done is never called reopened" grep -q "  step $OPT_STEP, " "$UP/update-after.txt"
+assert_eq "only step 3 is called reopened" "$(grep -c '^  step [0-9]*, ' "$UP/update-after.txt")" 1
+cp "$UP/stub-state.saved" "$GH_STUB_STATE"
+# Since step 0 asks for TIME_ZONE while a copy step is not done, an update
+# reopens step 0 for a setup without it; the report says why, as status.sh does.
+O5="$UP/o5"; mkdir -p "$O5"; cp -R "$K/bootstrap" "$K/starter" "$K/library" "$O5/"
+sed -i 's/^if \[ "\$CONFIG_OK" = 1 \] && \[ -z "\$CFG_TIME_ZONE" \]; then$/if false; then/' "$O5/bootstrap/status.sh"
+assert_not "the old kit's status.sh has no TIME_ZONE rule" cmp -s "$K/bootstrap/status.sh" "$O5/bootstrap/status.sh"
+ugit -C "$O5" init -q -b main && ugit -C "$O5" add -A && ugit -C "$O5" commit -qm "step 0 without the TIME_ZONE rule"
+ugit clone -q "$O5" "$UP/k5"
+cp "$K/bootstrap/status.sh" "$O5/bootstrap/status.sh" && ugit -C "$O5" commit -qam "step 0 asks for TIME_ZONE"
+new_config "$UP/k5.env" free zz-fresh-owner; sed -i '/^TIME_ZONE=/d' "$UP/k5.env"
+run env ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/status.sh" --config "$UP/k5.env"
+assert "under the old kit step 0 is done without TIME_ZONE" grep -qE '^done +0 ' "$OUT"
+run env ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/update-kit.sh" --config "$UP/k5.env"; rc=$?
+assert_eq "the update that reopens step 0 exits 0" "$rc" 0
+assert "it names step 0" has "$OUT" "  step 0, Write fleet.env:"
+assert "it says why: TIME_ZONE, as status.sh and the key report do" has "$OUT" "    why: $UP/k5.env: TIME_ZONE is required: set TIME_ZONE in fleet.env"
+# A downloaded copy (no .git) cannot be updated in place.
+mkdir -p "$UP/dl"; cp -R "$UK/bootstrap" "$UK/starter" "$UK/library" "$UP/dl/"
+uk "$UP/dl" --config "$UK/fleet.env"; rc=$?
+assert_eq "a kit that is not a git clone exits 1" "$rc" 1
+assert "it says it is not a git clone" has "$ERR" "not a git clone"
+assert "it says to clone fresh and re-run add-content.sh" has "$ERR" "bootstrap/add-content.sh --items <ids>"
+assert "it prints the recorded ids" has "$ERR" "Your recorded content choices:"
 
 # ======================================================== status.sh (part 1) and verify.sh
 run bash "$B/status.sh" --config "$T/none.env"; rc=$?

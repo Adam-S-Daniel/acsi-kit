@@ -60,6 +60,91 @@ merged improvement comes one to two weeks later, because it waits on the
 eval budget rather than on you ([what it
 costs](docs/before-you-start.md#what-it-costs)).
 
+## Update your copy of the kit
+
+The kit changes often. To move your clone to the newest kit, open a terminal
+in the kit's folder and paste this block. The same block works for every copy,
+including one made before `bootstrap/update-kit.sh` existed: it fetches the
+newest kit and runs the newest `update-kit.sh` from a temporary folder. If your
+`fleet.env` is not in the kit's folder, put its path in the first line in
+place of `./fleet.env`.
+
+```bash
+cfg=./fleet.env
+git fetch origin &&
+tool=$(mktemp -d) &&
+git archive origin/main bootstrap | tar -x -C "$tool" &&
+bash "$tool/bootstrap/update-kit.sh" --kit . --config "$cfg"
+```
+
+Nothing in the block changes your clone; only the last line's script does,
+and it refuses, changing nothing, when you have edited a tracked file outside
+`starter/`, edited `starter/` yourself, when it cannot find your `fleet.env`,
+or when your `fleet.env` does not load under the newer kit (it names the key
+to fix). To see its plan first, add ` --dry-run` to the last line; when it
+refuses your own `starter/` edits, add ` --discard-starter-edits` there to
+save them and go ahead. It
+fast-forwards your clone, puts the optional content you chose back, and lists
+the `fleet.env` keys that are new (saying which are required) or gone. It
+exits 0 only when everything worked; then run what it prints last,
+`bash bootstrap/status.sh` (with your `--config`).
+
+If it stops, it says what changed and what to run next; once you have done
+that, paste the block again. Before it discards anything under `starter/` it
+saves all of it, your own edits and new files included, to a new folder
+`~/kit-starter-backup-<commit>` (a patch named starter-edits.patch, and a copy
+of the new files in a folder named new-files). Your own `starter/` edits belong in a pull
+request on your repo after `copy-starter.sh`, not in the kit. Your content
+choices are recorded outside the kit. Your `fleet.env` and your app manifests
+folder are untouched.
+
+Before and after the update it runs `bash bootstrap/status.sh` (read-only)
+and lists any setup step that was done before and is not done under the
+newer kit, because its check now covers more, with the command to run again.
+It also lists new `fleet.env` keys; a key only a later script needs, such as
+`TIME_ZONE` (needed by `copy-starter.sh`), is named with the step that needs
+it and does not stop the update. These steps changed recently for a setup
+that already ran them:
+
+- Step 2 (the repos): `create-repos.sh` now also creates a `ci` label, so
+  step 2 shows as not done until you run `bash bootstrap/create-repos.sh`
+  again (it skips what exists).
+- Steps 8 and 37 (the repository variables): run
+  `bash bootstrap/create-environments.sh` again. It sets
+  `LOOP_WORKER_EVERY_HOURS` to your plan's value (replacing one you set by
+  hand), adds `EVALS_REPO` to the `acsi-agentskills` registry, and writes
+  `none` to `FLEET_WORKER_FIRE_URL` and `LOOP_WORKER_FIRE_URL` if they are
+  not set (a URL you set is kept).
+- Steps 7 and 34 (installing the Apps): `gh` cannot read App installations,
+  so check each App's installation page, then mark the step yourself:
+  `bash bootstrap/status.sh --mark 7` (and `--mark 34`).
+- Step 27 (the fleet worker routine): done only when `_agent-guidance` has
+  both `FLEET_WORKER_FIRE_URL` (not `none`) and `FLEET_WORKER_FIRE_BEARER`.
+- Step 3 (the privacy denylist): `set-secrets.sh --only privacy` now stores
+  it in four repos (the registry, `_agent-guidance`, `repo-settings`,
+  `wsl-automation`), so a setup that stored it before shows step 3 as not
+  done again. Run step 3 again; it skips the repo that already has it.
+- Step 0 (fleet.env): while `TIME_ZONE` is empty and a base step that runs
+  `copy-starter.sh` is still open, step 0 shows as not done again; set
+  `TIME_ZONE` in your `fleet.env` (the update names it as a new key and
+  shows the same reason).
+- Step 35 (creating `skills-evals`, on the evals track): it now also stores
+  the privacy list in `skills-evals`. If you created it before, run
+  `bash bootstrap/set-secrets.sh --only privacy --denylist <the same file>`
+  again; it stores only the copy that is missing.
+- Step 22 (the machine jobs): `~/.config/wsl-automation/settings.env` now
+  needs `WSL_AUTOMATION_AGENT_OWNER_ROOTS`, the folder that holds your clones
+  (on Windows, a user environment variable of that name instead;
+  [machine](docs/machine.md#scheduled-jobs-wsl-automation) has the details).
+
+On macOS, if it says it needs bash 4.4 or later, install it (`brew install
+bash`) and replace `bash` at the start of the last line with
+`"$(brew --prefix)/bin/bash"`; nothing was changed before that check.
+
+It does not change repos you already filled from an older starter. For
+those, `bash bootstrap/copy-starter.sh --dry-run <starter-subdir> <owner/repo>`
+shows what the newer starter would change.
+
 ## Read more
 
 - [How it works](docs/how-it-works.md): the six repos, the loop, and the

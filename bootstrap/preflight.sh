@@ -48,42 +48,6 @@ warn_() { WARNS=$((WARNS + 1)); printf 'WARN: %s\n' "$*"; }
 skp()  { SKIPPED=$((SKIPPED + 1)); printf 'SKIP: %s\n' "$*"; }
 fix()  { printf '      fix: %s\n' "$*"; }
 
-# ------------------------------------------------------------------ the OS
-# OS_KIND is macos, debian, fedora or other; IS_WSL is 1 on Linux under WSL.
-detect_os() {
-  local kernel
-  kernel=$(uname -s)
-  if [ -n "${PREFLIGHT_OS:-}" ]; then
-    case $PREFLIGHT_OS in macos|debian|fedora|other) OS_KIND=$PREFLIGHT_OS ;; *) die "PREFLIGHT_OS wants macos, debian, fedora or other, not: $PREFLIGHT_OS" ;; esac
-  elif [ "$kernel" = Darwin ]; then
-    OS_KIND=macos
-  elif [ "$kernel" = Linux ] && command -v apt-get >/dev/null 2>&1; then
-    OS_KIND=debian
-  elif [ "$kernel" = Linux ] && command -v dnf >/dev/null 2>&1; then
-    OS_KIND=fedora
-  else
-    OS_KIND=other
-  fi
-  IS_WSL=0
-  if [ -n "${PREFLIGHT_WSL:-}" ]; then
-    [ "$PREFLIGHT_WSL" != 1 ] || IS_WSL=1
-  elif [ "$kernel" = Linux ] && [ -r /proc/version ] && [[ $(cat /proc/version 2>/dev/null || true) == *[Mm]icrosoft* ]]; then
-    IS_WSL=1
-  fi
-}
-
-# install_cmd <tool> <brew package> <apt package> <dnf package> <install page>:
-# the command for this OS; an empty package means no package, so the page.
-install_cmd() {
-  local tool=$1 brew=$2 apt=$3 dnf=$4 page=$5
-  case $OS_KIND in
-    macos)  [ -z "$brew" ] || { printf 'brew install %s' "$brew"; return 0; } ;;
-    debian) [ -z "$apt" ]  || { printf 'sudo apt-get install -y %s' "$apt"; return 0; } ;;
-    fedora) [ -z "$dnf" ]  || { printf 'sudo dnf install -y %s' "$dnf"; return 0; } ;;
-  esac
-  printf 'install %s from %s' "$tool" "$page"
-}
-
 # version_ge <have> <want>: dotted integers, 0 when have >= want. Anything
 # after the first non-numeric part of have is ignored (2.54.0.windows.1 is
 # 2.54.0), and a missing part counts as 0 (2.54 equals 2.54.0).
@@ -265,7 +229,7 @@ check_node() {
     if have "$t"; then
       pass "$t is installed"
     else
-      check_missing "$t" fail "add-content.sh, step 1, builds the contributor rules with it" "$(install_cmd "$t" node "nodejs npm" "nodejs npm" https://nodejs.org/en/download)"
+      check_missing "$t" fail "add-content.sh, step 1, builds the contributor rules with it" "$(node_install_cmd "$t")"
     fi
   done
 }

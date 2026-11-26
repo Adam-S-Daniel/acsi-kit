@@ -18,6 +18,8 @@
 #   run_write_stdin <cmd...>  write command whose value arrives on stdin (secrets)
 #   value_names <secret|variable> <owner/repo> <env|->  names set (never values)
 #   finish                 the "changed N things" / "nothing to change" summary
+#   CONFIG_REQUIRED        the keys load_config requires
+#   detect_os, install_cmd, node_install_cmd   the install command for this OS (OS_KIND)
 #   state_file / choices_file   status.sh's answers and add-content.sh's record (STATE, CHOICES)
 #
 # The registries below (ENVIRONMENTS, APPS, OTHER_VALUES, REPO_VARIABLES,
@@ -97,10 +99,15 @@ state_path_ok() {
     die "the state file must be outside every git work tree: $p"
   fi
 }
+# state_dir: the folder of the state file and the content choices records
+# (update-kit.sh looks there for a record when no fleet.env is found).
+state_dir() {
+  if [ -n "${ADOPT_STATE_FILE:-}" ]; then dirname -- "$ADOPT_STATE_FILE"; else printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/adopt-the-whole-system"; fi
+}
 # state_file: sets STATE, status.sh's answers for CFG_OWNER (load_config first):
 # ${ADOPT_STATE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/adopt-the-whole-system/<owner>.json}.
 state_file() {
-  STATE=${ADOPT_STATE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/adopt-the-whole-system/$CFG_OWNER.json}
+  STATE=${ADOPT_STATE_FILE:-$(state_dir)/$CFG_OWNER.json}
   case $STATE in /*) ;; *) STATE=$PWD/$STATE ;; esac
   state_path_ok "$STATE"
 }
@@ -134,6 +141,16 @@ CONFIG_KEYS=(
   SITE_REPO
 )
 
+# The keys load_config refuses to leave empty; update-kit.sh reads this list
+# to say which new keys a newer kit requires.
+CONFIG_REQUIRED=(OWNER PLAN CLAUDE_PLAN)
+required_hint() { # key
+  case $1 in
+    PLAN) printf ' (free or paid)' ;;
+    CLAUDE_PLAN) printf " (pro, max5x or ultra): it sizes the eval budget and the fleet worker's schedule; docs/before-you-start.md#which-plan" ;;
+  esac
+}
+
 # time_zone_state <name>: prints ok (python3's zoneinfo loads it), unknown (the
 # machine has a tz database and does not know the name) or nodb (this python3
 # has no tz database at all: a minimal container, Git Bash, some macOS
@@ -165,6 +182,10 @@ _TIME_ZONE_HELP="set TIME_ZONE in fleet.env to your IANA time zone name, such as
 # TIME_ZONE_NODB_HELP: said where a zone is accepted on shape alone.
 _TIME_ZONE_NODB_HELP="this machine's python3 has no time zone database, so TIME_ZONE could not be checked against it: install one with 'pip install tzdata' for that python3 (or your OS's tzdata package), then run again"
 
+# Keys load_config leaves optional that a later step's script refuses to run
+# without (require_time_zone, in copy-starter.sh): update-kit.sh names a new
+# one as needed before the first copy-starter.sh step in steps.json.
+CONFIG_REQUIRED_BY_COPY=(TIME_ZONE)
 # require_time_zone: the scripts that write the merge window call this after
 # load_config. TIME_ZONE has no default and is not required by load_config, so
 # status.sh and verify.sh stay green for a setup that copied the starter before
@@ -224,9 +245,10 @@ load_config() { # path
     _valid_value "$key" "$val" || die "$path:$n: invalid value for $key$([ "$key" != TIME_ZONE ] || echo ": $_TIME_ZONE_HELP")$([ "$key" != OWNER_NAME ] || echo " (letters, digits, spaces, . and - only; no apostrophe, it ends a single-quoted string in the starter's scripts)")"
     printf -v "CFG_$key" '%s' "$val"
   done < "$path"
-  [ -n "$CFG_OWNER" ] || die "$path: OWNER is required"
-  [ -n "$CFG_PLAN" ] || die "$path: PLAN is required (free or paid)"
-  [ -n "$CFG_CLAUDE_PLAN" ] || die "$path: CLAUDE_PLAN is required (pro, max5x or ultra): it sizes the eval budget and the fleet worker's schedule; docs/before-you-start.md#which-plan"
+  for key in "${CONFIG_REQUIRED[@]}"; do
+    known=CFG_$key
+    [ -n "${!known}" ] || die "$path: $key is required$(required_hint "$key")"
+  done
   : "${CFG_OWNER_TYPE:=user}" "${CFG_REVIEWER:=$CFG_OWNER}"
   # <your name> and "Example Adopter" land in public repos: default to the
   # public handle, never a legal name.
@@ -495,6 +517,48 @@ parse_common_args() {
 }
 
 usage() { sed -n '2,/^$/{s/^# \{0,1\}//;p}' "$0"; }
+
+# ------------------------------------------------------------------ the OS
+# preflight.sh's tool checks and update-kit.sh's node check name the install
+# command for this OS with these. PREFLIGHT_OS and PREFLIGHT_WSL (tests only)
+# override the detection.
+# OS_KIND is macos, debian, fedora or other; IS_WSL is 1 on Linux under WSL.
+detect_os() {
+  local kernel
+  kernel=$(uname -s)
+  if [ -n "${PREFLIGHT_OS:-}" ]; then
+    case $PREFLIGHT_OS in macos|debian|fedora|other) OS_KIND=$PREFLIGHT_OS ;; *) die "PREFLIGHT_OS wants macos, debian, fedora or other, not: $PREFLIGHT_OS" ;; esac
+  elif [ "$kernel" = Darwin ]; then
+    OS_KIND=macos
+  elif [ "$kernel" = Linux ] && command -v apt-get >/dev/null 2>&1; then
+    OS_KIND=debian
+  elif [ "$kernel" = Linux ] && command -v dnf >/dev/null 2>&1; then
+    OS_KIND=fedora
+  else
+    OS_KIND=other
+  fi
+  IS_WSL=0
+  if [ -n "${PREFLIGHT_WSL:-}" ]; then
+    [ "$PREFLIGHT_WSL" != 1 ] || IS_WSL=1
+  elif [ "$kernel" = Linux ] && [ -r /proc/version ] && [[ $(cat /proc/version 2>/dev/null || true) == *[Mm]icrosoft* ]]; then
+    IS_WSL=1
+  fi
+}
+
+# install_cmd <tool> <brew package> <apt package> <dnf package> <install page>:
+# the command for this OS; an empty package means no package, so the page.
+install_cmd() {
+  local tool=$1 brew=$2 apt=$3 dnf=$4 page=$5
+  case $OS_KIND in
+    macos)  [ -z "$brew" ] || { printf 'brew install %s' "$brew"; return 0; } ;;
+    debian) [ -z "$apt" ]  || { printf 'sudo apt-get install -y %s' "$apt"; return 0; } ;;
+    fedora) [ -z "$dnf" ]  || { printf 'sudo dnf install -y %s' "$dnf"; return 0; } ;;
+  esac
+  printf 'install %s from %s' "$tool" "$page"
+}
+
+# node_install_cmd <node|npm>: the one place that names node's packages.
+node_install_cmd() { install_cmd "$1" node "nodejs npm" "nodejs npm" https://nodejs.org/en/download; }
 
 # sha256_stdin: the hex sha256 of stdin. python3, not sha256sum, which macOS lacks.
 sha256_stdin() { python3 -I -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'; }
