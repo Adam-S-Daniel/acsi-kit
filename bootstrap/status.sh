@@ -146,6 +146,28 @@ for id in "${IDS[@]}"; do
   esac
 done
 
+# TIME_ZONE is not required by load_config (a setup that copied the starter
+# before the key existed keeps loading), but copy-starter.sh refuses without it.
+# So the config step is not done while TIME_ZONE is empty and a base step that
+# runs copy-starter.sh is still not done; once every such step is done the empty
+# key reopens nothing. Reads the steps' own `run` text, so a renamed or added
+# copy step needs no change here.
+if [ "$CONFIG_OK" = 1 ] && [ -z "$CFG_TIME_ZONE" ]; then
+  COPY_PENDING=""
+  for id in "${IDS[@]}"; do
+    case ${CTYPE[$id]} in config) ;; *) continue ;; esac
+    [ -n "${STEP_DONE[$id]:-}" ] || continue
+    for cid in "${IDS[@]}"; do
+      [ "${TRK[$cid]}" = "${TRK[$id]}" ] && [[ ${RUN[$cid]} == *copy-starter.sh* ]] && [ -z "${STEP_DONE[$cid]:-}" ] \
+        && COPY_PENDING+=" $cid"
+    done
+    if [ -n "$COPY_PENDING" ]; then
+      unset "STEP_DONE[$id]"
+      DETAIL[$id]="$(time_zone_required_message) (the copy steps (${COPY_PENDING# }) run copy-starter.sh, which refuses without it)"
+    fi
+  done
+fi
+
 # ------------------------------------------------------------------ report
 NEXT="" N=0 M=0
 declare -A TRACK_DONE=([base]=0 [evals]=0) TRACK_ALL=([base]=0 [evals]=0)
