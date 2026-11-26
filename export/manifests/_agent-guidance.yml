@@ -417,6 +417,12 @@ edits:
 # template (see the patch's docstring).
 
 patches:
+  - file: kit_only.py
+    why: >-
+      C11 and "Kit-only blocks" (DECISIONS). The source's fleet-worker spec may carry a kit-only block (the
+      owner's worker may merge the kit's re-sync pull requests) and repos.yml
+      a `kit_resync` key; an adopter's fleet has no kit, so both are cut. It
+      landed before the source change and is tolerant of its absence.
   - file: blank_content.py
     why: >-
       X9 and Content tiers. base.md keeps the core sections (two of them split
