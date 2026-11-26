@@ -254,7 +254,7 @@ PF_REAL_GIT=$(command -v git) PF_REAL_PY=$(command -v python3) PF_REAL_JQ=$(comm
 mkpf() { # dir [tool ...]: PATH dir without the tools named
   local d=$1 t src; shift
   rm -rf "$d"; mkdir -p "$d"
-  for t in bash env uname grep sed cat dirname mktemp rm chmod tr cut od head wc; do
+  for t in bash env uname grep sed cat dirname mktemp rm chmod tr cut od head wc tar; do
     case " $* " in *" $t "*) continue ;; esac
     src=$(command -v "$t") && ln -s "$src" "$d/$t"
   done
@@ -417,8 +417,16 @@ assert_eq "no scopes header is only a warning" "$rc" 0
 assert "no scopes header warns and names what is needed" grep -qE '^WARN: gh.s token scopes could not be read.*repository administration' "$OUT"
 printf '' > "$T/pf-gitconfig-empty"
 pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-empty" -- --config "$PFCFG"; rc=$?
-assert_eq "no gh credential helper is only a warning" "$rc" 0
+assert_eq "no gh credential helper fails, since every push needs it" "$rc" 1
+assert "it is a FAIL" grep -q '^FAIL: git is not set up to use gh.s credential for https pushes' "$OUT"
 assert "no credential helper: gh auth setup-git fix" grep -qF '      fix: gh auth setup-git' "$OUT"
+mkpf "$T/pf-notar" tar
+PF_PATH="$T/pf-notar" pf -- --config "$PFCFG"; rc=$?
+assert_eq "a missing tar exits 1" "$rc" 1
+assert "a missing tar is a FAIL that names the update block" grep -q "^FAIL: tar is not installed (the README's update block" "$OUT"
+assert "a missing tar has a fix line" grep -qF '      fix: sudo apt-get install -y tar' "$OUT"
+pf -- --config "$PFCFG"
+assert "tar present passes" grep -q '^PASS: tar is installed' "$OUT"
 pf PF_NO_YAML=1 -- --config "$PFCFG"; rc=$?
 assert_eq "a python3 without PyYAML exits 1" "$rc" 1
 assert "missing PyYAML is a FAIL" grep -q '^FAIL: python3 -I cannot import PyYAML' "$OUT"
