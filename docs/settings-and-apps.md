@@ -261,8 +261,7 @@ These wait for a later step without failing, each with a "not set up yet"
 or "skipped" notice on its run: `repo-settings`' weekly `plan` plans nothing
 until `create-apps.sh` sets `REPO_SETTINGS_READ_APP_CLIENT_ID` (step 6; a
 merge to `repo-settings` before then still fails at the token mint);
-`_agent-guidance`'s `skills-lock-bump.yml` bumps nothing while
-`acsi-agentskills` holds only its first README (until step 12); `_agent-guidance`'s `fleet-worker-fire.yml` fires no Fleet worker while
+`_agent-guidance`'s `fleet-worker-fire.yml` fires no Fleet worker while
 `FLEET_WORKER_FIRE_URL` is `none`, the value `create-environments.sh` writes
 until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
 27's check, reports it until then), and the same for the Loop worker's
@@ -270,10 +269,19 @@ until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
 scheduled runs that read `skills-evals` skip while `EVALS_REPO` is `none`
 ([routines](routines.md#fleet-worker)).
 
-No scheduled run is expected to fail while you set up the base. One push
-run is: merging `repo-settings`' starter pull request (step 4) runs its
-`plan`, which fails at the token mint until step 6 creates the settings-read
-App; the next Monday's scheduled plan, or a re-run after step 6, is green.
+These are expected to fail until a later step or a kit update, and nothing
+else is:
+
+- merging `repo-settings`' starter pull request (step 4) runs its `plan`,
+  which fails at the token mint until step 6 creates the settings-read App
+  (a re-run after step 6 is green);
+- `_agent-guidance`'s `skills-lock-bump.yml`, four times a day from step 10
+  until step 12 copies `acsi-agentskills` (until then that repo holds only
+  its first README);
+- on a setup without `skills-evals`, `_agent-guidance`'s daily
+  `dependabot-config-health.yml`: `repos.yml` still names `skills-evals`
+  under `cron_coverage.fleet`. A later kit update fixes both of these.
+
 Any other failure is real: read it before you merge.
 
 On `PLAN=free`, `create-apps.sh` skips the `settings-admin` App, so

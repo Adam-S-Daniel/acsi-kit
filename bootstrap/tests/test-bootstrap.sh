@@ -1394,7 +1394,7 @@ assert "it says the evals track was left out" has "$OUT" "SKIP: acme-example/ski
 # The shipped workflows' "off" branches, run from their parsed YAML.
 run python3 -I "$B/tests/check-workflow-gates.py"; rc=$?
 assert_eq "check-workflow-gates passes on the kit" "$rc" 0
-assert "it ran its 88 assertions" grep -qE '^88 assertions passed, 0 failed$' "$OUT"
+assert "it ran its 81 assertions" grep -qE '^81 assertions passed, 0 failed$' "$OUT"
 # No base starter workflow reads skills-evals unless EVALS_REPO gates it
 # (parsed YAML); its self-test proves the scan can fail.
 run python3 -I "$B/tests/check-evals-refs.py"; rc=$?

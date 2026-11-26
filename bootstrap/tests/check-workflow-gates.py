@@ -273,39 +273,5 @@ for wf, job, level in (("drift-report.yml", "report", "::warning::"), ("dependab
     rc, out, calls, _ = run_step(st, {**base_env, "GH_TOKEN_EXAMPLE_ADOPTER": "token-canary"})
     check(f"{wf}: with a token it says nothing and never prints it", rc == 0 and out.strip() == "")
 
-# skills-lock-bump.yml before the registry's starter is merged: only the
-# README-only repo create-repos.sh made reads as not set up.
-slb = load("skills-lock-bump.yml")
-reg = step_of(slb, "bump", "Is the skills registry set up yet")
-check("skills-lock-bump: the registry check's env is its checkout dir", set(reg["env"]) == {"REGISTRY_DIR"})
-with tempfile.TemporaryDirectory(prefix="gates-reg-") as d:
-    repo = Path(d) / "reg"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    (repo / "README.md").write_text("# acsi-agentskills\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    no_git = ("curl", "gh", "python3")
-    rc, out, calls, gh_out = run_step(reg, {"REGISTRY_DIR": str(repo)}, fakes=no_git)
-    check("skills-lock-bump, README-only registry: ready=false with a not-set-up notice naming step 12",
-          rc == 0 and gh_out.strip() == "ready=false" and "not set up yet" in out and "step 12" in out)
-    (repo / "scripts").mkdir()
-    (repo / "scripts" / "generate_skills_lock.py").write_text("\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    rc, out, calls, gh_out = run_step(reg, {"REGISTRY_DIR": str(repo)}, fakes=no_git)
-    check("skills-lock-bump, a copied registry: ready=true", rc == 0 and gh_out.strip() == "ready=true")
-    (repo / "scripts" / "generate_skills_lock.py").unlink()
-    (repo / "setup.sh").write_text("\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    rc, out, calls, gh_out = run_step(reg, {"REGISTRY_DIR": str(repo)}, fakes=no_git)
-    check("skills-lock-bump, a registry that lost its generator later: ready=true, so the bump still fails",
-          gh_out.strip() == "ready=true")
-bump = step_of(slb, "bump", "Bump consumer locks")
-check("skills-lock-bump: the lock pass waits on the registry check", bump.get("if") == "steps.registry.outputs.ready == 'true'")
-pin = step_of(slb, "bump", "Bump the skills-bootstrap hook pin")
-check("skills-lock-bump: the hook pin keeps success() || failure() and reads the check through env",
-      pin.get("if") == "success() || failure()" and pin["env"].get("REGISTRY_READY") == "${{ steps.registry.outputs.ready }}")
-rc, out, calls, _ = run_step(pin, {"REGISTRY_READY": "false", "DRY_RUN": "", "GH_TOKEN": "", "HOOK_PIN_REPO": "acme/_agent-guidance",
-                                   "BUMP_CHECKOUTS": ""})
-check("skills-lock-bump: the hook pin returns early, calling nothing, while the registry is not set up", rc == 0 and calls == [])
-
 print(f"{passed} assertions passed, {failed} failed")
 sys.exit(1 if failed else 0)

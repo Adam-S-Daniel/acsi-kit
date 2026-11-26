@@ -122,12 +122,13 @@ is in `docs/quick-start.md`.
   `EVALS_REPO` to `none`, so the workflow skips the Loop worker's fire and
   stays green. The step's check is `verify` (`verify.sh --only
   fleet-worker`): done once both values are set on `_agent-guidance`.
-- **No scheduled run is expected to fail** while the base is set up: what
-  waits for a later step skips with a "not set up yet" notice
-  (`docs/settings-and-apps.md`, "Merging the starter pull requests"). The
-  one expected red run is the push `plan` that merging `repo-settings`'
-  starter (step 4) starts, until step 6. Any other failure email is real;
-  read the run with the user.
+- **Expected red runs** are listed once, in `docs/settings-and-apps.md`
+  ("Merging the starter pull requests"): the push `plan` from merging
+  `repo-settings`' starter (step 4) until step 6, `skills-lock-bump.yml`
+  from step 10 until step 12, and on a base-only setup the daily
+  `dependabot-config-health.yml` until a kit update. Everything else that
+  waits for a later step skips with a "not set up yet" notice; any other
+  failure email is real: read the run with the user.
 - **Step 30** (memory curation): for the machine task, ask which system
   holds that machine's Claude Code sessions. On macOS, or on Windows with
   Claude Code running natively, offer a Claude desktop app scheduled task
