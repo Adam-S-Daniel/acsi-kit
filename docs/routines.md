@@ -223,7 +223,7 @@ in `_agent-guidance`:
 
 | Setting | Value |
 |---|---|
-| Schedule | weekly: the project task on Monday at 14:00 UTC, the machine task once a week on each durable machine |
+| Schedule | weekly: the project task on Monday morning in your own time zone (`fleet.env`'s `TIME_ZONE`), the machine task once a week on each durable machine |
 | Model | Sonnet for both. For the project task, set **Threads** to Sonnet in **Project settings > General** (see below; that setting is the lever you have). On a machine, `wsl-automation`'s job names Sonnet itself; a desktop app task or your own `claude -p` line needs it picked (`--model sonnet`) |
 | Notifications | push on (the project task) |
 | Spec | `_agent-guidance` [`docs/routines/memory-curation.md`](../starter/agent-guidance/docs/routines/memory-curation.md) |
@@ -244,8 +244,8 @@ project memory to curate: create the machine task only, and come back for
 the project task when Projects reach your account.
 
 - **Project task:** create it from a thread in a claude.ai project, weekly
-  on Monday at 14:00 UTC, with a fresh session per fire and push
-  notifications on. Prompt, exactly:
+  on Monday morning in your own time zone (`fleet.env`'s `TIME_ZONE`), with
+  a fresh session per fire and push notifications on. Prompt, exactly:
 
   <!-- generated:memory-curation-prompt by export/doc_regions.py; edit the spec, then run it with --write -->
   > Read and follow `docs/routines/memory-curation.md` in

@@ -243,6 +243,22 @@ edits:
     why: >-
       The kit's invented owner, so copy-starter.sh fills in the adopter's
       login and the copied file names the adopter's own repositories.
+  - path: config/settings.env.example
+    old: "WSL_AUTOMATION_AGENT_OWNER_ROOTS=~/src\n"
+    new: "WSL_AUTOMATION_AGENT_OWNER_ROOTS=~/repos\n"
+    why: >-
+      kit departure: install-machine.sh clones into REPOS_DIR, ~/repos by
+      default, and LESSONS_CLONE above names ~/repos too, so a copy of this
+      file trusts the folder that holds the adopter's clones. The README's
+      own example says the same (the next edit).
+  - path: README.md
+    stage: output
+    old: "Add `WSL_AUTOMATION_AGENT_OWNER_ROOTS=~/src` to\n"
+    new: "Add `WSL_AUTOMATION_AGENT_OWNER_ROOTS=~/repos` to\n"
+    why: >-
+      kit departure: the folder install-machine.sh clones into (REPOS_DIR,
+      ~/repos by default), as config/settings.env.example now says, so the
+      README and the example agree.
 
   # ---- notes Q6: the Codex Cloud bootstrap pin names the source registry's
   # commit and file digest, which the adopter's registry will not have.

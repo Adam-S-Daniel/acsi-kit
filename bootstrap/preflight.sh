@@ -6,8 +6,10 @@
 # whether gh is signed in as OWNER with the scopes a push of workflow files
 # needs, whether git has a credential helper for https pushes (a FAIL without
 # one; a WARN when it is not gh's, gh auth setup-git), and whether the kit
-# sits where the scripts want it. It installs nothing, makes no write call to GitHub and
-# writes nothing outside its own temp dir. Run it before step 2.
+# sits where the scripts want it, and whether git's own identity would put a
+# real name or a private email into public history (a WARN). It installs
+# nothing, makes no write call to GitHub and writes nothing outside its own
+# temp dir. Run it before step 2.
 #
 # Prints one line per check, PASS, FAIL, WARN or SKIP, and under every FAIL
 # and WARN an indented "fix:" line with the command for your OS (macOS:
@@ -181,6 +183,63 @@ check_gh() {
   fi
 }
 
+# git's own identity, which a commit you make by hand in these repos publishes
+# for good (the kit's own commits use OWNER_NAME and your noreply address
+# instead, lib/pr.sh). A WARN, never a FAIL: it matters once you commit by
+# hand. The local denylist is read as the pre-push privacy check and the
+# write-marker hook read it: PRIVACY_DENYLIST_FILE, else
+# ~/.config/privacy-denylist.txt. Neither a pattern nor the identity is printed.
+check_git_identity() {
+  local name email login="" id="" noreply handle fixline list shown hits
+  have git || { skp "git identity: git is not installed"; return 0; }
+  name=$(git config --global --get user.name 2>/dev/null || true)
+  email=$(git config --global --get user.email 2>/dev/null || true)
+  if have "$GH" && "$GH" auth status >/dev/null 2>&1; then
+    login=$("$GH" api user --jq .login 2>/dev/null) || login=""
+    id=$("$GH" api user --jq .id 2>/dev/null) || id=""
+  fi
+  if [[ $login =~ ^[A-Za-z0-9-]{1,39}$ && $id =~ ^[1-9][0-9]{0,11}$ ]]; then
+    noreply="$id+$login@users.noreply.github.com"
+  else
+    noreply="<id>+<login>@users.noreply.github.com"
+  fi
+  if [ "$CONFIG_STATE" = ok ]; then handle=$CFG_OWNER_NAME; else handle="<OWNER_NAME, a public handle>"; fi
+  fixline="git config --global user.name '$handle' && git config --global user.email '$noreply'   (or set both without --global in each clone of these repos; this check reads only the global ones)"
+  if [ -z "$name" ] || [ -z "$email" ]; then
+    warn_ "git has no user.name or user.email in its global config; a commit you make by hand needs both, and public history keeps them for good, so use a public handle and your GitHub noreply address"
+    fix "$fixline"
+  elif [[ ! $email =~ ^([0-9]+\+)?[A-Za-z0-9-]+@users\.noreply\.github\.com$ ]]; then
+    warn_ "git commits as an email that is not a GitHub noreply address (git's global user.email), so a commit you make by hand in these repos publishes it for good (the kit's own commits use OWNER_NAME and your noreply address)"
+    fix "$fixline"
+  else
+    pass "git commits as a GitHub noreply address"
+  fi
+  list=${PRIVACY_DENYLIST_FILE:-$HOME/.config/privacy-denylist.txt}
+  # shellcheck disable=SC2088  # the path as the user writes it, for the message; never expanded
+  if [ -n "${PRIVACY_DENYLIST_FILE:-}" ]; then shown=$PRIVACY_DENYLIST_FILE; else shown="~/.config/privacy-denylist.txt"; fi
+  [ -n "$name$email" ] && [ -r "$list" ] && have python3 || return 0
+  hits=$(python3 -I - "$list" "$name" "$email" <<'PY'
+import re, sys
+out = []
+for n, line in enumerate(open(sys.argv[1], encoding="utf-8", errors="replace"), 1):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    try:
+        rx = re.compile(line, re.I)
+    except re.error:
+        continue
+    if any(rx.search(v) for v in sys.argv[2:] if v):
+        out.append(str(n))
+print(("line " if len(out) == 1 else "lines ") + ", ".join(out) if out else "")
+PY
+  ) || hits=""
+  if [ -n "$hits" ]; then
+    warn_ "git's user.name or user.email matches $hits of your privacy denylist ($shown), so a commit you make by hand would publish it, and the privacy checks would flag it"
+    fix "$fixline"
+  fi
+}
+
 # tar: the README's update block ("Update your copy of the kit") unpacks the
 # newest bootstrap/ with it, and update-kit.sh needs it.
 check_tar() {
@@ -332,6 +391,7 @@ fi
 pass "bash ${BASH_VERSION%%[^0-9.]*} (4.4 or newer needed; lib/common.sh enforces it)"
 check_git
 check_gh
+check_git_identity
 check_jq
 check_tar
 check_python

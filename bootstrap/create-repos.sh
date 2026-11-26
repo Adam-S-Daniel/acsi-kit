@@ -18,6 +18,11 @@
 #   * A first commit (a README), so a clone has a default branch to branch
 #     from. The README is generated_readme (lib/common.sh), whose last line is
 #     a fixed marker: copy-starter.sh replaces exactly that file without --force.
+#     It, and the results branch's commit below, name OWNER_NAME and the
+#     account's GitHub noreply address as author and committer
+#     (kit_git_identity, as lib/pr.sh's commits do). Without them GitHub
+#     records its own account data, the profile name and the commit email,
+#     which may be a real name and a private email, in public history.
 #   * Labels agent-ready and on-hold (LABELS in lib/common.sh): the fleet
 #     worker reads both and no fleet.yml entry declares them.
 #
@@ -88,6 +93,7 @@ ensure_repo() { # name -> sets FRESH=1 when the repo does not exist yet (dry run
   did "created $O/$r ($want)"
   if [ "$DRY_RUN" = 1 ]; then
     FRESH=1
+    kit_git_identity
     gh_write_api PUT "repos/$O/$r/contents/README.md" "$(readme_body "$r")"
     did "added the generated README to $O/$r"
     return 0
@@ -95,9 +101,15 @@ ensure_repo() { # name -> sets FRESH=1 when the repo does not exist yet (dry run
   ensure_first_commit "$r"
 }
 
+# The author and committer of the kit's API commits; kit_git_identity runs
+# first, outside the command substitution, so a failure stops the script.
+identity_json() {
+  jq -nc --arg n "$KIT_GIT_NAME" --arg e "$KIT_GIT_EMAIL" '{name: $n, email: $e}'
+}
+
 readme_body() { # name: the contents API body for the generated README
-  jq -n --arg c "$(generated_readme "$1" | base64 | tr -d '\n')" \
-    '{message: "Add a README so the repo has a first commit", content: $c}'
+  jq -n --arg c "$(generated_readme "$1" | base64 | tr -d '\n')" --argjson id "$(identity_json)" \
+    '{message: "Add a README so the repo has a first commit", content: $c, author: $id, committer: $id}'
 }
 
 ensure_first_commit() { # name
@@ -106,6 +118,7 @@ ensure_first_commit() { # name
     skip "$O/$r has a first commit"; return 0
   fi
   [ "$GH_HTTP" = 409 ] || die "could not read the commits of $O/$r (HTTP $GH_HTTP)"
+  kit_git_identity
   gh_write_api PUT "repos/$O/$r/contents/README.md" "$(readme_body "$r")"
   did "added a README to the empty repo $O/$r"
 }
@@ -114,7 +127,8 @@ results_body() { # kind arg...: the git data API body of one step of an orphan c
   case $1 in
     tree) jq -n --arg c "$(eval_results_readme)" \
             '{tree: [{path: "README.md", mode: "100644", type: "blob", content: $c}]}' ;;
-    commit) jq -n --arg t "$2" '{message: "Create the results branch", tree: $t, parents: []}' ;;
+    commit) jq -n --arg t "$2" --argjson id "$(identity_json)" \
+              '{message: "Create the results branch", tree: $t, parents: [], author: $id, committer: $id}' ;;
     ref) jq -n --arg r "refs/heads/$EVAL_RESULTS_BRANCH" --arg s "$2" '{ref: $r, sha: $s}' ;;
   esac
 }
@@ -131,6 +145,7 @@ ensure_results_branch() { # name: the orphan EVAL_RESULTS_BRANCH, when it does n
   tree=$(printf '%s' "$GH_OUT" | jq -r '.sha // empty')
   [ "$DRY_RUN" = 0 ] || tree=${tree:-"<tree sha>"}
   [ -n "$tree" ] || die "creating the tree of $b in $O/$r returned no sha"
+  kit_git_identity
   gh_write_api POST "repos/$O/$r/git/commits" "$(results_body commit "$tree")"
   commit=$(printf '%s' "$GH_OUT" | jq -r '.sha // empty')
   [ "$DRY_RUN" = 0 ] || commit=${commit:-"<commit sha>"}

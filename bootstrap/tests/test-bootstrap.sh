@@ -75,7 +75,7 @@ export GH_STUB_APP_USER_TOKEN=1
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$T/gitconfig"
 export BOOTSTRAP_GIT_BASE="file://$T/remotes"
 export GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z
-unset GH_TOKEN GITHUB_TOKEN CLAUDE_CONFIG_DIR ADOPT_STATE_FILE XDG_STATE_HOME GH_STUB_GIT_REMOTES
+unset GH_TOKEN GITHUB_TOKEN CLAUDE_CONFIG_DIR ADOPT_STATE_FILE XDG_STATE_HOME GH_STUB_GIT_REMOTES PRIVACY_DENYLIST PRIVACY_DENYLIST_FILE
 touch "$GH_LOG"
 git config --global user.name "Test User"
 git config --global user.email "test-user@example.com"
@@ -425,6 +425,33 @@ pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-other" -- --config "$PFCFG"; rc=$?
 assert_eq "another credential helper (osxkeychain, GCM) is only a warning" "$rc" 0
 assert "it warns that a push goes as that helper's account" grep -q '^WARN: git pushes with another credential helper, not gh.s' "$OUT"
 assert "with the same fix line" grep -qF '      fix: gh auth setup-git' "$OUT"
+# Git's own identity: a commit made by hand in these repos publishes it, and
+# the privacy scan flags it once the denylist names it. A WARN, never a FAIL.
+uidpf=$(uid_of acme-example)
+pf -- --config "$PFCFG"; rc=$?
+assert_eq "no git identity is only a warning" "$rc" 0
+assert "no git identity warns" grep -q '^WARN: git has no user.name or user.email' "$OUT"
+assert "its fix names OWNER_NAME and the account's noreply address" grep -qF "      fix: git config --global user.name 'Acme Example' && git config --global user.email '$uidpf+acme-example@users.noreply.github.com'" "$OUT"
+{ cat "$T/pf-gitconfig"; printf '[user]\n\tname = River Quinn\n\temail = river@example.net\n'; } > "$T/pf-gitconfig-real"
+pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-real" -- --config "$PFCFG"; rc=$?
+assert_eq "an email that is not a noreply address is only a warning" "$rc" 0
+assert "it warns" grep -q '^WARN: git commits as an email that is not a GitHub noreply address' "$OUT"
+assert "with the same fix" grep -qF "git config --global user.email '$uidpf+acme-example@users.noreply.github.com'" "$OUT"
+assert_not "it never prints the email" grep -qF 'river@example.net' "$OUT"
+{ cat "$T/pf-gitconfig"; printf '[user]\n\tname = River Quinn\n\temail = %s+acme-example@users.noreply.github.com\n' "$uidpf"; } > "$T/pf-gitconfig-noreply"
+pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-noreply" -- --config "$PFCFG"
+assert "a noreply email passes" grep -q '^PASS: git commits as a GitHub noreply address' "$OUT"
+assert_not "with no local denylist the name is not checked" grep -q 'matches line' "$OUT"
+mkdir -p "$T/pf-home/.config"; printf '# names\nriver[ ._-]?quinn\n' > "$T/pf-home/.config/privacy-denylist.txt"
+pf HOME="$T/pf-home" GIT_CONFIG_GLOBAL="$T/pf-gitconfig-noreply" -- --config "$PFCFG"; rc=$?
+assert_eq "a name the local denylist matches is only a warning" "$rc" 0
+assert "it names the denylist's line" grep -qF "WARN: git's user.name or user.email matches line 2 of your privacy denylist (~/.config/privacy-denylist.txt)" "$OUT"
+assert_not "it prints neither the pattern nor the name" grep -qi 'river' "$OUT"
+pf HOME="$T/pf-home" PRIVACY_DENYLIST_FILE="$T/private-none.txt" GIT_CONFIG_GLOBAL="$T/pf-gitconfig-noreply" -- --config "$PFCFG"
+assert_not "PRIVACY_DENYLIST_FILE names the list when set, as the hooks read it" grep -q 'matches line' "$OUT"
+{ cat "$T/pf-gitconfig"; printf '[user]\n\tname = Acme Example\n\temail = %s+acme-example@users.noreply.github.com\n' "$uidpf"; } > "$T/pf-gitconfig-handle"
+pf HOME="$T/pf-home" GIT_CONFIG_GLOBAL="$T/pf-gitconfig-handle" -- --config "$PFCFG"
+assert_not "the public handle and the noreply address raise no identity warning" grep -qE "^WARN: git('s user| has no user| commits as)" "$OUT"
 mkpf "$T/pf-notar" tar
 PF_PATH="$T/pf-notar" pf -- --config "$PFCFG"; rc=$?
 assert_eq "a missing tar exits 1" "$rc" 1
@@ -627,6 +654,7 @@ run bash "$B/create-repos.sh" --config "$CFG" --dry-run skills-evals; rc=$?
 assert_eq "a dry run naming skills-evals exits 0" "$rc" 0
 assert "dry run prints the results branch's tree, commit and ref" bash -c 'for u in git/trees git/commits git/refs; do grep -qF "DRY-RUN: gh api -X POST repos/acme-example/skills-evals/$u" "$1" || exit 1; done' _ "$OUT"
 assert "dry run says it would create the orphan results branch" has "$OUT" "would have: created the orphan branch persistent/eval-results in acme-example/skills-evals"
+assert "dry run shows the results commit's author as OWNER_NAME and the noreply address" has "$OUT" "\"author\":{\"name\":\"Acme Example\",\"email\":\"$(uid_of acme-example)+acme-example@users.noreply.github.com\"}"
 assert_eq "dry run creates no branch" "$(jqs '[.repos[]? | .branches // {} | keys[]] | length')" 0
 
 run bash "$B/create-repos.sh" --config "$CFG"; rc=$?
@@ -689,6 +717,12 @@ assert_eq "every README is the generated one, ending in the marker" \
 assert_eq "persistent/eval-results exists on skills-evals only" "$(jqs '[.repos | to_entries[] | select(.value.branches["persistent/eval-results"] != null) | .key] | join(" ")')" "$O/skills-evals"
 assert_eq "the results branch is an orphan commit" "$(jqs '.repos["acme-example/skills-evals"] | .commits[.branches["persistent/eval-results"]].parents | length')" 0
 assert_eq "the results branch holds a README and nothing else" "$(jqs '.repos["acme-example/skills-evals"] | .trees[.commits[.branches["persistent/eval-results"]].tree] | map(.path) | join(",")')" README.md
+# Both API commits name OWNER_NAME and the noreply address, never GitHub's own record of the account.
+KIT_AUTHOR=$(jq -nc --arg n 'Acme Example' --arg e "$(uid_of "$O")+$O@users.noreply.github.com" '{name: $n, email: $e}')
+assert_eq "every README commit is authored and committed as OWNER_NAME and the noreply address" \
+  "$(jq -r --argjson a "$KIT_AUTHOR" '[.repos[] | select(.readme_author == $a and .readme_committer == $a)] | length' "$GH_STUB_STATE")" 6
+assert_eq "the results branch's commit is authored and committed as OWNER_NAME and the noreply address" \
+  "$(jq -r --argjson a "$KIT_AUTHOR" '.repos["acme-example/skills-evals"] | .commits[.branches["persistent/eval-results"]] | .author == $a and .committer == $a' "$GH_STUB_STATE")" true
 assert "the results README says what the branch holds" jq -e '.repos["acme-example/skills-evals"] | .trees[.commits[.branches["persistent/eval-results"]].tree][0].content | contains("never merges into main")' "$GH_STUB_STATE"
 assert_eq "labels agent-ready, on-hold and ci on all six" "$(jqs '[.repos[] | select([.labels[].name] | index("agent-ready") and index("on-hold") and index("ci"))] | length')" 6
 assert_eq "it leaves merge and Actions settings to fleet.yml" "$(jqs '[.repos[] | select(.allow_squash_merge and (.actions.sha_pinning_required | not))] | length')" 6
@@ -1003,12 +1037,22 @@ assert "a line that matches part of a name gets a hint to list the name whole" h
 assert "it says what belongs in the list instead" has "$ERR" "never your GitHub login or the public handle in OWNER_NAME"
 assert_not "it prints no pattern" grep -qE 'example-two|example-guidance|acme_example|river' "$ERR" "$OUT"
 assert_eq "the refusal writes nothing" "$(since "$n")" 0
+assert "a line that matches only OWNER_NAME says to make OWNER_NAME a public handle" has "$ERR" "line(s) 4 match only OWNER_NAME, which copy-starter.sh writes into public plugin manifests and notices: if it is your real name, set OWNER_NAME in fleet.env to a public handle (your GitHub login is the default) and keep the line"
+# The dry run /adopt shows first refuses what the real run refuses.
+n=$(log_lines "$GH_LOG")
+run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate --dry-run --denylist "$T/private/public-denylist"; rc=$?
+assert_eq "a dry run refuses the denylist the real run refuses" "$rc" 1
+assert "naming the same lines" has "$ERR" "line(s) 2 (APP_NAME_PREFIX, OWNER, OWNER (noreply address), OWNER_TWO, REVIEWER); 3 (OWNER_TWO)"
+assert_eq "and writing nothing" "$(since "$n")" 0
+run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate --dry-run --denylist "$T/private/denylist"; rc=$?
+assert_eq "a dry run with a denylist the real run takes exits 0" "$rc" 0
 # REVIEWER and APP_NAME_PREFIX set apart from OWNER are public names too.
 { cat "$CFGP"; printf '%s\n' REVIEWER=zz-reviewer-example APP_NAME_PREFIX=zz-apps; } > "$T/private/fleet-names.env"
 printf '%s\n' 'zz-reviewer' 'zz-apps-roster' > "$T/private/names-denylist"
 run bash "$B/set-secrets.sh" --config "$T/private/fleet-names.env" --only privacy --rotate --denylist "$T/private/names-denylist"; rc=$?
 assert_eq "a pattern matching REVIEWER or an App's name is refused" "$rc" 1
 assert "it names both keys" has "$ERR" "line(s) 1 (REVIEWER); 2 (APP_NAME_PREFIX)"
+assert_not "and gives no OWNER_NAME hint" has "$ERR" "match only OWNER_NAME"
 printf '%s\n' 'zz-apps-roster' > "$T/private/whole-denylist"
 run bash "$B/set-secrets.sh" --config "$T/private/fleet-names.env" --only privacy --rotate --denylist "$T/private/whole-denylist"; rc=$?
 assert_not "a line that matches a whole name gets no part-of-a-name hint" has "$ERR" "matches only part of a name"
@@ -1098,6 +1142,23 @@ run bash "$B/copy-starter.sh" --config "$CFGP" --dry-run starter/repo-settings "
 assert_eq "copy-starter dry run exits 0" "$rc" 0
 assert_eq "copy-starter dry run pushes nothing" "$(git --git-dir="$T/remotes/$O/repo-settings.git" for-each-ref | wc -l)" "$before"
 assert_eq "copy-starter dry run opens nothing" "$(since "$n")" 0
+# The kit commits as OWNER_NAME and the signed-in account's noreply address,
+# never git's own identity (here "Test User <test-user@example.com>"), which
+# may be a real name and a private email that public history keeps for good.
+KIT_IDENT="Acme Example <$(uid_of "$O")+$O@users.noreply.github.com>"
+assert "the dry run says who the commit would be by" has "$OUT" "as $KIT_IDENT"
+# A branch an older kit pushed under git's own identity is refused, not
+# reused: merging it would publish that identity.
+t=$(tree_of wsl-automation); g="$T/remotes/$O/wsl-automation.git"; w="$T/tmp/old-kit"
+git clone -q "$g" "$w" && printf 'old\n' > "$w/old.txt" && git -C "$w" add old.txt && git -C "$w" commit -qm old \
+  && git -C "$w" push -q origin "HEAD:refs/heads/starter/$t"; rm -rf "$w"
+n=$(log_lines "$GH_LOG")
+run bash "$B/copy-starter.sh" --config "$CFGP" "starter/$t" "$O/wsl-automation"; rc=$?
+assert_eq "copy-starter refuses a branch holding a commit under another identity" "$rc" 1
+assert "it says to delete the branch" has "$ERR" "gh api -X DELETE repos/$O/wsl-automation/git/refs/heads/starter/$t"
+assert_not "it does not print that identity" has "$ERR" "test-user@example.com"
+assert_eq "it opens no pull request" "$(since "$n")" 0
+git --git-dir="$g" update-ref -d "refs/heads/starter/$t"
 # Before any starter is merged no repo has its actions.lock: step 18's check
 # is not done yet (it once passed vacuously from step 2 on).
 run bash "$B/regenerate.sh" --config "$CFGP" --check actions-lock; rc=$?
@@ -1121,6 +1182,9 @@ for r in "${FLEET[@]}"; do
   g="$T/remotes/$O/$r.git"
   assert "copy-starter $t pushed starter/$t" git --git-dir="$g" rev-parse -q --verify "refs/heads/starter/$t"
   assert_eq "copy-starter $t left main alone" "$(git --git-dir="$g" rev-list --count main)" 1
+  assert_eq "copy-starter $t commits as OWNER_NAME and the noreply address, author and committer" \
+    "$(git --git-dir="$g" log -1 --format='%an <%ae>|%cn <%ce>' "starter/$t")" "$KIT_IDENT|$KIT_IDENT"
+  assert "copy-starter $t prints its pull request's URL" grep -qE "^opened a pull request for starter/$t in $O/$r: https://github.com/$O/$r/pull/[0-9]+$" "$OUT"
   left=$(git --git-dir="$g" grep -I -i -l -E 'example[-_ ]adopter' "starter/$t" -- 2>/dev/null | wc -l)
   assert_eq "no form of the invented owners is left in $t's text" "$left" 0
   assert_not "no invented owner is left in $t's paths" bash -c 'git --git-dir="$1" ls-tree -r --name-only "$2" | grep -qiE "example[-_]adopter"' _ "$g" "starter/$t"
@@ -1306,6 +1370,9 @@ st0=$(git -C "$UK" status --porcelain); h0=$(git -C "$UK" rev-parse HEAD)
 uk "$UK" --config "$UK/fleet.env" --dry-run; rc=$?
 assert_eq "update-kit --dry-run exits 0" "$rc" 0
 assert "the dry run prints the planned fast-forward" has "$OUT" "would have: fast-forward origin/main: ${h0:0:12} -> $(origin_head | cut -c1-12), 1 commit(s)"
+nwould=$(grep -c '^would have: ' "$OUT")
+assert "the dry run lists the save of starter/ and the fast-forward" test "$nwould" -ge 2
+assert "and counts every change it lists" has "$OUT" "Dry run: $nwould change(s) would be made"
 assert_eq "the dry run leaves git status alone" "$(git -C "$UK" status --porcelain)" "$st0"
 assert_eq "the dry run leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h0"
 # The new copy is started through a `bash` on PATH that only logs: the
@@ -1668,7 +1735,7 @@ INST=installs:guidance-sync,installs:settings-admin,installs:settings-read
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
 assert_eq "verify fails an installation gh's sign-in cannot read" "$rc" 1
 assert "it says to check by hand at settings/installations" has "$OUT" "gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: acme-example-guidance-sync must have access to acme-example/_agent-guidance, "
-assert "it names the step to mark, with this fleet.env's path (it is outside the kit)" has "$OUT" "Then: bash bootstrap/status.sh --config $CFGP --mark 7"
+assert "it names the step to mark, with this fleet.env's path (it is outside the kit) and its track" has "$OUT" "Then: bash bootstrap/status.sh --config $CFGP --track base --mark 7"
 MARK7=$(sed -n 's/.*Then: \(bash bootstrap\/status\.sh .*--mark 7\)$/\1/p' "$OUT" | head -n1)
 assert_not "the 403's body is not printed" grep -q "BODY-MUST-NOT-BE-PRINTED" "$OUT" "$ERR"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
@@ -1683,7 +1750,7 @@ assert "it says they were confirmed by you" has "$OUT" "confirmed by you (status
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
 assert "with gh's sign-in, step 7 is done once answered" grep -qE '^done +7 ' "$OUT"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track evals --only installs:guidance-sync; rc=$?
-assert "the evals track's installation step needs its own answer" has "$OUT" "Then: bash bootstrap/status.sh --config $CFGP --mark 34"
+assert "the evals track's installation step needs its own answer" has "$OUT" "Then: bash bootstrap/status.sh --config $CFGP --track evals --mark 34"
 run env GH_STUB_INSTALLATIONS_STATUS=401 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
 assert "a 401 says to sign in again" has "$OUT" "HTTP 401: gh's sign-in has expired or was revoked; run gh auth login, then this again"
 run env GH_STUB_INSTALLATIONS_STATUS=502 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
@@ -2218,8 +2285,20 @@ assert "status --track base picks the next base step" grep -q '^Next: 9 ' "$OUT"
 run bash "$B/status.sh" --config "$CFGP" --track evals
 assert "status --track evals picks the next evals step" grep -q '^Next: 42 ' "$OUT"
 assert "status --track evals says the base is not done" has "$OUT" "The base track is not done yet"
+assert "the Run: line names your owner" has "$OUT" "https://github.com/acme-example/skills-evals.git"
+assert_not "and leaves no <you> in it" grep -qF '<you>' "$OUT"
 run bash "$B/status.sh" --config "$CFGP" --track some; rc=$?
 assert_eq "status refuses an unknown track" "$rc" 1
+# The --mark hint keeps the track: run as printed after --track base, it lists
+# the base steps and names a base step next, never an evals one.
+run bash "$B/status.sh" --config "$CFGP" --track base
+assert "the --mark hint carries --track base" has "$OUT" "Once it is done: bootstrap/status.sh --config $CFGP --track base --mark 9"
+HINT=$(sed -n 's/.*Once it is done: \(bootstrap\/status\.sh .*--mark 9\)$/\1/p' "$OUT")
+run bash -c 'cd "$1" && eval "bash $2"' _ "$K" "$HINT"; rc=$?
+assert_eq "the hint runs as printed" "$rc" 0
+assert_eq "and lists only the base steps" "$(listed "$OUT")" "$(track_ids base)"
+assert_not "naming no evals step next" grep -qE "^Next: ($(track_ids evals | tr ' ' '|')) " "$OUT"
+bash "$B/status.sh" --config "$CFGP" --unmark 9 >/dev/null 2>&1
 
 # ======================================================== apply-settings.sh
 # A second invented owner whose repo-settings holds a fake engine that logs
@@ -2367,6 +2446,12 @@ assert "it cloned acsi-agentskills into REPOS_DIR" test -f "$RD/acsi-agentskills
 # Step 22 reads wsl-automation's settings example: the clone sits beside the others.
 assert "it cloned wsl-automation into REPOS_DIR, where step 22 reads it" test -f "$RD/wsl-automation/config/settings.env.example"
 assert "it says step 22 works in that clone" has "$OUT" "Step 22 (Schedule the machine jobs) works in $RD/wsl-automation: copy its config/settings.env.example"
+assert "with no local denylist it warns, naming the file this machine's checks read" has "$ERR" "no privacy denylist at ~/.config/privacy-denylist.txt"
+mkdir -p "$HOME/.config"; cp "$T/private/denylist" "$HOME/.config/privacy-denylist.txt"
+run bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
+assert_eq "install-machine with a local denylist exits 0" "$rc" 0
+assert_not "and gives no such warning" has "$ERR" "no privacy denylist"
+rm "$HOME/.config/privacy-denylist.txt"
 run env PREFLIGHT_WSL=1 bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
 assert_eq "install-machine under WSL exits 0" "$rc" 0
 assert "under WSL it gives the Windows checkout's clone command" has "$OUT" "  git clone $BOOTSTRAP_GIT_BASE/$F/wsl-automation.git \$HOME\\repos\\wsl-automation"

@@ -99,7 +99,7 @@ miss. Two gates apply:
   fix (ADR 0033 and 0034).
 - **The weekly merge window** (ADR 0039): every merge to `base.md` or
   `agents-md/sections/` restarts each section's eval evidence, so automation
-  merges those changes only on Monday from 17:00 to 19:00 UTC
+  merges those changes only on Monday from noon to 2 PM in your `TIME_ZONE`
   (`scripts/base-md-merge-window.yml`). You can merge at any time, at that
   cost.
 

@@ -29,9 +29,13 @@
 # that matches a public name the starter writes into its files (fleet.env's
 # OWNER, OWNER_TWO, OWNER_NAME, REVIEWER and APP_NAME_PREFIX, the logins'
 # upper and snake forms, and the Apps' <prefix>-<app> names): every scan that
-# reads the list would then fail on every pull request. It never prints a
-# pattern, only line numbers. docs/skills.md, "The privacy check", says what the check
-# reads and shows a sample file.
+# reads the list would then fail on every pull request. A line that matches
+# OWNER_NAME alone gets one more hint: if OWNER_NAME is your real name, make it
+# a public handle. It never prints a pattern, only line numbers. A dry run
+# checks the --denylist file the same way. Keep the file at
+# ~/.config/privacy-denylist.txt, where this machine's own checks read it.
+# docs/skills.md, "The privacy check", says what the check reads and shows a
+# sample file.
 #
 # The bearer and the trigger id come from the eval runner routine's API
 # trigger at claude.ai/code/routines (skills-evals docs/routine/eval-runner-prompt.md);
@@ -89,11 +93,11 @@ get_trigger() {
 get_denylist() {
   [ "$HAVE_DENYLIST" = 1 ] && return 0
   if [ -z "$DENYLIST" ]; then
-    printf 'The privacy denylist is a text file with one regular expression per line (your real name, emails, hosts and private ids; never your GitHub login or the public handle in OWNER_NAME), kept outside every repo; docs/skills.md, "The privacy check", has a sample.\nPath to your privacy denylist file: ' >&2
+    printf 'The privacy denylist is a text file with one regular expression per line (your real name, emails, hosts and private ids; never your GitHub login or the public handle in OWNER_NAME), kept outside every repo, best at ~/.config/privacy-denylist.txt, where the checks on this machine read it; docs/skills.md, "The privacy check", has a sample.\nPath to your privacy denylist file: ' >&2
     IFS= read -r DENYLIST || die "no path given"
   fi
   DENYLIST=${DENYLIST/#\~/$HOME}
-  [ -f "$DENYLIST" ] || die "the denylist path is not a file: write one regular expression per line to a file outside every repo (docs/skills.md, \"The privacy check\") and give its path"
+  [ -f "$DENYLIST" ] || die "the denylist path is not a file: write one regular expression per line to a file outside every repo, best ~/.config/privacy-denylist.txt (mkdir -p ~/.config first if that folder is missing; docs/skills.md, \"The privacy check\"), and give its path"
   local dir; dir=$(cd "$(dirname "$DENYLIST")" && pwd)
   if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     die "the denylist is inside a git work tree; keep it outside every repo"
@@ -105,7 +109,7 @@ get_denylist() {
   python3 -I - "$DENYLIST" "${names[@]}" <<'PY' || die "the denylist failed validation (see above)"
 import re, sys
 names = [a.split("\t", 1) for a in sys.argv[2:]]
-bad, public, n, partial = [], [], 0, False
+bad, public, only_name, n, partial = [], [], [], 0, False
 for i, l in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
     l = l.strip()
     if not l or l.startswith("#"):
@@ -118,14 +122,23 @@ for i, l in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
         continue
     hits = [(k, v, m) for k, v in names for m in [rx.search(v)] if m]
     if hits:
-        public.append(f"{i} ({', '.join(sorted({k for k, _, _ in hits}))})")
+        keys = {k for k, _, _ in hits}
+        public.append(f"{i} ({', '.join(sorted(keys))})")
         partial = partial or any(m.group(0) != v for _, v, m in hits)
+        # OWNER_NAME alone: no login form matched, so the list's owner holds
+        # that name private, which means it is likely a real name.
+        if keys == {"OWNER_NAME"}:
+            only_name.append(i)
 if bad:
     print("denylist: line(s) " + ", ".join(map(str, bad)) + " are not valid regular expressions", file=sys.stderr)
 if public:
     print("denylist: line(s) " + "; ".join(public) + " match a public name from fleet.env that the starter writes into dozens of files,"
           " so every privacy scan would fail on every pull request. List your real name, emails, hosts and private ids,"
           " never your GitHub login or the public handle in OWNER_NAME (docs/skills.md, \"The privacy check\")", file=sys.stderr)
+    if only_name:
+        print("denylist: line(s) " + ", ".join(map(str, only_name)) + " match only OWNER_NAME, which copy-starter.sh writes into"
+              " public plugin manifests and notices: if it is your real name, set OWNER_NAME in fleet.env to a public handle"
+              " (your GitHub login is the default) and keep the line", file=sys.stderr)
     if partial:
         print("denylist: a line that matches only part of a name (a surname inside your login, say) is refused too. List the"
               " name whole, such as first[ ._-]?last, rather than one part; word boundaries (\\bpart\\b) help only where"
@@ -184,6 +197,9 @@ set_one() { # repo env kind name
     die "could not list the ${kind}s of $O/$repo$at (HTTP $GH_HTTP): run create-repos.sh$([ "$env" = - ] || echo " and create-environments.sh") first"
   fi
   if [ "$DRY_RUN" = 1 ]; then
+    # The list given is checked as the real run checks it, so a list the real
+    # run refuses is refused here too (no prompt: a dry run reads no secret).
+    if [ "$name" = PRIVACY_DENYLIST ] && [ -n "$DENYLIST" ]; then get_denylist; fi
     set_value "$kind" "$O/$repo" "$env" "$name" </dev/null
   else
     case $name in

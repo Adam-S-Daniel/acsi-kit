@@ -25,7 +25,8 @@
 # then "N of M done", how many required steps of each track are done, and
 # the next step: title, time estimate, kind, what to run and the docs section
 # that explains it. Every bootstrap command it prints carries your --config
-# when it is not ./fleet.env, so it runs as printed. Steps are sequential: the first step not done is next, except
+# when it is not ./fleet.env, and every status.sh hint your --track when it is
+# not all, so it runs as printed; <you> in a step's command is your OWNER. Steps are sequential: the first step not done is next, except
 # that an optional step never blocks the next one. The counts are of required
 # steps: an optional step is listed, done or not, and never counted, so a
 # track reads "M of M done" whether or not its optional steps were taken.
@@ -210,7 +211,9 @@ if [ -z "$NEXT" ]; then
   exit 0
 fi
 log "Next: $NEXT ${TITLE[$NEXT]} (about ${MIN[$NEXT]} minutes, ${KIND[$NEXT]})"
-log "  Run: $(with_config_arg "${RUN[$NEXT]}")"
+run_text=${RUN[$NEXT]}
+[ "$CONFIG_OK" = 0 ] || run_text=${run_text//<you>/$CFG_OWNER}
+log "  Run: $(with_config_arg "$run_text")"
 log "  Read: ${LINK[$NEXT]}"
 case $NEXT in 0|1|2) log "  Before step 2: bash bootstrap/preflight.sh$(config_arg) checks the tools and the gh sign-in these scripts need." ;; esac
 if [ -n "${DETAIL[$NEXT]:-}" ]; then
@@ -218,6 +221,6 @@ if [ -n "${DETAIL[$NEXT]:-}" ]; then
   printf '%s\n' "${DETAIL[$NEXT]}" | sed 's/^/    /'
 fi
 if [ "${CTYPE[$NEXT]}" = ask ]; then
-  log "  status.sh cannot see this one. Once it is done: bootstrap/status.sh$(config_arg) --mark $NEXT"
+  log "  status.sh cannot see this one. Once it is done: bootstrap/status.sh$(config_arg)$(track_arg) --mark $NEXT"
 fi
 exit 0
