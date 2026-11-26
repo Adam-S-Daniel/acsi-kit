@@ -48,23 +48,30 @@ scripts as the base, which include the repo once it exists:
 3. The three eval Apps, `eval-improve`, `roster` and `registry-read`
    (`create-apps.sh`, step 33), and their installations, with `skills-evals`
    added to the three base Apps' installations (step 34).
-4. `bootstrap/create-environments.sh` again: the `routine-fire` environment
-   and `repo-settings`' `ROSTER_WRITER_APP_ID` (step 37).
-5. `bootstrap/regenerate.sh run-health-sha` and
+4. The Loop worker routine and its `LOOP_WORKER_FIRE_URL` and
+   `LOOP_WORKER_FIRE_BEARER` on `_agent-guidance` (step 41), before the next
+   step flips `EVALS_REPO`: from then on a scheduled Loop worker fire needs
+   both ([routines](routines.md#fleet-worker)).
+5. `bootstrap/create-environments.sh` again: the `routine-fire` environment,
+   `repo-settings`' `ROSTER_WRITER_APP_ID`, and `_agent-guidance`'s
+   `EVALS_REPO`, which flips from `none` to `<you>/skills-evals` (step 37).
+6. `bootstrap/regenerate.sh run-health-sha` and
    `bootstrap/regenerate.sh actions-lock` again, for `skills-evals`' copies
    (step 38).
-6. `bootstrap/regenerate.sh evals-fleet`, then merge what it opens in
+7. `bootstrap/regenerate.sh evals-fleet`, then merge what it opens in
    `repo-settings` (step 40). The starter's `fleet.yml` declares only the
    base repos. The `skills-evals` element waits in
    `repo-settings/fleet.evals.yml`, which nothing applies. The task parses
    both files, appends that element to `fleet.yml`'s `repos:` list (leaving
    it alone if `fleet.yml` already declares it), and deletes the fragment,
    so a second run opens nothing.
-7. `bootstrap/apply-settings.sh` again, which now protects `skills-evals`
+8. `bootstrap/apply-settings.sh` again, which now protects `skills-evals`
    too (step 39).
 
 Each of these steps' checks reads only the evals track's part
-(`verify.sh --track evals`), so the base steps stay done throughout.
+(`verify.sh --track evals`), so the base steps stay done throughout. The one
+value both tracks read, `EVALS_REPO`, passes the base track as `none` or
+`<you>/skills-evals`, and the evals track only as `<you>/skills-evals`.
 
 ## Fixtures
 

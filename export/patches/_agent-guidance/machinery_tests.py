@@ -143,8 +143,9 @@ test_agent_checks_persistent_delete() {
     else
         fail "agent-checks persistent: deleting persistent/results is refused — exit $rc"
     fi
-''', ''),    # The bump-branch-push check is a fleet check (the consumer lock bumper's
-    # branch) and is not shipped, so its test and its group entry go too.
+''', ''),    # The kit ships no pre-push checks at all (DECISIONS, Content tiers), so
+    # bump-branch-push (the consumer lock bumper's branch) is left out like
+    # push-to-default and persistent-delete, and its test and group entry go too.
     ('''# pre-push refuses a push to the lock bumper's branch, because a commit the
 # bumper did not make strands its pull request; deleting that branch, which is
 # the way to free it, and pushing to any other branch still pass.

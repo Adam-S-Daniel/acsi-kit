@@ -11,9 +11,11 @@ runs). [Free or paid](before-you-start.md#free-or-paid-github-plan) decides
 which are private.
 
 Each repo gets a first commit, a generated README that `copy-starter.sh`
-later replaces. The script also creates the two labels no settings file
-declares: `agent-ready` (the fleet worker's queue) and `on-hold` (paused by
-you, and only you add or remove it).
+later replaces. The script also creates the three labels no settings file
+declares: `agent-ready` (the fleet worker's queue), `on-hold` (paused by
+you, and only you add or remove it) and `ci` (the label the scheduled
+workflows file their issues under; creating an issue with a label the repo
+lacks fails, so a first nudge would otherwise turn its run red).
 
 In `skills-evals`, it creates the branch `persistent/eval-results` as an
 orphan commit holding only a README. The weekly plan, the ingest, the
@@ -114,9 +116,21 @@ would do. It is advisory, not a required check.
 It also sets `repo-settings`' variables `GUIDANCE_SYNC_APP_ID` and
 `ROSTER_WRITER_APP_ID` from `fleet.env` once `create-apps.sh` has filled
 them in, so run it again after creating the Apps. From the same file, it
-sets `_agent-guidance`'s `FLEET_WORKER_EVERY_HOURS` (from `CLAUDE_PLAN`)
+sets `_agent-guidance`'s `FLEET_WORKER_EVERY_HOURS` and `LOOP_WORKER_EVERY_HOURS` (from `CLAUDE_PLAN`),
+its `EVALS_REPO` and `ARTICLE_WATCH_FEED_URL` (see [routines](routines.md#fleet-worker)),
+`acsi-agentskills`' `EVALS_REPO` (its `ci.yml` reads it too),
 and, once `skills-evals` exists, that repo's `SITE_REPO` and four federation
 ids. It skips any key left empty in `fleet.env`.
+
+**Updating an existing setup:** each run sets these values to what the plan
+and `fleet.env` say, so it replaces a value you set by hand. In particular,
+if you set `LOOP_WORKER_EVERY_HOURS` yourself (an earlier kit left it to
+you), running `create-environments.sh` again replaces it with your plan's
+value (168 on Pro, 24 on Max 5x and Ultra); to keep a different cadence, set
+it again afterwards and expect `verify.sh` to report it as differing. The
+same run also adds `EVALS_REPO` to `acsi-agentskills`, which its `ci.yml`
+now needs, and `bash bootstrap/create-repos.sh` again adds the `ci` label
+to repos made before the kit created it.
 
 Until the evals track creates `skills-evals`, the script skips
 `routine-fire`, and `ROSTER_WRITER_APP_ID` waits for the `roster` App. The
@@ -177,7 +191,11 @@ and every consumer in `_agent-guidance`'s `repos.yml`. Once the evals track
 creates `skills-evals`, add it to their installations (step 34). With a
 second owner, the three are public Apps, so sign in as that owner and
 install them there too. `bash bootstrap/verify.sh --only installs:<app>`
-checks an installation.
+checks an installation when it can: GitHub lists installations only to a
+GitHub App user token, and answers gh's own sign-in with HTTP 403. Then
+verify.sh names each App and the repos it needs; check them at
+https://github.com/settings/installations and record your answer with
+`bash bootstrap/status.sh --mark 7` (step 34 on the evals track).
 
 ## The first apply
 
@@ -230,16 +248,47 @@ workflow isn't on the base branch yet:
   `pull_request_target`, which uses the base branch's workflow, and an empty
   repo has none, so it never reports on the first pull request;
 - anything that verifies `actions.lock` against GitHub, the hook pin or the
-  scheduled-run-health pin: steps 15 to 18.
+  scheduled-run-health pin: steps 15 to 18;
+- `skills-evals`' daily `scheduled-run-health.yml` (evals track): it calls
+  `_agent-guidance`'s reusable workflow at a sha that ships as forty zeros,
+  so the run fails at startup until step 38 pins it. The base repos' copies
+  ship with no schedule; step 16 pins the sha and adds the daily schedule in
+  the same pull request, so they never run at the placeholder.
 
-Nothing is protected before step 20, so these don't block the merge. Any
-other failure is real, so read it before you merge.
+Nothing is protected before step 20, so these don't block the merge.
+
+These wait for a later step without failing, each with a "not set up yet"
+or "skipped" notice on its run: `repo-settings`' weekly `plan` plans nothing
+until `create-apps.sh` sets `REPO_SETTINGS_READ_APP_CLIENT_ID` (step 6; a
+merge to `repo-settings` before then still fails at the token mint);
+`_agent-guidance`'s `fleet-worker-fire.yml` fires no Fleet worker while
+`FLEET_WORKER_FIRE_URL` is `none`, the value `create-environments.sh` writes
+until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
+27's check, reports it until then), and the same for the Loop worker's
+`LOOP_WORKER_FIRE_URL` until step 41; and the
+scheduled runs that read `skills-evals` skip while `EVALS_REPO` is `none`
+([routines](routines.md#fleet-worker)).
+
+These are expected to fail until a later step or a kit update, and nothing
+else is:
+
+- merging `repo-settings`' starter pull request (step 4) runs its `plan`,
+  which fails at the token mint until step 6 creates the settings-read App
+  (a re-run after step 6 is green);
+- `_agent-guidance`'s `skills-lock-bump.yml`, four times a day from step 10
+  until step 12 copies `acsi-agentskills` (until then that repo holds only
+  its first README);
+- on a setup without `skills-evals`, `_agent-guidance`'s daily
+  `dependabot-config-health.yml`: `repos.yml` still names `skills-evals`
+  under `cron_coverage.fleet`. A later kit update fixes both of these.
+
+Any other failure is real: read it before you merge.
 
 On `PLAN=free`, `create-apps.sh` skips the `settings-admin` App, so
 `REPO_SETTINGS_APP_CLIENT_ID` is never set in `repo-settings`. Both apply
 jobs in `repo-settings.yml` (`apply-auto` and `repo-settings`) check that
-variable and are skipped. The weekly `plan` job doesn't, so it still runs
-with the read App and reports drift. You apply from your machine with
+variable and are skipped. The weekly `plan` job doesn't need it: it runs with
+the read App and reports drift. You apply from your machine with
 `bash bootstrap/apply-settings.sh`.
 
 Until step 20, `repo-settings.yml`'s apply job waits for your approval on

@@ -13,10 +13,12 @@ run-name: >-
      || format('manual — @{0}', github.actor) }}
 
 on:
-  schedule:
-    # Off-peak offset minute (house precedent). GitHub cron lag (measured
-    # 4-5h on daily crons) is absorbed by the reusable's 48h scan window.
-    - cron: '47 8 * * *'
+  # The schedule starts with the pin: bootstrap/regenerate.sh run-health-sha
+  # replaces the forty-zero sha below and turns the next line into the daily
+  # schedule (47 8 * * *, an off-peak minute; GitHub's cron lag is absorbed
+  # by the reusable's 48h scan window). A schedule at the placeholder would
+  # fail at "Set up job" every day until then.
+  # schedule-starts-with-the-pin: - cron: '47 8 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

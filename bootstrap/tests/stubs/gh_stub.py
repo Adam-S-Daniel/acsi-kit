@@ -8,7 +8,9 @@ the first one wrote. A secret's value is stored only as a SHA-256, so no
 secret text lands in any file.
 
 User installations come from the state's "installations" list (a test
-writes it): {"id", "app_id", "account": {"login"}, "repos": [full names]}.
+writes it): {"id", "app_id", "account": {"login"}, "repos": [full names]},
+read only with GH_STUB_APP_USER_TOKEN=1 (gh's own sign-in gets GitHub's 403);
+GH_STUB_INSTALLATIONS_STATUS=<code> answers that status instead.
 `gh actions-lock` is stubbed too: --help exits 0 unless
 GH_STUB_NO_ACTIONS_LOCK=1; --no-narrow appends GH_STUB_ACTIONS_LOCK_LINE (if
 set) to .github/workflows/actions.lock in the current directory; --verify
@@ -136,6 +138,12 @@ def api(args):
         u = m.group(1)
         return out({"login": u, "id": 5000 + sum(map(ord, u)), "type": "User"})
 
+    # Real GitHub answers 403 to gh's own (OAuth) sign-in here: the endpoint
+    # takes a GitHub App user token. GH_STUB_APP_USER_TOKEN=1 stands for one.
+    if path.startswith("user/installations") and os.environ.get("GH_STUB_INSTALLATIONS_STATUS"):
+        return err(int(os.environ["GH_STUB_INSTALLATIONS_STATUS"]), "Bad credentials")
+    if path.startswith("user/installations") and os.environ.get("GH_STUB_APP_USER_TOKEN") != "1":
+        return err(403, "You must authenticate with an access token authorized to a GitHub App in order to list installations")
     if path == "user/installations":
         return out({"total_count": len(st.get("installations", [])),
                     "installations": [{k: v for k, v in i.items() if k != "repos"} for i in st.get("installations", [])]})
@@ -244,6 +252,33 @@ def api(args):
         if method == "PUT":
             r["fork"] = body
         return out(r["fork"])
+    # Dependabot alerts and security updates: a PUT turns one on, a DELETE
+    # off (no body either way). GitHub answers the alerts read with an empty
+    # 204 when on and 404 when off, and the security-updates read with JSON.
+    if rest in ("/vulnerability-alerts", "/automated-security-fixes"):
+        key = rest.strip("/")
+        if method in ("PUT", "DELETE"):
+            r[key] = method == "PUT"
+            save()
+            sys.exit(0)
+        if rest == "/vulnerability-alerts":
+            if r.get(key):
+                save()
+                sys.exit(0)
+            return err(404, "Not Found")
+        return out({"enabled": bool(r.get(key)), "paused": False})
+    m2 = re.fullmatch(r"/labels/([^/]+)", rest)
+    if m2:  # one label by name, as the settings engine reads and edits it
+        from urllib.parse import unquote
+        name = unquote(m2.group(1))
+        lab = next((l for l in r["labels"] if l["name"] == name), None)
+        if lab is None:
+            return err(404, "Not Found")
+        if method == "PATCH":
+            lab.update({k: v for k, v in (body or {}).items() if k in ("color", "description")})
+            if (body or {}).get("new_name"):
+                lab["name"] = body["new_name"]
+        return out(lab)
     if rest == "/labels":
         if method == "POST":
             r["labels"].append(body)
@@ -255,7 +290,9 @@ def api(args):
     if m2:
         name, pol = m2.group(1), m2.group(2)
         if r["private"] and os.environ.get("GH_STUB_PLAN", "free") == "free":
-            return err(404, "Not Found")
+            # GitHub Free: no environments in a private repo. Reads find
+            # none; creating one is refused with a bare 403.
+            return err(403 if method == "PUT" else 404, "Forbidden" if method == "PUT" else "Not Found")
         e = envs.get(name)
         if pol:
             if e is None:

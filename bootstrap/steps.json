@@ -1,5 +1,5 @@
 {
-  "about": "The quick start's steps, in order: the one source for docs/quick-start.md's table (render-quickstart.py) and for status.sh. Each step is at most one command or one visit to a page, plus the check that says it is done. check.type is config (fleet.env exists with OWNER, PLAN and CLAUDE_PLAN), verify (verify.sh --only <groups> passes), files (each file is on that repo's default branch, so its starter pull request is merged) or ask (status.sh --mark <id> once you say it is done; an ask check with \"record\": \"content\" is also done once add-content.sh has recorded your choices). link is a kit-relative path to the docs section that explains the step. An optional step is listed but never blocks the next. track is base (guidance, skills, settings, hooks, machines: what /adopt sets up) or evals (what exists only for the eval loop: what /adopt-evals adds); status.sh --track limits its report to one. A step that serves both is base, and its run text says which part only evals use. A verify check runs with its step's track (verify.sh --track): a base step never looks at skills-evals or what serves only it, and an evals step looks only at those, so the base needs no skills-evals and adding evals never undoes a base step.",
+  "about": "The quick start's steps, in order: the one source for docs/quick-start.md's table (render-quickstart.py) and for status.sh. Each step is at most one command or one visit to a page, plus the check that says it is done. check.type is config (fleet.env exists with OWNER, PLAN and CLAUDE_PLAN), verify (verify.sh --only <groups> passes), files (each file is on that repo's default branch, so its starter pull request is merged) or ask (status.sh --mark <id> once you say it is done; an ask check with \"record\": \"content\" is also done once add-content.sh has recorded your choices). link is a kit-relative path to the docs section that explains the step. An optional step is listed but never blocks the next. track is base (guidance, skills, settings, hooks, machines: what /adopt sets up) or evals (what exists only for the eval loop: what /adopt-evals adds); status.sh --track limits its report to one. A step that serves both is base, and its run text says which part only evals use. A verify check runs with its step's track (verify.sh --track): a base step never looks at skills-evals or what serves only it, and an evals step looks only at those, so the base needs no skills-evals and adding evals never undoes a base step. A verify check with \"by_hand\": true (the App installations) also takes status.sh --mark <id>: gh's own sign-in cannot read GET user/installations (HTTP 403), so verify.sh then accepts your answer for that step instead and says so.",
   "steps": [
     {
       "id": "0",
@@ -132,7 +132,8 @@
           "installs:guidance-sync",
           "installs:settings-admin",
           "installs:settings-read"
-        ]
+        ],
+        "by_hand": true
       },
       "minutes": 10
     },
@@ -355,7 +356,7 @@
     {
       "id": "22",
       "title": "Schedule the machine jobs",
-      "run": "First, in the distro (or on Linux or macOS), copy your wsl-automation clone's `config/settings.env.example` to `~/.config/wsl-automation/settings.env` (every job, the session miner included, reads it) and check its repositories, `LESSONS_CLONE` and `WSL_AUTOMATION_AGENT_OWNER_ROOTS` (the folder that holds your clones); then Windows: `./scripts/register-tasks.ps1` in an elevated PowerShell 7, in your wsl-automation clone; Linux or macOS: `bash scripts/unix/install-schedule.sh <systemd|launchd|cron>` (its usage census, the Linux and macOS default, feeds only evals: without evals pass `--jobs session-miner`)",
+      "run": "First, in the distro (or on Linux or macOS), copy your wsl-automation clone's `config/settings.env.example` to `~/.config/wsl-automation/settings.env` (every job reads it) and check its repositories, `LESSONS_CLONE` and `WSL_AUTOMATION_AGENT_OWNER_ROOTS` (the folder that holds your clones). It ships `SKILLS_EVALS_URL=none`: the session miner and the usage census run code from skills-evals, so on the base they log that they skipped and exit 0 (step 42 turns them on). Windows: `./scripts/register-tasks.ps1` in an elevated PowerShell 7, in your wsl-automation clone; on the base the jobs that do work are the ccstatusline config sync, the WSL memory log, the Docker watchdog and memory curation, and the optional waiting feed fails each minute until you create `waiting-feed` and set `WAITING_FEED_URL`. Linux or macOS: nothing to schedule on the base (`scripts/unix/install-schedule.sh` schedules only the usage census and the session miner, which serve evals, and the optional waiting feed), so mark this step done, or run `bash scripts/unix/install-schedule.sh <systemd|launchd|cron> --jobs waiting-feed` if you use the waiting feed",
       "kind": "machine",
       "part": "machine",
       "track": "base",
@@ -380,16 +381,19 @@
     },
     {
       "id": "27",
-      "title": "Create the fleet worker routines",
-      "run": "At https://claude.ai/code/routines, two tasks (Fleet worker, Loop worker): an API trigger only (no schedule), the GitHub connector, each one's prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER and LOOP_WORKER_FIRE_URL and LOOP_WORKER_FIRE_BEARER on _agent-guidance, and LOOP_WORKER_EVERY_HOURS (required), whose fleet-worker-fire.yml fires them",
+      "title": "Create the fleet worker routine",
+      "run": "At https://claude.ai/code/routines, one task (the Fleet worker, maintenance role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it (create-environments.sh left the URL `none`, which skips the fire with a \"not set up yet\" notice; set it to the routine's fire URL. This step's check is that the URL is no longer `none` and the bearer is set). The Loop worker serves the eval loop, so the evals track creates it (step 41)",
       "kind": "browser",
       "part": "routines",
       "track": "base",
       "link": "docs/routines.md#fleet-worker",
       "check": {
-        "type": "ask"
+        "type": "verify",
+        "groups": [
+          "fleet-worker"
+        ]
       },
-      "minutes": 15
+      "minutes": 10
     },
     {
       "id": "28",
@@ -469,6 +473,19 @@
       "minutes": 20
     },
     {
+      "id": "42",
+      "title": "Turn on the session miner and the usage census",
+      "run": "On each durable machine, in `~/.config/wsl-automation/settings.env`, change `SKILLS_EVALS_URL=none` to `SKILLS_EVALS_URL=https://github.com/<you>/skills-evals.git`; then, in your wsl-automation clone, run `bash scripts/run-session-miner.sh --dry-run` once (a scheduled miner run refuses until one dry run has succeeded). Windows: the tasks are already registered. Linux or macOS: `bash scripts/unix/install-schedule.sh <systemd|launchd|cron> --jobs usage-census,session-miner`",
+      "kind": "machine",
+      "part": "machine",
+      "track": "evals",
+      "link": "docs/machine.md#scheduled-jobs-wsl-automation",
+      "check": {
+        "type": "ask"
+      },
+      "minutes": 20
+    },
+    {
       "id": "33",
       "title": "Create the three eval GitHub Apps",
       "run": "`bootstrap/create-apps.sh eval-improve roster registry-read` (GitHub's App manifest flow, once per App, in the browser)",
@@ -503,14 +520,28 @@
           "installs:guidance-sync",
           "installs:settings-admin",
           "installs:settings-read"
-        ]
+        ],
+        "by_hand": true
+      },
+      "minutes": 10
+    },
+    {
+      "id": "41",
+      "title": "Create the Loop worker routine",
+      "run": "At https://claude.ai/code/routines, one task (the Loop worker, loop role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set LOOP_WORKER_FIRE_URL (replacing the `none` create-environments.sh wrote) and LOOP_WORKER_FIRE_BEARER on _agent-guidance (create-environments.sh already set LOOP_WORKER_EVERY_HOURS from CLAUDE_PLAN). fleet-worker-fire.yml skips its fire while EVALS_REPO is none and fires it once the next step flips EVALS_REPO to skills-evals, so this comes first",
+      "kind": "browser",
+      "part": "routines",
+      "track": "evals",
+      "link": "docs/routines.md#fleet-worker",
+      "check": {
+        "type": "ask"
       },
       "minutes": 10
     },
     {
       "id": "37",
       "title": "Create its environment and copy the roster App's id",
-      "run": "`bootstrap/create-environments.sh` again (the `routine-fire` environment in `skills-evals`, and `ROSTER_WRITER_APP_ID` in `repo-settings`)",
+      "run": "`bootstrap/create-environments.sh` again (the `routine-fire` environment in `skills-evals`, `ROSTER_WRITER_APP_ID` in `repo-settings`, and `EVALS_REPO` on `_agent-guidance`, which flips from `none` to `<owner>/skills-evals`)",
       "kind": "script",
       "part": "evals",
       "track": "evals",
@@ -589,7 +620,7 @@
     {
       "id": "24",
       "title": "Create the eval runner routine",
-      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id",
+      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id for the next step",
       "kind": "browser",
       "part": "routines",
       "track": "evals",
@@ -597,7 +628,7 @@
       "check": {
         "type": "ask"
       },
-      "minutes": 20
+      "minutes": 15
     },
     {
       "id": "25",
