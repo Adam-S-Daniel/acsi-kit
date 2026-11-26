@@ -23,6 +23,7 @@ fails loudly, so a source change that moves a block stops the export.
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import yaml
@@ -38,6 +39,11 @@ PERMS = (
     "      contents: read\n"
     "      pull-requests: read\n"
 )
+# The gate's steps, by name, in the source's order: only these may go.
+GATE_STEPS = ("Check out the eval-protection gate", "Check out the skills-evals gate input builder",
+              "Eval-protected skills take correctness fixes only")
+# The job permissions the gate needed, which go with it.
+GATE_PERMISSIONS = {"contents": "read", "pull-requests": "read"}
 HOOKS_START = "The bundle also carries one Claude Code Stop hook,"
 HOOKS_END = "cannot send it itself.\n\n"
 
@@ -53,37 +59,40 @@ def _once(text: str, needle: str, where: str) -> int:
     return text.index(needle)
 
 
-def _steps(text: str) -> list:
+def _doc(text: str) -> dict:
     try:
-        return yaml.safe_load(text)["jobs"]["agent-checks"]["steps"]
+        doc = yaml.safe_load(text)
+        doc["jobs"]["agent-checks"]["steps"]
+        return doc
     except (yaml.YAMLError, KeyError, TypeError):
         raise PatchError(f"owner_only: {AGENT_CHECKS}: no agent-checks job with steps") from None
-
-
-def _gate_step(step) -> bool:
-    """A step of the eval-protection gate: it checks out another repo or uses
-    the gate's working folder."""
-    return bool((step.get("with") or {}).get("repository")) or ".eval-protection" in yaml.safe_dump(step)
 
 
 def cut_gate(text: str) -> str:
     """agent-checks.yml without the eval-protection steps and their permissions.
 
-    The gate is the job's last steps, from its comment to the end of the file;
-    the cut parses both texts and refuses unless the steps it removes are all
-    gate steps and the ones it keeps are the same as before, so a step the
-    source adds after the gate stops the export instead of vanishing."""
-    before = _steps(text)
+    The gate is the job's last steps, from its comment to the end of the file.
+    The cut parses the whole document before and after, and refuses unless
+    the only difference is the gate's own steps (GATE_STEPS, by name, all of
+    them) and the permissions they needed. So a step or a job the source adds
+    after the gate, or a new step that checks out another repo, stops the
+    export instead of vanishing."""
+    before = _doc(text)
     i = _once(text, "\n" + GATE_COMMENT, AGENT_CHECKS)
     text = text[:i + 1].rstrip("\n") + "\n"
     _once(text, PERMS, AGENT_CHECKS)
     text = text.replace(PERMS, "")
-    steps = _steps(text)
-    removed = before[len(steps):]
-    if before[:len(steps)] != steps or not removed or not all(_gate_step(s) for s in removed):
-        raise PatchError(f"owner_only: {AGENT_CHECKS}: the cut would remove a step that is not the gate's")
-    if any(_gate_step(s) for s in steps):
-        raise PatchError(f"owner_only: {AGENT_CHECKS}: a gate step is still there")
+    after = _doc(text)
+    job = before["jobs"]["agent-checks"]
+    if [s.get("name") for s in job["steps"] if s.get("name") in GATE_STEPS] != list(GATE_STEPS):
+        raise PatchError(f"owner_only: {AGENT_CHECKS}: the gate's steps are not the ones this cut knows: {GATE_STEPS}")
+    if job.get("permissions") != GATE_PERMISSIONS:
+        raise PatchError(f"owner_only: {AGENT_CHECKS}: the job's permissions are not the gate's")
+    want = copy.deepcopy(before)
+    want["jobs"]["agent-checks"]["steps"] = [s for s in job["steps"] if s.get("name") not in GATE_STEPS]
+    del want["jobs"]["agent-checks"]["permissions"]
+    if after != want:
+        raise PatchError(f"owner_only: {AGENT_CHECKS}: the cut would remove more than the gate's steps and permissions")
     return text
 
 

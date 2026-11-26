@@ -110,6 +110,12 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           repository: example-adopter/_agent-guidance
+      - name: Check out the skills-evals gate input builder
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: example-adopter/skills-evals
+      - name: Eval-protected skills take correctness fixes only
+        run: node .eval-protection/gate/scripts/eval-protected.js ci
 """
 
 
@@ -120,10 +126,23 @@ def test_the_gate_cut_leaves_the_checks_and_drops_the_gate():
     assert "permissions" not in yaml.safe_load(out)["jobs"]["agent-checks"]
 
 
-def test_a_step_after_the_gate_stops_the_cut():
-    text = GATE_SRC + "      - name: A step the source adds later\n        run: echo later\n"
-    with pytest.raises(SystemExit, match="not the gate's"):
-        owner_only.cut_gate(text)
+@pytest.mark.parametrize("later", [
+    # a step after the gate
+    "      - name: A step the source adds later\n        run: echo later\n",
+    # a new step that checks out another repo, which only looks like the gate
+    "      - name: Check out a tool\n        uses: actions/checkout@v7.0.1\n"
+    "        with:\n          repository: example-adopter/a-tool\n",
+    # a second job after the gate
+    "  another-job:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo another\n",
+])
+def test_anything_after_the_gate_stops_the_cut(later):
+    with pytest.raises(SystemExit, match="more than the gate"):
+        owner_only.cut_gate(GATE_SRC + later)
+
+
+def test_a_renamed_gate_step_stops_the_cut():
+    with pytest.raises(SystemExit, match="not the ones this cut knows"):
+        owner_only.cut_gate(GATE_SRC.replace("Check out the skills-evals gate input builder", "Check out the builder"))
 
 
 def test_the_synced_scanners_are_the_ones_agent_guidance_delivers():
