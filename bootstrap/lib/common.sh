@@ -402,6 +402,8 @@ gh_write_api() { # METHOD endpoint [json]
   fi
   GH_OUT=""
   local s; s=$(_status_from "$err")
+  # GH_403_HINT: what a caller knows a 403 there most likely means.
+  if [ "$s" = 403 ] && [ -n "${GH_403_HINT:-}" ]; then die "gh api -X $method $endpoint failed (HTTP 403): $GH_403_HINT"; fi
   die "gh api -X $method $endpoint failed (HTTP ${s:-unknown})"
 }
 

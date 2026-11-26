@@ -493,6 +493,12 @@ assert "the federation ids are skipped as optional" has "$OUT" "ANTHROPIC_WORKSP
 assert "an empty SITE_REPO is skipped and named as required" has "$OUT" "variable SITE_REPO: SITE_REPO is empty in fleet.env (required: none for no website"
 
 CFGP="$T/fleet-paid.env"; new_config "$CFGP" paid
+# PLAN=paid on an account that is on GitHub Free: GitHub answers a bare 403
+# to an environment in a private repo; the script says what to change.
+run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
+assert_eq "PLAN=paid on a Free account fails" "$rc" 1
+assert "the 403 says the plan is likely wrong and what to set" has "$ERR" "(HTTP 403): environments in a private repository need a paid GitHub plan. If your account is on GitHub Free, set PLAN=free in bootstrap/fleet.env and run this again"
+assert_not "the 403's body is not printed" grep -q "BODY-MUST-NOT-BE-PRINTED" "$OUT" "$ERR"
 export GH_STUB_PLAN=paid
 run bash "$B/create-environments.sh" --config "$CFGP"; rc=$?
 assert_eq "create-environments (paid) exits 0" "$rc" 0

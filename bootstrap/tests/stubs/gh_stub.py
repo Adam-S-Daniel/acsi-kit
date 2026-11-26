@@ -259,7 +259,9 @@ def api(args):
     if m2:
         name, pol = m2.group(1), m2.group(2)
         if r["private"] and os.environ.get("GH_STUB_PLAN", "free") == "free":
-            return err(404, "Not Found")
+            # GitHub Free: no environments in a private repo. Reads find
+            # none; creating one is refused with a bare 403.
+            return err(403 if method == "PUT" else 404, "Forbidden" if method == "PUT" else "Not Found")
         e = envs.get(name)
         if pol:
             if e is None:

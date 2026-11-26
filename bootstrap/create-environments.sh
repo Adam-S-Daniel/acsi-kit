@@ -93,9 +93,16 @@ ensure_env() { # repo env reviewer branches
   else
     die "could not read $O/$r (HTTP $GH_HTTP); run create-repos.sh first"
   fi
+  # PLAN=paid on an account that is on GitHub Free: GitHub refuses
+  # environments in a private repo with a 403 that says nothing more.
+  GH_403_HINT=""
+  if [ "$(repo_visibility "$r")" = private ]; then
+    GH_403_HINT="environments in a private repository need a paid GitHub plan. If your account is on GitHub Free, set PLAN=free in bootstrap/fleet.env and run this again (it then skips $e; docs/settings-and-apps.md#environments)"
+  fi
   if gh_read "repos/$O/$r/environments/$e"; then
     cur=$GH_OUT
   else
+    if [ "$GH_HTTP" = 403 ] && [ -n "$GH_403_HINT" ]; then die "could not read environment $e in $O/$r (HTTP 403): $GH_403_HINT"; fi
     [ "$GH_HTTP" = 404 ] || die "could not read environment $e in $O/$r (HTTP $GH_HTTP)"
     cur='{}'; fresh=1
   fi
