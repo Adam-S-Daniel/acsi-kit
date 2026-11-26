@@ -61,7 +61,7 @@ actually publish:
 
 | Repo | Required checks |
 |---|---|
-| `acsi-agentskills` | `privacy`, `pytest`, `pytest-windows`, `plugin-runtime-approval`, `agent-checks`, `merge-gate` |
+| `acsi-agentskills` | `pytest`, `pytest-windows`, `plugin-runtime-approval`, `agent-checks`, `merge-gate` |
 | `skills-evals` | `test`, `agent-checks` |
 | `_agent-guidance` | `test`, `agent-checks` |
 | `wsl-automation` | `shell`, `test`, `test-linux`, `agent-checks` |

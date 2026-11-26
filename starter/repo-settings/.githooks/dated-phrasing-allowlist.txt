@@ -34,7 +34,7 @@ example-adopter-two/example-site-b AGENTS.md :: previously partner and
 example-adopter/acsi-agentskills plugins/acsi-coding-anywhere/skills/github-actions-repo-settings/SKILL.md :: no longer accepted
 example-adopter/acsi-agentskills plugins/acsi-coding-anywhere/skills/skills-doctor/SKILL.md :: in either no longer loads
 example-adopter/acsi-agentskills plugins/acsi-coding-local/skills/migrate-claude-memory/SKILL.md :: 2.1.273 and later no longer loads
-example-adopter/acsi-agentskills AGENTS.md :: repos from 2026-11-02
+example-adopter/acsi-agentskills AGENTS.md :: repos from 2026-12-02
 
 # Quoted examples and example data.
 example-adopter/acsi-agentskills plugins/acsi-anything-anywhere/skills/writing-adrs/SKILL.md :: No "as of today the build is broken"
