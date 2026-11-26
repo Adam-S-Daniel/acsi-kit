@@ -128,10 +128,15 @@ fi
 # wsl-automation last, and never fatal: none of the installers above needs it,
 # so a clone of it that cannot be made or used (another origin, a folder of
 # that name, a branch without the settings example) is step 22's to fix, not
-# a reason this step fails. ensure_clone dies, so it runs in a subshell.
-if (ensure_clone wsl-automation config/settings.env.example) 2>"$BOOT_WORK/wa.err"; then
+# a reason this step fails. ensure_clone dies, so it runs in a subshell; the
+# subshell hands back its write and skip counts (a dry run's planned clone),
+# and whatever it said on stderr (a clone used as it is) is shown either way.
+if (ensure_clone wsl-automation config/settings.env.example; printf '%s %s\n' "$WRITES" "$SKIPS" > "$BOOT_WORK/wa.counts") 2>"$BOOT_WORK/wa.err"; then
+  read -r WRITES SKIPS < "$BOOT_WORK/wa.counts"
+  cat "$BOOT_WORK/wa.err" >&2
   log "Step 22 (Schedule the machine jobs) works in $DIR/wsl-automation: copy its config/settings.env.example to ~/.config/wsl-automation/settings.env."
 else
+  grep -v '^ERROR: ' "$BOOT_WORK/wa.err" >&2 || true
   warn "no usable wsl-automation clone in $DIR ($(sed -n 's/^ERROR: //p' "$BOOT_WORK/wa.err" | head -n 1)); this step is done without it, and step 22 needs one: fix that, then run this again or clone it yourself"
 fi
 detect_os

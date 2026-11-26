@@ -2337,6 +2337,7 @@ assert_eq "install-machine dry run exits 0" "$rc" 0
 assert_eq "the dry run runs no installer" "$(log_lines "$INSTALL_LOG")" 0
 assert_not "the dry run clones nothing into REPOS_DIR" test -e "$RD"
 assert "the dry run names the final hook path" has "$OUT" "--hook $RD/_agent-guidance/.claude/hooks/memory-home.sh"
+assert "the dry run counts three clones and three installers, wsl-automation's clone included" has "$OUT" "Dry run: 6 change(s) would be made"
 run bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
 assert_eq "install-machine exits 0" "$rc" 0
 assert_eq "it runs the repos' own installers, in order, with their arguments" "$(cat "$INSTALL_LOG")" \
@@ -2351,6 +2352,11 @@ assert "under WSL it gives the Windows checkout's clone command" has "$OUT" "  g
 assert "and where register-tasks.ps1 runs" has "$OUT" '.\scripts\register-tasks.ps1 (step 22)'
 run env PREFLIGHT_WSL=0 bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
 assert_not "off WSL it names no Windows checkout" has "$OUT" "Windows checkout"
+echo mine > "$RD/wsl-automation/local-note.txt"
+run bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
+assert_eq "a wsl-automation clone with local changes does not fail step 21" "$rc" 0
+assert "and its warning that it was used as it is reaches the user" has "$ERR" "$RD/wsl-automation has local changes or is not on main; using it as it is"
+rm "$RD/wsl-automation/local-note.txt"
 mv "$RD/wsl-automation" "$T/tmp/wa-clone"; mkdir -p "$RD/wsl-automation"; : > "$INSTALL_LOG"
 run bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
 assert_eq "a wsl-automation folder that is not a clone does not fail step 21" "$rc" 0
