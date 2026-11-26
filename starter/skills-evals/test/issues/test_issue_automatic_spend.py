@@ -94,9 +94,9 @@ class Breakdown(unittest.TestCase):
              "fired_at": "2026-11-12T02:22:00Z"},
         ]
 
-    def run_breakdown(self, workstation=()):
-        return aus.breakdown(CONFIG, self.triggers, self.fires, self.workflows, list(workstation),
-                             NOW, 14)
+    def run_breakdown(self, workstation_tasks=()):
+        return aus.breakdown(CONFIG, self.triggers, self.fires, self.workflows,
+                             list(workstation_tasks), NOW, 14)
 
     def job(self, doc, name):
         return next(j for j in doc["jobs"] if j["name"] == name)
