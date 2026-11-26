@@ -279,7 +279,7 @@
     {
       "id": "16",
       "title": "Pin the scheduled-run-health reusable",
-      "run": "`bootstrap/regenerate.sh run-health-sha`, then merge the three pull requests",
+      "run": "`bootstrap/regenerate.sh run-health-sha`, then merge the three pull requests; the one in `acsi-agentskills` also sets the `_agent-guidance` commit that cloud sessions install the guidance from and that its CI checks out",
       "kind": "script",
       "part": "generated files",
       "track": "base",
@@ -295,7 +295,7 @@
     {
       "id": "17",
       "title": "Pin the Codex Cloud bootstrap",
-      "run": "`bootstrap/regenerate.sh codex-pin`, then merge",
+      "run": "`bootstrap/regenerate.sh codex-pin`, then merge; it pins your registry's hook and your `_agent-guidance`'s guidance installer for Codex Cloud",
       "kind": "script",
       "part": "generated files",
       "track": "base",
