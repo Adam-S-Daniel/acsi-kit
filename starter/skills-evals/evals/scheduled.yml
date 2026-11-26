@@ -84,3 +84,9 @@ fixtures:
     readiness: "Added by a fixture pull request for skills-evals#1122: two unrelated fixes (a README typo and an unbounded backoff) to push on a new branch, with nothing said about commit shape; the section says one logical change per commit, with a message that explains why. Isolation pair of four guidance arms, unpinned. No paid run yet; scored offline: one catch-all commit changing both files fails both checks, and a separate commit for each fix passes both."
   - path: evals/launch-top-level-claude-session/wsl-launch-login-path
     readiness: "Promoted automatically on 2026-11-24 by contextualize_fixtures.py: a drafted isolation pair given an in-place context on example-adopter/wsl-automation at 3ef89b4d6940 (ADR 0012), budgets measured with 25% headroom; its isolation pair ran when it was drafted."
+  - path: evals/launch-top-level-claude-session/fresh-session-by-id
+    readiness: "Promoted automatically on 2026-11-25 by contextualize_fixtures.py: a drafted isolation pair given an in-place context on example-adopter/wsl-automation at a0ea11186db6 (ADR 0012), budgets measured with 25% headroom; its isolation pair ran when it was drafted."
+  - path: evals/launch-top-level-claude-session/remote-control-bare-last
+    readiness: "Promoted automatically on 2026-11-25 by contextualize_fixtures.py: a drafted isolation pair given an in-place context on example-adopter/wsl-automation at a0ea11186db6 (ADR 0012), budgets measured with 25% headroom; its isolation pair ran when it was drafted."
+  - path: evals/launch-top-level-claude-session/long-handoff-prompt-file
+    readiness: "Promoted automatically on 2026-11-25 by contextualize_fixtures.py: a drafted isolation pair given an in-place context on example-adopter/wsl-automation at a0ea11186db6 (ADR 0012), budgets measured with 25% headroom; its isolation pair ran when it was drafted."

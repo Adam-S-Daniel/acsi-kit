@@ -163,18 +163,20 @@ off", is the one list, with the reasons.
   worker or set `LOOP_WORKER_*`: it serves the eval loop, and the evals track
   (`/adopt-evals`, step 41) creates it. `create-environments.sh` has set
   `EVALS_REPO` to `none`, so the workflow skips the Loop worker's fire and
-  stays green.
+  stays green. The step's check is `verify` (`verify.sh --only
+  fleet-worker`): done once both values are set on `_agent-guidance`.
 - **Step 17** (the Codex Cloud pin) is optional: status.sh labels it
   `optional` and never makes it the next step. Ask whether the user runs
   Codex. If not, skip it; if so, run it like any other script step.
-- **Expected red until a later step**: the list is in
-  `docs/settings-and-apps.md`, "Merging the starter pull requests". It has
-  four entries: the Fleet worker leg of `fleet-worker-fire.yml` until step
-  27 sets its URL and bearer, `skills-lock-bump.yml` until steps 12 to 15,
-  `dependabot-config-health.yml` until step 11 drops the example repos'
-  names, and `repo-settings`' plan
-  between step 6 and steps 8 and 9. Tell the user so when they ask about a
-  failure email, and name the step that ends it; any other failure is real.
+- **Expected red runs** are listed once, in `docs/settings-and-apps.md`
+  ("Merging the starter pull requests"): the push `plan` from merging
+  `repo-settings`' starter (step 4) until step 6, `skills-lock-bump.yml`
+  from step 10 until step 12, and the daily
+  `dependabot-config-health.yml` from step 10 until step 11 drops the
+  example repos' names. Everything else that
+  waits for a later step skips with a "not set up yet" notice; any other
+  failure email is real: read the run with the user, and name the step
+  that ends a listed one.
 - **Step 30** (memory curation) has two tasks. The project task needs
   claude.ai Projects, a public beta that is rolling out gradually, so ask
   whether the user's account has Projects. If it does not, there is no

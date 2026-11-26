@@ -26,8 +26,9 @@ On Pro, also say the Pro value at these steps
 - **Steps 24 and 41** (the eval runner and the Loop worker): Sonnet in each
   task's model selector, never **Default**, which is Opus on Pro. Remove
   every connector the task's table in `docs/routines.md` doesn't name.
-- **Step 37** (`create-environments.sh` again): `LOOP_WORKER_EVERY_HOURS`
-  is already 168, so the Loop worker fires weekly at most.
+- **Step 41** (the Loop worker) again: its cadence,
+  `LOOP_WORKER_EVERY_HOURS`, is already 168 on Pro, so it fires weekly at
+  most. Nothing to choose.
 - **The budget**: `CLAUDE_PLAN=pro` sizes `skills-evals`' eval budget in
   points of a Pro week, with no Fable judge.
 
@@ -77,12 +78,16 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
   which adds `skills-evals` to `repos.yml` `cron_coverage.fleet`. The base
   leaves that name out, because the daily Dependabot health check fails on
   a repo that doesn't exist. The user merges both.
-- **Steps 35 to 40** add `skills-evals` with the base's own scripts, which
-  include it once it exists (`docs/evals-and-loop.md`, "Adding
-  skills-evals"): `create-repos.sh skills-evals`, its starter pull request,
-  `create-environments.sh`, `regenerate.sh run-health-sha` and
-  `actions-lock`, `regenerate.sh evals-fleet` and `apply-settings.sh`. They
-  come first: every other evals step needs that repo.
+- **The first evals steps**, in the order status.sh gives them, add
+  `skills-evals` with the base's own scripts, which include it once it
+  exists (`docs/evals-and-loop.md`, "Adding skills-evals"):
+  `create-repos.sh skills-evals` (step 35), its starter pull request (36),
+  the eval Apps (33, 34), the Loop worker routine (step 41), and only then
+  `create-environments.sh` (step 37, which flips `EVALS_REPO`), followed by
+  `regenerate.sh run-health-sha` and `actions-lock` (38),
+  `regenerate.sh evals-fleet` (40) and `apply-settings.sh` (39). Never run
+  `create-environments.sh` on the evals track before step 41, even when
+  `create-apps.sh` ends by suggesting it.
 - **Step 40** (`regenerate.sh evals-fleet`) declares `skills-evals` in
   `repo-settings/fleet.yml`. In a pull request on the user's
   `repo-settings`, it moves the element from `repo-settings/fleet.evals.yml`

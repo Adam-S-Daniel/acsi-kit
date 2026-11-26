@@ -86,7 +86,7 @@ check(f"the registries were read: {FLEET}", len(FLEET) == 6 and all(TREE.values(
 def group_known(g):
     kind, _, arg = g.partition(":")
     if not arg:
-        return g in {"repos", "labels", "branches", "environments", "variables", "federation", "settings"}
+        return g in {"repos", "labels", "branches", "environments", "variables", "federation", "settings", "fleet-worker"}
     return {"apps": arg in APPS, "installs": arg in APPS, "values": arg in VALUE_GROUPS,
             "regen": arg in TASKS}.get(kind, False)
 
@@ -217,6 +217,28 @@ check("an evals step runs create-environments.sh, whose first run there sets EVA
 if len(loop_steps) == 1 and flip_steps:
     check(f"step {loop_steps[0]} (Loop worker fire URL and bearer) comes before step {flip_steps[0]} "
           "(EVALS_REPO flips to skills-evals)", pos[loop_steps[0]] < pos[flip_steps[0]])
+
+# Two texts tell the adopter to run create-environments.sh outside steps.json:
+# create-apps.sh's closing hint (step 6 on the base, 33 on the evals track)
+# and the /adopt-evals skill's catch for the first evals steps. Neither may
+# send them to it on the evals track before the Loop worker step, or
+# EVALS_REPO flips first (targeted: these are prose, not a schema).
+if len(loop_steps) == 1 and flip_steps:
+    lw, fl = loop_steps[0], flip_steps[0]
+    hint = [l for l in (B / "create-apps.sh").read_text(encoding="utf-8").splitlines()
+            if l.startswith("log ") and "create-environments.sh again" in l]
+    check(f"create-apps.sh's closing hint names step {fl} after step {lw}: {hint}",
+          len(hint) == 1 and f"step {fl}, after step {lw}" in hint[0])
+    skill = (ROOT / ".claude" / "skills" / "adopt-evals" / "SKILL.md").read_text(encoding="utf-8")
+    # The passages about what happens up to the flip: they name
+    # create-environments.sh and a step that comes no later than it.
+    paras = [p for p in re.split(r"\n\s*\n|\n- ", skill) if "create-environments.sh" in p
+             and any(pos.get(n, len(STEPS)) <= pos[fl] for n in re.findall(r"[Ss]teps? (\d+)", p))]
+    check("the /adopt-evals skill names create-environments.sh before the flip", bool(paras))
+    for p in paras:
+        check(f"/adopt-evals: a passage naming create-environments.sh puts step {lw} before step {fl}: {p[:80]!r}",
+              f"step {lw}" in p and (f"step {fl}" not in p or p.index(f"step {lw}") < p.index(f"step {fl}")
+                                     or f"before step {fl}" in p))
 
 # The cost sentence in docs/before-you-start.md quotes the step counts.
 EXPECTED_COUNTS = tuple(str(n) for n in (len(STEPS), sum(s.get("track") == "base" for s in STEPS),

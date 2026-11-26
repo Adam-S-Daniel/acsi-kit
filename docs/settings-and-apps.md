@@ -257,36 +257,34 @@ workflow isn't on the base branch yet:
 
 Nothing is protected before step 20, so these don't block the merge.
 
-Two things wait for a later step without failing: `repo-settings`' `plan` job
-prints a "not set up yet" notice and plans nothing until `create-apps.sh`
-sets `REPO_SETTINGS_READ_APP_CLIENT_ID` (step 6), and the scheduled runs that
-read `skills-evals` print a notice while `EVALS_REPO` is `none`
+These wait for a later step without failing, each with a "not set up yet"
+or "skipped" notice on its run: `repo-settings`' weekly `plan` plans nothing
+until `create-apps.sh` sets `REPO_SETTINGS_READ_APP_CLIENT_ID` (step 6; a
+merge to `repo-settings` before then still fails at the token mint);
+`_agent-guidance`'s `fleet-worker-fire.yml` fires no Fleet worker while
+`FLEET_WORKER_FIRE_URL` is `none`, the value `create-environments.sh` writes
+until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
+27's check, reports it until then), and the same for the Loop worker's
+`LOOP_WORKER_FIRE_URL` until step 41; and the
+scheduled runs that read `skills-evals` skip while `EVALS_REPO` is `none`
 ([routines](routines.md#fleet-worker)).
 
-These scheduled runs are expected to fail until a later step, and nothing
-else is. GitHub emails you about each failed run, so finish the step named
-and the emails stop:
+These are expected to fail until a later step or a kit update, and nothing
+else is:
 
-- `_agent-guidance`'s `fleet-worker-fire.yml`, Fleet worker leg, on its slot
-  (weekly on Pro, Tuesday 00:20 UTC): it fails naming `FLEET_WORKER_FIRE_URL`
-  and `FLEET_WORKER_FIRE_BEARER` until step 27 creates the routine and sets
-  them. The routine needs the cloud environment of step 23, which needs the
-  repos of steps 10 and 12, so the step cannot move earlier.
-- `_agent-guidance`'s `skills-lock-bump.yml` (every six hours): it reads
-  your `acsi-agentskills`, so it fails from the step 10 merge until that
-  repo's starter is merged (step 12) and the locks and the hook pin are
-  yours (steps 14 and 15). It clears after steps 12 to 15.
-- `_agent-guidance`'s `dependabot-config-health.yml` (daily): it fails while
-  `repos.yml`'s `cron_coverage.fleet` names a repo neither owner has. The
-  starter lists the three `example-site-*` repos, and step 11 removes them.
-  It doesn't list `skills-evals`; step 40 adds that name once the evals
-  track has created the repo.
-- `repo-settings`' `repo-settings.yml` plan (each push to `main`, and
-  Mondays at 07:00 UTC): between step 6, which gives it the read App, and
-  steps 8 and 9, it fails while `GUIDANCE_SYNC_APP_ID` is unset or
-  `fleet.yml` still names the example repos.
+- merging `repo-settings`' starter pull request (step 4) runs its `plan`,
+  which fails at the token mint until step 6 creates the settings-read App
+  (a re-run after step 6 is green);
+- `_agent-guidance`'s `skills-lock-bump.yml`, four times a day from step 10
+  until step 12 copies `acsi-agentskills` (until then that repo holds only
+  its first README). A later kit update fixes this one;
+- `_agent-guidance`'s daily `dependabot-config-health.yml`, from step 10
+  until step 11 removes the three `example-site-*` names from `repos.yml`'s
+  `cron_coverage.fleet`: it fails on a name neither owner has. The list
+  doesn't name `skills-evals` until step 40 adds it, so a setup without
+  `skills-evals` is green from step 11 on.
 
-Any other failure is real, so read it before you merge.
+Any other failure is real: read it before you merge.
 
 On `PLAN=free`, `create-apps.sh` skips the `settings-admin` App, so
 `REPO_SETTINGS_APP_CLIENT_ID` is never set in `repo-settings`. Both apply

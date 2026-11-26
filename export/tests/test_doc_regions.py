@@ -343,6 +343,30 @@ def test_the_checks_table_names_the_checks_the_runner_records():
           "the agent-checks runner (note_ran)", runner_check_ids(), allowed_extra=LIBRARY_CHECKS)
 
 
+def settings_example_keys() -> set[str]:
+    """The keys wsl-automation's settings.env.example sets (KEY=value lines, not comments)."""
+    text = (KIT / "starter/wsl-automation/config/settings.env.example").read_text(encoding="utf-8")
+    return {m.group(1) for m in re.finditer(r"(?m)^([A-Z][A-Z0-9_]*)=", text)}
+
+
+def machine_page_code_spans() -> set[str]:
+    spans = set()
+    for tok in md_tokens(KIT / "docs/machine.md"):
+        if tok.type == "inline":
+            spans.update(code_spans(tok))
+    return spans
+
+
+def test_the_machine_page_names_every_key_of_the_settings_example():
+    # The adopter copies config/settings.env.example and the page says which
+    # keys to check; a key the source adds with no default (re-pin round 23:
+    # WSL_AUTOMATION_AGENT_OWNER_ROOTS) must reach that list.
+    keys = settings_example_keys()
+    assert {"LESSONS_CLONE", "SKILLS_EVALS_URL"} <= keys, keys
+    missing = sorted(keys - machine_page_code_spans())
+    assert not missing, f"docs/machine.md does not name these settings.env keys: {missing}"
+
+
 def test_the_runner_scan_sees_the_known_ids():
     # The scan is lexical; this fails if the runner's shape moves out from under it.
     assert {"skill-shell", "secret-file", "pr-tldr", "dated-phrasing"} <= runner_check_ids()

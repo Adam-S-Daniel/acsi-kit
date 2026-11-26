@@ -35,8 +35,9 @@ tiers, and the tests check this file against it.
   .githooks/) keeps the runner: events, the problem/note_ran bookkeeping,
   the run log, the empty lesson slot (check_lessons) and the repo-local
   .agent-checks/local.sh mechanism. Of the fleet checks it keeps the
-  core ones, `secret-file`, `skill-shell` and `local-identity`, exactly as
-  the source has them, and a commented-out example check (`.orig`/`.rej` leftovers). The
+  core ones, `secret-file`, `skill-shell`, `local-identity` and (re-pin
+  round 23) the pre-push `privacy` check with its privacy-denylist.py,
+  exactly as the source has them, and a commented-out example check (`.orig`/`.rej` leftovers). The
   opinionated `rules-dir` check goes to library/git-hooks/rules-dir/ with
   its test cases (machinery_tests.py writes the test half). The pre-push
   checks are not shipped.
@@ -269,17 +270,22 @@ check_paths() {
         esac
         continue
       fi
+      privacy_push_ref "$remote" "$remote_ref" "$local_oid" "$remote_oid"
       # The consumer lock bumper (_agent-guidance scripts/bump-consumer-locks.sh)
       # owns this branch. Deleting it, above, is the way to free it.
       if [ "$remote_ref" = refs/heads/skills-lock-bump/update ]; then
         problem bump-branch-push "refusing to push to skills-lock-bump/update: the skills.lock bumper owns this branch. It merges only a diff that is skills.lock alone and never force-pushes over a commit it did not make, so one more commit here strands its pull request and fails every later bumper run for this repo. Put your change on a branch of its own and open a separate PR. If the bumper's PR is already stranded, close it and delete this branch; the next run proposes a fresh re-pin."
       fi
 ''',
+     # The privacy check (re-pin round 23) is core, beside local-identity: it
+     # applies the same machine names, and a denylist only when the adopter
+     # configures one, to the pushed ref names and commit messages.
      '''    remote=${2:-origin}
     while read -r _ local_oid remote_ref remote_oid; do
       [ -n "${remote_ref:-}" ] || continue
       # A delete pushes no content to check.
       is_zero "$local_oid" && continue
+      privacy_push_ref "$remote" "$remote_ref" "$local_oid" "$remote_oid"
 '''),
 ]
 

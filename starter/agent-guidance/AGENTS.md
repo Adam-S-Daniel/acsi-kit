@@ -65,10 +65,10 @@ The owner's sessions install it from the owner's own routes (the plugin's
 SessionStart hook and the cloud environments' setup script). Consumer repos,
 this one included, carry only the stub and `.github/fleet-contributor-rules.md`,
 which `scripts/build-contributor-rules.js` builds from `base.md` and CI
-regenerates and diffs. `scripts/sync.sh` removes a leftover
-`.claude/hooks/fleet-guidance.md`, `fleet-memory.sh` or `guidance-load-record.sh`
-from a consumer, along with exactly the `settings.json` entries it once wrote
-for them. This repo keeps `fleet-memory.sh` and `guidance-load-record.sh`
+regenerates and diffs. `scripts/sync.sh` keeps a consumer free of
+`.claude/hooks/fleet-guidance.md`, `fleet-memory.sh` and `guidance-load-record.sh`:
+it deletes any copy it finds, along with exactly the `settings.json` entries
+that registered them. This repo keeps `fleet-memory.sh` and `guidance-load-record.sh`
 because they are the source the owner's routes download, and the tests run
 them. A PR that changes `base.md` shows the owner's next payload; one that
 changes `stub.md` shows the text each consumer repo's `AGENTS.md` gets on the
@@ -162,6 +162,7 @@ not run on a change, so they have no path filter. The required contexts on
 | --- | --- | --- | --- |
 | `ci.yml` | `pull_request`, push to `main` | Broad trigger; each `suite` shard and `checks` decide from `scripts/ci-scope.sh` and the job still reports success | `test` (aggregator) |
 | `agent-checks.yml` | `pull_request`, push to `main` | None: a required check cannot use `on.paths`, and the runner itself passes when nothing it checks changed | `agent-checks` |
+| `privacy-comment-alert.yml` | `issue_comment`, `issues`, `pull_request_review_comment`, `pull_request_review` (created, opened, submitted or edited) | Not applicable: it runs on comment events, not on pull request code | No: it can never report on a PR's head, so a required context would block every merge |
 | `health-reusable-parity.yml` | `pull_request` with `paths:` (`scheduled-run-health-reusable.yml`, itself, `scripts/check-health-reusable-parity.js`), daily schedule | `on.paths` | No: with `on.paths` it would be missing, not skipped, on every other PR and block the merge |
 | `sync.yml` | push to `main` with `paths:` (the sync inputs and `templates/**`) | `on.paths` | No: post-merge, not a PR check |
 | `vendor-discrepancy-alert.yml` | push to `main` with `paths:` (the vendor discrepancy and draft files) | `on.paths` | No: post-merge |

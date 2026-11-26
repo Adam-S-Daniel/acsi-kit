@@ -39,9 +39,11 @@ specs the standing routines follow.
   removes any leftover copy from a consumer (ADR 0043).
   `memory-home.sh` is registered per machine instead, and
   `github-write-marker.sh` reaches sessions through the `acsi-anything-anywhere`
-  plugin.
+  plugin, in Claude Code and Codex. Besides the marker, it blocks a GitHub
+  write that holds this machine's account or host name, or a pattern from
+  your privacy denylist when you have one (see the `privacy` check below).
 - `templates/` holds the other files the sync delivers: the agent-checks
-  runner, its guard hook, its warning-only `dated-phrasing` pass and its CI
+  runner and its `privacy-denylist.py`, its guard hook, its warning-only `dated-phrasing` pass and its CI
   workflow, and the Dependabot auto-merge sweep.
 - `docs/routines/` and `docs/reference/` hold the routine specs
   ([routines](routines.md)), `docs/decisions/` the ADRs.
@@ -116,6 +118,7 @@ instead of text:
   | `skill-shell` | a `SKILL.md` or command file that runs a shell command when it loads |
   | `secret-file` | a committed `.env` or key file |
   | `local-identity` | a changed file that holds this machine's account name in a home path, or its hostname (not run in CI) |
+  | `privacy` | a push whose branch name, commit messages or commit identities hold this machine's account name or hostname, or a pattern from your privacy denylist (pre-push only) |
   | `agents-md-size` | a root `AGENTS.md` over the 32 KiB Codex reads |
   | `gha-template-injection` | a workflow expression that zizmor's template-injection audit flags |
   | `pr-tldr` | a pull request whose description does not open with `## TLDR` (CI only) |
@@ -127,6 +130,16 @@ instead of text:
   rule doesn't need to sit in always-on guidance. Every run is logged to
   `~/.local/state/agent-checks/runs.jsonl`, which is how a check's use is
   measured ([rules](../starter/skills-evals/docs/rules.md)).
+
+  The `privacy` check needs no setup: with no denylist it checks only this
+  machine's own names, silently. To add your own names, emails or hosts, put
+  one regular expression per line (matched ignoring case) in
+  `~/.config/privacy-denylist.txt`, outside every repo, or point
+  `PRIVACY_DENYLIST_FILE` at another file; the write-marker hook reads the
+  same file. A refusal names the place and the pattern's number, never the
+  match. In CI the check scans each pull request when the repo has the
+  `PRIVACY_DENYLIST` secret, and only warns when it does not
+  ([the privacy check](skills.md#the-privacy-check)).
 - **On your machine**, a config-based git hook (Git 2.54+) runs it on every
   commit and push, but only in clones of your two owners' repos
   ([machines](machine.md#install-on-each-durable-machine)).

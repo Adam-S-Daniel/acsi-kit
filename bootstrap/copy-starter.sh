@@ -19,6 +19,9 @@
 #   2b. sizes a skills-evals tree for CLAUDE_PLAN with lib/plan_sizing.py:
 #      the eval budget's claude_plan, a 5-hour stop on Pro and Max 5x, and
 #      no Fable judge on Pro (docs/before-you-start.md#which-plan);
+#   2c. writes TIME_ZONE into _agent-guidance's scripts/base-md-merge-window.yml
+#      (the one `timezone: UTC` line the export ships) with lib/time_zone.py,
+#      and refuses when TIME_ZONE is unset or the line is not there once;
 #   3. clones <owner/repo> and refuses, listing the paths, when a file
 #      already on the default branch differs from the starter's, unless
 #      --force. The one exception is a README.md that is still byte for byte
@@ -102,6 +105,9 @@ python3 -I "$HERE/lib/substitute.py" "$W/stage" --owner "$CFG_OWNER" "${two[@]}"
 log "gave the starter your names in $(grep -c '^filled: ' "$BOOT_WORK/subst.log" || true) file(s)"
 python3 -I "$HERE/lib/plan_sizing.py" "$W/stage" --plan "$CFG_CLAUDE_PLAN" \
   || die "could not size the starter for CLAUDE_PLAN=$CFG_CLAUDE_PLAN (see above)"
+require_time_zone
+python3 -I "$HERE/lib/time_zone.py" "$W/stage" --zone "$CFG_TIME_ZONE" \
+  || die "could not write TIME_ZONE=$CFG_TIME_ZONE into the starter (see above)"
 
 # ---- clone and compare with the default branch
 clone_repo "$REPO" "$W/repo"

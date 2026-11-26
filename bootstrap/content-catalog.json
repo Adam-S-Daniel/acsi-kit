@@ -292,6 +292,14 @@
       "source_link": "starter/agent-guidance/templates/agent-checks/agent-checks"
     },
     {
+      "id": "privacy",
+      "kind": "git-hook",
+      "tier": "core",
+      "title": "privacy",
+      "short": "Refuses a push whose branch name or commit messages hold this machine's account or host name, or a pattern from your own privacy denylist if you keep one; with the denylist stored as a secret, CI also scans each pull request, and the privacy-comment-alert workflow scans issues and comments (both only warn when it is missing).",
+      "source_link": "starter/agent-guidance/templates/agent-checks/privacy-denylist.py"
+    },
+    {
       "id": "rules-dir",
       "kind": "git-hook",
       "tier": "opinionated",

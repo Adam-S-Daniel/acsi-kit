@@ -95,7 +95,9 @@ ensure_env() { # repo env reviewer branches
   fi
   # PLAN=paid on an account that is on GitHub Free: GitHub refuses
   # environments in a private repo with a 403 that says nothing more.
-  GH_403_HINT=""
+  # local: bash scopes it to this call and what it calls (gh_write_api), so
+  # a 403 elsewhere in the run never gets this hint.
+  local GH_403_HINT=""
   if [ "$(repo_visibility "$r")" = private ]; then
     GH_403_HINT="environments in a private repository need a paid GitHub plan. If your account is on GitHub Free, set PLAN=free in bootstrap/fleet.env and run this again (it then skips $e; docs/settings-and-apps.md#environments)"
   fi

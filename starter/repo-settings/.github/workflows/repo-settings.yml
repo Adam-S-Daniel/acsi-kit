@@ -136,9 +136,11 @@ jobs:
   # policies. Not the merge flags: the admin App has no Contents either, so the
   # apply skips them too and only an operator `apply` converges them.
   #
-  # Not gated on the read App's variable, on purpose: a plan that skipped
-  # would read as "nothing to apply" on push. A missing App fails the mint and
-  # turns the plan red instead.
+  # Not gated on the read App's variable on push or dispatch, on purpose: a
+  # plan that skipped would read as "nothing to apply". A missing App fails
+  # the mint and turns the plan red instead. The kit's one exception is the
+  # weekly schedule before the App exists (step "Is the read App set up
+  # yet?" below): it skips with a notice, since nothing could be applied.
   plan:
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'pull_request' }}
@@ -159,20 +161,22 @@ jobs:
       - name: Install PyYAML
         run: python3 -m pip install -r requirements.txt
 
-      # Not set up yet: until create-apps.sh has made the settings-read App
-      # and set its client id, there is nothing to plan with. A notice says
-      # so and the plan reports no drift, so no apply runs; once the
-      # variable is set, a missing key or installation fails the mint.
+      # Not set up yet, on the weekly schedule only: until create-apps.sh
+      # has made the settings-read App and set its client id, a scheduled
+      # plan has nothing to plan with, so a notice says so and it reports
+      # no drift. A push or a dispatch still mints, and fails at the mint
+      # without the App: a settings change must never read as "nothing to
+      # apply".
       - name: Is the read App set up yet?
         id: read_app
         env:
           READ_APP_CLIENT_ID: ${{ vars.REPO_SETTINGS_READ_APP_CLIENT_ID }}
         run: |
-          if [[ -n "$READ_APP_CLIENT_ID" ]]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::not set up yet: variable REPO_SETTINGS_READ_APP_CLIENT_ID is not set, so nothing was planned. bootstrap/create-apps.sh sets it when it creates the settings-read App."
+          if [[ -z "$READ_APP_CLIENT_ID" && "$GITHUB_EVENT_NAME" == schedule ]]; then
+            echo "::notice::not set up yet: variable REPO_SETTINGS_READ_APP_CLIENT_ID is not set, so the weekly plan planned nothing. bootstrap/create-apps.sh sets it when it creates the settings-read App (quick start step 6)."
             echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Mint read-only GitHub App token for example-adopter

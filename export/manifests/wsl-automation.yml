@@ -16,7 +16,7 @@
 repo: wsl-automation
 kit_name: wsl-automation
 source: wsl-automation
-source_sha: d0eb45224f1307ec283acbb3da2c3bc11d0a6721
+source_sha: 970c586f525bac55a316e5cdc19cfec5b9c15df2
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror,
 # the agent-checks runner) are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -81,14 +81,20 @@ substitutions:
   - name: psd1 author
     literal: Adam S. Daniel
     to: Example Adopter
-  # notes Q7: the agent-trust tests assert the default owner roots and use
-  # `D:\repos\x` as an arbitrary path, so the drive must stay concrete (the
-  # common `<drive>:` placeholder would not run). C: keeps the shape.
+  # notes Q7: the agent-trust tests use `D:\repos\x` as an arbitrary path,
+  # so the drive must stay concrete (the common `<drive>:` placeholder would
+  # not run). C: keeps the shape. (The source's built-in default owner roots,
+  # which the tests also asserted, are gone since wsl-automation#134.)
   - name: owner's clone drive (concrete, asserted by tests)
     regex: 'D:(?=\\+repos)'
     to: 'C:'
 
 edits:
+  # ---- Re-pin round 23: the source owner's folder-name guard has no meaning in the kit
+  - path: tests/AgentWorkspaceTrust.Tests.ps1
+    old: "Describe 'No owner-specific folder names in src' {\n\n    It 'has no string constant naming the owner folders' {\n        $files = Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'src') -Recurse -File |\n            Where-Object Extension -In '.ps1', '.psm1'\n        $files | Should -Not -BeNullOrEmpty\n        # Lowercase folder names, matched case-sensitively so the owner's GitHub URLs (capitalized) do not count.\n        $banned = @('D:\\repos', '\\adam-s-daniel', '/adam-s-daniel', '\\jodidaniel', '/jodidaniel')\n        $hits = foreach ($file in $files) {\n            $tokens = $null; $errors = $null\n            $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)\n            $constants = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $n -is [System.Management.Automation.Language.ExpandableStringExpressionAst] }, $true)\n            foreach ($node in $constants) {\n                foreach ($word in $banned) {\n                    if ($node.Value.IndexOf($word, [System.StringComparison]::Ordinal) -ge 0) {\n                        '{0}:{1} {2}' -f $file.Name, $node.Extent.StartLineNumber, $word\n                    }\n                }\n            }\n        }\n        @($hits) | Should -BeNullOrEmpty\n    }\n}\n\n"
+    new: ''
+    why: Re-pin round 23. The source's guard bans its owner's lowercase clone-folder names in src/ and tells them from the owner's capitalized GitHub URLs by letter case. The kit's substitutions turn both into the same lowercase placeholder (and copy-starter.sh then into the adopter's login), so the shipped guard flagged the legitimate github.com URLs in src/ and failed Pester on every adopter's pull request. In a copy whose names are placeholders the guard has nothing to protect, so it is cut; export/tests/test_shipped_pester_guards.py locks that.
   - path: src/WslAutomation/Private/Get-LastWakeTime.ps1
     old: "        Invoke-WslBackup uses this to defer an export attempted too soon after either: 'wsl\n        --export' can fail outright (exit -1) while WSL is still transitioning after a boot or a\n        resume, up to roughly 270 seconds afterward (see AGENTS.md's \"wsl --export fails on a\n        transitioning WSL\" section).\n"
     new: "        Invoke-DockerWslIntegrationWatchdog uses this to defer a repair attempted too soon after\n        either, while WSL and Docker Desktop are still transitioning after a boot or a resume.\n"
