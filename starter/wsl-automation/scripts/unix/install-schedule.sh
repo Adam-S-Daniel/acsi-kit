@@ -39,6 +39,15 @@
 # file, not the macOS keychain or a desktop credential manager, which need a
 # login session.
 #
+# Before it writes anything it checks, and reports all at once with the command
+# that fixes each (exit 1, nothing written), what a run needs: flock and
+# timeout (or gtimeout), found the way run-task.sh finds them; for the waiting
+# feed, a date that reads `-d @0`; for systemd, a reachable user bus. The
+# waiting feed reads ~/.claude/.credentials.json, which Claude Code on macOS
+# keeps in the Keychain instead, so on macOS the waiting-feed job is skipped
+# (the other jobs install). launchd's login-session check cannot run first:
+# a failed `launchctl bootstrap` removes that job's plist and exits 1.
+#
 # Check it:
 #   systemd  systemctl --user list-timers 'wsl-automation-*'
 #            journalctl --user -u wsl-automation-usage-census.service
@@ -48,7 +57,8 @@
 #
 # Environment seams (for tests): INSTALL_SCHEDULE_SYSTEMCTL, _LOGINCTL,
 # _LAUNCHCTL and _CRONTAB name the commands to run (default systemctl,
-# loginctl, launchctl, crontab).
+# loginctl, launchctl, crontab); INSTALL_SCHEDULE_UNAME names the command that
+# reports the OS (default uname).
 set -euo pipefail
 
 usage() {
@@ -105,6 +115,75 @@ runner=$repo/scripts/unix/run-task.sh
 # that one of those would read as syntax rather than escaping it three ways.
 if ! [[ $repo =~ ^/[A-Za-z0-9._/@+\ -]+$ ]]; then
     printf '%s\n' 'install-schedule: the checkout path has a character a unit, plist or crontab would misread; move the checkout to a plain path' >&2
+    exit 1
+fi
+
+# shellcheck source=scripts/unix/tool-path.sh
+. "$repo/scripts/unix/tool-path.sh"
+# The runner puts gnubin first on PATH and appends the usual directories, so
+# probe with the same PATH.
+unix_job_path
+os=$("${INSTALL_SCHEDULE_UNAME:-uname}" -s 2>/dev/null || true)
+
+# The waiting feed reads ~/.claude/.credentials.json. Per
+# https://code.claude.com/docs/en/authentication ("Credential management"), "On
+# macOS, credentials are stored in the encrypted macOS Keychain", and the file
+# only holds them when the Keychain rejects the write, so the job would end with
+# err=no_credentials every minute. Skip it there; the other jobs still install.
+if [[ $os == Darwin ]]; then
+    skip_kept=()
+    for job in "${job_list[@]}"; do
+        if [[ $job == waiting-feed ]]; then
+            printf '%s\n' 'install-schedule: skipping waiting-feed: the feed reads ~/.claude/.credentials.json, which Claude Code on macOS keeps in the Keychain instead; the feed is supported on Linux and WSL only' >&2
+        else
+            skip_kept+=("$job")
+        fi
+    done
+    job_list=("${skip_kept[@]+"${skip_kept[@]}"}")
+    if ((${#job_list[@]} == 0)); then
+        printf '%s\n' 'install-schedule: no job left to install on macOS' >&2
+        exit 1
+    fi
+fi
+
+# job -> needs a date that reads "-d @epoch" (GNU date).
+job_needs_gnu_date() {
+    case $1 in
+        waiting-feed) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Collect every missing piece, then refuse once, before anything is written.
+missing=()
+if [[ $os == Darwin ]]; then
+    flock_hint='brew install flock coreutils'
+    timeout_hint='brew install coreutils'
+    date_hint='brew install coreutils'
+else
+    flock_hint='install the util-linux package (for example: sudo apt install util-linux)'
+    timeout_hint='install the coreutils package (for example: sudo apt install coreutils)'
+    date_hint='install the coreutils package (for example: sudo apt install coreutils)'
+fi
+if [[ -z $(unix_find_flock) ]]; then
+    missing+=("flock is missing; run-task.sh refuses to start a job without it: $flock_hint")
+fi
+if [[ -z $(unix_find_timeout) ]]; then
+    missing+=("timeout (or gtimeout) is missing; run-task.sh refuses to start a job without it: $timeout_hint")
+fi
+for job in "${job_list[@]}"; do
+    if job_needs_gnu_date "$job" && ! unix_date_reads_epoch; then
+        missing+=("$job needs a date that accepts -d @0 (GNU date), and this one does not: $date_hint")
+        break
+    fi
+done
+if [[ $target == systemd ]] && ! "${INSTALL_SCHEDULE_SYSTEMCTL:-systemctl}" --user show-environment >/dev/null 2>&1; then
+    # shellcheck disable=SC2016 # the commands are printed for the reader to run
+    missing+=('no systemd user bus (systemctl --user show-environment fails). On WSL, add to /etc/wsl.conf: [boot] then systemd=true, run wsl.exe --shutdown from Windows, and reopen the distro; in a container or without systemd, use the cron mode: bash scripts/unix/install-schedule.sh cron')
+fi
+if ((${#missing[@]})); then
+    printf '%s\n' 'install-schedule: this machine would run the jobs but fail every time; nothing was written. Fix these first:' >&2
+    for item in "${missing[@]}"; do printf '  - %s\n' "$item" >&2; done
     exit 1
 fi
 
@@ -278,7 +357,15 @@ case $target in
             else
                 "$launchctl" bootout "$domain/local.wsl-automation.$job" >/dev/null 2>&1 || true
             fi
-            run "$launchctl" bootstrap "$domain" "$plist"
+            if ((print_only)); then
+                run "$launchctl" bootstrap "$domain" "$plist"
+            elif ! "$launchctl" bootstrap "$domain" "$plist"; then
+                # No GUI session (for example over SSH): do not leave an
+                # agent file behind that was never loaded.
+                rm -f -- "$plist"
+                printf '%s\n' "install-schedule: launchctl bootstrap $domain failed for $job, so it is not installed (removed $plist). Run this from a Terminal in a logged-in macOS session, not over SSH." >&2
+                exit 1
+            fi
         done
         ;;
     cron)
