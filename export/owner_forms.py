@@ -15,8 +15,10 @@ One-owner fleets). `stage()` gives a copied tree one of three forms:
             documented "drop the example repos" step done (below).
 
 For `one` and `two` it runs bootstrap/lib/substitute.py, plan_sizing.py
-(`--plan pro`) and repin.py in that order, as copy-starter.sh does. Form
-`two` then removes the example repos' rows:
+(`--plan pro`), time_zone.py (a zone that is not the export's UTC, ZONES) and
+repin.py in that order, as copy-starter.sh does; repin.py is last, because a
+pin is the digest of a file as the steps before it left it. Form `two` then
+removes the example repos' rows:
 
   repo-settings   repo-settings/fleet.yml: the `repos:` elements named
                   `<owner>/example-site-*`;
@@ -45,6 +47,11 @@ FORMS = {
     "two": ("zeta-user", "Alpha-Org", "Zeta User", "0+zeta-user@users.noreply.github.com"),
 }
 CHOICES = ("invented", "one", "two")
+# form -> the TIME_ZONE the copy is given: neither is the export's UTC, and one
+# is not a whole number of hours from it. Both are names Node's Intl keeps as
+# written: _agent-guidance's scripts/base-md-merge-window.js refuses a name
+# Intl renames (Asia/Kolkata, Europe/Kyiv), which is the source's to fix.
+ZONES = {"one": "America/Chicago", "two": "Australia/Adelaide"}
 
 EXAMPLE_PREFIX = "example-site-"
 # kit tree -> [(file in the tree, key path to the list, rows expected)]
@@ -193,6 +200,7 @@ def stage(tree: Path, kit_name: str, form: str, env=None) -> None:
     _run([str(BOOTSTRAP_LIB / "substitute.py"), str(tree), "--owner", owner, "--owner-two", owner_two,
           "--name", name, "--noreply", noreply], env)
     _run([str(BOOTSTRAP_LIB / "plan_sizing.py"), str(tree), "--plan", "pro"], env)
+    _run([str(BOOTSTRAP_LIB / "time_zone.py"), str(tree), "--zone", ZONES[form]], env)
     _run([str(BOOTSTRAP_LIB / "repin.py"), str(tree)], env)
     if form == "two":
         drop_example_repos(tree, kit_name)

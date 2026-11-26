@@ -65,6 +65,34 @@ def test_the_forms_use_names_the_substitution_accepts():
     assert two[0].lower() > two[1].lower()
 
 
+def test_each_adopter_form_has_a_time_zone_that_is_not_the_exports():
+    import zoneinfo
+    time_zone = _load("kit_time_zone_for_forms", KIT / "bootstrap" / "lib" / "time_zone.py")
+    assert set(owner_forms.ZONES) == set(owner_forms.FORMS)
+    for form, zone in owner_forms.ZONES.items():
+        assert zone != "UTC" and time_zone.SHAPE.fullmatch(zone), form
+        zoneinfo.ZoneInfo(zone)
+
+
+def test_stage_gives_the_names_the_zone_and_then_the_digests(tmp_path):
+    # What copy-starter.sh does to a staged tree, in its order: the names, the
+    # zone, then the digests of the files as those steps left them.
+    import hashlib
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / ".claude" / "hooks").mkdir(parents=True)
+    window = tmp_path / "scripts" / "base-md-merge-window.yml"
+    window.write_text("timezone: UTC\nweekday: 1\n")
+    hook = tmp_path / ".claude" / "hooks" / "fleet-memory.sh"
+    hook.write_text("echo example-adopter\n")
+    (tmp_path / "docs" / "codex-cloud.md").write_text("fleet_pin_sha256=" + "0" * 64 + "\n")
+    owner_forms.stage(tmp_path, "agent-guidance-like", "one")
+    assert window.read_text() == f"timezone: {owner_forms.ZONES['one']}\nweekday: 1\n"
+    assert hook.read_text() == "echo acme-solo\n"
+    want = hashlib.sha256(hook.read_bytes()).hexdigest()
+    assert (tmp_path / "docs" / "codex-cloud.md").read_text() == f"fleet_pin_sha256={want}\n"
+
+
 def test_the_example_rows_go_with_their_comment_and_the_trailing_blank_line():
     out = owner_forms.drop_example_rows(FLEET, ["repos"], 3)
     assert out == "defaults:\n  a: 1\n\nrepos:\n  - name: example-adopter/repo-settings\n    manage: [\"all\"]\n"

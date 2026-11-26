@@ -412,6 +412,46 @@ edits:
     old: all nine system entries
     new: all six system entries
     why: The hook writes 6 includeIf entries for the kit's two owners.
+  # ---- TIME_ZONE: the shipped window file carries a neutral zone
+  - path: scripts/base-md-merge-window.yml
+    old: "# Owner's rule (2026-11-13): Monday noon to 2 PM US Eastern.\ntimezone: America/New_York\n"
+    new: |
+      # Your window: Monday noon to 2 PM in your own time zone. bootstrap/copy-starter.sh
+      # writes the timezone line below from TIME_ZONE in your fleet.env when it copies
+      # this file; the weekday and the hours are yours to change here.
+      timezone: UTC
+    why: >-
+      TIME_ZONE. The source ships the owner's zone, which every adopter would
+      inherit unasked. The kit ships the neutral UTC, which both parsers
+      accept, and copy-starter.sh replaces that one line from TIME_ZONE.
+  - path: scripts/base-md-merge-window.yml
+    old: "with the clocks: America/New_York 12:00 is 17:00 UTC in\n#             winter (EST) and 16:00 UTC in summer (EDT)."
+    new: "with the clocks: in a zone that is five hours behind UTC in\n#             winter, 12:00 is 17:00 UTC, and 16:00 UTC in summer."
+    why: TIME_ZONE. The comment's worked example named the owner's zone; the shipped tree names no one's zone.
+  - path: test/test-base-md-merge-window.js
+    old: |
+      const WINDOW = mod.loadWindow();
+    new: |
+      // The shipped file's zone is the adopter's own (TIME_ZONE), so the tests
+      // below pin the Monday noon to 2 PM Eastern bounds their dates assume.
+      const WINDOW = { timezone: "America/New_York", weekday: 1, start: "12:00", end: "14:00" };
+    why: >-
+      TIME_ZONE. These tests' UTC instants assume US Eastern; the shipped file
+      is UTC until copy-starter.sh writes the adopter's zone, so the tests use
+      their own bounds, not the file's.
+  - path: test/test-base-md-merge-window.js
+    old: |
+      test("the shipped bounds are Monday noon to 2 PM US Eastern", () => {
+        assert.deepEqual(WINDOW, { timezone: "America/New_York", weekday: 1, start: "12:00", end: "14:00" });
+    new: |
+      test("the shipped bounds are Monday noon to 2 PM in the configured zone", () => {
+        const shipped = mod.loadWindow();
+        assert.equal(typeof shipped.timezone, "string");
+        assert.deepEqual({ ...shipped, timezone: null }, { timezone: null, weekday: 1, start: "12:00", end: "14:00" });
+    why: >-
+      TIME_ZONE. The file's zone differs per adopter: the test holds the
+      weekday and hours and that a zone is present, not which one.
+
 
   # ---- One-owner and reordered-owner forms (DECISIONS, One-owner fleets): tests that read the owners from the
   # ---- workflow or the files, so the suite holds for any number of owners.
@@ -472,6 +512,23 @@ edits:
 
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).
+  - path: test/test-base-md-merge-window.js
+    old: |
+      function run(args) {
+        const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+    new: |
+      // The CLI tests run against the New York bounds, not the shipped file's zone.
+      const NY_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bmw-ny-"));
+      const NY_FILE = path.join(NY_DIR, "window.yml");
+      fs.writeFileSync(NY_FILE, 'timezone: America/New_York\nweekday: 1\nstart: "12:00"\nend: "14:00"\n');
+      process.on("exit", () => fs.rmSync(NY_DIR, { recursive: true, force: true }));
+
+      function run(args) {
+        const argv = args.includes("--window") ? args : [...args, "--window", NY_FILE];
+        const r = spawnSync(process.execPath, [SCRIPT, ...argv], { encoding: "utf8" });
+    why: >-
+      TIME_ZONE. The CLI tests' instants assume US Eastern and ran against the
+      shipped file; they now pass their own bounds file unless a test names one.
 
 patches:
   - file: kit_only.py
@@ -551,7 +608,6 @@ regenerate:
       test_codex_cloud_recipe holds it to the working-tree hook; the kit's hook
       differs from the source's (C2 folds the first owner), so the pin follows
       the kit's copy. The pinned commit is the source's: REGENERATE.md.
-
 # P2 citation spans that are really test data: protecting them would leave
 # the fixture on the source owner while the assertion beside it is
 # substituted. Both files get the plain substitution instead.
