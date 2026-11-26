@@ -499,7 +499,8 @@ for rel in sorted(set(a) | set(b)):
       printf '  %s\n' "${hand[@]:0:20}"
       [ ${#hand[@]} -le 20 ] || printf '  ... and %d more\n' $((${#hand[@]} - 20))
       printf 'Starter edits belong in a pull request on your own repo after copy-starter.sh, not in the kit.\n'
-      printf 'To go ahead, run this again with --discard-starter-edits: it first saves every starter/ change\n'
+      printf 'To go ahead, run the same command again with --discard-starter-edits added (in the README'"'"'s\n'
+      printf 'update block: at the end of its last line). It first saves every starter/ change\n'
       printf '(a patch, and a copy of new files) to ~/kit-starter-backup-%s. Nothing was changed.\n' "${old:0:12}"
     } >&2
     exit 1

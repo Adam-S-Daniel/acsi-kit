@@ -81,7 +81,9 @@ Nothing in the block changes your clone; only the last line's script does,
 and it refuses, changing nothing, when you have edited a tracked file outside
 `starter/`, edited `starter/` yourself, when it cannot find your `fleet.env`,
 or when your `fleet.env` does not load under the newer kit (it names the key
-to fix). To see its plan first, add ` --dry-run` to the last line. It
+to fix). To see its plan first, add ` --dry-run` to the last line; when it
+refuses your own `starter/` edits, add ` --discard-starter-edits` there to
+save them and go ahead. It
 fast-forwards your clone, puts the optional content you chose back, and lists
 the `fleet.env` keys that are new (saying which are required) or gone. It
 exits 0 only when everything worked; then run what it prints last,
