@@ -176,6 +176,33 @@ FANOUT_TEST_EDITS = {
         cfg = rs.load_config(str(Path(__file__).resolve().parent.parent
                                  / "repo-settings" / "fleet.yml"))
         self.assertNotIn("secrets", cfg["defaults"])'''),
+        # The kit's setter has no default repo (SETTER_EDITS): the tests name one.
+        ('''contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = sp.main([], stdin=io.StringIO(VALUE))''',
+         '''contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = sp.main(["--repo", "o/repo-settings"], stdin=io.StringIO(VALUE))'''),
+        ('''                contextlib.redirect_stdout(out):
+            rc = sp.main([], stdin=io.StringIO(VALUE))
+        self.assertEqual(rc, 0)
+        self.assertIn("fleet-apply, fleet-apply-auto", out.getvalue())
+        self.assertNotIn("example-host-alpha", out.getvalue())
+''',
+         '''                contextlib.redirect_stdout(out):
+            rc = sp.main(["--repo", "o/repo-settings"], stdin=io.StringIO(VALUE))
+        self.assertEqual(rc, 0)
+        self.assertIn("fleet-apply, fleet-apply-auto", out.getvalue())
+        self.assertNotIn("example-host-alpha", out.getvalue())
+
+    def test_the_kits_setter_requires_the_repo_and_names_it(self):
+        # The adoption kit's re-pin round 23: no owner's repo as a default.
+        err = io.StringIO()
+        with patch.object(sp.subprocess, "run") as run, contextlib.redirect_stderr(err), \\
+                self.assertRaises(SystemExit) as cm:
+            sp.main([], stdin=io.StringIO(VALUE))
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("--repo", err.getvalue())
+        run.assert_not_called()
+'''),
     ],
 }
 

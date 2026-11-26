@@ -259,9 +259,9 @@ real="$test_root/real"
 mkdir -p "$real/scripts/unix"
 cp -- "$runner_src" "$tool_path_src" "$real/scripts/unix/"
 #     The census sources task-settings.sh for SKILLS_EVALS_URL, which the
-#     environment sets here.
+#     environment sets here, and update-task-checkout.sh sources portable.sh.
 cp -- "$repository_root/scripts/publish-usage-census.sh" "$repository_root/scripts/update-task-checkout.sh" \
-    "$repository_root/scripts/task-settings.sh" "$real/scripts/"
+    "$repository_root/scripts/task-settings.sh" "$repository_root/scripts/portable.sh" "$real/scripts/"
 rc=0
 out=$(SKILLS_EVALS_URL="file://$test_root/no-such-repo" USAGE_CENSUS_LOG="$test_root/census.log" \
     bash "$real/scripts/unix/run-task.sh" usage-census 2>&1) || rc=$?
@@ -532,19 +532,15 @@ PATH="$test_root/gtimeout-bin:$PATH" install_without timeout systemd
 assert_eq "$rc" 0 'gtimeout alone passes the timeout probe'
 rm -rf -- "$XDG_CONFIG_HOME" "$CALLS"
 
-# The date probe applies only to the jobs whose scripts need GNU date.
+# No job needs GNU date: the waiting feed's dates are portable since
+# wsl-automation#133, so a BSD date blocks nothing.
 PATH="$test_root/baddate:$PATH" install systemd --jobs waiting-feed
-assert_eq "$rc" 1 'waiting-feed with a BSD date exits 1'
-assert_match "$out" 'waiting-feed needs a date that accepts -d @0' 'the refusal names the job and the date test'
-assert_match "$out" 'coreutils' 'the date hint names coreutils'
-nothing_written 'a BSD date writes nothing'
+assert_eq "$rc" 0 'waiting-feed installs with a BSD date'
+assert_no_match "$out" 'needs a date' 'no date refusal'
+rm -rf -- "$XDG_CONFIG_HOME" "$CALLS"
 FAKE_OS=Darwin PATH="$test_root/baddate:$PATH" install launchd --jobs usage-census
-assert_eq "$rc" 0 'the census runs on a BSD date, so the date probe is skipped'
+assert_eq "$rc" 0 'the census installs on a BSD date'
 rm -rf -- "$agents" "$CALLS"
-PATH="$test_root/baddate:$PATH" install cron --jobs waiting-feed,session-miner
-assert_match "$out" 'brew install coreutils|install the coreutils package' 'the date hint is given'
-assert_eq "$rc" 1 'cron: waiting-feed with a BSD date exits 1'
-nothing_written 'cron with a BSD date writes nothing'
 
 # systemd needs a user bus; cron does not.
 FAKE_BUS_RC=1 install systemd
@@ -562,13 +558,13 @@ install systemd
 assert_eq "$rc" 0 'systemd installs when the bus is reachable'
 rm -rf -- "$XDG_CONFIG_HOME" "$CALLS"
 
-# Everything missing at once: all four items in one message.
+# Everything missing at once: all three items in one message.
 FAKE_BUS_RC=1 PATH="$test_root/baddate:$PATH" install_without 'flock timeout gtimeout' systemd --jobs waiting-feed
 assert_eq "$rc" 1 'everything missing exits 1'
-for needle in 'flock is missing' 'timeout \(or gtimeout\) is missing' 'waiting-feed needs a date' 'no systemd user bus'; do
+for needle in 'flock is missing' 'timeout \(or gtimeout\) is missing' 'no systemd user bus'; do
     assert_match "$out" "$needle" "the all-missing message carries: $needle"
 done
-assert_eq "$(grep -c '^  - ' <<<"$out")" 4 'the all-missing message lists four items'
+assert_eq "$(grep -c '^  - ' <<<"$out")" 3 'the all-missing message lists three items'
 nothing_written 'everything missing writes nothing'
 
 # launchd: a bootstrap that fails (no GUI session) leaves no plist and fails.

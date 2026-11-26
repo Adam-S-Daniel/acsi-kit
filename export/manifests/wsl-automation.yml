@@ -16,7 +16,7 @@
 repo: wsl-automation
 kit_name: wsl-automation
 source: wsl-automation
-source_sha: d310352a3eedeee9330a1cf44edfc59397934d68
+source_sha: fb5528280f1e05bcca8cef30558f972b8257836c
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror,
 # the agent-checks runner) are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -81,9 +81,10 @@ substitutions:
   - name: psd1 author
     literal: Adam S. Daniel
     to: Example Adopter
-  # notes Q7: the agent-trust tests assert the default owner roots and use
-  # `D:\repos\x` as an arbitrary path, so the drive must stay concrete (the
-  # common `<drive>:` placeholder would not run). C: keeps the shape.
+  # notes Q7: the agent-trust tests use `D:\repos\x` as an arbitrary path,
+  # so the drive must stay concrete (the common `<drive>:` placeholder would
+  # not run). C: keeps the shape. (The source's built-in default owner roots,
+  # which the tests also asserted, are gone since wsl-automation#134.)
   - name: owner's clone drive (concrete, asserted by tests)
     regex: 'D:(?=\\+repos)'
     to: 'C:'
