@@ -125,6 +125,11 @@ Two lists are maintained by hand: the agent-checks table in
 runner's checks or `bootstrap/README.md`, and says which. Fix the page by
 hand.
 
+`export/tests/test_required_checks_table.py` fails when a repo's row in the
+required-checks table of `docs/settings-and-apps.md` differs from what the
+shipped `fleet.yml` requires, so the next source change to a repo's required
+checks holds that source's re-sync back until the page follows.
+
 ## CI
 
 `test` (`.github/workflows/ci.yml`) and `agent-checks` are the required
