@@ -409,6 +409,19 @@ suite, ShellCheck over `ci.yml`'s list, and the ASCII check of every
   grace, `Persistent=true`). Neither ran on macOS: launchd output is checked
   by parsing the plists with `plistlib`, and bash 3.2 compatibility of the
   runner is by inspection only.
+- **Installer preflight** (wsl-automation#132): `install-schedule.sh` refuses
+  before writing anything when `flock`, `timeout`/`gtimeout`, a date that reads
+  `-d @0` (only for the jobs that need it: the waiting feed), or, for systemd,
+  a user bus (`systemctl --user show-environment`) is missing, and lists every
+  gap with its fix in one message. The lookups and the PATH setup live in
+  `scripts/unix/tool-path.sh`, sourced by both scripts so the installer cannot
+  disagree with the runner. A failed `launchctl bootstrap` removes that
+  job's plist and exits 1 (no pre-check: it cannot be probed without a
+  session). On macOS the waiting feed is skipped, because Claude Code's
+  documentation puts macOS credentials in the Keychain, not in
+  `~/.claude/.credentials.json`. The source's `publish-waiting-feed.sh`
+  `date -d` is fixed in the source repository, not here. Exercised only
+  through stubs (no macOS machine).
 - `NOTICE` names the source repository and commit.
 
 ## Export record: agentskills
@@ -3033,3 +3046,13 @@ Both rules now spell the name one letter class at a time (`[Xx][Yy]...`), so the
 The source still uses the name in those identifiers at the `skills-evals` pin; renaming them there is a separate `skills-evals` pull request, and until the kit's pin moves past it, this rule is what keeps the shipped copy clean.
 
 Reverse: restore the word-bounded regex rule and the case-sensitive `leak_scan` entry, remove the `regex` + `forms` branch from `compile_rules`, delete the new test file and the two `test_no_leaks.py` tests, and re-run the export.
+
+## Kit-only blocks in the source (2026-11-25, Adam-S-Daniel/_agent-guidance#644)
+
+The source's fleet-worker spec (`docs/routines/fleet-worker.md`) gains a rule that lets the owner's fleet worker merge the kit's own re-sync pull requests (heads `resync/auto` and `resync-fix/*`), fenced by `<!-- kit-only:begin -->` and `<!-- kit-only:end -->` lines, and `repos.yml` gains a top-level `kit_resync` key (`repo`, `app_slug`) under a comment block. An adopter's fleet has no kit, so neither ships.
+
+- `export/patches/_agent-guidance/kit_only.py` cuts every marker-fenced region from the Markdown files under `docs/routines/` (markers and one blank line after the end marker included, so the paragraphs around it stay one blank line apart) and the `kit_resync` key with the comment block directly above it from `repos.yml`. It runs first among the patches, on the substituted tree, while the marker text is intact.
+- It landed before the source change, which is why it is a patch and not an `edits` entry (an edit's old text must match at the pin). With no markers and no key it changes nothing, so the starters are unchanged at the current pin. An unbalanced, nested or out-of-order marker stops the export, naming the file, instead of shipping half a block.
+- `export/tests/test_kit_only.py` covers the patch and holds the shipped fleet-worker spec to no marker, no `resync/auto` and no `resync-fix/`, and the shipped `repos.yml` to no `kit_resync`.
+
+Reverse: delete the patch, its manifest entry and its test file. The next re-pin then ships the owner's merge rule and key as exported.

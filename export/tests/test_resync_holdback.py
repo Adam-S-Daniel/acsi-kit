@@ -7,6 +7,7 @@ Run: python3 -m pytest KIT/export/tests -q
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -165,7 +166,7 @@ def test_restoring_keeps_an_import_that_was_pinned_apart_from_the_source_sha():
     assert hb.restore_pins(new, old, "a.yml") == old
 
 
-def run_main(manifests, tmp_path, monkeypatch, runner, tails=True):
+def run_main(manifests, tmp_path, monkeypatch, runner, tails=True, held_heads=False):
     out = tmp_path / "gh-output"
     summary = tmp_path / "summary.md"
     summary.write_text("| Repo | Old | New | Compare |\n", encoding="utf-8")
@@ -173,6 +174,8 @@ def run_main(manifests, tmp_path, monkeypatch, runner, tails=True):
     argv = ["--sources", str(tmp_path), "--owner", OWNER, "--manifests", str(manifests), "--summary", str(summary)]
     if tails:
         argv += ["--tails", str(tmp_path / "tails.txt")]
+    if held_heads:
+        argv += ["--held-heads", str(tmp_path / "held-heads.json")]
     rc = hb.main(argv, runner=runner, read_old=lambda *_: OLD_TEXTS)
     return rc, out.read_text(encoding="utf-8"), summary.read_text(encoding="utf-8")
 
@@ -235,3 +238,21 @@ def test_the_trial_rewrites_the_docs_regions_between_the_export_and_the_tests(tm
     steps = [Path(a[1]).name if a[1] != "-m" else "pytest" for a in ran]
     assert steps == ["export.py", "doc_regions.py", "pytest"]
     assert "--write" in ran[1]
+
+
+def test_held_heads_maps_each_held_source_to_the_head_it_could_not_take(manifests, tmp_path, monkeypatch):
+    rc, _, _ = run_main(manifests, tmp_path, monkeypatch, FakeRunner(manifests, bad_pins={NEW_B}), held_heads=True)
+    assert rc == 0
+    got = json.loads((tmp_path / "held-heads.json").read_text(encoding="utf-8"))
+    assert got == {"src-b": NEW_B}
+
+
+def test_held_heads_names_every_source_when_all_are_held(manifests, tmp_path, monkeypatch):
+    run_main(manifests, tmp_path, monkeypatch, FakeRunner(manifests, bad_combos=[{"a", "b"}]), held_heads=True)
+    got = json.loads((tmp_path / "held-heads.json").read_text(encoding="utf-8"))
+    assert got == {"src-a": NEW_A, "src-b": NEW_B, "src-c": NEW_C}
+
+
+def test_held_heads_is_not_written_when_nothing_is_held(manifests, tmp_path, monkeypatch):
+    rc, _, _ = run_main(manifests, tmp_path, monkeypatch, FakeRunner(manifests), held_heads=True)
+    assert rc == 0 and not (tmp_path / "held-heads.json").exists()

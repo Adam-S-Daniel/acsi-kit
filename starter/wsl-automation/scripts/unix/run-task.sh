@@ -17,7 +17,8 @@
 #      (cron's PATH is /usr/bin:/bin), so ~/.local/bin, Homebrew's and the
 #      usual system directories are appended, and GNU coreutils' gnubin
 #      directories (Homebrew on macOS) go first: publish-waiting-feed.sh needs
-#      GNU date.
+#      GNU date. tool-path.sh holds this and the tool lookups, shared with
+#      install-schedule.sh so its checks cannot disagree with this runner.
 #   2. No overlap. `flock -n` on a per-job lock; a run that finds the previous
 #      one still going logs `skipped=running` and exits 0, like Task
 #      Scheduler's MultipleInstances IgnoreNew. macOS ships no flock (`brew
@@ -68,11 +69,9 @@ scripts_dir=$repo/scripts
 state_dir=${RUN_TASK_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/wsl-automation}
 runner_log=${RUN_TASK_LOG:-$HOME/.cache/wsl-automation-tasks.log}
 
-for gnubin in /usr/local/opt/coreutils/libexec/gnubin /opt/homebrew/opt/coreutils/libexec/gnubin; do
-    if [[ -d $gnubin && :$PATH: != *":$gnubin:"* ]]; then PATH=$gnubin:$PATH; fi
-done
-PATH=$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
-export PATH
+# shellcheck source=scripts/unix/tool-path.sh
+. "$unix_dir/tool-path.sh"
+unix_job_path
 # Never wait on a credential prompt: a scheduled run has no one to answer it.
 export GIT_TERMINAL_PROMPT=0
 
@@ -84,8 +83,8 @@ log_line() {
     fi
 }
 
-flock_cmd=$(command -v flock || true)
-timeout_cmd=$(command -v timeout || command -v gtimeout || true)
+flock_cmd=$(unix_find_flock)
+timeout_cmd=$(unix_find_timeout)
 if [[ -z $flock_cmd ]]; then
     log_line 'exit=1 refused=no-flock'
     printf '%s\n' 'run-task: flock is required to keep runs from overlapping (macOS: brew install flock)' >&2
