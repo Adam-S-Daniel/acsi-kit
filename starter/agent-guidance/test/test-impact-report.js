@@ -367,10 +367,12 @@ test("workflow: the job holds contents: read and nothing more", () => {
 
 test("workflow: read tokens are read-only; the write token reaches skills-evals contents alone", () => {
   const mints = steps.filter((s) => String(s.uses || "").startsWith("actions/create-github-app-token@"));
-  assert.equal(mints.length, 3);
+  assert.ok(mints.length >= 2, "one read mint per owner and the one write mint");
   const perms = (s) => Object.fromEntries(Object.entries(s.with).filter(([k]) => k.startsWith("permission-")));
   const writers = mints.filter((s) => Object.values(perms(s)).includes("write"));
   assert.equal(writers.length, 1);
+  const readers = mints.filter((m) => m !== writers[0]);
+  assert.equal(new Set(readers.map((m) => m.with.owner)).size, readers.length, "no owner is minted twice");
   assert.deepEqual(perms(writers[0]), { "permission-contents": "write" });
   assert.equal(writers[0].with.repositories, "skills-evals");
   assert.equal(writers[0].with.owner, "example-adopter");
