@@ -18,6 +18,20 @@
 
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1   # no __pycache__ in a tree that copy-starter.sh may copy
+# The tools the scripts under test need (their require_tools lines) and this
+# test's own: a missing one fails here in one line, not as hundreds of FAILs.
+# TEST_BOOTSTRAP_TOOLS_ONLY=1 runs only this check (the test below runs it).
+check_tools() {
+  local t miss=()
+  for t in git jq python3 node npm; do command -v "$t" >/dev/null 2>&1 || miss+=("$t"); done
+  if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import yaml' >/dev/null 2>&1; then miss+=("python3's yaml module (PyYAML)"); fi
+  if [ "${#miss[@]}" -gt 0 ]; then
+    printf 'test-bootstrap.sh: not run: missing %s on PATH; install it and run this again\n' "$(printf '%s, ' "${miss[@]}" | sed 's/, $//')" >&2
+    return 2
+  fi
+}
+check_tools || exit 2
+[ -z "${TEST_BOOTSTRAP_TOOLS_ONLY:-}" ] || exit 0
 B=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 K=$(cd "$B/.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-test.XXXXXX")
@@ -205,6 +219,16 @@ for plan in pro max5x max20x; do
   assert "the starter's fire workflow accepts the Loop worker's $hours hours on $plan" has "$T/fire-step.out" "not configured: variable"
   assert_not "the Loop worker's $hours hours on $plan are not refused" has "$T/fire-step.out" "must be 3, 6"
 done
+
+# ======================================================== the tool check
+# With jq missing from PATH the test stops at once, naming it.
+tb="$T/toolbin"; mkdir -p "$tb"
+for t in bash git python3 node npm sed printf; do src=$(command -v "$t") && ln -sf "$src" "$tb/$t"; done
+run env -i HOME="$HOME" PATH="$tb" TEST_BOOTSTRAP_TOOLS_ONLY=1 "$BASH" "$B/tests/test-bootstrap.sh"; rc=$?
+assert_eq "the tool check exits 2 without jq" "$rc" 2
+assert "it names jq in one line" grep -qx "test-bootstrap.sh: not run: missing jq on PATH; install it and run this again" "$ERR"
+run env TEST_BOOTSTRAP_TOOLS_ONLY=1 "$BASH" "$B/tests/test-bootstrap.sh"; rc=$?
+assert_eq "the tool check passes with every tool" "$rc" 0
 
 # ======================================================== preflight.sh
 # Tools are stubbed by a bin dir that is the whole PATH: symlinks to what
