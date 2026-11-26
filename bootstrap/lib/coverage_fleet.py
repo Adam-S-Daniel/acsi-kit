@@ -72,19 +72,21 @@ def _indent(line):
 def _marker(lines, fleet, name):
     """(first, last) line indexes of the comment that holds `name`'s place in
     the list, or None. The starter writes it where the source lists the repo:
-    a run of comment lines among the elements (or right under the last) whose first begins
-    "# <name> is not listed while ...". A comment indented less than the
-    elements' `-` is not the list's: it belongs to what follows (the next
-    key's comment, with no blank line before it), and is never taken."""
+    a run of comment lines among the elements, or among the comments right
+    under the last one at any indent, whose first begins "# <name> is not
+    listed while ...". The marker is one sentence: it runs on over comment
+    lines indented at least as deep as its first, and ends at the line that
+    ends with a period. So a comment after it (the next key's, with no blank
+    line before it) is never taken, whether it is indented less than the
+    marker or, in a compact list whose `-` sits at the key's indent, the same."""
     first, last = fleet.value[0].start_mark.line, fleet.value[-1].start_mark.line
-    dash = _indent(lines[last])
-    while (last + 1 < len(lines) and lines[last + 1].strip().startswith("#")
-           and _indent(lines[last + 1]) >= dash):
-        last += 1                       # comments right under the last element belong to the list too
+    while last + 1 < len(lines) and lines[last + 1].strip().startswith("#"):
+        last += 1                       # comments right under the last element may hold the marker
     for n in range(first, last + 1):
         if lines[n].strip().startswith(f"# {name} {MARKER}"):
             end = n
-            while (end + 1 <= last and lines[end + 1].strip().startswith("#")
+            while (not lines[end].rstrip().endswith(".") and end + 1 <= last
+                   and lines[end + 1].strip().startswith("#")
                    and _indent(lines[end + 1]) >= _indent(lines[n])):
                 end += 1
             return n, end
