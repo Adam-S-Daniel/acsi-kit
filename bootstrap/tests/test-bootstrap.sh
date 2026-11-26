@@ -1075,7 +1075,7 @@ h3=$(git -C "$UP/k3" rev-parse HEAD)
 git -C "$UP/k3" remote set-url origin "$UP/no-such-origin.git"
 run env ADOPT_STATE_FILE="$UP/state3/adopt.json" sh -c 'cd "$1" && sh "$2"' _ "$UP/k3" "$UP/block-mine.sh"; rc=$?
 assert_not "the block stops when the fetch fails" test "$rc" = 0
-assert "it shows git's own fetch error" grep -q "^  | .*no-such-origin" "$ERR"
+assert "it shows why the fetch failed" has "$ERR" "no-such-origin"
 assert_eq "a failed fetch leaves HEAD alone" "$(git -C "$UP/k3" rev-parse HEAD)" "$h3"
 assert "a failed fetch leaves the item in place" test -f "$UP/k3/$SEC"
 git -C "$UP/k3" remote set-url origin "$O3"
@@ -1085,6 +1085,13 @@ assert_eq "the README block updates a clone older than the script" "$rc" 0
 assert_eq "the old clone reached the upstream head" "$(git -C "$UP/k3" rev-parse HEAD)" "$(git -C "$O3" rev-parse HEAD)"
 assert "the item is back in the old clone" test -f "$UP/k3/$SEC"
 assert "it ends with status.sh and the config path" has "$OUT" "Next: bash bootstrap/status.sh --config"
+# A fetch that fails inside the script shows git's own lines and changes nothing.
+git -C "$UK" remote set-url origin "$UP/no-such-origin.git"; h1=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a failed fetch makes update-kit exit 1" "$rc" 1
+assert "it shows git's own fetch error" grep -q "^  | .*no-such-origin" "$ERR"
+assert_eq "a failed fetch leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+git -C "$UK" remote set-url origin "$UP/origin"
 # A downloaded copy (no .git) cannot be updated in place.
 mkdir -p "$UP/dl"; cp -R "$UK/bootstrap" "$UK/starter" "$UK/library" "$UP/dl/"
 uk "$UP/dl" --config "$UK/fleet.env"; rc=$?

@@ -92,8 +92,8 @@ exits 0 only when everything worked; then run what it prints last,
 If it stops, it says what changed and what to run next; once you have done
 that, paste the block again. Before it discards anything under `starter/` it
 saves all of it, your own edits and new files included, to a new folder
-`~/kit-starter-backup-<commit>` (a patch, `starter-edits.patch`, and a copy of
-the new files, `new-files/`). Your own `starter/` edits belong in a pull
+`~/kit-starter-backup-<commit>` (a patch named starter-edits.patch, and a copy
+of the new files in a folder named new-files). Your own `starter/` edits belong in a pull
 request on your repo after `copy-starter.sh`, not in the kit. Your content
 choices are recorded outside the kit. Your `fleet.env` and your app manifests
 folder are untouched.
