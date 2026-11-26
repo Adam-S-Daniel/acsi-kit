@@ -13,6 +13,13 @@ follows the "Prompt, exactly" paragraph or list item in a spec. The source is
 read by parsing the spec with markdown-it-py. The page gets that text with
 the kit's invented owner replaced by `<you>`, wrapped to 78 columns.
 
+A second kind of region is computed from the kit's files instead of quoted:
+COMPUTED names each one's page and the function that returns its lines. The
+one such region is the table in docs/machine.md of what every session loads
+(the fleet guidance and the skill descriptions, in bytes, by content tier),
+read from bootstrap/content-catalog.json and the files it names, so the
+numbers are never counted by hand and follow a re-sync.
+
 --check exits 1 and prints a diff for each stale region; --write rewrites
 the stale ones in place (a second run changes nothing). Exit 2: a spec or
 page the tool cannot read (no block or more than one in a spec, a marker
@@ -23,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import json
 import re
 import sys
 import textwrap
@@ -51,6 +59,67 @@ REGIONS = {
 ANCHORS = {
     "fleet-worker-prompt": "Fleet worker prompt (maintenance role), exactly",
     "loop-worker-prompt": "Loop worker prompt (loop role), exactly",
+}
+
+CATALOG = "bootstrap/content-catalog.json"
+BASE_MD = GUIDANCE + "agents-md/base.md"
+FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+
+
+def skill_listing_bytes(text: str, where: str) -> int:
+    """The bytes of a skill's name and description, the part of a SKILL.md
+    that every session's skill list carries (the body loads only on use)."""
+    import yaml
+    m = FRONTMATTER.match(text)
+    meta = yaml.safe_load(m.group(1)) if m else None
+    if not isinstance(meta, dict) or not isinstance(meta.get("name"), str) or not isinstance(meta.get("description"), str):
+        raise RegionError(f"{where}: no frontmatter with a name and a description")
+    return len(meta["name"].encode("utf-8")) + len(meta["description"].encode("utf-8"))
+
+
+def always_loaded(root: Path) -> list[str]:
+    """The docs/machine.md table: bytes every session loads, by content tier."""
+    try:
+        items = json.loads((root / CATALOG).read_text(encoding="utf-8"))["items"]
+    except (OSError, ValueError, KeyError) as exc:
+        raise RegionError(f"{CATALOG}: cannot be read ({type(exc).__name__})") from None
+
+    def size(item) -> int:
+        path = root / item["source_link"]
+        if not path.is_file():
+            raise RegionError(f"{item['source_link']}: named by {CATALOG} for '{item['id']}', does not exist")
+        if item["kind"] == "skill":
+            return skill_listing_bytes(path.read_text(encoding="utf-8"), item["source_link"])
+        return len(path.read_bytes())
+
+    def pick(kind, tier, group=None):
+        return [i for i in items if i["kind"] == kind and i["tier"] == tier and (group is None or i.get("group") == group)]
+
+    def row(label, chosen, where, total=None):
+        if not chosen:
+            raise RegionError(f"{CATALOG}: no item for the row '{label}'")
+        total = sum(size(i) for i in chosen) if total is None else total
+        return f"| {label} | {len(chosen)} | {total:,} | {where} |"
+
+    core = pick("guidance", "core")
+    if {i["source_link"] for i in core} != {BASE_MD}:
+        raise RegionError(f"{CATALOG}: a core guidance item is not a section of {BASE_MD}")
+    step1 = "your choice in step 1"
+    lines = ["| What | Items | Bytes | Loaded when |", "|---|---|---|---|",
+             row("Core guidance (`agents-md/base.md` as shipped)", core, "always", len((root / BASE_MD).read_bytes())),
+             row("Recommended guidance, safety", pick("guidance", "recommended", "safety"), step1),
+             row("Recommended guidance, habits", pick("guidance", "recommended", "habits"), step1)]
+    for item in pick("guidance", "opinionated"):
+        lines.append(row(f"Opinionated guidance: `{item['id']}`", [item], step1))
+    lines += [row("Core skills (name and description)", pick("skill", "core"), "always"),
+              row("Recommended skills (name and description)", pick("skill", "recommended"), step1),
+              row("Opinionated skills (name and description)", pick("skill", "opinionated"), step1)]
+    return lines
+
+
+#: region name -> (page, function(root) -> the region's lines, before indentation)
+COMPUTED = {
+    "always-loaded": ("docs/machine.md", always_loaded),
 }
 
 # The markers are lexical tokens on a line of their own.
@@ -129,14 +198,15 @@ def process(root: Path, write: bool) -> list[str]:
     """Check or rewrite every page; returns one diff per stale region."""
     stale: list[str] = []
     pages: dict[str, list[str]] = {}
-    for page in sorted({p for p, _ in REGIONS.values()}):
-        pages[page] = [n for n, (p, _) in REGIONS.items() if p == page]
+    known = {**REGIONS, **COMPUTED}
+    for page in sorted({p for p, _ in known.values()}):
+        pages[page] = [n for n, (p, _) in known.items() if p == page]
     for page, names in pages.items():
         path = root / page
         text = path.read_text(encoding="utf-8")
         regions = find_regions(text, page)
         for name in regions:
-            if name not in REGIONS or REGIONS[name][0] != page:
+            if name not in known or known[name][0] != page:
                 raise RegionError(f"{page}: region '{name}' has no known source (REGIONS in export/doc_regions.py)")
         for name in names:
             if name not in regions:
@@ -145,11 +215,15 @@ def process(root: Path, write: bool) -> list[str]:
         # Bottom up, so a rewrite does not move the regions above it.
         for name in sorted(names, key=lambda n: -regions[n][0]):
             first, end, indent = regions[name]
-            spec = REGIONS[name][1]
-            spec_path = root / spec
-            if not spec_path.is_file():
-                raise RegionError(f"{spec}: the source of region '{name}' does not exist")
-            want = render(extract_prompt(spec_path.read_text(encoding="utf-8"), spec, ANCHORS.get(name, ANCHOR)), indent)
+            if name in COMPUTED:
+                spec = "the kit's files"
+                want = [indent + line for line in COMPUTED[name][1](root)]
+            else:
+                spec = REGIONS[name][1]
+                spec_path = root / spec
+                if not spec_path.is_file():
+                    raise RegionError(f"{spec}: the source of region '{name}' does not exist")
+                want = render(extract_prompt(spec_path.read_text(encoding="utf-8"), spec, ANCHORS.get(name, ANCHOR)), indent)
             have = lines[first:end]
             if have == want:
                 continue

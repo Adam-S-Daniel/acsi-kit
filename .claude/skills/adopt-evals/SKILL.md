@@ -13,6 +13,31 @@ retires skills and guidance. `bootstrap/steps.json` puts each step on the
 (`.claude/skills/adopt/SKILL.md`) runs the base. Work from the kit's folder,
 the one holding `bootstrap/`.
 
+## The model and the session
+
+Say what `/adopt`'s "The model and the session" says at the start of every
+sitting: on Claude Pro (`CLAUDE_PLAN=pro` in `fleet.env`) the user types
+`/model sonnet` first, because the default model on Pro is Opus, and each
+sitting gets its own session (`claude`, then `/adopt-evals`).
+
+On Pro, also say the Pro value at these steps
+(`docs/before-you-start.md`, "On Pro: what to set and what to leave off"):
+
+- **Steps 24 and 41** (the eval runner and the Loop worker): Sonnet in each
+  task's model selector, picked explicitly. **Default** follows the
+  account's default model, which Anthropic's model configuration page lists
+  as Opus on Pro. Never a Fable model or a 1M-context variant of a 4.6
+  model: on Pro those bill usage credits. Remove every connector the task's
+  table in `docs/routines.md` doesn't name.
+- **Step 32** (the dashboard and the explorer page) is optional: on Pro,
+  leave the dashboard refresh off, and say so when status.sh lists the
+  step. Article lift ships off too; leave it that way.
+- **Step 41** (the Loop worker) again: its cadence,
+  `LOOP_WORKER_EVERY_HOURS`, is already 168 on Pro, so it fires weekly at
+  most. Nothing to choose.
+- **The budget**: `CLAUDE_PLAN=pro` sizes `skills-evals`' eval budget in
+  points of a Pro week, with no Fable judge.
+
 ## First: is the base in place?
 
 1. Run `bash bootstrap/status.sh --track base` (with `--config <path>` if
@@ -54,6 +79,14 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
 
 ## Steps with a catch
 
+- **Step 40** (`regenerate.sh evals-fleet`) opens two pull requests: one in
+  `repo-settings` (the `fleet.yml` element) and one in `_agent-guidance`,
+  which adds `skills-evals` to `repos.yml` `cron_coverage.fleet`. The base
+  leaves that name out, because the daily Dependabot health check fails on
+  a repo that doesn't exist. The user merges both. Until then, an
+  "Unclassified for cron coverage" issue naming `skills-evals` in
+  `_agent-guidance` is expected (the drift report opens it once the repo
+  exists and closes it after the merge).
 - **The first evals steps**, in the order status.sh gives them, add
   `skills-evals` with the base's own scripts, which include it once it
   exists (`docs/evals-and-loop.md`, "Adding skills-evals"):

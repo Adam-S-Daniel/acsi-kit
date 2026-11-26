@@ -34,6 +34,13 @@ check_tools || exit 2
 [ -z "${TEST_BOOTSTRAP_TOOLS_ONLY:-}" ] || exit 0
 B=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 K=$(cd "$B/.." && pwd)
+# The add-content cases copy bootstrap/, starter/ and library/ with cp -R and
+# write optional content into the copy. cp -R keeps a symlink a symlink, so a
+# kit folder that is one (a scratch tree linked into a checkout) would send
+# those writes into the tree it points at.
+for d in bootstrap starter library; do
+  [ ! -L "$K/$d" ] || { printf 'ERROR: %s is a symlink: run the suite from a checkout or a full copy of the kit, or its add-content cases write through the link\n' "$K/$d" >&2; exit 2; }
+done
 T=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-test.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 PASSES=0 FAILS=0
@@ -125,6 +132,7 @@ for p in lib/substitute.py lib/plan_sizing.py lib/time_zone.py lib/repin.py lib/
          tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/check-evals-refs.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
+assert "lib/guidance_pins.py parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/lib/guidance_pins.py"
 # The bash >= 4.4 guard: the version test, and that a too-old bash stops before anything runs.
 guard() { bash -c '. "$1"; bash_version_ok "$2" "$3"' _ "$B/lib/common.sh" "$1" "$2"; }
 assert "bash 4.4 passes the version guard" guard 4 4
@@ -993,6 +1001,15 @@ chmod 600 "$T/private/denylist"
 run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate --denylist "$T/private/denylist"; rc=$?
 assert_eq "set-secrets privacy --rotate exits 0" "$rc" 0
 assert_not "a mode 600 denylist is not warned about" has "$ERR" "readable by other users"
+# Asked for the path, the script says what the file holds and where to read more.
+printf '%s\n' "$T/private/denylist" | run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate; rc=$?
+assert_eq "set-secrets takes the denylist path from its prompt" "$rc" 0
+assert "the prompt says the file holds one regular expression per line" has "$ERR" "one regular expression per line"
+assert "the prompt points at docs/skills.md" has "$ERR" 'docs/skills.md, "The privacy check"'
+printf '%s\n' "$T/private/no-such-file" | run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate; rc=$?
+assert_eq "a path that is not a file is refused" "$rc" 1
+assert "the refusal says what to write" has "$ERR" "write one regular expression per line to a file outside every repo"
+assert "the usage text says so too" bash -c 'bash "$1" --help | grep -qF "docs/skills.md, \"The privacy check\""' _ "$B/set-secrets.sh"
 assert_not "the mode check does not use find's GNU-only -perm /mode" grep -qE '^[^#]*find .*-perm /' "$B/set-secrets.sh"
 n=$(log_lines "$GH_LOG")
 run bash "$B/set-secrets.sh" --config "$CFGP" --only routine-fire --dry-run </dev/null; rc=$?
@@ -1698,9 +1715,141 @@ regen_and_merge() { # task
   done
   return 0
 }
+# edit_main <repo> <python> [arg ...]: commit an edit straight to a repo's
+# main (the python gets the clone's path, then the args) and print the commit
+# main had before;
+# restore_main <repo> <commit> puts main back.
+edit_main() {
+  local w="$T/tmp/edit-main" before
+  before=$(git --git-dir="$T/remotes/$O/$1.git" rev-parse main)
+  rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/$1.git" "$w" || return 1
+  python3 -I -c "$2" "$w" "${@:3}" || return 1
+  git -C "$w" commit -qam "test edit" && git -C "$w" push -q origin HEAD:main || return 1
+  rm -rf "$w"; printf '%s' "$before"
+}
+restore_main() { git --git-dir="$T/remotes/$O/$1.git" update-ref refs/heads/main "$2"; }
+no_regen_branch() { # task: no repo has a regenerate/<task> branch
+  local r
+  for r in "${FLEET[@]}"; do
+    git --git-dir="$T/remotes/$O/$r.git" rev-parse -q --verify "refs/heads/regenerate/$1" >/dev/null && return 1
+  done
+  return 0
+}
+# run-health-sha also names your _agent-guidance's commit in two more places
+# of acsi-agentskills (the fleet-guidance installer's commit and the
+# eval-protection gate's checkout): --check gives each part its own line.
+AS="$O/acsi-agentskills" CES=scripts/cloud-env-setup.sh CIY=.github/workflows/ci.yml FM=.claude/hooks/fleet-memory.sh
+GATE='Check out the eval-protection gate'
+refs_of() { # ci.yml: "<the gate step's ref> <the twin step's ref>", parsed
+  python3 -I -c '
+import sys, yaml
+steps = [s for j in yaml.safe_load(open(sys.argv[1]))["jobs"].values() for s in j.get("steps", [])]
+print(*[s["with"]["ref"] for n in sys.argv[2:] for s in steps if s.get("name") == n])' "$1" "$GATE" "Another checkout of the same commit"
+}
+old_sum=$(on_main acsi-agentskills "$CES" | sed -n 's/^fleet_pin_sha256=//p')
+old_ref=$(on_main acsi-agentskills "$CIY" > "$T/ci.yml"; refs_of "$T/ci.yml")
+assert "the registry's starter names a 40-hex gate ref and a 64-hex digest" bash -c '[[ $1 =~ ^[0-9a-f]{40}$ && $2 =~ ^[0-9a-f]{64}$ ]]' _ "$old_ref" "$old_sum"
+assert_eq "copy-starter left the registry's digest at its own installer's (lib/repin.py)" \
+  "$(on_main _agent-guidance "$FM" | sha256sum | cut -d' ' -f1)" "$old_sum"
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha
+assert "--check names the registry's reusable pin" has "$OUT" "NOT DONE: $AS .github/workflows/scheduled-run-health.yml still calls the reusable"
+assert "--check names the registry's fleet-guidance pin" has "$OUT" "NOT DONE: $AS $CES: fleet_pin_commit"
+assert "--check names the registry's eval-protection ref" has "$OUT" "NOT DONE: $AS $CIY: the step \"$GATE\" checks out ${old_ref:0:12}, which is not a commit of your _agent-guidance"
+assert "--check counts each part (three repos, and three parts of the registry)" has "$OUT" "run-health-sha: 6 item(s) not done"
+# A second step that checks out the same commit is not the gate's: it stays.
+edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+open(p, "w", encoding="utf-8").write(t + """  twin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Another checkout of the same commit
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: acme-example/_agent-guidance
+          ref: """ + sys.argv[2] + "\n")' "$old_ref" >/dev/null
+on_main acsi-agentskills "$CIY" > "$T/ci.yml"
+assert_eq "the fixture has a twin step at the gate's commit" "$(refs_of "$T/ci.yml")" "$old_ref $old_ref"
+# A drifted installer: your _agent-guidance's copy no longer has the digest
+# the registry records. The task refuses before it writes anything anywhere.
+ag_before=$(edit_main _agent-guidance 'import sys; open(sys.argv[1] + "/.claude/hooks/fleet-memory.sh", "a", encoding="utf-8").write("# drifted\n")')
+drift_sum=$(on_main _agent-guidance "$FM" | sha256sum | cut -d' ' -f1)
+n=$(log_lines "$GH_LOG")
+run bash "$B/regenerate.sh" --config "$CFGP" run-health-sha; rc=$?
+assert_eq "a drifted fleet-guidance installer is refused" "$rc" 1
+assert "the refusal names both files" bash -c 'grep -F "$2/_agent-guidance $3" "$1" | grep -qF "$2/acsi-agentskills $4"' _ "$ERR" "$O" "$FM" "$CES"
+assert "the refusal shows the first 12 characters of both digests" bash -c 'grep -F "has sha256 $2," "$1" | grep -qF "records $3 "' _ "$ERR" "${drift_sum:0:12}" "${old_sum:0:12}"
+assert "the refusal says how to fix it" has "$ERR" "bootstrap/copy-starter.sh for that repo"
+assert_eq "the refusal opens nothing" "$(since "$n")" 0
+assert "the refusal pushes no branch, not even in the repos before the registry" no_regen_branch run-health-sha
+restore_main _agent-guidance "$ag_before"
+# The gate step missing or doubled, or a doubled pin line, is an error that
+# names the file, in --check and in the task; the evals track never looks.
+as_before=$(edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+assert t.count("- name: Check out the eval-protection gate\n") == 1
+open(p, "w", encoding="utf-8").write(t.replace("- name: Check out the eval-protection gate\n", "- name: Check out the gate\n"))')
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails when the gate step is missing" "$rc" 1
+assert "the error names the file and the step" has "$ERR" "ERROR: $AS $CIY: has 0 step(s) named \"$GATE\", want exactly 1"
+n=$(log_lines "$GH_LOG")
+run bash "$B/regenerate.sh" --config "$CFGP" run-health-sha; rc=$?
+assert_eq "the task fails when the gate step is missing" "$rc" 1
+assert_eq "and opens nothing" "$(since "$n")" 0
+assert "and pushes no branch" no_regen_branch run-health-sha
+run bash "$B/regenerate.sh" --config "$CFGP" --check --track evals run-health-sha; rc=$?
+assert_eq "--track evals reports only skills-evals" "$(grep -c '^NOT DONE: ' "$OUT")" 1
+assert "--track evals names skills-evals" has "$OUT" "NOT DONE: $O/skills-evals"
+assert_not "--track evals never reads the registry" grep -qF acsi-agentskills "$OUT" "$ERR"
+restore_main acsi-agentskills "$as_before"
+as_before=$(edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+open(p, "w", encoding="utf-8").write(t + """  double:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the eval-protection gate
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: acme-example/_agent-guidance
+          ref: 2222222222222222222222222222222222222222
+""")')
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails when the gate step is doubled" "$rc" 1
+assert "the error counts the steps" has "$ERR" "ERROR: $AS $CIY: has 2 step(s) named \"$GATE\", want exactly 1"
+restore_main acsi-agentskills "$as_before"
+# A gate step the rewrite could not prove (its ref written twice) is refused
+# when the file is read, so no other repo's pull request is opened first.
+as_before=$(edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+i = t.index("- name: Check out the eval-protection gate\n")
+j = t.index("          ref: " + sys.argv[2] + "\n", i)
+open(p, "w", encoding="utf-8").write(t[:j] + "          ref: 2222222222222222222222222222222222222222\n" + t[j:])' "$old_ref")
+n=$(log_lines "$GH_LOG")
+run bash "$B/regenerate.sh" --config "$CFGP" run-health-sha; rc=$?
+assert_eq "the task fails when the gate step writes its ref twice" "$rc" 1
+assert "the error names the file and the doubled key" has "$ERR" "ERROR: $AS $CIY: the step \"$GATE\" writes a key of its \`with\` twice: ref"
+assert_eq "and opens nothing, in any repo" "$(since "$n")" 0
+assert "and pushes no branch, in any repo" no_regen_branch run-health-sha
+restore_main acsi-agentskills "$as_before"
+as_before=$(edit_main acsi-agentskills 'import sys
+open(sys.argv[1] + "/scripts/cloud-env-setup.sh", "a", encoding="utf-8").write("fleet_pin_commit=2222222222222222222222222222222222222222\n")')
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails when the pin line is doubled" "$rc" 1
+assert "the error names the script" has "$ERR" "ERROR: $AS $CES: has 2 \`fleet_pin_commit=<40 hex>\` line(s), want exactly 1"
+restore_main acsi-agentskills "$as_before"
 regen_and_merge run-health-sha
 assert_eq "regenerate run-health-sha exits 0" "$RC" 0
 ag=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
+assert_eq "the registry's fleet_pin_commit is your _agent-guidance's commit" "$(on_main acsi-agentskills "$CES" | sed -n 's/^fleet_pin_commit=//p')" "$ag"
+assert_eq "the registry's digest line is not written" "$(on_main acsi-agentskills "$CES" | sed -n 's/^fleet_pin_sha256=//p')" "$old_sum"
+on_main acsi-agentskills "$CIY" > "$T/ci.yml"
+assert_eq "the gate step's ref is your commit, and the twin step's is untouched" "$(refs_of "$T/ci.yml")" "$ag $old_ref"
+assert_eq "one pull request carries the registry's three files" \
+  "$(git --git-dir="$T/remotes/$O/acsi-agentskills.git" diff --name-only main~1 main | paste -sd' ' -)" "$CIY .github/workflows/scheduled-run-health.yml $CES"
+assert_eq "the registry got one run-health-sha pull request" "$(jqs "[.prs[\"$AS\"][] | select(.head == \"regenerate/run-health-sha\")] | length")" 1
 for r in repo-settings skills-evals acsi-agentskills wsl-automation; do
   assert "$r calls your _agent-guidance's reusable at its commit" bash -c 'git --git-dir="$1" show main:.github/workflows/scheduled-run-health.yml | grep -qF "scheduled-run-health-reusable.yml@$2"' _ "$T/remotes/$O/$r.git" "$ag"
   # The schedule arrives with the pin (the starter has none at the placeholder).
@@ -1712,8 +1861,17 @@ regen_and_merge hook-pin
 assert_eq "regenerate hook-pin exits 0" "$RC" 0
 as=$(git --git-dir="$T/remotes/$O/acsi-agentskills.git" rev-parse main)
 assert "repos.yml pins your acsi-agentskills" bash -c 'git --git-dir="$1" show main:repos.yml | grep -qx "  ref: $2"' _ "$T/remotes/$O/_agent-guidance.git" "$as"
+CXS=scripts/sync-codex-cloud-environments.sh
+run bash "$B/regenerate.sh" --config "$CFGP" --check codex-pin
+assert "--check names the Codex bootstrap pin" has "$OUT" "NOT DONE: $O/wsl-automation $CXS (bootstrap pin is still zeros)"
+assert "--check names the Codex fleet-guidance pin" has "$OUT" "NOT DONE: $O/wsl-automation $CXS (fleet-guidance pin is still the placeholder)"
 regen_and_merge codex-pin
 assert_eq "regenerate codex-pin exits 0 (the script's own test passed)" "$RC" 0
+ag2=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
+on_main wsl-automation "$CXS" > "$T/cx.sh"
+assert "the Codex fleet pin names your _agent-guidance's commit" grep -qx "readonly fleet_pin_commit='$ag2'" "$T/cx.sh"
+assert "and the digest of its installer there" grep -qx "readonly fleet_pin_sha256='$(git --git-dir="$T/remotes/$O/_agent-guidance.git" show "$ag2:$FM" | sha256sum | cut -d' ' -f1)'" "$T/cx.sh"
+assert_not "no placeholder of ones is left in the Codex script" grep -qE "='1{40,}'" "$T/cx.sh"
 assert "the Codex pin names your acsi-agentskills" bash -c 'git --git-dir="$1" show main:scripts/sync-codex-cloud-environments.sh | grep -qx "readonly bootstrap_revision=.$2."' _ "$T/remotes/$O/wsl-automation.git" "$as"
 regen_and_merge skills-locks
 assert_eq "regenerate skills-locks (registry) exits 0" "$RC" 0
@@ -1726,8 +1884,22 @@ for r in _agent-guidance repo-settings wsl-automation; do
   assert_eq "$r's lock names your registry" "$(on_main "$r" skills.lock | jq -r .registry)" acme-example/acsi-agentskills
 done
 assert "acsi-agentskills-private's lock is the registry's copy" bash -c 'cmp -s <(git --git-dir="$1" show main:skills.lock) <(git --git-dir="$2" show main:skills.lock)' _ "$T/remotes/$O/acsi-agentskills-private.git" "$T/remotes/$O/acsi-agentskills.git"
+# The starter's coverage list leaves skills-evals out (a name neither owner
+# has fails the daily Dependabot health check); evals-fleet adds it.
+cov_names() { python3 -I -c 'import sys, yaml; print(" ".join(yaml.safe_load(sys.stdin)["cron_coverage"]["fleet"]))'; }
+assert "lib/coverage_fleet.py parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/lib/coverage_fleet.py"
+assert_not "the starter's coverage list leaves skills-evals out" bash -c 'grep -qw skills-evals <<<"$1"' _ "$(on_main _agent-guidance repos.yml | cov_names)"
+assert "the starter's coverage list names the base repos" bash -c 'grep -qw wsl-automation <<<"$1"' _ "$(on_main _agent-guidance repos.yml | cov_names)"
+run bash "$B/regenerate.sh" --config "$CFGP" --check evals-fleet
+assert "evals-fleet --check names the coverage list" has "$OUT" "NOT DONE: acme-example/_agent-guidance repos.yml cron_coverage.fleet does not name skills-evals"
+assert "evals-fleet --check counts both lists" has "$OUT" "evals-fleet: 2 item(s) not done"
 regen_and_merge evals-fleet
 assert_eq "regenerate evals-fleet exits 0" "$RC" 0
+assert "evals-fleet lists skills-evals where the starter's comment held its place" bash -c 'grep -q "repo-settings skills-evals wsl-automation" <<<"$1"' _ "$(on_main _agent-guidance repos.yml | cov_names)"
+assert_not "and the comment that said it is not listed is gone" bash -c 'git --git-dir="$1" show main:repos.yml | grep -qF "skills-evals is not listed"' _ "$T/remotes/$O/_agent-guidance.git"
+assert_eq "the coverage pull request changes repos.yml alone: one line in, the comment out" \
+  "$(git --git-dir="$T/remotes/$O/_agent-guidance.git" diff --numstat main~1 main | tr '\t' ' ')" "1 4 repos.yml"
+assert_eq "evals-fleet opens one pull request in each of the two repos" "$(jqs '[.prs[][] | select(.head == "regenerate/evals-fleet")] | length')" 2
 assert_eq "evals-fleet appends skills-evals to fleet.yml's repos" "$(on_main repo-settings repo-settings/fleet.yml | fleet_names | tr ' ' '\n' | tail -n 1)" acme-example/skills-evals
 assert_not "evals-fleet deletes the fragment" git --git-dir="$T/remotes/$O/repo-settings.git" cat-file -e main:repo-settings/fleet.evals.yml
 assert "the merged element is the fragment's" bash -c 'diff <(git --git-dir="$1" show starter/repo-settings:repo-settings/fleet.evals.yml | python3 -I -c "import sys, yaml; print(yaml.safe_load(sys.stdin)[\"repos\"])") <(git --git-dir="$1" show main:repo-settings/fleet.yml | python3 -I -c "import sys, yaml; print(yaml.safe_load(sys.stdin)[\"repos\"][-1:])")' _ "$T/remotes/$O/repo-settings.git"
@@ -1745,6 +1917,45 @@ n=$(log_lines "$GH_LOG")
 run bash "$B/regenerate.sh" --config "$CFGP" run-health-sha; rc=$?
 assert_eq "a second regenerate run-health-sha exits 0" "$rc" 0
 assert_eq "a second regenerate run-health-sha opens nothing" "$(since "$n")" 0
+# Any commit of your _agent-guidance is current, not only its newest one.
+assert_not "your _agent-guidance has moved on since the pin" test "$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)" = "$ag"
+assert "the registry's three parts read as current at the older commit" has "$OUT" "current: $AS .github/workflows/scheduled-run-health.yml calls your _agent-guidance at $ag, and $CES and $CIY name commits of it"
+# Each part can fail on its own after the pin: a digest the installer at the
+# pinned commit does not have, and a gate ref that is not your commit.
+as_before=$(edit_main acsi-agentskills 'import re, sys
+p = sys.argv[1] + "/scripts/cloud-env-setup.sh"
+t, n = re.subn(r"(?m)^fleet_pin_sha256=[0-9a-f]{64}$", "fleet_pin_sha256=" + "f" * 64, open(p, encoding="utf-8").read())
+assert n == 1
+open(p, "w", encoding="utf-8").write(t)')
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails a digest the pinned installer does not have" "$rc" 1
+assert "it says which part" has "$OUT" "NOT DONE: $AS $CES: $FM at fleet_pin_commit ${ag:0:12} does not have the sha256 fleet_pin_sha256 records (ffffffffffff)"
+assert_eq "and only that part" "$(grep -c '^NOT DONE: ' "$OUT")" 1
+restore_main acsi-agentskills "$as_before"
+as_before=$(edit_main acsi-agentskills 'import sys
+p = sys.argv[1] + "/.github/workflows/ci.yml"
+t = open(p, encoding="utf-8").read()
+assert t.count("ref: " + sys.argv[2] + "\n") == 1
+open(p, "w", encoding="utf-8").write(t.replace("ref: " + sys.argv[2] + "\n", "ref: " + "a" * 40 + "\n"))' "$ag")
+run bash "$B/regenerate.sh" --config "$CFGP" --check run-health-sha; rc=$?
+assert_eq "--check fails a gate ref that is not your commit" "$rc" 1
+assert "it says which part" has "$OUT" "NOT DONE: $AS $CIY: the step \"$GATE\" checks out aaaaaaaaaaaa"
+assert_eq "and only that part" "$(grep -c '^NOT DONE: ' "$OUT")" 1
+restore_main acsi-agentskills "$as_before"
+n=$(log_lines "$GH_LOG")
+run bash "$B/regenerate.sh" --config "$CFGP" codex-pin; rc=$?
+assert_eq "a second regenerate codex-pin exits 0" "$rc" 0
+assert_eq "a second regenerate codex-pin opens nothing" "$(since "$n")" 0
+ws_before=$(edit_main wsl-automation 'import re, sys
+p = sys.argv[1] + "/scripts/sync-codex-cloud-environments.sh"
+t, n = re.subn(r"(?m)^readonly fleet_pin_sha256=.[0-9a-f]{64}.$", "readonly fleet_pin_sha256=\x27" + "a" * 64 + "\x27", open(p, encoding="utf-8").read())
+assert n == 1
+open(p, "w", encoding="utf-8").write(t)')
+run bash "$B/regenerate.sh" --config "$CFGP" --check codex-pin; rc=$?
+assert_eq "codex-pin --check fails a fleet digest the pinned installer does not have" "$rc" 1
+assert "it says which pin" has "$OUT" "NOT DONE: $O/wsl-automation $CXS ($FM at fleet_pin_commit ${ag2:0:12} does not have the sha256 fleet_pin_sha256 records)"
+assert_not "the bootstrap pin stays current" grep -qF "bootstrap pin" "$OUT"
+restore_main wsl-automation "$ws_before"
 # actions-lock through the gh extension (stubbed).
 run env GH_STUB_NO_ACTIONS_LOCK=1 bash "$B/regenerate.sh" --config "$CFGP" actions-lock; rc=$?
 assert_eq "actions-lock without the gh extension fails" "$rc" 1
@@ -1780,14 +1991,17 @@ assert "status says how to mark an ask step" has "$OUT" "bootstrap/status.sh --m
 # --track: one track's steps, its own next step, and both tracks' counts.
 track_ids() { jq -r --arg t "$1" '[.steps[] | select(.track == $t) | .id] | join(" ")' "$B/steps.json"; }
 listed() { sed -nE 's/^(done|asked: done|next|todo|optional) +([0-9]+) .*/\2/p' "$1" | paste -sd' ' -; }
-nbase=$(track_ids base | wc -w) nevals=$(track_ids evals | wc -w)
-assert_eq "the two tracks split every step" "$((nbase + nevals))" "$(jq '.steps | length' "$B/steps.json")"
+assert_eq "the two tracks split every step" "$(($(track_ids base | wc -w) + $(track_ids evals | wc -w)))" "$(jq '.steps | length' "$B/steps.json")"
+# The counts are of required steps: an optional one is listed and never counted.
+required() { jq -r --arg t "$1" '[.steps[] | select(.track == $t and (.optional | not))] | length' "$B/steps.json"; }
+nbase=$(required base) nevals=$(required evals)
+assert "each track has an optional step, so the counts differ from the lists" bash -c '[ "$1" -lt "$2" ] && [ "$3" -lt "$4" ]' _ "$nbase" "$(track_ids base | wc -w)" "$nevals" "$(track_ids evals | wc -w)"
 assert "status counts each track's steps done" grep -qE "^base: [0-9]+ of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
 for tr in base evals; do
   run bash "$B/status.sh" --config "$CFGP" --track "$tr"; rc=$?
   assert_eq "status --track $tr exits 0" "$rc" 0
   assert_eq "status --track $tr lists only the $tr steps, in order" "$(listed "$OUT")" "$(track_ids "$tr")"
-  assert "status --track $tr counts only its steps" grep -qE "^[0-9]+ of $(track_ids "$tr" | wc -w) done$" "$OUT"
+  assert "status --track $tr counts only its required steps" grep -qE "^[0-9]+ of $(required "$tr") done$" "$OUT"
   assert "status --track $tr still counts both tracks" grep -qE "^base: [0-9]+ of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
 done
 run bash "$B/status.sh" --config "$CFGP" --track base
@@ -2031,6 +2245,26 @@ assert_eq "status --track base on a base-only setup exits 0" "$rc" 0
 assert "a base-only setup reaches done" has "$OUT" "Next: nothing; every required base step is done"
 grep -qF 'Next: nothing' "$OUT" || sed 's/^/    status: /' "$OUT"
 assert "every base step is done" grep -qE "^base: $nbase of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
+# An adopter without Codex skips step 17 (optional): the base still reads done,
+# and the evals track does not say the base is unfinished. The Codex pin goes
+# back to the starter's zeros on wsl-automation's main for this case.
+ws_git="$T/remotes/$O/wsl-automation.git"; ws_before=$(git --git-dir="$ws_git" rev-parse main)
+w="$T/tmp/skip17"; rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/wsl-automation.git" "$w"
+sed -i.bak "s/^readonly bootstrap_revision='[0-9a-f]\{40\}'/readonly bootstrap_revision='0000000000000000000000000000000000000000'/" "$w/scripts/sync-codex-cloud-environments.sh"
+rm -f "$w/scripts/sync-codex-cloud-environments.sh.bak"
+git -C "$w" commit -qam "no Codex pin" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
+run bash "$B/regenerate.sh" --config "$CFGB" --check --track base codex-pin; rc=$?
+assert_eq "the Codex pin is not done in this case" "$rc" 1
+run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" --track base; rc=$?
+assert "the skipped Codex step is labeled optional" grep -qE '^optional +17 ' "$OUT"
+assert "the base still reaches done with step 17 skipped" has "$OUT" "Next: nothing; every required base step is done"
+assert "and its count is complete" grep -qE "^base: $nbase of $nbase done; evals: [0-9]+ of $nevals done$" "$OUT"
+assert "and its own list counts the same" grep -qxE "$nbase of $nbase done" "$OUT"
+run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" --track evals; rc=$?
+assert_not "the evals track does not call the base unfinished over an optional step" has "$OUT" "The base track is not done yet"
+git --git-dir="$ws_git" update-ref refs/heads/main "$ws_before"
+run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" --track base
+assert "with the pin back, step 17 reads done and the count is unchanged" bash -c 'grep -qE "^done +17 " "$1" && grep -qxE "$2 of $2 done" "$1"' _ "$OUT" "$nbase"
 assert "the settings check ran the engine" grep -q '^diff |' "$BASE_ENGINE_LOG"
 assert_not "the engine was never given skills-evals" grep -qF skills-evals "$BASE_ENGINE_LOG"
 run env ADOPT_STATE_FILE="$SB" bash "$B/verify.sh" --config "$CFGB"; rc=$?
