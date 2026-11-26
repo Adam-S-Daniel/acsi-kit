@@ -14,18 +14,27 @@
 # equal to the first); and `two`, two accounts whose names sort the other way
 # round, with the example repos dropped, as an adopter does. skills-evals, the
 # evals track's and the longest, runs in the invented form only. At most
-# RUN_ALL_JOBS runs (default 6) are in flight at once.
+# RUN_ALL_JOBS runs (default 6) are in flight at once. RUN_ALL_FORMS limits the
+# forms to the ones it names, separated by spaces (the kit's CI runs one form
+# per job, side by side).
 set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1   # no __pycache__ in a tree that copy-starter.sh may copy
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 base_trees=(agent-guidance repo-settings agent-skills agent-skills-private wsl-automation)
-forms=(invented one two)
+all_forms=(invented one two)
+read -r -a forms <<<"${RUN_ALL_FORMS:-${all_forms[*]}}"
+[ "${#forms[@]}" -gt 0 ] || { echo "RUN_ALL_FORMS names no form" >&2; exit 2; }
+for f in "${forms[@]}"; do
+  case " ${all_forms[*]} " in *" $f "*) ;; *) echo "RUN_ALL_FORMS: unknown form '$f' (want: ${all_forms[*]})" >&2; exit 2 ;; esac
+done
+with_evals=0
+case " ${forms[*]} " in *" invented "*) with_evals=1 ;; esac
 # "<tree> <form>", the slowest first so the last runs to start are the short ones.
 runs=()
 for f in "${forms[@]}"; do runs+=("agent-guidance $f"); done
 for f in "${forms[@]}"; do runs+=("agent-skills $f"); done
-runs+=("skills-evals invented")
+[ "$with_evals" = 0 ] || runs+=("skills-evals invented")
 for t in repo-settings agent-skills-private wsl-automation; do
   for f in "${forms[@]}"; do runs+=("$t $f"); done
 done
@@ -75,5 +84,5 @@ for t in "${base_trees[@]}" skills-evals; do
     total=$((total + 1)); report "$t" "$f"
   done
 done
-echo "runs: $passed passed, $failed failed, $total total (${#base_trees[@]} base trees in ${#forms[@]} forms, skills-evals in the invented form)"
+echo "runs: $passed passed, $failed failed, $total total (${#base_trees[@]} base trees in the form(s) ${forms[*]}$([ "$with_evals" = 0 ] || echo ', skills-evals in the invented form'))"
 [ "$failed" = 0 ]

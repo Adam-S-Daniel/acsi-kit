@@ -980,6 +980,13 @@ What the three forms found, and how each is fixed:
 `steps.json` step 9 and `docs/generated-files.md` no longer tell the adopter
 to edit rows of `tests/test_repo_settings.py`: the tests read `fleet.yml`.
 
+In the kit's CI the three forms run as three legs of one `suites` job, side
+by side (`RUN_ALL_FORMS` picks a leg's form), so the two adopter forms add no
+time to a merge. The required context is still `starter-suites`: that job now
+only waits for the legs, runs under `if: always()` so it is never skipped, and
+fails unless every leg concluded success. `export/tests/test_run_suites.py`
+parses `ci.yml` and holds that shape.
+
 ### Smaller fixes
 
 - **Sentence case.** `export.py`'s `_at_sentence_start` capitalized "the

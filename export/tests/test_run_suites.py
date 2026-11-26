@@ -323,7 +323,7 @@ def test_known_failures_still_excuse_a_failure_in_a_substituted_form(tmp_path, m
 TREES = ("agent-guidance", "repo-settings", "agent-skills", "agent-skills-private", "wsl-automation")
 
 
-def _run_all(tmp_path, fail_key=""):
+def _run_all(tmp_path, fail_key="", forms=None):
     """starter/run-all-tests.sh in a copy of the kit's layout, with a stand-in
     python3 that passes every run but `fail_key` ("<tree>.<form>") and records
     each run it was asked for."""
@@ -348,6 +348,9 @@ def _run_all(tmp_path, fail_key=""):
     seen.write_text("")
     env = dict(os.environ, PATH=f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
                RUN_ALL_SEEN=str(seen), RUN_ALL_FAIL=fail_key, RUN_ALL_JOBS="3")
+    env.pop("RUN_ALL_FORMS", None)
+    if forms is not None:
+        env["RUN_ALL_FORMS"] = forms
     p = subprocess.run(["bash", str(tmp_path / "starter" / "run-all-tests.sh")],
                        capture_output=True, text=True, env=env)
     return p, sorted(seen.read_text().split())
@@ -366,3 +369,39 @@ def test_run_all_fails_when_one_form_of_one_tree_fails(tmp_path):
     assert p.returncode == 1
     assert "FAIL repo-settings (two) (exit 1):" in p.stdout
     assert p.stdout.splitlines()[-1].startswith("runs: 15 passed, 1 failed, 16 total")
+
+
+@pytest.mark.parametrize("forms, want", [
+    ("one", [f"{t}.one" for t in TREES]),
+    ("invented", [f"{t}.invented" for t in TREES] + ["skills-evals.invented"]),
+    ("two one", [f"{t}.{f}" for t in TREES for f in ("one", "two")]),
+])
+def test_run_all_forms_limits_the_runs_and_skills_evals_goes_with_invented(tmp_path, forms, want):
+    p, seen = _run_all(tmp_path, forms=forms)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert seen == sorted(want)
+    assert p.stdout.splitlines()[-1].startswith(f"runs: {len(want)} passed, 0 failed, {len(want)} total")
+
+
+@pytest.mark.parametrize("forms", ["three", "one three", " "])
+def test_run_all_refuses_a_form_it_does_not_know(tmp_path, forms):
+    p, seen = _run_all(tmp_path, forms=forms)
+    assert p.returncode == 2 and seen == []
+    assert "RUN_ALL_FORMS" in p.stderr
+
+
+def test_ci_runs_one_leg_per_owner_form_behind_one_required_job():
+    import yaml
+    jobs = yaml.safe_load((KIT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))["jobs"]
+    legs, gate = jobs["suites"], jobs["starter-suites"]
+    # Every form run_suites.py knows has a leg, and a leg runs its form alone.
+    assert sorted(legs["strategy"]["matrix"]["form"]) == sorted(run_suites.owner_forms.CHOICES)
+    assert legs["strategy"]["fail-fast"] is False
+    runs = [s for s in legs["steps"] if "starter/run-all-tests.sh" in str(s.get("run", ""))]
+    assert len(runs) == 1 and runs[0]["env"]["RUN_ALL_FORMS"] == "${{ matrix.form }}"
+    # The required context waits for the legs and cannot be skipped.
+    assert gate["name"] == "starter-suites" and gate["needs"] == ["suites"] and gate["if"] == "always()"
+    assert "needs.suites.result" in str(gate["steps"][0]["env"])
+    assert "!= success" in gate["steps"][0]["run"] and "exit 1" in gate["steps"][0]["run"]
+    # A required check that can fire twice on one head takes no concurrency group.
+    assert "concurrency" not in legs and "concurrency" not in gate
