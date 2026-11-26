@@ -94,6 +94,23 @@ them unset with `SITE_REPO=none`.
   which `site-preview.yml` comments on a pull request. Set it the same way as
   `SITE_PAGE_URL`.
 
+The privacy comment alert (`privacy-comment-alert.yml`, which the sync
+delivers with agent-checks) sends its alert through a self-alert route that
+the kit does not include: a GitHub App that can dispatch a self-alert
+workflow you write, named send-self-alert.yml, in a repository of your own. Without
+these three values it scans nothing it can report and only warns, so leave
+them unset unless you build that route.
+
+- `SELF_ALERT_APP_ID`: a repository variable on each repo that runs the
+  alert, the route App's client id. Set it with
+  `gh variable set SELF_ALERT_APP_ID --repo <you>/<repo> --body <id>`.
+- `SELF_ALERT_REPO`: a repository variable on the same repos, the
+  `owner/name` of the repository that holds that workflow. Set it the
+  same way.
+- `SELF_ALERT_APP_PRIVATE_KEY`: a repository secret on the same repos, the
+  route App's private key. Set it with
+  `gh secret set SELF_ALERT_APP_PRIVATE_KEY --repo <you>/<repo> < <key file>`.
+
 The prompt-audit sweep's fire values live on `_agent-guidance`, where
 `prompt-audit-fire.yml` fires the sweep for each trigger issue the changelog
 watcher files ([routines](../docs/routines.md#prompt-audit-sweep)). If they

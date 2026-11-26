@@ -137,6 +137,14 @@ hosts, and account ids. The list is the repository secret
 `file:line` and the pattern's number, never the match, and it fails closed
 without the secret, including on a fork's pull request.
 
+The same secret is optional everywhere else. With it, each repo's
+`agent-checks` job also scans a pull request's added lines, commit messages,
+branch name, title and body, and the `privacy-comment-alert` workflow scans
+issues and comments. Without it, both scan nothing and only add a warning;
+neither ever fails a check for a missing secret. `set-secrets.sh` stores it
+in `acsi-agentskills` and `_agent-guidance`. For another repo, run
+`gh secret set PRIVACY_DENYLIST --repo <you>/<repo> < <file>`.
+
 Write the list to a file outside every repo, with one regular expression per
 line, and store it before the `acsi-agentskills` starter pull request:
 

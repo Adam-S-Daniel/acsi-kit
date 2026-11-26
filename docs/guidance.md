@@ -137,7 +137,9 @@ instead of text:
   `~/.config/privacy-denylist.txt`, outside every repo, or point
   `PRIVACY_DENYLIST_FILE` at another file; the write-marker hook reads the
   same file. A refusal names the place and the pattern's number, never the
-  match.
+  match. In CI the check scans each pull request when the repo has the
+  `PRIVACY_DENYLIST` secret, and only warns when it does not
+  ([the privacy check](skills.md#the-privacy-check)).
 - **On your machine**, a config-based git hook (Git 2.54+) runs it on every
   commit and push, but only in clones of your two owners' repos
   ([machines](machine.md#install-on-each-durable-machine)).

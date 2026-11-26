@@ -620,7 +620,8 @@ run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --denylist "$T/priv
 assert_eq "set-secrets privacy exits 0" "$rc" 0
 assert "a denylist other users can read is warned about" has "$ERR" "the denylist is readable by other users"
 assert_eq "PRIVACY_DENYLIST is a repository secret in acsi-agentskills" "$(jqs '.values["acme-example/acsi-agentskills||secret"].PRIVACY_DENYLIST')" "$(sha256sum < "$T/private/denylist" | cut -d' ' -f1)"
-assert "set-secrets counts the write" has "$OUT" "Done: 1 change(s)"
+assert_eq "PRIVACY_DENYLIST is a repository secret in _agent-guidance, for its agent-checks CI scan" "$(jqs '.values["acme-example/_agent-guidance||secret"].PRIVACY_DENYLIST')" "$(sha256sum < "$T/private/denylist" | cut -d' ' -f1)"
+assert "set-secrets counts the writes" has "$OUT" "Done: 2 change(s)"
 chmod 600 "$T/private/denylist"
 run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate --denylist "$T/private/denylist"; rc=$?
 assert_eq "set-secrets privacy --rotate exits 0" "$rc" 0
