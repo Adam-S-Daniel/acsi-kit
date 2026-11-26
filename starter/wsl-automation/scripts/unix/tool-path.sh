@@ -16,5 +16,3 @@ unix_job_path() {
 
 unix_find_flock() { command -v flock || true; }
 unix_find_timeout() { command -v timeout || command -v gtimeout || true; }
-# GNU date reads "@seconds" with -d; BSD date's -d means something else.
-unix_date_reads_epoch() { date -u -d @0 +%s >/dev/null 2>&1; }
