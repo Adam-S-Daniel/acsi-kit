@@ -42,7 +42,9 @@ edits:
       .pytest_cache/, node_modules/, .DS_Store); the lines already present
       are not repeated.
 
-  # >>> one-owner forms (generated block, edit the spec)
+  # ---- One-owner and reordered-owner forms (DECISIONS, One-owner fleets): tests that read the owners and the
+  # ---- fleet from the files, so the suite holds for any number of owners and for a
+  # ---- fleet.yml without the example repos.
   - path: tests/test_repo_settings_workflow_token.py
     stage: output
     old: "import json\nimport os\nimport re\nimport shlex\n"
@@ -85,7 +87,6 @@ edits:
     new: "# One line per owner the file names, whatever their number: an owner's\n        # label-only repos are the file's `manage: [\"labels\"]` rows that the\n        # engine guards, sorted. A one-owner fleet has one line holding all\n        # of them, and a fleet without the example repos has empty lines.\n        targets = rs.resolve_targets(rs.load_config(str(self.FLEET)), None)\n        owners = {t[\"repo\"].split(\"/\", 1)[0] for t in targets}\n        self.assertTrue(owners)\n        for owner in sorted(owners):\n            want = \",\".join(sorted(\n                t[\"repo\"].split(\"/\", 1)[1] for t in targets\n                if t[\"repo\"].split(\"/\", 1)[0] == owner\n                and t[\"manage\"] == [\"labels\"] and rs.is_cms_label_only(t[\"repo\"])))\n            with self.subTest(owner=owner):\n"
     why: >-
       The expected per-owner split named the two invented owners, so a one-owner fleet (one owner holding all three repos) and a fleet without the example repos failed. It derives each owner's list from the file.
-  # <<< one-owner forms
 
 patches:
   - file: kit_config.py
