@@ -180,6 +180,15 @@ keeps the name on purpose (rule C5 in
 [`export/manifests/_common.yml`](../export/manifests/_common.yml)), and
 `copy-starter.sh` replaces only the invented owners, so it never touches it.
 
+So your CI runs a public action from the kit owner's account,
+`Adam-S-Daniel/verify-actions-lock`, at the tag each workflow names (`v1.2.0`
+today), and each repo's `actions.lock` locks that tag to one commit, which
+the runner runs even if the tag later moves. To run your own copy instead,
+fork it, change every `uses: Adam-S-Daniel/verify-actions-lock@<tag>` line
+(the workflows above, and `ci.yml` in `_agent-guidance`) to your fork and a
+tag of it, then run `gh actions-lock --no-narrow` in each repo and merge
+those pull requests.
+
 ## Example repos in fleet.yml
 
 The owner's fleet includes a site platform and two sites. So

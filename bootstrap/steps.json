@@ -102,8 +102,8 @@
     },
     {
       "id": "6",
-      "title": "Create the three base GitHub Apps",
-      "run": "`bootstrap/create-apps.sh guidance-sync settings-admin settings-read` (GitHub's App manifest flow, once per App, in the browser)",
+      "title": "Create the base GitHub Apps (three; two on PLAN=free)",
+      "run": "`bootstrap/create-apps.sh guidance-sync settings-admin settings-read` (GitHub's App manifest flow, once per App, in the browser). On `PLAN=free` it creates two: it skips `settings-admin`, whose key would live in an environment a private repo has only on a paid plan, so you apply `fleet.yml` from your machine (step 20)",
       "kind": "browser",
       "part": "settings",
       "track": "base",

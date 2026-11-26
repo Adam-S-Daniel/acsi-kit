@@ -174,7 +174,8 @@ nightly drift report, the skills-lock bumper, and the Dependabot sweep.
 secret because its gates check that both values exist before minting a
 token. App names are `<APP_NAME_PREFIX>-<app>`.
 
-The base needs only the three fleet-wide Apps, created in step 6.
+The base needs only the three fleet-wide Apps, created in step 6 (two on
+`PLAN=free`, where `create-apps.sh` skips `settings-admin`: see below).
 `eval-improve`, `roster`, and `registry-read` serve only evals and keep
 their credentials in `skills-evals`. `/adopt-evals` creates and installs
 them in steps 33 and 34, once `skills-evals` exists, and `create-apps.sh`
@@ -305,5 +306,9 @@ variable and are skipped. The weekly `plan` job doesn't need it: it runs with
 the read App and reports drift. You apply from your machine with
 `bash bootstrap/apply-settings.sh`.
 
-Until step 20, `repo-settings.yml`'s apply job waits for your approval on
-each merge to `repo-settings`. Reject those deployments until then.
+On `PLAN=paid`, until step 20, `repo-settings.yml`'s apply job waits for
+your approval on each merge to `repo-settings`. Reject those deployments
+until then. On `PLAN=free` nothing waits for you: `repo-settings` has no
+`fleet-apply` environment, so each merge's run shows both apply jobs as
+skipped and the `plan` job's drift report, with nothing to approve or reject;
+step 20 applies from your machine.

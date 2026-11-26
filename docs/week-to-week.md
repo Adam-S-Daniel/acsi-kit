@@ -12,9 +12,20 @@
 
 Every repo setting lives in `repo-settings/fleet.yml`. Change it in a pull
 request on `repo-settings`. On merge, `repo-settings.yml` applies it to both
-owners once you approve the `fleet-apply` deployment, and a daily drift
+owners once you approve the `fleet-apply` deployment (on `PLAN=free` there is
+none: run `bash bootstrap/apply-settings.sh` yourself), and a daily drift
 check opens an issue if a repo no longer matches. Don't change a ruleset by
 hand in the GitHub UI, because the next apply will put it back.
+
+## When a scheduled workflow stops running
+
+In a public repository, GitHub turns a scheduled workflow off after 60 days
+with no activity in the repository ("scheduled workflows are automatically
+disabled when no repository activity has occurred in 60 days", [GitHub's
+docs](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/disabling-and-enabling-a-workflow)),
+so its scheduled runs just stop, with no failed run and no issue, and to
+turn it back on you open the repository's **Actions** tab, click the
+workflow in the left sidebar, and click **Enable workflow**.
 
 ## When the allowance runs short
 
