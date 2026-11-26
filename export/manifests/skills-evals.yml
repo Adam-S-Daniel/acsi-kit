@@ -7,7 +7,7 @@
 repo: skills-evals
 kit_name: skills-evals
 source: skills-evals
-source_sha: ea84ca96c028eff472397718785649f1ff81d032
+source_sha: 1492367482275c10c02c25d9ef1c9a16608a2def
 # The vendored fleet files (payload mirror, agent-checks runner and guard,
 # AGENTS.md's managed half) are rebuilt from the kit's own _agent-guidance.
 after: [_agent-guidance]
@@ -538,6 +538,56 @@ edits:
 
           def test_the_page_names_no_owner(self):
     why: Cold start. Regression test that build.py succeeds on fully empty inputs.
+  # ---- The rules-consistency list names only repos the kit creates for the adopter
+  - path: evals/rules-consistency.yml
+    stage: output
+    old: |
+      # The public repositories .github/workflows/rules-consistency.yml checks daily
+      # with scripts/check_rule_restatements.py against docs/rules.json: the one
+      # place their names live. Each is shallow-cloned read-only with no token, so
+      # only public repositories belong here. `exclude` lists globs, relative to
+      # the repository root, of paths that are deliberately not this fleet's rules:
+      # an adopter's starter template ships its own example values, and an
+      # append-only history log records what was true then (a finding there could
+      # never be fixed in place).
+    new: |
+      # The public repositories .github/workflows/rules-consistency.yml checks daily
+      # with scripts/check_rule_restatements.py against docs/rules.json: the one
+      # place their names live. Each is shallow-cloned read-only with no token, so
+      # only PUBLIC repositories belong here: a private one fails the daily run with
+      # "could not clone". The two listed are repos the kit created for you;
+      # _agent-guidance is public unless you set VISIBILITY_AGENT_GUIDANCE=private
+      # (paid plans), and then it must come out of this list. Add your own website
+      # or other public repo as another `- repo: <owner>/<name>` row. `exclude`
+      # lists globs, relative to the repository root, of paths that are deliberately
+      # not this fleet's rules: an append-only history log records what was true
+      # then (a finding there could never be fixed in place).
+    why: >-
+      Rules-list. The source's header describes rows the kit does not ship and
+      says nothing of what happens to a private repo; this says both.
+  - path: evals/rules-consistency.yml
+    stage: output
+    old: |2
+        - repo: example-adopter/acsi-kit
+          exclude:
+            - starter/*
+        - repo: example-adopter/example-site-a
+    new: ""
+    why: >-
+      Rules-list. An adopter has no acsi-kit repo (the kit is not in the repos
+      create-repos.sh makes) and only an optional website, so the daily
+      workflow's clone of either fails with "could not clone" every day. The two
+      rows left, _agent-guidance and acsi-agentskills, are in FLEET_REPOS.
+  - path: .github/workflows/rules-consistency.yml
+    stage: output
+    old: '            [ -n "$ok" ] || { echo "::error::could not clone $repo"; exit 1; }'
+    new: '            [ -n "$ok" ] || { echo "::error::could not clone $repo (cloned with no token: it must be public and exist; fix or remove its row in evals/rules-consistency.yml)"; exit 1; }'
+    why: Rules-list. A private repo cannot be cloned without a token; the error now says so and where the list is.
+  - path: docs/workflows.md
+    stage: output
+    old: "listed in `evals/rules-consistency.yml` (read-only, no token) and runs"
+    new: "listed in `evals/rules-consistency.yml` (read-only, no token, so each must be a public repo that exists: a private one fails the run with `could not clone`) and runs"
+    why: Rules-list. The workflow clones without a token; the doc now says what that needs.
 
 patches:
   - file: owner_constants.py
