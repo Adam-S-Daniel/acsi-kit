@@ -191,3 +191,30 @@ def test_stage_reports_a_substitution_that_refuses(tmp_path):
     (tmp_path / "bad.yml").write_text("a: [example-adopter-two\n")
     with pytest.raises(owner_forms.FormError, match="substitute.py exited"):
         owner_forms.stage(tmp_path, "t", "one")
+
+
+def test_stage_rebuilds_the_explorer_pages_after_the_zone(tmp_path):
+    # Re-pin round 24: explorer/display.json takes the zone and the pages embed
+    # it, so a staged skills-evals tree is rebuilt as copy-starter.sh does;
+    # stand-in npm and node record their calls (no network).
+    import json
+    import os
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls.log"
+    for tool in ("npm", "node"):
+        f = bin_dir / tool
+        f.write_text(f'#!/usr/bin/env bash\nprintf "{tool} %s|%s\\n" "$*" "$(cat display.json | tr -d "\\n ")" >> "{log}"\nmkdir -p node_modules\n')
+        f.chmod(0o755)
+    tree = tmp_path / "tree"
+    (tree / "explorer").mkdir(parents=True)
+    (tree / "explorer" / "display.json").write_text(json.dumps({"time_zone": "UTC", "issue_repos": ["example-adopter/skills-evals"]}, indent=1) + "\n")
+    env = dict(os.environ, PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    owner_forms.stage(tree, "skills-evals", "one", env=env)
+    zone = owner_forms.ZONES["one"]
+    calls = log.read_text().splitlines()
+    assert [c.split("|")[0] for c in calls] == [
+        "npm ci --ignore-scripts --no-audit --no-fund --silent", "node build.js", "node build.js --check"]
+    # Built from the file as the zone and the names left it.
+    assert all(f'"time_zone":"{zone}"' in c and "acme-solo/skills-evals" in c for c in calls), calls
+    assert not (tree / "explorer" / "node_modules").exists()
