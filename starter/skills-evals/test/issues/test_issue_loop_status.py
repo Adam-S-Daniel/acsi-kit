@@ -163,8 +163,10 @@ class ForecastTests(unittest.TestCase):
         doc["backlog_pairs"] = {"central": 24}
         doc["keep_up_items"] = {"new skills": 35.0, "new git hooks": 0.0, "re-checks": 35.0}
         doc["inputs"]["cap_steps"] = {"weekly_cap_points": 25.0, "after_loop_jobs_points": 16.0,
-                                      "after_account_stop_points": 16.0,
+                                      "improve_points": 3.0, "after_improve_points": 13.0,
+                                      "after_account_stop_points": 13.0,
                                       "account_stop_basis": "pace_replay"}
+        doc["inputs"]["improve"] = {"points_per_week": 3.0, "runs": 2}
         doc["inputs"]["assumptions"]["start"] = "2026-11-23T17:00:00Z"
         c = loop_status.forecast_block(doc)["calculation"]
         self.assertEqual([r["subject"] for r in c["subjects"]], ["b", "a"])  # largest first
@@ -175,6 +177,9 @@ class ForecastTests(unittest.TestCase):
                           c["after_loop_jobs_points"], c["capacity_basis"]),
                          (25.0, 9.0, 16.0, "pace_replay"))
         self.assertAlmostEqual(c["capacity_points"], 20.0)
+        self.assertEqual((c["improve_points"], c["after_improve_points"]), (3.0, 13.0))
+        self.assertEqual(loop_status.forecast_block(doc)["improve_points_per_week"], 3.0)
+        self.assertIsNone(loop_status.forecast_block(FORECAST)["improve_points_per_week"])
         self.assertEqual([i["item"] for i in c["keep_up_items"]], ["new skills", "re-checks"])
         self.assertAlmostEqual(c["keep_up_points"], 10.0)
         self.assertAlmostEqual(c["room_points"], 10.0)
@@ -198,6 +203,74 @@ class ForecastTests(unittest.TestCase):
             self.assertEqual(doc["loop_meter_points_per_week"], 8.5)
             self.assertEqual(doc["categories"], [])
             self.assertIsNone(loop_status.loop_jobs_input(tree / "none", tree / "x.json"))
+
+
+class BasisWindowTests(unittest.TestCase):
+    """The page can switch between basis windows (evals/forecast.yml), so
+    `collect` precomputes each one (the owner, 2026-11-26)."""
+
+    def windowed(self, days, keep_up_usd):
+        doc = json.loads(json.dumps(FORECAST))
+        doc["keep_up_usd_per_week"] = keep_up_usd
+        doc["inputs"]["basis_window"] = {"days": days, "meter_days_covered": min(days, 24.0)}
+        return doc
+
+    def test_every_window_is_shown_and_the_default_is_named(self):
+        doc = self.windowed(28, 70.0)
+        doc["by_window"] = {"56": self.windowed(56, 63.0), "14": self.windowed(14, 77.0),
+                            "28": self.windowed(28, 70.0)}
+        got = loop_status.forecast_section(doc)
+        self.assertEqual(got["basis_window_days"], 28)
+        self.assertEqual(list(got["by_window"]), ["14", "28", "56"])
+        self.assertAlmostEqual(got["by_window"]["14"]["keep_up_points_per_week"], 11.0)
+        self.assertEqual(got["by_window"]["56"]["basis_meter_days"], 24.0)
+        self.assertNotIn("by_window", got["by_window"]["28"])
+
+    def test_a_document_from_before_the_window_still_shows(self):
+        got = loop_status.forecast_section(json.loads(json.dumps(FORECAST)))
+        self.assertEqual(got["by_window"], {})
+        self.assertIsNone(got["basis_window_days"])
+        self.assertIsNone(loop_status.forecast_section(None))
+
+    def test_collect_runs_the_forecast_once_per_window(self):
+        import forecast_catch_up
+        basis = forecast_catch_up.load_basis(ROOT / "evals")
+        seen = []
+
+        def fake_main(argv):
+            days = int(argv[argv.index("--basis-days") + 1])
+            seen.append(days)
+            out = Path(argv[argv.index("--out-json") + 1])
+            out.write_text(json.dumps(self.windowed(days, 10.0 * days)), encoding="utf-8")
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                unittest.mock.patch.object(loop_status, "fetch_gates", return_value=Path(tmp) / "g"), \
+                unittest.mock.patch.object(loop_status, "shallow"), \
+                unittest.mock.patch.object(loop_status, "loop_jobs_input", return_value=None), \
+                unittest.mock.patch.object(forecast_catch_up, "main", side_effect=fake_main):
+            out = loop_status.run_forecast(Path(tmp), Path(tmp), None, NOW)
+            doc = json.loads(out.read_text(encoding="utf-8"))
+            self.assertFalse((Path(tmp) / "forecast.tmp.json").exists())
+        self.assertEqual(seen, basis["choices"])
+        self.assertEqual(doc["inputs"]["basis_window"]["days"], basis["days"])
+        self.assertEqual(sorted(doc["by_window"], key=int), [str(d) for d in basis["choices"]])
+        self.assertEqual(doc["as_of"], loop_status.iso(NOW))
+        self.assertEqual(loop_status.forecast_section(doc)["by_window"][str(basis["choices"][0])]
+                         ["basis_window_days"], basis["choices"][0])
+
+    def test_a_failed_window_keeps_the_previous_forecast(self):
+        import forecast_catch_up
+        with tempfile.TemporaryDirectory() as tmp, \
+                unittest.mock.patch.object(loop_status, "fetch_gates", return_value=Path(tmp) / "g"), \
+                unittest.mock.patch.object(loop_status, "shallow"), \
+                unittest.mock.patch.object(loop_status, "loop_jobs_input", return_value=None), \
+                unittest.mock.patch.object(forecast_catch_up, "main", return_value=2):
+            (Path(tmp) / "forecast.json").write_text("{}", encoding="utf-8")
+            with self.assertRaises(RuntimeError) as raised:
+                loop_status.run_forecast(Path(tmp), Path(tmp), None, NOW)
+            self.assertEqual((Path(tmp) / "forecast.json").read_text(encoding="utf-8"), "{}")
+        self.assertIn("basis window", str(raised.exception))
 
 
 @pytest.mark.real_loop_reserve
