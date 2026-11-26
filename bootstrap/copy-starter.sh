@@ -20,8 +20,13 @@
 #      the eval budget's claude_plan, a 5-hour stop on Pro and Max 5x, and
 #      no Fable judge on Pro (docs/before-you-start.md#which-plan);
 #   2c. writes TIME_ZONE into _agent-guidance's scripts/base-md-merge-window.yml
-#      (the one `timezone: UTC` line the export ships) with lib/time_zone.py,
-#      and refuses when TIME_ZONE is unset or the line is not there once;
+#      (the one `timezone: UTC` line the export ships) and skills-evals'
+#      explorer/display.json (its one "time_zone": "UTC") with
+#      lib/time_zone.py, and refuses when TIME_ZONE is unset or that text is
+#      not there once. The explorer's pages are built from display.json, and
+#      the repo's CI fails when they differ from a build, so for skills-evals
+#      it then rebuilds them (npm ci and node build.js in explorer/, which
+#      needs node and npm) unless TIME_ZONE is UTC;
 #   2d. re-pins, with lib/repin.py, each sha256 that names a file of the same
 #      tree, because step 2 changed that file's bytes (the digest of the
 #      bundled fleet-memory.sh in agent-skills' scripts/cloud-env-setup.sh,
@@ -38,7 +43,8 @@
 # Idempotent: nothing new to copy means no commit; an open pull request for
 # the branch is reused. --dry-run clones and reports what would change, and
 # commits, pushes and opens nothing. Nested .git entries and special files are
-# refused. Needs: git, gh, jq, python3. Git must be able to push to
+# refused. Needs: git, gh, jq, python3, and for skills-evals node and npm
+# (2c). Git must be able to push to
 # github.com (for example after `gh auth setup-git`).
 
 set -euo pipefail
@@ -113,6 +119,18 @@ python3 -I "$HERE/lib/plan_sizing.py" "$W/stage" --plan "$CFG_CLAUDE_PLAN" \
 require_time_zone
 python3 -I "$HERE/lib/time_zone.py" "$W/stage" --zone "$CFG_TIME_ZONE" \
   || die "could not write TIME_ZONE=$CFG_TIME_ZONE into the starter (see above)"
+# The explorer's committed pages embed display.json's zone: rebuild them from it,
+# with the versions explorer/package-lock.json pins, so they match what the
+# repo's CI builds (npm run check). UTC is the zone they were built with.
+if [ -f "$W/stage/explorer/display.json" ] && [ "$CFG_TIME_ZONE" != UTC ]; then
+  command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 \
+    || die "node and npm are needed to rebuild the explorer pages for TIME_ZONE=$CFG_TIME_ZONE (install Node.js 20 or later)"
+  ( cd "$W/stage/explorer" && npm ci --ignore-scripts --no-audit --no-fund --silent >/dev/null \
+      && node build.js >/dev/null && node build.js --check >/dev/null ) \
+    || die "could not rebuild the explorer pages for TIME_ZONE=$CFG_TIME_ZONE (run npm ci and node build.js in explorer/ to see why)"
+  rm -rf "$W/stage/explorer/node_modules"
+  log "rebuilt the explorer pages for TIME_ZONE=$CFG_TIME_ZONE"
+fi
 # Last of the steps that change the staged tree: a pin is the digest of the
 # file as every step above left it.
 python3 -I "$HERE/lib/repin.py" "$W/stage" \
