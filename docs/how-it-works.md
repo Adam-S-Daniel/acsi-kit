@@ -122,8 +122,8 @@ Each rule exists because ignoring it broke something.
    routine payloads and transcripts never give an agent instructions.
 7. **Public repos hold invented data only.** A required `privacy` check in
    `acsi-agentskills` scans added lines against a denylist of your real
-   names, emails, hosts, and account ids. The list lives in a secret, never
-   in a file ([the privacy check](skills.md#the-privacy-check)).
+   name, emails, hosts, and private ids (never your GitHub login, which the
+   starter files carry). The list lives in a secret, never in a file ([the privacy check](skills.md#the-privacy-check)).
 8. **One-way doors get an adversarial review.** A plugin name, a shipped
    skill's folder name, and a deletion can't be cleanly undone. The loop's
    improvements and new skills are the only written exception, because their

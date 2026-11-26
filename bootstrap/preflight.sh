@@ -2,9 +2,11 @@
 # preflight.sh [--config fleet.env] [--track base|evals|all]
 #
 # Read-only, and only about THIS machine: whether the tools the other scripts
-# call are installed (and new enough), whether gh is signed in as OWNER with
-# the scopes a push of workflow files needs, and whether the kit sits where
-# the scripts want it. It installs nothing, makes no write call to GitHub and
+# call are installed (and new enough; tar for the README's update block),
+# whether gh is signed in as OWNER with the scopes a push of workflow files
+# needs, whether git has a credential helper for https pushes (a FAIL without
+# one; a WARN when it is not gh's, gh auth setup-git), and whether the kit
+# sits where the scripts want it. It installs nothing, makes no write call to GitHub and
 # writes nothing outside its own temp dir. Run it before step 2.
 #
 # Prints one line per check, PASS, FAIL, WARN or SKIP, and under every FAIL
@@ -165,10 +167,27 @@ check_gh() {
     helpers=$({ git config --get-all credential.https://github.com.helper; git config --get-all credential.helper; } 2>/dev/null || true)
     if [[ $helpers == *"auth git-credential"* ]]; then
       pass "git pushes over https with gh's credential"
+    elif [ -z "${helpers//[[:space:]]/}" ]; then
+      # Every push needs a helper: the scripts push with GIT_TERMINAL_PROMPT=0,
+      # so without one git cannot ask for a password and the push fails.
+      fail "git has no credential helper for https pushes, which every script that pushes needs (copy-starter.sh from step 4, regenerate.sh)"
+      fix "gh auth setup-git"
     else
-      warn_ "git is not set up to use gh's credential for https pushes"
+      # Another helper (osxkeychain, Git Credential Manager) can push, but as
+      # whatever account it holds, which may not be the one gh is signed in as.
+      warn_ "git pushes with another credential helper, not gh's, so a push goes as whatever account that helper holds; gh's pushes as the account gh is signed in as (OWNER)"
       fix "gh auth setup-git"
     fi
+  fi
+}
+
+# tar: the README's update block ("Update your copy of the kit") unpacks the
+# newest bootstrap/ with it, and update-kit.sh needs it.
+check_tar() {
+  if have tar; then
+    pass "tar is installed"
+  else
+    check_missing tar fail "the README's update block and update-kit.sh unpack the newest kit with it" "$(install_cmd tar "" tar tar https://www.gnu.org/software/tar/)"
   fi
 }
 
@@ -314,6 +333,7 @@ pass "bash ${BASH_VERSION%%[^0-9.]*} (4.4 or newer needed; lib/common.sh enforce
 check_git
 check_gh
 check_jq
+check_tar
 check_python
 check_node
 check_claude

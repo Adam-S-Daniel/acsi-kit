@@ -34,9 +34,13 @@
 #                   "by_hand" verify checks)
 #   values:<group>  privacy (PRIVACY_DENYLIST in acsi-agentskills) or routine-fire
 #                   (the eval routine's bearer and trigger id), by name only
-#   fleet-worker    _agent-guidance's FLEET_WORKER_FIRE_URL is set and is not
-#                   none (create-environments.sh's "not set up yet" value),
+#   fleet-worker    _agent-guidance's FLEET_WORKER_FIRE_URL is a routine fire
+#                   URL, https://api.anthropic.com/v1/claude_code/routines/
+#                   trig_<id>/fire (not none, create-environments.sh's "not
+#                   set up yet" value, and not the routine's claude.ai page),
 #                   and its FLEET_WORKER_FIRE_BEARER secret is set (by name)
+#   prompt-audit    the same for the prompt-audit sweep (step 28):
+#                   PROMPT_AUDIT_SWEEP_FIRE_URL and PROMPT_AUDIT_SWEEP_FIRE_BEARER
 #   settings        repo-settings' engine reports no drift from fleet.yml
 #                   (apply-settings.sh --check, which clones repo-settings)
 #   regen:<task>    a regenerate.sh task is done on your default branches
@@ -56,7 +60,7 @@
 # passes each step's own track.
 #
 # Without --only: repos, labels, branches, environments, variables, every App, its
-# installation and every values group (the fast ones; settings and regen:* clone repos, so
+# installation, every values group, fleet-worker and prompt-audit (the fast ones; settings and regen:* clone repos, so
 # name them, and federation is optional, so name it too), and content once
 # add-content.sh has recorded your choices. Secret and variable values are never read or printed; the
 # variables group compares a value to fleet.env's without printing either.
@@ -91,12 +95,12 @@ if [ -n "$ONLY" ]; then
   IFS=',' read -r -a only_list <<<"$ONLY"
   for g in "${only_list[@]}"; do
     case $g in
-      repos|labels|branches|environments|variables|federation|settings|content|fleet-worker) ;;
+      repos|labels|branches|environments|variables|federation|settings|content|fleet-worker|prompt-audit) ;;
       apps:*) app_known "${g#apps:}" || die "unknown App in --only: ${g#apps:}" ;;
       installs:*) app_known "${g#installs:}" || die "unknown App in --only: ${g#installs:}" ;;
       values:*) group_known "${g#values:}" || die "unknown values group in --only: ${g#values:}" ;;
       regen:*) task_known "${g#regen:}" || die "unknown regenerate task in --only: ${g#regen:}" ;;
-      *) die "unknown group in --only: $g (repos, labels, branches, environments, variables, federation, apps:<app>, installs:<app>, values:<group>, settings, fleet-worker, regen:<task>, content)" ;;
+      *) die "unknown group in --only: $g (repos, labels, branches, environments, variables, federation, apps:<app>, installs:<app>, values:<group>, settings, fleet-worker, prompt-audit, regen:<task>, content)" ;;
     esac
     SEL[$g]=1
   done
@@ -258,9 +262,9 @@ installs_by_hand() {
   for id in $ids; do grep -qxF -- "$id" <<<"$done_ids" || missing+="$id "; done
   if [ "$installed" = fleet ]; then repos=$(track_repos "$TRACK" | sed "s|^|$O/|" | paste -sd, - | sed 's/,/, /g'); else repos=""; for id in $installed; do repos+="${repos:+, }$O/$id"; done; fi
   if [ -n "$ids" ] && [ -z "$missing" ]; then
-    pass "$app App's installation on $repos: confirmed by you (status.sh --mark $(paste -sd' ' <<<"$ids")); gh's sign-in cannot read installations (HTTP 403)"
+    pass "$app App's installation on $repos: confirmed by you (status.sh --mark $(paste -sd' ' - <<<"$ids")); gh's sign-in cannot read installations (HTTP 403)"
   else
-    fail "$app App's installation: gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: ${CFG_APP_NAME_PREFIX}-$app must have access to $repos. Then: bash bootstrap/status.sh --mark ${missing% }"
+    fail "$app App's installation: gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: ${CFG_APP_NAME_PREFIX}-$app must have access to $repos. Then: bash bootstrap/status.sh$(config_arg) --mark ${missing% }"
   fi
 }
 INSTALLS=""
@@ -313,25 +317,38 @@ for entry in "${OTHER_VALUES[@]}"; do
   has_name "$kind" "$r" "$e" "$name"
 done
 
-# The Fleet worker's fire URL and bearer (step 27, by hand from the routine's
-# API trigger). Until then create-environments.sh leaves the URL `none` and
+# A routine's fire URL and bearer on _agent-guidance, set by hand from its API
+# trigger (steps 27 and 28). The URL is a variable, compared with the shape
+# fleet-worker-fire.yml and prompt-audit-fire.yml post to and never printed;
+# the bearer is a secret, checked by name. Until step 27,
+# create-environments.sh leaves FLEET_WORKER_FIRE_URL `none` and
 # fleet-worker-fire.yml skips the fire with a notice, so this is where the
-# step shows as not done. The URL is a variable (its value is compared with
-# none, never printed); the bearer is a secret (its name only).
-if sel fleet-worker && tracked base && [ "${EXISTS[_agent-guidance]:-0}" = 1 ]; then
+# step shows as not done. A routine's claude.ai page URL is the usual wrong
+# paste: it has the same trig_ id, and a fire posted to it fails.
+FIRE_URL_RE='^https://api\.anthropic\.com/v1/claude_code/routines/trig_[A-Za-z0-9]{1,64}/fire$'
+PAGE_URL_RE='^https://claude\.ai/code/routines/trig_'
+fire_values() { # url-variable bearer-secret step routine
+  local url at="$O/_agent-guidance variable $1"
+  url=$(awk -F'\t' -v n="$1" '$1 == n { print substr($0, length(n) + 2); exit }' <<<"$REPO_VARS_OUT")
+  if [ -z "$url" ]; then fail "$at is not set (step $3 sets it to the $4 routine's fire URL)"
+  elif [ "$url" = none ]; then fail "$at is still none: step $3 creates the $4 routine and sets its fire URL"
+  elif [[ $url =~ $FIRE_URL_RE ]]; then pass "$at is a routine fire URL"
+  else
+    fail "$at is not a routine fire URL$([[ ! $url =~ $PAGE_URL_RE ]] || echo " (it is the routine's page on claude.ai)"): copy the URL the $4 routine's API trigger shows, https://api.anthropic.com/v1/claude_code/routines/trig_<id>/fire, and set it again (bootstrap/README.md, \"Variables and secrets set by hand\")"
+  fi
+  has_name secret _agent-guidance - "$2"
+}
+if { sel fleet-worker || sel prompt-audit; } && tracked base && [ "${EXISTS[_agent-guidance]:-0}" = 1 ]; then
   if repo_variables "$O/_agent-guidance"; then
-    url=$(awk -F'\t' '$1 == "FLEET_WORKER_FIRE_URL" { print substr($0, length($1) + 2); exit }' <<<"$REPO_VARS_OUT")
-    if [ -z "$url" ]; then fail "$O/_agent-guidance variable FLEET_WORKER_FIRE_URL is not set (step 27 sets it to the Fleet worker routine's fire URL)"
-    elif [ "$url" = none ]; then fail "$O/_agent-guidance variable FLEET_WORKER_FIRE_URL is still none: step 27 creates the Fleet worker routine and sets its fire URL"
-    else pass "$O/_agent-guidance variable FLEET_WORKER_FIRE_URL is set"; fi
+    ! sel fleet-worker || fire_values FLEET_WORKER_FIRE_URL FLEET_WORKER_FIRE_BEARER 27 "Fleet worker"
+    ! sel prompt-audit || fire_values PROMPT_AUDIT_SWEEP_FIRE_URL PROMPT_AUDIT_SWEEP_FIRE_BEARER 28 "prompt-audit sweep"
   else fail "$O/_agent-guidance variables readable (HTTP $GH_HTTP)"; fi
-  has_name secret _agent-guidance - FLEET_WORKER_FIRE_BEARER
 fi
 
 sub_check() { # description cmd...
   local out="$BOOT_WORK/sub.out" d=$1; shift
   if "$@" >"$out" 2>&1; then pass "$d"
-  else fail "$d:"; sed -n 's/^\(NOT DONE\|ERROR\|MISSING\|WARNING\): /    &/p' "$out" | head -n 20; fi
+  else fail "$d:"; sed -nE 's/^(NOT DONE|ERROR|MISSING|WARNING): /    &/p' "$out" | head -n 20; fi
 }
 if sel settings off; then
   while IFS= read -r o; do

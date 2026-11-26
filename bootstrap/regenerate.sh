@@ -484,6 +484,6 @@ case $TASK in
 esac
 if [ "$CHECK" = 1 ]; then
   if [ "$NOT_DONE" = 0 ]; then log "$TASK: done"; exit 0; fi
-  log "$TASK: $NOT_DONE item(s) not done; run bootstrap/regenerate.sh $TASK"; exit 1
+  log "$TASK: $NOT_DONE item(s) not done; run bootstrap/regenerate.sh$(config_arg) $TASK"; exit 1
 fi
 finish

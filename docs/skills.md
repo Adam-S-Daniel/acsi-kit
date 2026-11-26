@@ -131,8 +131,9 @@ there. Never approve it for an agent.
 The registries' predecessor was retired because its git history contained
 personal data. Now `acsi-agentskills`' required `privacy` job scans every
 tracked file's path and text, plus a change's commit messages, author
-identities, and branch name, against a denylist of your real names, emails,
-hosts, and account ids. The list is the repository secret
+identities, and branch name, against a denylist of your real name, emails,
+hosts, and private ids, never your GitHub login or the public handle in
+`OWNER_NAME`. The list is the repository secret
 `PRIVACY_DENYLIST`, never a file in a repo. The script prints only
 `file:line` and the pattern's number, never the match, and it fails closed
 without the secret, including on a fork's pull request.
@@ -156,11 +157,17 @@ to the scan, which only warns there.
 Write the list to a file outside every repo, with one regular expression per
 line, and store it before the `acsi-agentskills` starter pull request. Each
 line is a Python regular expression, matched in any letter case. Blank lines
-and lines that start with `#` are skipped. A sample, with invented values:
+and lines that start with `#` are skipped. List your real name, emails, hosts,
+and private ids. Never list your GitHub login or the public handle in
+`OWNER_NAME`: `copy-starter.sh` writes them, and the Apps' names built from
+them, into dozens of starter files, so every scan that reads the list would
+fail on every pull request. `set-secrets.sh` refuses a line that matches any
+of them, naming the line's number and the `fleet.env` key it matched. A
+sample, with invented values:
 
 ```text
-# names and handles
-example[ ._-]?adopter
+# your real name
+river[ ._-]?quinn
 # email domains and machine names
 example\.net
 example-laptop

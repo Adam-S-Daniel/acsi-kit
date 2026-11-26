@@ -70,7 +70,7 @@ while IFS= read -r o; do [ "${o,,}" = "${TARGET,,}" ] && known=1; done < <(owner
 [ "$known" = 1 ] || die "--owner must be OWNER or OWNER_TWO from fleet.env"
 # -I, as the engine itself runs: it hides a `pip install --user` copy, so a
 # plain probe could pass and the engine still fail.
-python3 -I -c 'import yaml' 2>/dev/null || die "the engine needs PyYAML where python3 -I can import it (a pip install --user copy is not visible there); bash bootstrap/preflight.sh says how to install it"
+python3 -I -c 'import yaml' 2>/dev/null || die "the engine needs PyYAML where python3 -I can import it (a pip install --user copy is not visible there); bash bootstrap/preflight.sh$(config_arg) says how to install it"
 
 [ -n "$CFG_GUIDANCE_SYNC_APP_ID" ] || die "GUIDANCE_SYNC_APP_ID empty in fleet.env: fleet.yml names that App as a ruleset bypass actor and the engine refuses to plan without it. Run create-apps.sh first."
 
