@@ -15,7 +15,11 @@
 #       git merge-base --is-ancestor (a refused commit can still let a push
 #       succeed), and open a pull request unless one is open for the branch,
 #       printing its URL. In a dry run it commits nothing and prints what it
-#       would do.
+#       would do. It refuses a branch that already holds a commit authored or
+#       committed under another email than the kit's (an older kit's commit
+#       under git's own identity, say): reusing it would publish that
+#       identity. GitHub's own committer address, noreply@github.com (the
+#       "Update branch" button), is allowed.
 
 start_branch() {
   local dir=$1 default=$2 branch=$3 G=(git -C "$1")
@@ -30,8 +34,12 @@ start_branch() {
 
 open_pr() {
   local dir=$1 repo=$2 default=$3 branch=$4 title=$5 body=$6; shift 6
-  local G=(git -C "$dir") base sha open url
+  local G=(git -C "$dir") base sha open url ids others
   [ "$("${G[@]}" rev-parse --abbrev-ref HEAD)" = "$branch" ] || die "open_pr: not on $branch (call start_branch first)"
+  kit_git_identity
+  ids=$("${G[@]}" log --format='%ae%n%ce' "origin/$default..HEAD") || die "could not read the commits on $branch"
+  others=$(grep -vxF -e "$KIT_GIT_EMAIL" -e noreply@github.com <<<"$ids" || true)
+  [ -z "$others" ] || die "$repo's branch $branch holds a commit made under another identity than the kit's ($KIT_GIT_NAME and your noreply address), likely by an older kit under git's own user.name and user.email; merging it would publish that for good. Close its pull request if one is open, delete the branch (gh api -X DELETE repos/$repo/git/refs/heads/$branch), then run this again"
   "${G[@]}" add -A -- "$@"
   if "${G[@]}" diff --cached --quiet; then
     if [ -z "$("${G[@]}" rev-list "origin/$default..HEAD" 2>/dev/null)" ]; then

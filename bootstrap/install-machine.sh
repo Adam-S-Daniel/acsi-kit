@@ -147,9 +147,9 @@ fi
 # The local denylist, where the hooks just installed and the session miner
 # read it. A warning only: without it they check this machine's own names.
 if [ -n "${PRIVACY_DENYLIST_FILE:-}" ]; then
-  [ -r "$PRIVACY_DENYLIST_FILE" ] || warn "PRIVACY_DENYLIST_FILE names $PRIVACY_DENYLIST_FILE, which cannot be read: the pre-push privacy check and the write-marker hook check only this machine's own names, and the session miner (step 22) refuses to run"
+  [ -r "$PRIVACY_DENYLIST_FILE" ] || warn "PRIVACY_DENYLIST_FILE names $PRIVACY_DENYLIST_FILE, which cannot be read: the pre-push privacy check and the write-marker hook check only this machine's own names, and the session miner (evals step 42) refuses to run"
 elif [ ! -r "$HOME/.config/privacy-denylist.txt" ]; then
-  warn "no privacy denylist at ~/.config/privacy-denylist.txt: without it the pre-push privacy check and the write-marker hook check only this machine's own names, and the session miner (step 22) refuses to run. Copy step 3's file there (mkdir -p ~/.config first if the folder is missing; docs/skills.md, \"The privacy check\")"
+  warn "no privacy denylist at ~/.config/privacy-denylist.txt: without it the pre-push privacy check and the write-marker hook check only this machine's own names, and the session miner (evals step 42) refuses to run. Copy step 3's file there (mkdir -p ~/.config first if the folder is missing; docs/skills.md, \"The privacy check\")"
 fi
 detect_os
 if [ "$IS_WSL" = 1 ]; then

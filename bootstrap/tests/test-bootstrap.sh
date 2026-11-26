@@ -1147,6 +1147,18 @@ assert_eq "copy-starter dry run opens nothing" "$(since "$n")" 0
 # may be a real name and a private email that public history keeps for good.
 KIT_IDENT="Acme Example <$(uid_of "$O")+$O@users.noreply.github.com>"
 assert "the dry run says who the commit would be by" has "$OUT" "as $KIT_IDENT"
+# A branch an older kit pushed under git's own identity is refused, not
+# reused: merging it would publish that identity.
+t=$(tree_of wsl-automation); g="$T/remotes/$O/wsl-automation.git"; w="$T/tmp/old-kit"
+git clone -q "$g" "$w" && printf 'old\n' > "$w/old.txt" && git -C "$w" add old.txt && git -C "$w" commit -qm old \
+  && git -C "$w" push -q origin "HEAD:refs/heads/starter/$t"; rm -rf "$w"
+n=$(log_lines "$GH_LOG")
+run bash "$B/copy-starter.sh" --config "$CFGP" "starter/$t" "$O/wsl-automation"; rc=$?
+assert_eq "copy-starter refuses a branch holding a commit under another identity" "$rc" 1
+assert "it says to delete the branch" has "$ERR" "gh api -X DELETE repos/$O/wsl-automation/git/refs/heads/starter/$t"
+assert_not "it does not print that identity" has "$ERR" "test-user@example.com"
+assert_eq "it opens no pull request" "$(since "$n")" 0
+git --git-dir="$g" update-ref -d "refs/heads/starter/$t"
 # Before any starter is merged no repo has its actions.lock: step 18's check
 # is not done yet (it once passed vacuously from step 2 on).
 run bash "$B/regenerate.sh" --config "$CFGP" --check actions-lock; rc=$?

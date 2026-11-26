@@ -97,7 +97,7 @@ get_denylist() {
     IFS= read -r DENYLIST || die "no path given"
   fi
   DENYLIST=${DENYLIST/#\~/$HOME}
-  [ -f "$DENYLIST" ] || die "the denylist path is not a file: write one regular expression per line to a file outside every repo (docs/skills.md, \"The privacy check\") and give its path"
+  [ -f "$DENYLIST" ] || die "the denylist path is not a file: write one regular expression per line to a file outside every repo, best ~/.config/privacy-denylist.txt (mkdir -p ~/.config first if that folder is missing; docs/skills.md, \"The privacy check\"), and give its path"
   local dir; dir=$(cd "$(dirname "$DENYLIST")" && pwd)
   if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     die "the denylist is inside a git work tree; keep it outside every repo"
