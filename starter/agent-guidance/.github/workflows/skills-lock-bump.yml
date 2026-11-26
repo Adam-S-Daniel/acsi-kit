@@ -202,7 +202,24 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.token_example_adopter.outputs.token || github.token }}
 
+      # The kit: from the _agent-guidance merge (quick start step 10) until
+      # the registry's starter is merged (step 12), acsi-agentskills holds
+      # only the README create-repos.sh wrote, and both passes below would
+      # fail on it. That one state, and only it, reads as not set up yet.
+      - name: Is the skills registry set up yet?
+        id: registry
+        env:
+          REGISTRY_DIR: registries/acsi-agentskills
+        run: |
+          if [[ "$(git -C "$REGISTRY_DIR" ls-files)" == README.md ]]; then
+            echo "::notice::not set up yet: the skills registry holds only its first README, so no lock or hook pin was bumped. The kit's quick start step 12 copies the registry there."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Bump consumer locks
+        if: steps.registry.outputs.ready == 'true'
         env:
           # Per-owner installation tokens minted above, consumed by the
           # script's GH_TOKEN_<OWNER> resolution. No shared GH_TOKEN fallback
@@ -273,7 +290,9 @@ jobs:
           # Through the environment, never interpolated into the `run:` body —
           # same rule, same incident, as the step above.
           DRY_RUN: ${{ inputs.dry_run }}
+          REGISTRY_READY: ${{ steps.registry.outputs.ready }}
         run: |
+          if [[ "$REGISTRY_READY" == false ]]; then exit 0; fi
           chmod +x scripts/bump-hook-pin.sh
           if [[ "$DRY_RUN" == "true" ]]; then
             ./scripts/bump-hook-pin.sh --dry-run

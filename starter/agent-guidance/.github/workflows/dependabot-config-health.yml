@@ -83,6 +83,21 @@ jobs:
           permission-pull-requests: read
           permission-issues: write
 
+      # The kit: quick start step 7 (the App installations) can be marked done
+      # by hand, so a missing installation is named here, with what to do.
+      - name: Name a missing App installation
+        env:
+          GH_TOKEN_EXAMPLE_ADOPTER: ${{ steps.token_example_adopter.outputs.token }}
+          GH_TOKEN_EXAMPLE_ADOPTER_TWO: ${{ steps.token_example_adopter_two.outputs.token }}
+          SYNC_OWNERS: "example-adopter example-adopter-two"
+        run: |
+          for owner in $SYNC_OWNERS; do
+            key="GH_TOKEN_$(tr 'a-z-' 'A-Z_' <<<"$owner")"
+            if [[ -z "${!key:-}" ]]; then
+              echo "::error::No installation token for $owner: is the guidance-sync App installed there? Check https://github.com/settings/installations. If the kit's quick start step 7 was marked done by hand, run bash bootstrap/status.sh --unmark 7 and install it."
+            fi
+          done
+
       # NO plain GH_TOKEN / github.token fallback: the default token cannot
       # write issues in another repo and would silently downgrade this run to
       # a partial read instead of a named per-owner failure. NOTHING is

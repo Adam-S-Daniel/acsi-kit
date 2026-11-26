@@ -158,14 +158,15 @@ for plan in pro max5x ultra max20x; do
     "$(case $plan in pro) echo 168;; *) echo 24;; esac)"
 done
 # The starter's fire workflow must accept each plan's value: run its step by
-# hand with nothing configured, so it stops at "not configured", after the
-# value check and before any network call.
+# hand with a URL but no bearer, so it stops at "not configured", after the
+# value check and before any network call (with no URL at all, the Fleet
+# worker is "not set up yet" and exits 0 before that point).
 python3 -I -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["jobs"]["fire"]["steps"][0]["run"])' \
   "$B/../starter/agent-guidance/.github/workflows/fleet-worker-fire.yml" > "$T/fire-step.sh"
 for plan in pro max5x max20x; do
   hours=$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")
-  WORKER=fleet EVERY_REQUIRED=false EVERY_VAR=FLEET_WORKER_EVERY_HOURS URL_VAR=FLEET_WORKER_FIRE_URL BEARER_VAR=FLEET_WORKER_FIRE_BEARER FLEET_BEARER= LOOP_BEARER= EVERY_HOURS=$hours GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL= bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
-  assert "the starter's fire workflow accepts $plan's $hours hours" has "$T/fire-step.out" "not configured"
+  WORKER=fleet EVERY_REQUIRED=false EVERY_VAR=FLEET_WORKER_EVERY_HOURS URL_VAR=FLEET_WORKER_FIRE_URL BEARER_VAR=FLEET_WORKER_FIRE_BEARER FLEET_BEARER= LOOP_BEARER= EVERY_HOURS=$hours GITHUB_EVENT_NAME=workflow_dispatch FIRE_URL=https://api.example.com/fire bash "$T/fire-step.sh" > "$T/fire-step.out" 2>&1
+  assert "the starter's fire workflow accepts $plan's $hours hours" has "$T/fire-step.out" "not configured: secret FLEET_WORKER_FIRE_BEARER"
 done
 for plan in pro max5x max20x; do
   hours=$(bash -c '. "$1"; loop_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")
@@ -925,6 +926,10 @@ run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --
 assert "with gh's sign-in, step 7 is done once answered" grep -qE '^done +7 ' "$OUT"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track evals --only installs:guidance-sync; rc=$?
 assert "the evals track's installation step needs its own answer" has "$OUT" "Then: bash bootstrap/status.sh --mark 34"
+run env GH_STUB_INSTALLATIONS_STATUS=401 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
+assert "a 401 says to sign in again" has "$OUT" "HTTP 401: gh's sign-in has expired or was revoked; run gh auth login, then this again"
+run env GH_STUB_INSTALLATIONS_STATUS=502 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
+assert "another status says to retry" has "$OUT" "HTTP 502: GitHub did not answer; check the network and run this again"
 # Install every App where it is needed.
 inst='[]'; i=0
 while IFS='|' read -r app _ installed _ _ _ _ key _; do
@@ -934,6 +939,19 @@ while IFS='|' read -r app _ installed _ _ _ _ key _; do
   inst=$(jq -c --argjson a "$id" --argjson i "$((70000 + i))" --argjson r "$repos" '. + [{id: $i, app_id: $a, account: {login: "acme-example"}, repos: $r}]' <<<"$inst")
 done < <(bash -c '. "$1/lib/common.sh"; printf "%s\n" "${APPS[@]}"' _ "$B")
 jqset ".installations = $inst"
+# Step 27's check: the Fleet worker's URL and bearer (fleet-worker-fire.yml
+# itself only notes an empty URL as "not set up yet").
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "verify --only fleet-worker fails before step 27" "$rc" 1
+assert "create-environments.sh left the URL none, and verify says step 27 sets it" has "$OUT" "FAIL: acme-example/_agent-guidance variable FLEET_WORKER_FIRE_URL is still none: step 27 creates the Fleet worker routine and sets its fire URL"
+assert_eq "create-environments.sh wrote the Loop worker's URL as none too" "$(jqs "$AG.LOOP_WORKER_FIRE_URL")" none
+assert "it names the missing bearer secret" has "$OUT" "FAIL: acme-example/_agent-guidance has secret FLEET_WORKER_FIRE_BEARER"
+printf 'https://api.example.com/fire' | gh variable set FLEET_WORKER_FIRE_URL --repo "$O/_agent-guidance" >/dev/null 2>&1
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "the URL alone is not enough" "$rc" 1
+printf 'fleet-bearer-placeholder' | gh secret set FLEET_WORKER_FIRE_BEARER --repo "$O/_agent-guidance" >/dev/null 2>&1
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "verify --only fleet-worker passes once both are set" "$rc" 0
 run bash "$B/verify.sh" --config "$CFGP"; rc=$?
 assert_eq "verify passes once everything is in place" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'
@@ -1376,7 +1394,7 @@ assert "it says the evals track was left out" has "$OUT" "SKIP: acme-example/ski
 # The shipped workflows' "off" branches, run from their parsed YAML.
 run python3 -I "$B/tests/check-workflow-gates.py"; rc=$?
 assert_eq "check-workflow-gates passes on the kit" "$rc" 0
-assert "it ran its 64 assertions" grep -qE '^64 assertions passed, 0 failed$' "$OUT"
+assert "it ran its 88 assertions" grep -qE '^88 assertions passed, 0 failed$' "$OUT"
 # No base starter workflow reads skills-evals unless EVALS_REPO gates it
 # (parsed YAML); its self-test proves the scan can fail.
 run python3 -I "$B/tests/check-evals-refs.py"; rc=$?

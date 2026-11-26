@@ -29,7 +29,9 @@ key, which no script creates. Its reads count as `fleet-apply`'s
 
 Also checked: an environment's value is read only in a job that runs in that
 environment, in the repo that holds it; a repository-level value only in its
-own repo; and the README lists no name a script already sets, nor one
+own repo; and the README lists no name a script already sets (except one a
+script only seeds with the placeholder `none`, a REPO_VARIABLES `unset:none`
+source, which the adopter then sets by hand), nor one
 nothing reads. Prints "N assertions passed" and exits 1 on any failure.
 """
 import re
@@ -76,8 +78,14 @@ for app, _perms, _inst, repo, idspec, env, sec, _key, _opt in registry("APPS"):
     SET_BY.setdefault(("secrets", sec), set()).add((repo, None if env == "-" else env))
 for repo, env, kind, name, _src in registry("OTHER_VALUES"):
     SET_BY.setdefault(("vars" if kind == "variable" else "secrets", name), set()).add((repo, None if env == "-" else env))
-for repo, name, _src, _group in registry("REPO_VARIABLES"):
+# A REPO_VARIABLES source of unset:none writes only a placeholder (`none`,
+# "not set up yet") while the variable is unset; a name the adopter then sets
+# by hand (a routine's fire URL) may be listed in the README too.
+PLACEHOLDER_ONLY = set()
+for repo, name, src, _group in registry("REPO_VARIABLES"):
     SET_BY.setdefault(("vars", name), set()).add((repo, None))
+    if src == "unset:none":
+        PLACEHOLDER_ONLY.add(name)
 check("every registry repo is a fleet repo", all(r in FLEET for v in SET_BY.values() for r, _ in v))
 envs = {(r, e) for r, e, _rev, _br in registry("ENVIRONMENTS")}
 check("every environment a value lives in is in ENVIRONMENTS",
@@ -135,7 +143,8 @@ check(f"the scan read the exported workflows ({n_files} files)", n_files >= 40)
 for key in sorted(SET_BY):
     check(f"a script sets {key[0]}.{key[1]}, and some workflow reads it", key in used)
 for name in sorted(MANUAL):
-    check(f"README lists {name} as by hand, but a script sets it", not any(n == name for _, n in SET_BY))
+    check(f"README lists {name} as by hand, but a script sets it",
+          name in PLACEHOLDER_ONLY or not any(n == name for _, n in SET_BY))
     check(f"README lists {name} as by hand, but no workflow reads it", any(n == name for _, n in used))
 
 print(f"{passed} assertions passed, {failed} failed")

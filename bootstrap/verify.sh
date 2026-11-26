@@ -34,6 +34,9 @@
 #                   "by_hand" verify checks)
 #   values:<group>  privacy (PRIVACY_DENYLIST in acsi-agentskills) or routine-fire
 #                   (the eval routine's bearer and trigger id), by name only
+#   fleet-worker    _agent-guidance's FLEET_WORKER_FIRE_URL is set and is not
+#                   none (create-environments.sh's "not set up yet" value),
+#                   and its FLEET_WORKER_FIRE_BEARER secret is set (by name)
 #   settings        repo-settings' engine reports no drift from fleet.yml
 #                   (apply-settings.sh --check, which clones repo-settings)
 #   regen:<task>    a regenerate.sh task is done on your default branches
@@ -88,12 +91,12 @@ if [ -n "$ONLY" ]; then
   IFS=',' read -r -a only_list <<<"$ONLY"
   for g in "${only_list[@]}"; do
     case $g in
-      repos|labels|branches|environments|variables|federation|settings|content) ;;
+      repos|labels|branches|environments|variables|federation|settings|content|fleet-worker) ;;
       apps:*) app_known "${g#apps:}" || die "unknown App in --only: ${g#apps:}" ;;
       installs:*) app_known "${g#installs:}" || die "unknown App in --only: ${g#installs:}" ;;
       values:*) group_known "${g#values:}" || die "unknown values group in --only: ${g#values:}" ;;
       regen:*) task_known "${g#regen:}" || die "unknown regenerate task in --only: ${g#regen:}" ;;
-      *) die "unknown group in --only: $g (repos, labels, branches, environments, variables, federation, apps:<app>, installs:<app>, values:<group>, settings, regen:<task>, content)" ;;
+      *) die "unknown group in --only: $g (repos, labels, branches, environments, variables, federation, apps:<app>, installs:<app>, values:<group>, settings, fleet-worker, regen:<task>, content)" ;;
     esac
     SEL[$g]=1
   done
@@ -288,7 +291,8 @@ for entry in "${APPS[@]}"; do
   sel "installs:$app" || continue
   if ! installs; then
     if [ "$GH_HTTP" = 403 ]; then installs_by_hand "$app" "$installed"
-    else fail "$app App: your installations readable (HTTP $GH_HTTP)"; fi
+    elif [ "$GH_HTTP" = 401 ]; then fail "$app App: your installations readable (HTTP 401: gh's sign-in has expired or was revoked; run gh auth login, then this again)"
+    else fail "$app App: your installations readable (HTTP $GH_HTTP: GitHub did not answer; check the network and run this again)"; fi
     continue
   fi
   iid=$(awk -F'\t' -v a="${!cfg}" -v o="${O,,}" '$1 == a && tolower($3) == o {print $2; exit}' <<<"$INSTALLS")
@@ -308,6 +312,21 @@ for entry in "${OTHER_VALUES[@]}"; do
   [ "${EXISTS[$r]:-0}" = 1 ] || continue
   has_name "$kind" "$r" "$e" "$name"
 done
+
+# The Fleet worker's fire URL and bearer (step 27, by hand from the routine's
+# API trigger). Until then create-environments.sh leaves the URL `none` and
+# fleet-worker-fire.yml skips the fire with a notice, so this is where the
+# step shows as not done. The URL is a variable (its value is compared with
+# none, never printed); the bearer is a secret (its name only).
+if sel fleet-worker && tracked base && [ "${EXISTS[_agent-guidance]:-0}" = 1 ]; then
+  if repo_variables "$O/_agent-guidance"; then
+    url=$(awk -F'\t' '$1 == "FLEET_WORKER_FIRE_URL" { print substr($0, length($1) + 2); exit }' <<<"$REPO_VARS_OUT")
+    if [ -z "$url" ]; then fail "$O/_agent-guidance variable FLEET_WORKER_FIRE_URL is not set (step 27 sets it to the Fleet worker routine's fire URL)"
+    elif [ "$url" = none ]; then fail "$O/_agent-guidance variable FLEET_WORKER_FIRE_URL is still none: step 27 creates the Fleet worker routine and sets its fire URL"
+    else pass "$O/_agent-guidance variable FLEET_WORKER_FIRE_URL is set"; fi
+  else fail "$O/_agent-guidance variables readable (HTTP $GH_HTTP)"; fi
+  has_name secret _agent-guidance - FLEET_WORKER_FIRE_BEARER
+fi
 
 sub_check() { # description cmd...
   local out="$BOOT_WORK/sub.out" d=$1; shift

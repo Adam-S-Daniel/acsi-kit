@@ -257,22 +257,24 @@ workflow isn't on the base branch yet:
 
 Nothing is protected before step 20, so these don't block the merge.
 
-Two things wait for a later step without failing: `repo-settings`' `plan` job
-prints a "not set up yet" notice and plans nothing until `create-apps.sh`
-sets `REPO_SETTINGS_READ_APP_CLIENT_ID` (step 6), and the scheduled runs that
-read `skills-evals` print a notice while `EVALS_REPO` is `none`
+These wait for a later step without failing, each with a "not set up yet"
+or "skipped" notice on its run: `repo-settings`' weekly `plan` plans nothing
+until `create-apps.sh` sets `REPO_SETTINGS_READ_APP_CLIENT_ID` (step 6; a
+merge to `repo-settings` before then still fails at the token mint);
+`_agent-guidance`'s `skills-lock-bump.yml` bumps nothing while
+`acsi-agentskills` holds only its first README (until step 12); `_agent-guidance`'s `fleet-worker-fire.yml` fires no Fleet worker while
+`FLEET_WORKER_FIRE_URL` is `none`, the value `create-environments.sh` writes
+until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
+27's check, reports it until then), and the same for the Loop worker's
+`LOOP_WORKER_FIRE_URL` until step 41; and the
+scheduled runs that read `skills-evals` skip while `EVALS_REPO` is `none`
 ([routines](routines.md#fleet-worker)).
 
-One scheduled run is expected to fail until a later step, and nothing else
-is:
-
-- `_agent-guidance`'s `fleet-worker-fire.yml`, Fleet worker leg, on its slot
-  (weekly on Pro, Tuesday 00:20 UTC): it fails naming `FLEET_WORKER_FIRE_URL`
-  and `FLEET_WORKER_FIRE_BEARER` until step 27 creates the routine and sets
-  them. The routine needs the cloud environment of step 23, which needs the
-  repos of steps 10 and 12, so the step cannot move earlier.
-
-Any other failure is real, so read it before you merge.
+No scheduled run is expected to fail while you set up the base. One push
+run is: merging `repo-settings`' starter pull request (step 4) runs its
+`plan`, which fails at the token mint until step 6 creates the settings-read
+App; the next Monday's scheduled plan, or a re-run after step 6, is green.
+Any other failure is real: read it before you merge.
 
 On `PLAN=free`, `create-apps.sh` skips the `settings-admin` App, so
 `REPO_SETTINGS_APP_CLIENT_ID` is never set in `repo-settings`. Both apply

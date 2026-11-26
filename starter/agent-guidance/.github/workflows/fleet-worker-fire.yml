@@ -29,6 +29,11 @@ name: Fire fleet worker
 #   missing-value checks, so a setup without the eval repository stays green.
 #   Unset or empty fails the Loop worker's fire naming it. The pace hold below
 #   reads the repository it names. The Fleet worker ignores it.
+# * A fire URL of `none` means that task is not set up yet: its fire exits 0
+#   with a notice naming the variable and the kit step that sets it, after
+#   the cadence check. bootstrap/create-environments.sh writes `none` only
+#   while the variable is not set at all, and the step that creates the
+#   routine overwrites it. An empty URL (never set, or deleted) still fails.
 # * Nothing from the event is interpolated into a `run:` block; the only
 #   `${{ }}` uses are the `env:` that hands the URL, bearer and cadence to
 #   the step.
@@ -158,6 +163,11 @@ jobs:
               echo "::notice::skipped: $EVERY_VAR is $EVERY_HOURS and the cron line '$line' is on the $slot-hour cadence"
               exit 0
             fi
+          fi
+          if [[ "$FIRE_URL" == none ]]; then
+            if [[ "$WORKER" == fleet ]]; then setup_step=27; else setup_step=41; fi
+            echo "::notice::not set up yet: variable $URL_VAR is none, so the $WORKER worker was not fired. Step $setup_step of the kit's quick start creates its routine and sets $URL_VAR and $BEARER_VAR."
+            exit 0
           fi
           missing=()
           [[ -n "$FIRE_URL" ]] || missing+=("variable $URL_VAR")

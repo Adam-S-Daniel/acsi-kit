@@ -116,9 +116,13 @@ configured, and you start the sweep by hand.
 cadence in `FLEET_WORKER_EVERY_HOURS`, which `create-environments.sh` sets
 from `CLAUDE_PLAN`: weekly (168) on Pro, every 12 hours on Max 5x, every 3
 hours on Ultra ([routines](../docs/routines.md#fleet-worker)). The workflow
-has no default for either value below, so if one is unset, each scheduled
-run fails and names it (until step 27 sets them, the one expected failure:
-docs/settings-and-apps.md, "Merging the starter pull requests").
+has no default for either value below. `create-environments.sh` sets
+`FLEET_WORKER_FIRE_URL` to `none` while it is not set at all, and each
+scheduled run then skips the fire with a "not set up yet" notice (a setup
+before step 27). Step 27 replaces `none` with the routine's URL; from then
+on an empty URL (a deleted variable), a missing bearer or a failed fire fails
+the run. `verify.sh --only fleet-worker` (step 27's check) reports a URL
+that is unset or still `none`, and a missing bearer.
 
 - `FLEET_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
   the fleet worker routine's fire URL. Set it like
@@ -130,7 +134,8 @@ The same workflow fires a second task, the Loop worker
 ([routines](../docs/routines.md#fleet-worker)), with its own values. It serves
 the eval loop, so it belongs to the evals track: while `EVALS_REPO` is `none`
 (a base-only setup), its fire is skipped with a notice and needs none of these.
-Once `skills-evals` exists, set them before `create-environments.sh` runs again
+`create-environments.sh` sets `LOOP_WORKER_FIRE_URL` to `none` while it is not
+set at all, which also skips the fire with a notice. Once `skills-evals` exists, set them (replacing `none`) before `create-environments.sh` runs again
 (the evals track's step 41, before step 37): that run flips `EVALS_REPO` to
 `skills-evals`, and a scheduled fire then fails while either is unset. Its cadence, `LOOP_WORKER_EVERY_HOURS`,
 is not among them: `create-environments.sh` sets it from `CLAUDE_PLAN`, like

@@ -54,12 +54,16 @@ run `bash bootstrap/verify.sh` for the whole setup and show its result.
 
 ## Steps with a catch
 
-- **Steps 35 to 40** add `skills-evals` with the base's own scripts, which
-  include it once it exists (`docs/evals-and-loop.md`, "Adding
-  skills-evals"): `create-repos.sh skills-evals`, its starter pull request,
-  `create-environments.sh`, `regenerate.sh run-health-sha` and
-  `actions-lock`, `regenerate.sh evals-fleet` and `apply-settings.sh`. They
-  come first: every other evals step needs that repo.
+- **The first evals steps**, in the order status.sh gives them, add
+  `skills-evals` with the base's own scripts, which include it once it
+  exists (`docs/evals-and-loop.md`, "Adding skills-evals"):
+  `create-repos.sh skills-evals` (step 35), its starter pull request (36),
+  the eval Apps (33, 34), the Loop worker routine (step 41), and only then
+  `create-environments.sh` (step 37, which flips `EVALS_REPO`), followed by
+  `regenerate.sh run-health-sha` and `actions-lock` (38),
+  `regenerate.sh evals-fleet` (40) and `apply-settings.sh` (39). Never run
+  `create-environments.sh` on the evals track before step 41, even when
+  `create-apps.sh` ends by suggesting it.
 - **Step 40** (`regenerate.sh evals-fleet`) declares `skills-evals` in
   `repo-settings/fleet.yml`. In a pull request on the user's
   `repo-settings`, it moves the element from `repo-settings/fleet.evals.yml`

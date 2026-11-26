@@ -382,13 +382,16 @@
     {
       "id": "27",
       "title": "Create the fleet worker routine",
-      "run": "At https://claude.ai/code/routines, one task (the Fleet worker, maintenance role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it. The Loop worker serves the eval loop, so the evals track creates it (step 41)",
+      "run": "At https://claude.ai/code/routines, one task (the Fleet worker, maintenance role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it (create-environments.sh left the URL `none`, which skips the fire with a \"not set up yet\" notice; set it to the routine's fire URL. This step's check is that the URL is no longer `none` and the bearer is set). The Loop worker serves the eval loop, so the evals track creates it (step 41)",
       "kind": "browser",
       "part": "routines",
       "track": "base",
       "link": "docs/routines.md#fleet-worker",
       "check": {
-        "type": "ask"
+        "type": "verify",
+        "groups": [
+          "fleet-worker"
+        ]
       },
       "minutes": 10
     },
@@ -524,7 +527,7 @@
     {
       "id": "41",
       "title": "Create the Loop worker routine",
-      "run": "At https://claude.ai/code/routines, one task (the Loop worker, loop role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set LOOP_WORKER_FIRE_URL and LOOP_WORKER_FIRE_BEARER on _agent-guidance (create-environments.sh already set LOOP_WORKER_EVERY_HOURS from CLAUDE_PLAN). fleet-worker-fire.yml skips its fire while EVALS_REPO is none and fires it once the next step flips EVALS_REPO to skills-evals, so this comes first",
+      "run": "At https://claude.ai/code/routines, one task (the Loop worker, loop role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set LOOP_WORKER_FIRE_URL (replacing the `none` create-environments.sh wrote) and LOOP_WORKER_FIRE_BEARER on _agent-guidance (create-environments.sh already set LOOP_WORKER_EVERY_HOURS from CLAUDE_PLAN). fleet-worker-fire.yml skips its fire while EVALS_REPO is none and fires it once the next step flips EVALS_REPO to skills-evals, so this comes first",
       "kind": "browser",
       "part": "routines",
       "track": "evals",

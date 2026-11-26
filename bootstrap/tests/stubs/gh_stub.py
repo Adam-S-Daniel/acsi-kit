@@ -8,7 +8,9 @@ the first one wrote. A secret's value is stored only as a SHA-256, so no
 secret text lands in any file.
 
 User installations come from the state's "installations" list (a test
-writes it): {"id", "app_id", "account": {"login"}, "repos": [full names]}.
+writes it): {"id", "app_id", "account": {"login"}, "repos": [full names]},
+read only with GH_STUB_APP_USER_TOKEN=1 (gh's own sign-in gets GitHub's 403);
+GH_STUB_INSTALLATIONS_STATUS=<code> answers that status instead.
 `gh actions-lock` is stubbed too: --help exits 0 unless
 GH_STUB_NO_ACTIONS_LOCK=1; --no-narrow appends GH_STUB_ACTIONS_LOCK_LINE (if
 set) to .github/workflows/actions.lock in the current directory; --verify
@@ -138,6 +140,8 @@ def api(args):
 
     # Real GitHub answers 403 to gh's own (OAuth) sign-in here: the endpoint
     # takes a GitHub App user token. GH_STUB_APP_USER_TOKEN=1 stands for one.
+    if path.startswith("user/installations") and os.environ.get("GH_STUB_INSTALLATIONS_STATUS"):
+        return err(int(os.environ["GH_STUB_INSTALLATIONS_STATUS"]), "Bad credentials")
     if path.startswith("user/installations") and os.environ.get("GH_STUB_APP_USER_TOKEN") != "1":
         return err(403, "You must authenticate with an access token authorized to a GitHub App in order to list installations")
     if path == "user/installations":

@@ -678,11 +678,11 @@ edits:
           else
               fail "fleet worker fire workflow: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=18, fail=0)
     new: |-
-      "$pass_n" == "20" && "$fail_n" == "0" ]]; then
-              pass "fleet worker fire workflow: 20 passed"
+      "$pass_n" == "21" && "$fail_n" == "0" ]]; then
+              pass "fleet worker fire workflow: 21 passed"
           else
-              fail "fleet worker fire workflow: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=20, fail=0)
-    why: 'kit departure: base-only track; source follow-up proposed. Two tests added.'
+              fail "fleet worker fire workflow: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=21, fail=0)
+    why: 'kit departure: base-only track; source follow-up proposed. Three tests added.'
   - path: test/test-impact-report.js
     stage: output
     old: |2
@@ -808,6 +808,145 @@ edits:
                   --pr-json "$d/pr.json" --files "$d/files.json" --base-md "$d/base.md" \
                   --explorer "$d/explorer.json"
     why: 'kit departure: base-only track; source follow-up proposed. Without skills-evals the explorer can never be fetched, so a pull request that touched a guidance section failed closed; with EVALS_REPO none the gate runs with --no-evidence (nothing is protected) and says so, and otherwise reads the explorer from the repository EVALS_REPO names.'
+
+  # ---- Base-only track, review fix: a worker's fire URL before its step.
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |
+      #   Unset or empty fails the Loop worker's fire naming it. The pace hold below
+      #   reads the repository it names. The Fleet worker ignores it.
+    new: |
+      #   Unset or empty fails the Loop worker's fire naming it. The pace hold below
+      #   reads the repository it names. The Fleet worker ignores it.
+      # * A fire URL of `none` means that task is not set up yet: its fire exits 0
+      #   with a notice naming the variable and the kit step that sets it, after
+      #   the cadence check. bootstrap/create-environments.sh writes `none` only
+      #   while the variable is not set at all, and the step that creates the
+      #   routine overwrites it. An empty URL (never set, or deleted) still fails.
+    why: 'kit departure: base-only track. The Fleet worker leg failed on its slot from the _agent-guidance merge (step 10) until step 27 set its URL (its routine needs step 23 first), and the Loop worker leg could fail the same way between an EVALS_REPO flip and step 41.'
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |2
+                missing=()
+                [[ -n "$FIRE_URL" ]] || missing+=("variable $URL_VAR")
+    new: |2
+                if [[ "$FIRE_URL" == none ]]; then
+                  if [[ "$WORKER" == fleet ]]; then setup_step=27; else setup_step=41; fi
+                  echo "::notice::not set up yet: variable $URL_VAR is none, so the $WORKER worker was not fired. Step $setup_step of the kit's quick start creates its routine and sets $URL_VAR and $BEARER_VAR."
+                  exit 0
+                fi
+                missing=()
+                [[ -n "$FIRE_URL" ]] || missing+=("variable $URL_VAR")
+    why: 'kit departure: base-only track. An explicit none (written by create-environments.sh until the routine exists) skips the fire with a notice; the source has no such value. Empty still fails naming the variable, so a URL deleted after setup stays red.'
+  - path: test/test-fleet-worker-fire.js
+    stage: output
+    old: test('a failed fire fails the run with the status code only', () => {
+    new: |-
+      test('a fire URL of none is not set up yet for either worker: exit 0, a notice naming the step, nothing fired', () => {
+        for (const [role, extra, name, step] of [['fleet', {}, 'FLEET_WORKER_FIRE_URL', 27],
+          ['loop', { line: '20 6,18 * * *' }, 'LOOP_WORKER_FIRE_URL', 41]]) {
+          for (const bearer of [undefined, '']) {
+            const over = { role, url: 'none', ...extra, ...(bearer === undefined ? {} : { bearer }) };
+            const { result, curl, git } = runFire(over);
+            assert.equal(result.status, 0, JSON.stringify(over) + result.stdout + result.stderr);
+            assert.equal(curl.length, 0);
+            assert.equal(git.length, 0, 'nothing is cloned');
+            assert.ok(result.stdout.includes(`::notice::not set up yet: variable ${name} is none`), result.stdout);
+            assert.ok(result.stdout.includes(`Step ${step} of the kit`), result.stdout);
+          }
+        }
+      });
+
+      test('a failed fire fails the run with the status code only', () => {
+    why: 'kit departure: base-only track. Covers the none branch for both workers; the empty-URL failure stays covered by the source''s own test.'
+
+  # ---- Base-only track, review fix: step 7 is the adopter's answer when gh
+  # cannot read installations, so a missing install must be named where it bites.
+  - path: .github/workflows/drift-report.yml
+    stage: output
+    old: |2
+            - name: Generate drift report
+    new: |2
+            # The kit: quick start step 7 (the App installations) can be marked done
+            # by hand, so a missing installation is named here, with what to do.
+            - name: Name a missing App installation
+              env:
+                GH_TOKEN_EXAMPLE_ADOPTER: ${{ steps.token_example_adopter.outputs.token }}
+                GH_TOKEN_EXAMPLE_ADOPTER_TWO: ${{ steps.token_example_adopter_two.outputs.token }}
+                SYNC_OWNERS: "example-adopter example-adopter-two"
+              run: |
+                for owner in $SYNC_OWNERS; do
+                  key="GH_TOKEN_$(tr 'a-z-' 'A-Z_' <<<"$owner")"
+                  if [[ -z "${!key:-}" ]]; then
+                    echo "::warning::No installation token for $owner, so this report reads only its public repos: is the guidance-sync App installed there? Check https://github.com/settings/installations. If the kit's quick start step 7 was marked done by hand, run bash bootstrap/status.sh --unmark 7 and install it."
+                  fi
+                done
+
+            - name: Generate drift report
+    why: 'kit departure: base-only track. Step 7 can now be marked by hand (gh''s sign-in cannot read installations), so the runs that mint from the App name a missing installation and how to undo the mark.'
+  - path: .github/workflows/dependabot-config-health.yml
+    stage: output
+    old: |2
+            # NO plain GH_TOKEN / github.token fallback: the default token cannot
+    new: |2
+            # The kit: quick start step 7 (the App installations) can be marked done
+            # by hand, so a missing installation is named here, with what to do.
+            - name: Name a missing App installation
+              env:
+                GH_TOKEN_EXAMPLE_ADOPTER: ${{ steps.token_example_adopter.outputs.token }}
+                GH_TOKEN_EXAMPLE_ADOPTER_TWO: ${{ steps.token_example_adopter_two.outputs.token }}
+                SYNC_OWNERS: "example-adopter example-adopter-two"
+              run: |
+                for owner in $SYNC_OWNERS; do
+                  key="GH_TOKEN_$(tr 'a-z-' 'A-Z_' <<<"$owner")"
+                  if [[ -z "${!key:-}" ]]; then
+                    echo "::error::No installation token for $owner: is the guidance-sync App installed there? Check https://github.com/settings/installations. If the kit's quick start step 7 was marked done by hand, run bash bootstrap/status.sh --unmark 7 and install it."
+                  fi
+                done
+
+            # NO plain GH_TOKEN / github.token fallback: the default token cannot
+    why: 'kit departure: base-only track. Step 7 can now be marked by hand, so a missing installation is named with how to undo the mark; the sweep still fails on its own (--require-owner-tokens).'
+
+  # ---- Base-only track, review fix: skills-lock-bump before the registry is copied.
+  - path: .github/workflows/skills-lock-bump.yml
+    stage: output
+    old: |2
+            - name: Bump consumer locks
+              env:
+    new: |2
+            # The kit: from the _agent-guidance merge (quick start step 10) until
+            # the registry's starter is merged (step 12), acsi-agentskills holds
+            # only the README create-repos.sh wrote, and both passes below would
+            # fail on it. That one state, and only it, reads as not set up yet.
+            - name: Is the skills registry set up yet?
+              id: registry
+              env:
+                REGISTRY_DIR: registries/acsi-agentskills
+              run: |
+                if [[ "$(git -C "$REGISTRY_DIR" ls-files)" == README.md ]]; then
+                  echo "::notice::not set up yet: the skills registry holds only its first README, so no lock or hook pin was bumped. The kit's quick start step 12 copies the registry there."
+                  echo "ready=false" >> "$GITHUB_OUTPUT"
+                else
+                  echo "ready=true" >> "$GITHUB_OUTPUT"
+                fi
+
+            - name: Bump consumer locks
+              if: steps.registry.outputs.ready == 'true'
+              env:
+    why: 'kit departure: base-only track. skills-lock-bump runs four times a day from step 10, and before step 12 the registry is the README-only repo create-repos.sh made, so the bump exited 2 (no lock generator). Only that exact state skips with a notice; a registry that loses its generator later still fails.'
+  - path: .github/workflows/skills-lock-bump.yml
+    stage: output
+    old: |2
+                DRY_RUN: ${{ inputs.dry_run }}
+              run: |
+                chmod +x scripts/bump-hook-pin.sh
+    new: |2
+                DRY_RUN: ${{ inputs.dry_run }}
+                REGISTRY_READY: ${{ steps.registry.outputs.ready }}
+              run: |
+                if [[ "$REGISTRY_READY" == false ]]; then exit 0; fi
+                chmod +x scripts/bump-hook-pin.sh
+    why: 'kit departure: base-only track. The hook pin pass reads the same registry; it keeps its success() || failure() condition and returns early only in the not-set-up state above.'
 
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).

@@ -64,27 +64,42 @@ edits:
               id: token_example_adopter
               uses: actions/create-github-app-token@v3.3.0
     new: |2
-            # Not set up yet: until create-apps.sh has made the settings-read App
-            # and set its client id, there is nothing to plan with. A notice says
-            # so and the plan reports no drift, so no apply runs; once the
-            # variable is set, a missing key or installation fails the mint.
+            # Not set up yet, on the weekly schedule only: until create-apps.sh
+            # has made the settings-read App and set its client id, a scheduled
+            # plan has nothing to plan with, so a notice says so and it reports
+            # no drift. A push or a dispatch still mints, and fails at the mint
+            # without the App: a settings change must never read as "nothing to
+            # apply".
             - name: Is the read App set up yet?
               id: read_app
               env:
                 READ_APP_CLIENT_ID: ${{ vars.REPO_SETTINGS_READ_APP_CLIENT_ID }}
               run: |
-                if [[ -n "$READ_APP_CLIENT_ID" ]]; then
-                  echo "ready=true" >> "$GITHUB_OUTPUT"
-                else
-                  echo "::notice::not set up yet: variable REPO_SETTINGS_READ_APP_CLIENT_ID is not set, so nothing was planned. bootstrap/create-apps.sh sets it when it creates the settings-read App."
+                if [[ -z "$READ_APP_CLIENT_ID" && "$GITHUB_EVENT_NAME" == schedule ]]; then
+                  echo "::notice::not set up yet: variable REPO_SETTINGS_READ_APP_CLIENT_ID is not set, so the weekly plan planned nothing. bootstrap/create-apps.sh sets it when it creates the settings-read App (quick start step 6)."
                   echo "ready=false" >> "$GITHUB_OUTPUT"
+                else
+                  echo "ready=true" >> "$GITHUB_OUTPUT"
                 fi
 
             - name: Mint read-only GitHub App token for example-adopter
               id: token_example_adopter
               if: steps.read_app.outputs.ready == 'true'
               uses: actions/create-github-app-token@v3.3.0
-    why: 'kit departure: base-only track. The plan minted from the settings-read App with no gate, so it was red from the starter merge (step 4) until create-apps.sh set the App up, and every Monday in between. Unlike the source, an unset client id now reads as not set up (a notice, no drift), not as a failure; a set one still fails on a bad key.'
+    why: 'kit departure: base-only track. The weekly plan minted from the settings-read App with no gate, so it was red every Monday from the starter merge (step 4) until create-apps.sh set the App up. Only the schedule skips with a notice; a push or dispatch keeps the source''s failure at the mint, so a deleted variable cannot make a settings change read as no drift.'
+  - path: .github/workflows/repo-settings.yml
+    stage: output
+    old: |2
+        # Not gated on the read App's variable, on purpose: a plan that skipped
+        # would read as "nothing to apply" on push. A missing App fails the mint and
+        # turns the plan red instead.
+    new: |2
+        # Not gated on the read App's variable on push or dispatch, on purpose: a
+        # plan that skipped would read as "nothing to apply". A missing App fails
+        # the mint and turns the plan red instead. The kit's one exception is the
+        # weekly schedule before the App exists (step "Is the read App set up
+        # yet?" below): it skips with a notice, since nothing could be applied.
+    why: 'kit departure: base-only track. The comment follows the schedule-only gate below.'
   - path: .github/workflows/repo-settings.yml
     stage: output
     old: |2
