@@ -1365,6 +1365,11 @@ rm -f "$UP"/state/update-kit-*.log
 uk "$UK" --config "$UK/fleet.env" --dry-run; rc=$?
 assert_eq "a dry run on a current kit exits 0" "$rc" 0
 assert_not "a dry run writes no log into the state folder" bash -c 'ls "$1"/update-kit-*.log' _ "$UP/state"
+mkdir -p "$UP/badnpm-dry"; printf '#!/bin/sh\necho "npm-stub: registry unreachable" >&2\nexit 1\n' > "$UP/badnpm-dry/npm"; chmod +x "$UP/badnpm-dry/npm"
+run env PATH="$UP/badnpm-dry:$PATH" ADOPT_STATE_FILE="$UP/state/adopt.json" "$BASH" "$UK/bootstrap/update-kit.sh" --config "$UK/fleet.env" --dry-run; rc=$?
+assert_eq "a dry run whose add-content.sh fails exits 1" "$rc" 1
+assert "it says the dry run failed" has "$ERR" "add-content.sh --dry-run failed on your recorded choices"
+assert_not "and names no log, which the dry run does not keep" has "$ERR" "all of it in"
 # Hand edits inside starter/ are not add-content's, so they are refused.
 bump "upstream again"
 assert "the hand-edited file is tracked" git -C "$UK" ls-files --error-unmatch starter/repo-settings/README.md
@@ -2252,7 +2257,7 @@ assert "the engine reads the committed fleet.yml, not a copy" grep -qE '^apply -
 : > "$FAKE_ENGINE_LOG"
 run bash "$B/apply-settings.sh" --config "$CFGF"; rc=$?
 assert_eq "apply-settings exits 0 when the read-back shows no drift" "$rc" 0
-assert_eq "it applies, then reads back" "$(cut -d' ' -f1 "$FAKE_ENGINE_LOG" | paste -sd' ')" "apply diff"
+assert_eq "it applies, then reads back" "$(cut -d' ' -f1 "$FAKE_ENGINE_LOG" | paste -sd' ' -)" "apply diff"
 assert "the apply skips the platform's label-only repos, as the fleet workflow does" grep -q '^apply .* --owner acme-fake --cms-label-only skip | 111 222$' "$FAKE_ENGINE_LOG"
 : > "$FAKE_ENGINE_LOG"
 run env FAKE_DIFF_RC=1 bash "$B/apply-settings.sh" --config "$CFGF"; rc=$?

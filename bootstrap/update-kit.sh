@@ -389,6 +389,7 @@ rest() {
     content_log
     if ! "$BASH" "$B/add-content.sh" "${args[@]}" > "$CONTENT_LOG" 2>&1; then
       content_report
+      [ "$DRY_RUN" = 0 ] || die "add-content.sh --dry-run failed on your recorded choices ($IDS; its output is above). Fix what it says, then run: $(next_cmd)"
       die "add-content.sh failed on your recorded choices ($IDS; its output is above, all of it in $CONTENT_LOG), so they are NOT all in starter/. Fix what it says, then run: $(next_cmd)"
     fi
     content_report
