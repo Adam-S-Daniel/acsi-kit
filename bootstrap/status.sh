@@ -25,7 +25,9 @@
 # then "N of M done", how many steps of each track are done, and the next
 # step: title, time estimate, kind, what to run and the docs section that
 # explains it. Steps are sequential: the first step not done is next, except
-# that an optional step never blocks the next one.
+# that an optional step never blocks the next one. The counts are of required
+# steps: an optional step is listed, done or not, and never counted, so a
+# track reads "M of M done" whether or not its optional steps were taken.
 #
 # Each step has a track (steps.json): base, the guidance, skills, settings,
 # hooks and machines /adopt sets up, or evals, what /adopt-evals adds for the
@@ -172,12 +174,15 @@ fi
 NEXT="" N=0 M=0
 declare -A TRACK_DONE=([base]=0 [evals]=0) TRACK_ALL=([base]=0 [evals]=0)
 for id in "${IDS[@]}"; do
-  TRACK_ALL[${TRK[$id]}]=$((TRACK_ALL[${TRK[$id]}] + 1))
-  [ -z "${STEP_DONE[$id]:-}" ] || TRACK_DONE[${TRK[$id]}]=$((TRACK_DONE[${TRK[$id]}] + 1))
+  # Only required steps are counted: a skipped optional step must not leave
+  # its track short of done (the evals track reads the base's count below).
+  req=1; [ "${OPT[$id]}" != yes ] || req=0
+  TRACK_ALL[${TRK[$id]}]=$((TRACK_ALL[${TRK[$id]}] + req))
+  [ -z "${STEP_DONE[$id]:-}" ] || TRACK_DONE[${TRK[$id]}]=$((TRACK_DONE[${TRK[$id]}] + req))
   [ "$TRACK" = all ] || [ "${TRK[$id]}" = "$TRACK" ] || continue
-  M=$((M + 1))
+  M=$((M + req))
   if [ -n "${STEP_DONE[$id]:-}" ]; then
-    N=$((N + 1))
+    N=$((N + req))
     if [ "${CTYPE[$id]}" = ask ] && [ -n "${ASKED[$id]:-}" ]; then label="asked: done"; else label="done"; fi
   elif [ "${OPT[$id]}" = yes ]; then
     label=optional

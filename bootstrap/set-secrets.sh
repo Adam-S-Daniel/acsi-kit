@@ -20,9 +20,11 @@
 # with it and fails closed without it, so the evals track stores it there
 # once the repo exists (step 35: run --only privacy again); while
 # skills-evals does not exist, its entry is skipped with one line. It is a file OUTSIDE every
-# repo, one regular expression per line (your real names, emails, hosts,
-# account ids); the script refuses a path inside a git work tree and never
-# prints a pattern.
+# repo, one regular expression per line, matched in any letter case (your real
+# names, emails, hosts, account ids); blank lines and lines that start with #
+# are skipped. The script refuses a path inside a git work tree and never
+# prints a pattern. docs/skills.md, "The privacy check", says what the check
+# reads and shows a sample file.
 #
 # The bearer and the trigger id come from the eval runner routine's API
 # trigger at claude.ai/code/routines (skills-evals docs/routine/eval-runner-prompt.md);
@@ -80,11 +82,11 @@ get_trigger() {
 get_denylist() {
   [ "$HAVE_DENYLIST" = 1 ] && return 0
   if [ -z "$DENYLIST" ]; then
-    printf 'Path to your privacy denylist file (outside every repo): ' >&2
+    printf 'The privacy denylist is a text file with one regular expression per line (your real names, emails, hosts, account ids), kept outside every repo; docs/skills.md, "The privacy check", has a sample.\nPath to your privacy denylist file: ' >&2
     IFS= read -r DENYLIST || die "no path given"
   fi
   DENYLIST=${DENYLIST/#\~/$HOME}
-  [ -f "$DENYLIST" ] || die "the denylist path is not a file"
+  [ -f "$DENYLIST" ] || die "the denylist path is not a file: write one regular expression per line to a file outside every repo (docs/skills.md, \"The privacy check\") and give its path"
   local dir; dir=$(cd "$(dirname "$DENYLIST")" && pwd)
   if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     die "the denylist is inside a git work tree; keep it outside every repo"
@@ -107,7 +109,7 @@ if bad:
     print("denylist: line(s) " + ", ".join(map(str, bad)) + " are not valid regular expressions", file=sys.stderr)
     sys.exit(1)
 if n == 0:
-    print("denylist: no patterns; the privacy check would fail closed", file=sys.stderr)
+    print("denylist: no patterns (it wants one regular expression per line; docs/skills.md, \"The privacy check\"); the privacy check would fail closed", file=sys.stderr)
     sys.exit(1)
 PY
   # The mode bits from stat(2), not `find -perm /077`: BSD find (macOS) has

@@ -360,13 +360,14 @@ regen_repos() {
     run-health-sha) printf '%s\n' repo-settings skills-evals acsi-agentskills wsl-automation ;;
     codex-pin) echo wsl-automation ;;
     actions-lock) printf '%s\n' "${FLEET_REPOS[@]}" ;;
-    evals-fleet) echo repo-settings ;;
+    evals-fleet) printf '%s\n' repo-settings _agent-guidance ;;
     *) return 1 ;;
   esac
 }
 # regen_track <task> <repo>: the track a task's edit of that repo is on. A
-# task is on its repo's track, except evals-fleet: it edits the base repo
-# repo-settings, but only to declare skills-evals there (the evals track's).
+# task is on its repo's track, except evals-fleet: it edits the base repos
+# repo-settings and _agent-guidance, but only to declare skills-evals there
+# (the evals track's).
 regen_track() { if [ "$1" = evals-fleet ]; then echo evals; else repo_track "$2"; fi; }
 # group_tracks <verify group>: the tracks on which that group checks
 # anything, one per line (tests/check-steps.py holds each step's checks to

@@ -19,6 +19,49 @@ as next, because those belong to `/adopt-evals`
 holding `bootstrap/`. The explanations are in `docs/`, and the steps table
 is in `docs/quick-start.md`.
 
+## The model and the session
+
+Say this at the start of every sitting, before any step:
+
+- **Model.** Sonnet is enough for every step here. Read `CLAUDE_PLAN` from
+  `fleet.env` (`grep '^CLAUDE_PLAN=' fleet.env`; before `fleet.env` exists,
+  ask which Claude plan the user is on). On `pro`, have the user type
+  `/model sonnet` now: Claude Code's default model on Pro is Opus, which
+  uses the plan's limits faster, and `/model` keeps the choice for new
+  sessions. On Max or Ultra the default model is fine.
+- **One sitting per session.** When a sitting ends, the user starts a new
+  session for the next one (`claude`, then `/adopt`). `status.sh` reads the
+  account's real state, so nothing is lost, and each turn of a short
+  session costs less than a turn of a long one.
+
+## On Pro
+
+When `CLAUDE_PLAN` is `pro`, say the Pro value when you reach each of these
+steps. `docs/before-you-start.md`, "On Pro: what to set and what to leave
+off", is the one list, with the reasons.
+
+- **Step 5** (`create-environments.sh`): it sets `FLEET_WORKER_EVERY_HOURS`
+  to 168, so the fleet worker fires weekly. Nothing to choose.
+- **Steps 1 and 21** (optional content, each machine): on Pro the context
+  a session carries matters most, so read out the table in
+  `docs/machine.md`, "What every session carries", and how to turn each
+  part off.
+- **Steps 27, 28, and 29** (the routines): Sonnet in each task's model
+  selector, picked explicitly. **Default** follows the account's default
+  model, which Anthropic's model configuration page lists as Opus on Pro.
+  Never a Fable model or a 1M-context variant of a 4.6 model: on Pro those
+  bill usage credits. Before the first routine, have the user check usage
+  credits at https://claude.ai/settings/usage: off, or a monthly cap they
+  accept.
+- **Step 29** (the changelog watcher): weekly, `3 1 * * 1`, not daily.
+- **Step 30** (memory curation): set the project's **Threads** model to
+  Sonnet in **Project settings > General**. A scheduled task made in a
+  project runs as threads in that project, a new project runs Opus, and
+  that setting is the one that sets the model for new threads; have the
+  user check the model on the first run's thread.
+- **Leave off**: the optional dashboard refresh (evals step 32) and article
+  lift, which ships off.
+
 ## First sitting
 
 1. Check where the kit sits by running `git -C .. rev-parse --show-toplevel`
@@ -115,6 +158,13 @@ is in `docs/quick-start.md`.
 - **Steps 14 to 18** (`regenerate.sh`) need the starter pull requests
   merged first; `regenerate.sh --check <task>` says what is still to do.
   `skills-locks` runs twice: once for the registry, then for the rest.
+- **Steps 27 to 30** (the routines): a new routine includes every connector
+  the account has connected, so have the user remove each one its table in
+  `docs/routines.md` doesn't name. Where a spec says the environment
+  `My Whitelist`, any environment with the allowlist works. An API trigger
+  shows its token once: have the user store it right away with the commands
+  in `bootstrap/README.md`, "Variables and secrets set by hand", in their
+  own terminal, never pasted into this session.
 - **Step 27** (the Fleet worker): one task only, the maintenance role, with
   `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER`. Do not create the Loop
   worker or set `LOOP_WORKER_*`: it serves the eval loop, and the evals track
@@ -122,14 +172,24 @@ is in `docs/quick-start.md`.
   `EVALS_REPO` to `none`, so the workflow skips the Loop worker's fire and
   stays green. The step's check is `verify` (`verify.sh --only
   fleet-worker`): done once both values are set on `_agent-guidance`.
+- **Step 17** (the Codex Cloud pin) is optional: status.sh labels it
+  `optional` and never makes it the next step. Ask whether the user runs
+  Codex. If not, skip it; if so, run it like any other script step.
 - **Expected red runs** are listed once, in `docs/settings-and-apps.md`
   ("Merging the starter pull requests"): the push `plan` from merging
   `repo-settings`' starter (step 4) until step 6, `skills-lock-bump.yml`
-  from step 10 until step 12, and on a base-only setup the daily
-  `dependabot-config-health.yml` until a kit update. Everything else that
+  from step 10 until step 12, and the daily
+  `dependabot-config-health.yml` from step 10 until step 11 drops the
+  example repos' names. Everything else that
   waits for a later step skips with a "not set up yet" notice; any other
-  failure email is real: read the run with the user.
-- **Step 30** (memory curation): for the machine task, ask which system
+  failure email is real: read the run with the user, and name the step
+  that ends a listed one.
+- **Step 30** (memory curation) has two tasks. The project task needs
+  claude.ai Projects, a public beta that is rolling out gradually, so ask
+  whether the user's account has Projects. If it does not, there is no
+  project memory to curate: create the machine task only, and the step is
+  done (it is an `ask` step, so run `bash bootstrap/status.sh --mark 30`
+  once the machine task exists). For the machine task, ask which system
   holds that machine's Claude Code sessions. On macOS, or on Windows with
   Claude Code running natively, offer a Claude desktop app scheduled task
   as the easier way and walk the user through creating it with the
@@ -167,6 +227,17 @@ Say one line about the core tier and nothing more: "A few skills, guidance
 rules and git hooks the system depends on are always included." Never list
 the core items, and never call an item "checked" or "unchecked": say which
 ones the user picked.
+
+Before the questions, say what the choices cost. Guidance and each skill's
+name and description sit in every session's context on every turn, so more
+content means more of the plan's limits spent per turn. Read the table in
+`docs/machine.md`, "What every session carries", and give its bytes: the
+core guidance, each optional set, and the skills. Never count them
+yourself; the table is computed from the kit's files. Say too that the
+installer of step 21 turns off the user's claude.ai account skills in
+terminals (`syncClaudeAiSkills: false`, Anthropic's document skills
+included) and shell lines in skills (`disableSkillShellExecution: true`),
+and that `FLEET_GUIDANCE_SKIP=1` on a machine leaves the guidance out there.
 
 The questions use Claude Code's AskUserQuestion tool. Its limits, from
 <https://code.claude.com/docs/en/agent-sdk/user-input> (read 2026-10-29):

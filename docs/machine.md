@@ -45,6 +45,56 @@ owner marker (`~/.config/fleet-guidance/owner`), and with it the
 marker the hook does nothing on a durable machine
 ([guidance](guidance.md#the-sync)).
 
+## What every session carries
+
+The fleet guidance and each installed skill's name and description are in
+the context of every session, on every turn, whether or not the task uses
+them. This is what the kit ships, in bytes (a token is about four bytes of
+English):
+
+<!-- generated:always-loaded by export/doc_regions.py; it counts the files, so run it with --write -->
+| What | Items | Bytes | Loaded when |
+|---|---|---|---|
+| Core guidance (`agents-md/base.md` as shipped) | 11 | 13,709 | always |
+| Recommended guidance, safety | 4 | 3,420 | your choice in step 1 |
+| Recommended guidance, habits | 3 | 2,059 | your choice in step 1 |
+| Opinionated guidance: `finding-your-unknowns` | 1 | 1,014 | your choice in step 1 |
+| Opinionated guidance: `anything-you-name-gets-its-link` | 1 | 885 | your choice in step 1 |
+| Opinionated guidance: `subagent-delegation` | 1 | 2,643 | your choice in step 1 |
+| Opinionated guidance: `dependency-updates` | 1 | 536 | your choice in step 1 |
+| Core skills (name and description) | 4 | 2,664 | always |
+| Recommended skills (name and description) | 2 | 1,170 | your choice in step 1 |
+| Opinionated skills (name and description) | 2 | 765 | your choice in step 1 |
+<!-- /generated:always-loaded -->
+
+A skill's body loads only when the skill is used. Each repo's `AGENTS.md`
+adds its short stub and that repo's own notes on top. Sections and skills
+you add later count the same way, and on Pro the context you carry is part
+of what each turn costs, so choose the optional content in step 1 with this
+table in view ([choosing optional
+content](skills.md#choosing-optional-content)).
+
+To turn parts off:
+
+- **The guidance, on one machine:** set `FLEET_GUIDANCE_SKIP=1` in that
+  machine's environment. The next session removes the installed block from
+  `~/.claude/CLAUDE.md` (and from `~/.codex/AGENTS.md`) and installs
+  nothing; unset it to get the guidance back. Your repos' `AGENTS.md` stubs
+  still load.
+- **An optional section or skill:** don't choose it in step 1, or remove it
+  later in a pull request on `_agent-guidance` or `acsi-agentskills`.
+- **Your claude.ai account's skills:** `setup.sh --owner-machine` (step 1
+  of the installer above) already turns these off in terminals with
+  `syncClaudeAiSkills: false`. That includes the document skills Anthropic
+  provides on the account, so a terminal session no longer lists them. Set
+  it back to `true` in `~/.claude/settings.json` if you want them, at the
+  cost of every one of their descriptions.
+- **Shell lines in skills:** the installer also sets
+  `disableSkillShellExecution: true`, so a `` !`command` `` line in a
+  `SKILL.md` is not run when the skill loads. No skill in the kit uses that
+  syntax. This one costs no context; it closes a path from a skill's text
+  to a command.
+
 ## Scheduled jobs (wsl-automation)
 
 **What a base-only machine schedules** (no `skills-evals`, so

@@ -269,6 +269,13 @@ until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
 scheduled runs that read `skills-evals` skip while `EVALS_REPO` is `none`
 ([routines](routines.md#fleet-worker)).
 
+One issue is expected on the evals track, and no run fails for it. Between
+step 35, which creates `skills-evals`, and step 40, which lists it in
+`repos.yml`'s `cron_coverage.fleet`, `_agent-guidance`'s daily
+`drift-report.yml` opens "Unclassified for cron coverage" naming
+`skills-evals`. The first report after step 40's pull request is merged
+closes it.
+
 These are expected to fail until a later step or a kit update, and nothing
 else is:
 
@@ -277,10 +284,12 @@ else is:
   (a re-run after step 6 is green);
 - `_agent-guidance`'s `skills-lock-bump.yml`, four times a day from step 10
   until step 12 copies `acsi-agentskills` (until then that repo holds only
-  its first README);
-- on a setup without `skills-evals`, `_agent-guidance`'s daily
-  `dependabot-config-health.yml`: `repos.yml` still names `skills-evals`
-  under `cron_coverage.fleet`. A later kit update fixes both of these.
+  its first README). A later kit update fixes this one;
+- `_agent-guidance`'s daily `dependabot-config-health.yml`, from step 10
+  until step 11 removes the three `example-site-*` names from `repos.yml`'s
+  `cron_coverage.fleet`: it fails on a name neither owner has. The list
+  doesn't name `skills-evals` until step 40 adds it, so a setup without
+  `skills-evals` is green from step 11 on.
 
 Any other failure is real: read it before you merge.
 
