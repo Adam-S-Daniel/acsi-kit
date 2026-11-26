@@ -61,16 +61,18 @@ actually publish:
 
 | Repo | Required checks |
 |---|---|
-| `acsi-agentskills` | `privacy`, `pytest`, `pytest-windows`, `plugin-runtime-approval`, `agent-checks`, `merge-gate` |
+| `acsi-agentskills` | `pytest`, `pytest-windows`, `plugin-runtime-approval`, `agent-checks`, `merge-gate` |
 | `skills-evals` | `test`, `agent-checks` |
 | `_agent-guidance` | `test`, `agent-checks` |
 | `wsl-automation` | `shell`, `test`, `test-linux`, `agent-checks` |
 | `repo-settings` | `agent-checks`, `unit` |
 | `acsi-agentskills-private` | `agent-checks` |
 
-`privacy` fails closed without the `PRIVACY_DENYLIST` secret, so store it
-before the `acsi-agentskills` starter pull request
-([the privacy check](skills.md#the-privacy-check)).
+Each repo's `agent-checks` also runs the privacy scan with the
+`PRIVACY_DENYLIST` secret (step 3) and only warns where the secret is
+missing. `acsi-agentskills-private`'s passes no secret, so there it always
+only warns. `skills-evals`' `test` is the one required check that fails
+closed without it ([the privacy check](skills.md#the-privacy-check)).
 
 `skills-evals` also gets the `eval-scaffold` label, a ruleset on
 `roster/proposal` that only the `roster` App and a repo admin can push to,

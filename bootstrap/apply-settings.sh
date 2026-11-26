@@ -5,9 +5,9 @@
 # engine, the way the owner's fleet is run: merge methods, auto-merge, the
 # Actions policy (full-SHA pins, read-only token, fork-run approval), the
 # security features, the agent-authored and eval-scaffold labels, and the
-# rulesets with each repo's real required checks (acsi-agentskills: privacy,
-# pytest, pytest-windows, plugin-runtime-approval, agent-checks; skills-evals:
-# test, agent-checks; and so on, as fleet.yml lists them). The kit keeps no
+# rulesets with each repo's real required checks (acsi-agentskills: pytest,
+# pytest-windows, plugin-runtime-approval, agent-checks, merge-gate;
+# skills-evals: test, agent-checks; and so on, as fleet.yml lists them). The kit keeps no
 # ruleset files of its own.
 #
 #   1. clones OWNER/repo-settings (its default branch: merge the repo-settings

@@ -445,7 +445,7 @@ plugins/
     hooks/claude-code.json            # acsi-coding-local: Claude-only hooks (ADR 0018)
     bin/claude-credit                 # acsi-coding-local: the API-credit lane wrapper
 schemas/                              # vendored Agent Plugins schema (pinned by sha256)
-scripts/                              # checks (consistency, privacy denylist, …) and their tests
+scripts/                              # checks (consistency, …) and their tests
 docs/decisions/                       # ADRs (see 0013 for the current plugin layout)
 setup.sh                              # sweep old skill links; --owner-machine configures a machine
 ```

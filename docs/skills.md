@@ -129,24 +129,26 @@ there. Never approve it for an agent.
 ## The privacy check
 
 The registries' predecessor was retired because its git history contained
-personal data. Now `acsi-agentskills`' required `privacy` job scans every
-tracked file's path and text, plus a change's commit messages, author
-identities, and branch name, against a denylist of your real name, emails,
-hosts, and private ids, never your GitHub login or the public handle in
-`OWNER_NAME`. The list is the repository secret
-`PRIVACY_DENYLIST`, never a file in a repo. The script prints only
-`file:line` and the pattern's number, never the match, and it fails closed
-without the secret, including on a fork's pull request.
+personal data. Now each repo's required `agent-checks` job scans every pull
+request and push against a denylist of your real name, emails, hosts, and
+private ids, never your GitHub login or the public handle in `OWNER_NAME`:
+the lines the change adds, its commit messages and author identities, its
+branch name, and the pull request's title and body. The list is the
+repository secret `PRIVACY_DENYLIST`, never a file in a repo. The scan
+prints only the place and the pattern's number, never the match.
 
-In `acsi-agentskills` the secret is required: that job is set up in step 3
-and fails closed without it. The same holds in `skills-evals` on the evals
-track: its required `test` job scans every tracked file and fails closed
-without it, so step 35 stores it there right after creating the repo. For the
-two scans below it is optional.
-With it, each repo's `agent-checks` job also scans a pull request's added lines, commit messages,
-branch name, title and body, and the `privacy-comment-alert` workflow scans
-issues and comments. Without it, both scan nothing and only add a warning;
-neither ever fails a check for a missing secret. `set-secrets.sh` stores it
+Step 3 stores the secret, and it stays a required step: on the base track
+this scan is the only check in CI that reads the list on every pull request.
+On your machine, the pre-push `privacy` check and the write-marker hook read
+a local copy ([guidance](guidance.md)). A missing secret does not block
+anything. The scan then checks nothing and only adds
+a warning, as it does on a fork's pull request, which never gets the
+secret. The scan never rereads the whole tree, so a pattern you add later
+checks only changes made after it. The `privacy-comment-alert` workflow scans issues and comments
+with the same secret and also only warns without it. `skills-evals`, on the
+evals track, is where the secret is enforced: its required `test` job scans
+every tracked file and fails closed without it, so step 35 stores it there
+right after creating the repo. `set-secrets.sh` stores it
 in `acsi-agentskills`, `_agent-guidance`, `repo-settings` and
 `wsl-automation`, and in `skills-evals` once that repo exists. For another repo, run
 `gh secret set PRIVACY_DENYLIST --repo <you>/<repo> < <file>`.
@@ -155,7 +157,8 @@ script stores the secret there, so its `agent-checks.yml` does not pass it
 to the scan, which only warns there.
 
 Write the list to a file outside every repo, with one regular expression per
-line, and store it before the `acsi-agentskills` starter pull request. Each
+line, and store it before the first starter pull request: each starter pull
+request adds every file of its starter, so its scan reads them all. Each
 line is a Python regular expression, matched in any letter case. Blank lines
 and lines that start with `#` are skipped. List your real name, emails, hosts,
 and private ids. Never list your GitHub login or the public handle in
@@ -182,10 +185,14 @@ bash bootstrap/set-secrets.sh --only privacy --denylist ~/private/denylist
 ```
 
 The script refuses a path inside a git work tree, checks that every line
-compiles, and sends the file to `gh` on stdin. To run the same check
-locally, use
-`PRIVACY_DENYLIST_FILE=<path> python3 scripts/check_privacy_denylist.py` in
-your `acsi-agentskills` clone. Everything in the public repos uses invented
+compiles, and sends the file to `gh` on stdin. To scan a branch before you
+push it, run
+`PRIVACY_DENYLIST_FILE=<path> bash .githooks/agent-checks ci "$(git rev-parse origin/main)" HEAD`
+in any of your clones. Give the base as a commit id: the scan reads the
+lines the range adds only from a hex base, and from any other it reads only
+the last commit's. It scans the range's added lines and its commit messages
+and identities, and runs the other CI checks too; the branch name and the
+pull request's title and body are scanned only in CI. Everything in the public repos uses invented
 data: `example.com`, made-up names, and `<user>` placeholders.
 
 ## The private registry and lessons

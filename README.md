@@ -124,6 +124,18 @@ that already ran them:
   it in four repos (the registry, `_agent-guidance`, `repo-settings`,
   `wsl-automation`), so a setup that stored it before shows step 3 as not
   done again. Run step 3 again; it skips the repo that already has it.
+- Steps 12 and 20 (the registry's `privacy` job): the `acsi-agentskills`
+  starter no longer has its own `privacy` CI job, and `fleet.yml` no longer
+  requires it; each repo's `agent-checks` scans for personal data instead
+  ([the privacy check](docs/skills.md#the-privacy-check)). If you copied
+  the registry and applied `fleet.yml` with an older kit, first remove
+  `privacy` from `acsi-agentskills`' `required_status_checks` in your
+  `repo-settings/fleet.yml` and apply it: on `PLAN=paid`, approve the
+  `fleet-apply` deployment its merge starts; on `PLAN=free`, run
+  `bash bootstrap/apply-settings.sh` (step 20). Only then take the newer
+  starter's `.github/workflows/ci.yml` into your registry (`copy-starter.sh`,
+  below). In the other order, the registry's pull requests wait on a
+  `privacy` check that nothing reports.
 - Step 0 (fleet.env): while `TIME_ZONE` is empty and a base step that runs
   `copy-starter.sh` is still open, step 0 shows as not done again; set
   `TIME_ZONE` in your `fleet.env` (the update names it as a new key and
