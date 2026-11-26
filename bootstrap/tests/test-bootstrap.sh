@@ -254,7 +254,7 @@ PF_REAL_GIT=$(command -v git) PF_REAL_PY=$(command -v python3) PF_REAL_JQ=$(comm
 mkpf() { # dir [tool ...]: PATH dir without the tools named
   local d=$1 t src; shift
   rm -rf "$d"; mkdir -p "$d"
-  for t in bash env uname grep sed cat dirname mktemp rm chmod tr cut od head wc; do
+  for t in bash env uname grep sed cat dirname mktemp rm chmod tr cut od head wc tar; do
     case " $* " in *" $t "*) continue ;; esac
     src=$(command -v "$t") && ln -s "$src" "$d/$t"
   done
@@ -417,8 +417,21 @@ assert_eq "no scopes header is only a warning" "$rc" 0
 assert "no scopes header warns and names what is needed" grep -qE '^WARN: gh.s token scopes could not be read.*repository administration' "$OUT"
 printf '' > "$T/pf-gitconfig-empty"
 pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-empty" -- --config "$PFCFG"; rc=$?
-assert_eq "no gh credential helper is only a warning" "$rc" 0
+assert_eq "no credential helper at all fails, since every push needs one" "$rc" 1
+assert "it is a FAIL" grep -q '^FAIL: git has no credential helper for https pushes' "$OUT"
 assert "no credential helper: gh auth setup-git fix" grep -qF '      fix: gh auth setup-git' "$OUT"
+printf '[credential]\n\thelper = store\n' > "$T/pf-gitconfig-other"
+pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-other" -- --config "$PFCFG"; rc=$?
+assert_eq "another credential helper (osxkeychain, GCM) is only a warning" "$rc" 0
+assert "it warns that a push goes as that helper's account" grep -q '^WARN: git pushes with another credential helper, not gh.s' "$OUT"
+assert "with the same fix line" grep -qF '      fix: gh auth setup-git' "$OUT"
+mkpf "$T/pf-notar" tar
+PF_PATH="$T/pf-notar" pf -- --config "$PFCFG"; rc=$?
+assert_eq "a missing tar exits 1" "$rc" 1
+assert "a missing tar is a FAIL that names the update block" grep -q "^FAIL: tar is not installed (the README's update block" "$OUT"
+assert "a missing tar has a fix line" grep -qF '      fix: sudo apt-get install -y tar' "$OUT"
+pf -- --config "$PFCFG"
+assert "tar present passes" grep -q '^PASS: tar is installed' "$OUT"
 pf PF_NO_YAML=1 -- --config "$PFCFG"; rc=$?
 assert_eq "a python3 without PyYAML exits 1" "$rc" 1
 assert "missing PyYAML is a FAIL" grep -q '^FAIL: python3 -I cannot import PyYAML' "$OUT"
@@ -966,7 +979,34 @@ assert_eq "verify --only variables passes once SITE_REPO is set" "$rc" 0
 
 # ======================================================== set-secrets.sh
 mkdir -p "$T/private"
-printf '%s\n' '# names' 'acme[- ]example' 'example\.net' > "$T/private/denylist"
+# A real name, a domain: never the GitHub login, which the starter writes into
+# dozens of files (the refusals below).
+printf '%s\n' '# names' 'river[- ]quinn' 'example\.net' > "$T/private/denylist"
+# A pattern matching a public name from fleet.env is refused, by line number
+# and key, never printed, and nothing is written: the login (line 2), the
+# second owner's login alone (3), OWNER_NAME (4), an App's <prefix>-<app>
+# name (5), the login's snake form (6), a pattern that matches anything (7),
+# the upper-snake form with case-insensitive matching turned off (8), and the
+# noreply address copy-starter.sh writes (9).
+printf '%s\n' '# names' 'ACME-EXAMPLE' 'example-two' 'acme example$' 'example-guidance' 'acme_example' '.*' '(?-i:ACME_EXAMPLE)' '\d+\+acme-example@users' 'river[- ]quinn' > "$T/private/public-denylist"
+n=$(log_lines "$GH_LOG")
+run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate --denylist "$T/private/public-denylist"; rc=$?
+assert_eq "a denylist that matches a public name from fleet.env is refused" "$rc" 1
+assert "it names each such line and the key it matched" has "$ERR" "line(s) 2 (APP_NAME_PREFIX, OWNER, OWNER (noreply address), OWNER_TWO, REVIEWER); 3 (OWNER_TWO); 4 (OWNER_NAME); 5 (APP_NAME_PREFIX); 6 (OWNER, OWNER_TWO, REVIEWER); 7 (APP_NAME_PREFIX, OWNER, OWNER (noreply address), OWNER_NAME, OWNER_TWO, REVIEWER); 8 (OWNER, OWNER_TWO, REVIEWER); 9 (OWNER (noreply address)) match"
+assert_not "it does not name the clean line" has "$ERR" "; 10 ("
+assert "a line that matches part of a name gets a hint to list the name whole" has "$ERR" "a line that matches only part of a name (a surname inside your login, say) is refused too"
+assert "it says what belongs in the list instead" has "$ERR" "never your GitHub login or the public handle in OWNER_NAME"
+assert_not "it prints no pattern" grep -qE 'example-two|example-guidance|acme_example|river' "$ERR" "$OUT"
+assert_eq "the refusal writes nothing" "$(since "$n")" 0
+# REVIEWER and APP_NAME_PREFIX set apart from OWNER are public names too.
+{ cat "$CFGP"; printf '%s\n' REVIEWER=zz-reviewer-example APP_NAME_PREFIX=zz-apps; } > "$T/private/fleet-names.env"
+printf '%s\n' 'zz-reviewer' 'zz-apps-roster' > "$T/private/names-denylist"
+run bash "$B/set-secrets.sh" --config "$T/private/fleet-names.env" --only privacy --rotate --denylist "$T/private/names-denylist"; rc=$?
+assert_eq "a pattern matching REVIEWER or an App's name is refused" "$rc" 1
+assert "it names both keys" has "$ERR" "line(s) 1 (REVIEWER); 2 (APP_NAME_PREFIX)"
+printf '%s\n' 'zz-apps-roster' > "$T/private/whole-denylist"
+run bash "$B/set-secrets.sh" --config "$T/private/fleet-names.env" --only privacy --rotate --denylist "$T/private/whole-denylist"; rc=$?
+assert_not "a line that matches a whole name gets no part-of-a-name hint" has "$ERR" "matches only part of a name"
 printf 'ok\n(unclosed\n' > "$T/private/bad-denylist"
 mkdir -p "$T/inrepo" && git -C "$T/inrepo" init -q && cp "$T/private/denylist" "$T/inrepo/denylist"
 run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --denylist "$T/inrepo/denylist"; rc=$?
@@ -1214,6 +1254,18 @@ assert_eq "add-content --items none exits 0" "$rc" 0
 assert_eq "--items none records an empty choice" "$(jq -c .installed "$CHOICES")" '[]'
 
 # ======================================================== update-kit.sh
+# macOS's paste needs a file operand (`-` for stdin); GNU's reads stdin
+# without one. A paste that refuses like the BSD one, first on PATH, catches
+# a call without `-` on this machine too.
+BSDBIN="$T/bsd-bin"; mkdir -p "$BSDBIN"; REALPASTE=$(command -v paste)
+cat > "$BSDBIN/paste" <<EOF
+#!$BASH
+for a in "\$@"; do case \$a in -s|-d*|-sd*) ;; *) exec "$REALPASTE" "\$@" ;; esac; done
+echo "usage: paste [-s] [-d delimiters] file ..." >&2; exit 1
+EOF
+chmod +x "$BSDBIN/paste"
+assert_not "the BSD-like paste refuses stdin without -" bash -c 'printf "a\nb\n" | "$1/paste" -sd" "' _ "$BSDBIN"
+assert_eq "and takes it with -" "$(printf 'a\nb\n' | "$BSDBIN/paste" -sd' ' -)" "a b"
 # A local "origin" holding the kit, cloned the way an adopter clones it; the
 # upstream moves on after the clone has had add-content.sh run in it.
 UP="$T/upd"; mkdir -p "$UP/origin" "$UP/state"
@@ -1267,6 +1319,21 @@ assert "the upstream file is there" has "$UK/starter/wsl-automation/UPSTREAM-TES
 assert "the optional item is back in starter/" test -f "$UK/$ITEM"
 assert "it reports the fast-forward" has "$OUT" "${h0:0:12} -> $(origin_head | cut -c1-12), 1 commit(s)"
 assert "it names the new key as optional" has "$OUT" "new, optional: NEW_KEY_FOR_TEST"
+# add-content.sh's line per file goes to a log the output names; the output
+# keeps the counts and ends with what to do now, then Next:.
+assert_not "it prints no line per file add-content.sh put back" grep -qE '^ *(add|change): [A-Za-z0-9_.-]+/' "$OUT"
+ULOG=$(sed -nE 's/^  \([0-9]+ file\(s\) added or changed in starter\/; the list is in (.*)\)$/\1/p' "$OUT" | head -n1)
+assert "it counts them and names the log" test -n "$ULOG"
+assert "the log lists every file" grep -qE '^  add: agent-skills/' "${ULOG:-/nonexistent}"
+assert "the log is outside the kit" bash -c 'case $1 in "$2"/*|"") exit 1 ;; esac' _ "$ULOG" "$UK"
+assert "it keeps add-content's per-tree counts" grep -qE '^  starter/[a-z-]+: add [0-9]+ file\(s\), change [0-9]+$' "$OUT"
+assert "it ends with a Do this now block" grep -qx 'Do this now:' "$OUT"
+assert "its first item is the TIME_ZONE this fleet.env lacks" grep -qE "^  1\. Set TIME_ZONE in $UK/fleet\.env \(your IANA time zone name, such as Europe/Berlin" "$OUT"
+assert "it names the existing repos that need a pull request for the content" grep -qE '^  [0-9]+\. Open a pull request on acme-example/[a-z_-]+ \(never a push' "$OUT"
+assert "the registry's line names the repo, the tree, the log and the next task, exactly" has "$OUT" ". Open a pull request on acme-example/acsi-agentskills (never a push to its default branch) that adds the starter/agent-skills files listed in $ULOG, with your names as copy-starter.sh writes them. When it merges, run bash bootstrap/regenerate.sh --config $UK/fleet.env skills-locks."
+assert_not "add-content's own advice, which points at lines above, is left out" has "$OUT" "files listed above"
+assert "the block comes after add-content's output" bash -c '[ "$(grep -n "^Do this now:$" "$1" | cut -d: -f1)" -gt "$(grep -n "file(s) added or changed in starter/" "$1" | cut -d: -f1)" ]' _ "$OUT"
+assert_eq "Next: is still the last line" "$(tail -n1 "$OUT")" "Next: bash bootstrap/status.sh --config $UK/fleet.env"
 COPY_STEP=$(jq -r '[.steps[] | select(.run | test("copy-starter[.]sh"))][0].id' "$K/bootstrap/steps.json")
 assert "it names TIME_ZONE as needed before the copy step, not as blocking the update" has "$OUT" "new, needed before the copy step (step $COPY_STEP): TIME_ZONE (copy-starter.sh refuses until it is set in your fleet.env; this update does not need it)"
 assert_not "TIME_ZONE is not called optional" has "$OUT" "new, optional: TIME_ZONE"
@@ -1289,6 +1356,10 @@ assert_not "a current kit lists no fleet.env key (this fleet.env sets few of the
 assert_eq "a second run changes no status" "$(git -C "$UK" status --porcelain)" "$st1"
 assert_eq "a second run keeps HEAD" "$(git -C "$UK" rev-parse HEAD)" "$h1"
 assert_not "it does not say nothing changed after re-applying the choices" has "$OUT" "Nothing to change"
+rm -f "$UP"/state/update-kit-*.log
+uk "$UK" --config "$UK/fleet.env" --dry-run; rc=$?
+assert_eq "a dry run on a current kit exits 0" "$rc" 0
+assert_not "a dry run writes no log into the state folder" bash -c 'ls "$1"/update-kit-*.log' _ "$UP/state"
 # Hand edits inside starter/ are not add-content's, so they are refused.
 bump "upstream again"
 assert "the hand-edited file is tracked" git -C "$UK" ls-files --error-unmatch starter/repo-settings/README.md
@@ -1505,6 +1576,7 @@ assert_eq "the README block updates a clone older than the script" "$rc" 0
 assert_eq "the old clone reached the upstream head" "$(git -C "$UP/k3" rev-parse HEAD)" "$(git -C "$O3" rev-parse HEAD)"
 assert "the item is back in the old clone" test -f "$UP/k3/$SEC"
 assert "it ends with status.sh and the config path" has "$OUT" "Next: bash bootstrap/status.sh --config"
+assert_not "the block's run prints no line per file either" grep -qE '^ *(add|change): [A-Za-z0-9_.-]+/' "$OUT"
 # A fetch that fails inside the script shows git's own lines and changes nothing.
 git -C "$UK" remote set-url origin "$UP/no-such-origin.git"; h1=$(git -C "$UK" rev-parse HEAD)
 uk "$UK" --config "$UK/fleet.env"; rc=$?
@@ -1531,7 +1603,8 @@ assert_eq "the update with a reopened step exits 0" "$rc" 0
 cp "$OUT" "$UP/update-after.txt"
 [ "$rc" = 0 ] || sed 's/^/    update-kit: /' "$ERR"
 assert "it says which steps reopened" has "$OUT" "Steps that were done before this update and are NOT done under the newer kit (its checks ask for more):"
-assert "it names step 3 and the command to run again" has "$OUT" "  step 3, Store the privacy denylist: \`bootstrap/set-secrets.sh --only privacy"
+assert "it names step 3 and the command to run again, with the config" has "$OUT" "  step 3, Store the privacy denylist: \`bootstrap/set-secrets.sh --config $CFGP --only privacy"
+assert "Do this now names step 3 too" has "$OUT" ". Step 3 (Store the privacy denylist) is not done under the newer kit: \`bootstrap/set-secrets.sh --config $CFGP --only privacy"
 run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/status.sh" --config "$CFGP"
 assert_not "after the update status.sh shows step 3 not done" grep -qE '^done +3 ' "$OUT"
 cp "$OUT" "$UP/status-after.txt"
@@ -1551,16 +1624,19 @@ cp "$K/bootstrap/status.sh" "$O5/bootstrap/status.sh" && ugit -C "$O5" commit -q
 new_config "$UP/k5.env" free zz-fresh-owner; sed -i '/^TIME_ZONE=/d' "$UP/k5.env"
 run env ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/status.sh" --config "$UP/k5.env"
 assert "under the old kit step 0 is done without TIME_ZONE" grep -qE '^done +0 ' "$OUT"
-run env ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/update-kit.sh" --config "$UP/k5.env"; rc=$?
-assert_eq "the update that reopens step 0 exits 0" "$rc" 0
+run env PATH="$BSDBIN:$PATH" ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/update-kit.sh" --config "$UP/k5.env"; rc=$?
+assert_eq "the update that reopens step 0 exits 0, with a paste that needs its - (macOS)" "$rc" 0
 assert "it names step 0" has "$OUT" "  step 0, Write fleet.env:"
 assert "it says why: TIME_ZONE, as status.sh and the key report do" has "$OUT" "    why: $UP/k5.env: TIME_ZONE is required: set TIME_ZONE in fleet.env"
+assert "Do this now says to set TIME_ZONE for step 0" has "$OUT" ". Step 0 (Write fleet.env) is not done under the newer kit: $UP/k5.env: TIME_ZONE is required: set TIME_ZONE in fleet.env"
+assert_not "and never to copy the example over fleet.env" grep -qE '^  [0-9]+\. .*cp bootstrap/fleet.env.example' "$OUT"
 # A downloaded copy (no .git) cannot be updated in place.
 mkdir -p "$UP/dl"; cp -R "$UK/bootstrap" "$UK/starter" "$UK/library" "$UP/dl/"
 uk "$UP/dl" --config "$UK/fleet.env"; rc=$?
 assert_eq "a kit that is not a git clone exits 1" "$rc" 1
 assert "it says it is not a git clone" has "$ERR" "not a git clone"
-assert "it says to clone fresh and re-run add-content.sh" has "$ERR" "bootstrap/add-content.sh --items <ids>"
+assert "it says to clone fresh and re-run add-content.sh, with fleet.env where it is" has "$ERR" "bootstrap/add-content.sh --config $(cd "$UK" && pwd -P)/fleet.env --items <ids>"
+assert_not "it never says to copy fleet.env into the kit" has "$ERR" "copy your fleet.env"
 assert "it prints the recorded ids" has "$ERR" "Your recorded content choices:"
 
 # ======================================================== status.sh (part 1) and verify.sh
@@ -1582,19 +1658,22 @@ INST=installs:guidance-sync,installs:settings-admin,installs:settings-read
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
 assert_eq "verify fails an installation gh's sign-in cannot read" "$rc" 1
 assert "it says to check by hand at settings/installations" has "$OUT" "gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: acme-example-guidance-sync must have access to acme-example/_agent-guidance, "
-assert "it names the step to mark" has "$OUT" "Then: bash bootstrap/status.sh --mark 7"
+assert "it names the step to mark, with this fleet.env's path (it is outside the kit)" has "$OUT" "Then: bash bootstrap/status.sh --config $CFGP --mark 7"
+MARK7=$(sed -n 's/.*Then: \(bash bootstrap\/status\.sh .*--mark 7\)$/\1/p' "$OUT" | head -n1)
 assert_not "the 403's body is not printed" grep -q "BODY-MUST-NOT-BE-PRINTED" "$OUT" "$ERR"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
 assert "with gh's sign-in, step 7 is not done before the answer" grep -qE '^next +7 ' "$OUT"
-run env ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --mark 7; rc=$?
-assert_eq "status --mark 7 is accepted (the installation step takes an answer)" "$rc" 0
-run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
-assert_eq "verify passes the installations you confirmed" "$rc" 0
+# The command as printed, run from the kit's folder, where there is no fleet.env.
+assert_not "the kit's folder has no fleet.env" test -e "$K/fleet.env"
+run env ADOPT_STATE_FILE="$SB7" bash -c 'cd "$1" && eval "$2"' _ "$K" "$MARK7"; rc=$?
+assert_eq "the printed --mark 7 runs as printed (the installation step takes an answer)" "$rc" 0
+run env -u GH_STUB_APP_USER_TOKEN PATH="$BSDBIN:$PATH" ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
+assert_eq "verify passes the installations you confirmed (with a paste that needs its -)" "$rc" 0
 assert "it says they were confirmed by you" has "$OUT" "confirmed by you (status.sh --mark 7); gh's sign-in cannot read installations (HTTP 403)"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
 assert "with gh's sign-in, step 7 is done once answered" grep -qE '^done +7 ' "$OUT"
 run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track evals --only installs:guidance-sync; rc=$?
-assert "the evals track's installation step needs its own answer" has "$OUT" "Then: bash bootstrap/status.sh --mark 34"
+assert "the evals track's installation step needs its own answer" has "$OUT" "Then: bash bootstrap/status.sh --config $CFGP --mark 34"
 run env GH_STUB_INSTALLATIONS_STATUS=401 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
 assert "a 401 says to sign in again" has "$OUT" "HTTP 401: gh's sign-in has expired or was revoked; run gh auth login, then this again"
 run env GH_STUB_INSTALLATIONS_STATUS=502 bash "$B/verify.sh" --config "$CFGP" --track base --only installs:guidance-sync; rc=$?
@@ -1615,12 +1694,42 @@ assert_eq "verify --only fleet-worker fails before step 27" "$rc" 1
 assert "create-environments.sh left the URL none, and verify says step 27 sets it" has "$OUT" "FAIL: acme-example/_agent-guidance variable FLEET_WORKER_FIRE_URL is still none: step 27 creates the Fleet worker routine and sets its fire URL"
 assert_eq "create-environments.sh wrote the Loop worker's URL as none too" "$(jqs "$AG.LOOP_WORKER_FIRE_URL")" none
 assert "it names the missing bearer secret" has "$OUT" "FAIL: acme-example/_agent-guidance has secret FLEET_WORKER_FIRE_BEARER"
-printf 'https://api.example.com/fire' | gh variable set FLEET_WORKER_FIRE_URL --repo "$O/_agent-guidance" >/dev/null 2>&1
+# The URL must be the fire URL fleet-worker-fire.yml posts to; its value is never printed.
+FLEET_URL=https://api.anthropic.com/v1/claude_code/routines/trig_EXAMPLEFleetWorker01/fire
+setvar() { printf '%s' "$2" | gh variable set "$1" --repo "$O/_agent-guidance" >/dev/null 2>&1; }
+setvar FLEET_WORKER_FIRE_URL "$FLEET_URL"
 run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
 assert_eq "the URL alone is not enough" "$rc" 1
+assert "a fire URL passes its own check" has "$OUT" "PASS: acme-example/_agent-guidance variable FLEET_WORKER_FIRE_URL is a routine fire URL"
 printf 'fleet-bearer-placeholder' | gh secret set FLEET_WORKER_FIRE_BEARER --repo "$O/_agent-guidance" >/dev/null 2>&1
 run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
 assert_eq "verify --only fleet-worker passes once both are set" "$rc" 0
+setvar FLEET_WORKER_FIRE_URL https://api.example.com/fire
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "a URL that is not a routine fire URL fails step 27" "$rc" 1
+assert "it says which URL to copy" has "$OUT" "FAIL: acme-example/_agent-guidance variable FLEET_WORKER_FIRE_URL is not a routine fire URL: copy the URL the Fleet worker routine's API trigger shows, https://api.anthropic.com/v1/claude_code/routines/trig_<id>/fire"
+setvar FLEET_WORKER_FIRE_URL https://claude.ai/code/routines/trig_EXAMPLEPageUrl01
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "the routine's page URL fails step 27" "$rc" 1
+assert "it says that is the routine's page" has "$OUT" "is not a routine fire URL (it is the routine's page on claude.ai): copy the URL"
+assert_not "no URL value is printed" grep -qE 'api\.example\.com|trig_EXAMPLE' "$OUT" "$ERR"
+setvar FLEET_WORKER_FIRE_URL "$FLEET_URL"
+# Step 28, the prompt-audit sweep, is checked the same way (it was an ask step).
+run bash "$B/verify.sh" --config "$CFGP" --track base --only prompt-audit; rc=$?
+assert_eq "verify --only prompt-audit fails before step 28" "$rc" 1
+assert "it says step 28 sets the URL" has "$OUT" "FAIL: acme-example/_agent-guidance variable PROMPT_AUDIT_SWEEP_FIRE_URL is not set (step 28 sets it to the prompt-audit sweep routine's fire URL)"
+assert "it names the missing bearer" has "$OUT" "FAIL: acme-example/_agent-guidance has secret PROMPT_AUDIT_SWEEP_FIRE_BEARER"
+run bash "$B/status.sh" --config "$CFGP" --mark 28; rc=$?
+assert_eq "status refuses to mark step 28, which it checks itself" "$rc" 1
+setvar PROMPT_AUDIT_SWEEP_FIRE_URL https://claude.ai/code/routines/trig_EXAMPLEPageUrl01
+printf 'sweep-bearer-placeholder' | gh secret set PROMPT_AUDIT_SWEEP_FIRE_BEARER --repo "$O/_agent-guidance" >/dev/null 2>&1
+run bash "$B/verify.sh" --config "$CFGP" --track base --only prompt-audit; rc=$?
+assert_eq "the sweep routine's page URL fails step 28" "$rc" 1
+assert "it says which URL to copy" has "$OUT" "variable PROMPT_AUDIT_SWEEP_FIRE_URL is not a routine fire URL (it is the routine's page on claude.ai): copy the URL the prompt-audit sweep routine's API trigger shows"
+setvar PROMPT_AUDIT_SWEEP_FIRE_URL https://api.anthropic.com/v1/claude_code/routines/trig_EXAMPLESweep01/fire
+run bash "$B/verify.sh" --config "$CFGP" --track base --only prompt-audit; rc=$?
+assert_eq "verify --only prompt-audit passes with a fire URL and the bearer" "$rc" 0
+assert_not "no URL value is printed" grep -qE 'trig_EXAMPLE' "$OUT" "$ERR"
 run bash "$B/verify.sh" --config "$CFGP"; rc=$?
 assert_eq "verify passes once everything is in place" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'
@@ -1706,6 +1815,14 @@ assert "the fragment stays when the merge is refused" test -e "$fw/repo-settings
 rm -rf "$fw"
 
 # ======================================================== regenerate.sh
+# Before any regenerate step: status.sh shows step 14's reasons, the indented
+# NOT DONE lines verify.sh prints under its FAIL, not a FAIL line ending in a colon.
+SR="$T/state-regen/adopt.json"; mkdir -p "$T/state-regen"; cp "$CHOICES" "$T/state-regen/adopt.content-choices.json"
+run env ADOPT_STATE_FILE="$SR" bash "$B/status.sh" --config "$CFGP" --track base --mark 9 --mark 11
+assert "step 14 is next before skills-locks runs" grep -q '^Next: 14 ' "$OUT"
+grep -q '^Next: 14 ' "$OUT" || sed 's/^/    status: /' "$OUT"
+assert "status.sh names step 14's failing check" grep -qx '    FAIL: regenerate.sh skills-locks is done on the base track:' "$OUT"
+assert "and the reasons under it" bash -c 'grep -A1 -x "    FAIL: regenerate.sh skills-locks is done on the base track:" "$1" | tail -n1 | grep -q "^        NOT DONE: "' _ "$OUT"
 for task in skills-locks hook-pin run-health-sha codex-pin evals-fleet; do
   run bash "$B/regenerate.sh" --config "$CFGP" --check "$task"; rc=$?
   assert_eq "regenerate --check $task fails on the export's placeholders" "$rc" 1
@@ -1987,13 +2104,22 @@ run bash "$B/status.sh" --config "$CFGP"; rc=$?
 assert "the regenerate steps read as done after their merges" bash -c 'for i in 14 15 16 17 18; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
 assert "step 20, the settings apply, is next" grep -q '^Next: 20 ' "$OUT"
 grep -q '^Next: 20 ' "$OUT" || sed 's/^/    status: /' "$OUT"
+# Every bootstrap command status.sh prints carries --config when fleet.env is
+# not ./fleet.env (shell-quoted), and none when it is.
+assert "the Run: line carries --config" has "$OUT" "  Run: bootstrap/apply-settings.sh --config $CFGP (and"
+mkdir -p "$T/my cfg" "$T/cwd-cfg"; cp "$CFGP" "$T/my cfg/fleet.env"; cp "$CFGP" "$T/cwd-cfg/fleet.env"
+run bash "$B/status.sh" --config "$T/my cfg/fleet.env"
+assert "a path with a space is shell-quoted" has "$OUT" "  Run: bootstrap/apply-settings.sh --config $(printf '%q' "$T/my cfg/fleet.env") (and"
+run bash -c 'cd "$1" && bash "$2/status.sh"' _ "$T/cwd-cfg" "$B"
+assert "with ./fleet.env the Run: line has no --config" has "$OUT" "  Run: bootstrap/apply-settings.sh (and"
+assert_not "nor any other line" grep -q -- '--config' "$OUT"
 assert "the evals steps that add skills-evals read as done" bash -c 'for i in 35 36 33 34 37 38 40; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
 assert "the optional dashboard step is labeled optional" grep -qE '^optional +32 ' "$OUT"
 assert "the optional federation step reads as done once its ids are set" grep -qE '^done +26 ' "$OUT"
 bash "$B/status.sh" --config "$CFGP" --unmark 9 >/dev/null 2>&1
 run bash "$B/status.sh" --config "$CFGP"
 assert "--unmark makes a step next again" grep -q '^Next: 9 ' "$OUT"
-assert "status says how to mark an ask step" has "$OUT" "bootstrap/status.sh --mark 9"
+assert "status says how to mark an ask step, with this fleet.env's path" has "$OUT" "bootstrap/status.sh --config $CFGP --mark 9"
 # --track: one track's steps, its own next step, and both tracks' counts.
 track_ids() { jq -r --arg t "$1" '[.steps[] | select(.track == $t) | .id] | join(" ")' "$B/steps.json"; }
 listed() { sed -nE 's/^(done|asked: done|next|todo|optional) +([0-9]+) .*/\2/p' "$1" | paste -sd' ' -; }

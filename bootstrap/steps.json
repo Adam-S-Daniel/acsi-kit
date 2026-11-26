@@ -383,7 +383,7 @@
     {
       "id": "27",
       "title": "Create the fleet worker routine",
-      "run": "At https://claude.ai/code/routines, one task (the Fleet worker, maintenance role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it (create-environments.sh left the URL `none`, which skips the fire with a \"not set up yet\" notice; set it to the routine's fire URL. This step's check is that the URL is no longer `none` and the bearer is set; the token is shown once, and bootstrap/README.md has the commands). Pick the model its table in docs/routines.md names (Sonnet on Pro) instead of leaving the selector on Default, which follows the account default (Opus on Pro, by Anthropic's model page); remove the connectors it does not need. The Loop worker serves the eval loop, so the evals track creates it (step 41)",
+      "run": "At https://claude.ai/code/routines, one task (the Fleet worker, maintenance role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it (create-environments.sh left the URL `none`, which skips the fire with a \"not set up yet\" notice; set it to the fire URL the routine's API trigger shows, `https://api.anthropic.com/v1/claude_code/routines/trig_<id>/fire`, not the routine's own `https://claude.ai/code/routines/trig_...` page. This step's check is that the URL has that shape and the bearer is set; the token is shown once, and bootstrap/README.md has the commands). Pick the model its table in docs/routines.md names (Sonnet on Pro) instead of leaving the selector on Default, which follows the account default (Opus on Pro, by Anthropic's model page); remove the connectors it does not need. The Loop worker serves the eval loop, so the evals track creates it (step 41)",
       "kind": "browser",
       "part": "routines",
       "track": "base",
@@ -399,13 +399,16 @@
     {
       "id": "28",
       "title": "Create the prompt-audit sweep routine",
-      "run": "At https://claude.ai/code/routines: API trigger only; store its fire URL and bearer on _agent-guidance as PROMPT_AUDIT_SWEEP_FIRE_URL (variable) and PROMPT_AUDIT_SWEEP_FIRE_BEARER (secret); the token is shown once, and bootstrap/README.md has the commands. Pick the model its table in docs/routines.md names (Sonnet on Pro) instead of leaving the selector on Default, which follows the account default (Opus on Pro, by Anthropic's model page); remove the connectors it does not need",
+      "run": "At https://claude.ai/code/routines: API trigger only; store its fire URL (the `https://api.anthropic.com/v1/claude_code/routines/trig_<id>/fire` its API trigger shows, not the routine's page URL) and bearer on _agent-guidance as PROMPT_AUDIT_SWEEP_FIRE_URL (variable) and PROMPT_AUDIT_SWEEP_FIRE_BEARER (secret); this step's check is that the URL has that shape and the bearer is set; the token is shown once, and bootstrap/README.md has the commands. Pick the model its table in docs/routines.md names (Sonnet on Pro) instead of leaving the selector on Default, which follows the account default (Opus on Pro, by Anthropic's model page); remove the connectors it does not need",
       "kind": "browser",
       "part": "routines",
       "track": "base",
       "link": "docs/routines.md#prompt-audit-sweep",
       "check": {
-        "type": "ask"
+        "type": "verify",
+        "groups": [
+          "prompt-audit"
+        ]
       },
       "minutes": 15
     },

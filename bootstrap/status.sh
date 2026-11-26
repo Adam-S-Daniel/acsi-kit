@@ -22,9 +22,10 @@
 # A path inside this kit or any git work tree is refused. It never prompts.
 #
 # Prints one line per step (done, next, todo, optional, or "asked: done"),
-# then "N of M done", how many steps of each track are done, and the next
-# step: title, time estimate, kind, what to run and the docs section that
-# explains it. Steps are sequential: the first step not done is next, except
+# then "N of M done", how many required steps of each track are done, and
+# the next step: title, time estimate, kind, what to run and the docs section
+# that explains it. Every bootstrap command it prints carries your --config
+# when it is not ./fleet.env, so it runs as printed. Steps are sequential: the first step not done is next, except
 # that an optional step never blocks the next one. The counts are of required
 # steps: an optional step is listed, done or not, and never counted, so a
 # track reads "M of M done" whether or not its optional steps were taken.
@@ -126,7 +127,9 @@ check_verify() { # id groups track
     else
       VERIFY_RC[$g]=1
     fi
-    VERIFY_OUT[$g]=$(grep -E '^(FAIL|ERROR): ' "$out" || true)
+    # A FAIL line and the indented reasons under it (regenerate.sh's and
+    # apply-settings.sh's NOT DONE and MISSING lines), and any ERROR.
+    VERIFY_OUT[$g]=$(awk '/^(FAIL|ERROR): /{keep=1; print; next} /^    / && keep {print; next} {keep=0}' "$out")
   fi
   if [ "${VERIFY_RC[$g]}" = 0 ]; then STEP_DONE[$1]=1; else DETAIL[$1]=${VERIFY_OUT[$g]}; fi
 }
@@ -196,25 +199,25 @@ done
 printf '%d of %d done\n' "$N" "$M"
 printf 'base: %d of %d done; evals: %d of %d done\n' "${TRACK_DONE[base]}" "${TRACK_ALL[base]}" "${TRACK_DONE[evals]}" "${TRACK_ALL[evals]}"
 if [ "$TRACK" = evals ] && [ "${TRACK_DONE[base]}" -lt "${TRACK_ALL[base]}" ]; then
-  log "The base track is not done yet: /adopt-evals runs it first (bootstrap/status.sh --track base lists it)."
+  log "The base track is not done yet: /adopt-evals runs it first (bootstrap/status.sh$(config_arg) --track base lists it)."
 fi
 if [ -z "$NEXT" ]; then
   case $TRACK in
-    all) log "Next: nothing; every required step is done. bootstrap/verify.sh checks the whole setup." ;;
-    base) log "Next: nothing; every required base step is done. The evals track (bootstrap/status.sh --track evals, or /adopt-evals) adds the eval loop." ;;
-    evals) log "Next: nothing; every required evals step is done. bootstrap/verify.sh checks the whole setup." ;;
+    all) log "Next: nothing; every required step is done. bootstrap/verify.sh$(config_arg) checks the whole setup." ;;
+    base) log "Next: nothing; every required base step is done. The evals track (bootstrap/status.sh$(config_arg) --track evals, or /adopt-evals) adds the eval loop." ;;
+    evals) log "Next: nothing; every required evals step is done. bootstrap/verify.sh$(config_arg) checks the whole setup." ;;
   esac
   exit 0
 fi
 log "Next: $NEXT ${TITLE[$NEXT]} (about ${MIN[$NEXT]} minutes, ${KIND[$NEXT]})"
-log "  Run: ${RUN[$NEXT]}"
+log "  Run: $(with_config_arg "${RUN[$NEXT]}")"
 log "  Read: ${LINK[$NEXT]}"
-case $NEXT in 0|1|2) log "  Before step 2: bash bootstrap/preflight.sh checks the tools and the gh sign-in these scripts need." ;; esac
+case $NEXT in 0|1|2) log "  Before step 2: bash bootstrap/preflight.sh$(config_arg) checks the tools and the gh sign-in these scripts need." ;; esac
 if [ -n "${DETAIL[$NEXT]:-}" ]; then
   log "  Not done yet:"
   printf '%s\n' "${DETAIL[$NEXT]}" | sed 's/^/    /'
 fi
 if [ "${CTYPE[$NEXT]}" = ask ]; then
-  log "  status.sh cannot see this one. Once it is done: bootstrap/status.sh --mark $NEXT"
+  log "  status.sh cannot see this one. Once it is done: bootstrap/status.sh$(config_arg) --mark $NEXT"
 fi
 exit 0
