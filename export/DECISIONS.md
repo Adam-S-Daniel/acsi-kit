@@ -2959,6 +2959,7 @@ Both rules now spell the name one letter class at a time (`[Xx][Yy]...`), so the
 The source still uses the name in those identifiers at the `skills-evals` pin; renaming them there is a separate `skills-evals` pull request, and until the kit's pin moves past it, this rule is what keeps the shipped copy clean.
 
 Reverse: restore the word-bounded regex rule and the case-sensitive `leak_scan` entry, remove the `regex` + `forms` branch from `compile_rules`, delete the new test file and the two `test_no_leaks.py` tests, and re-run the export.
+
 ## The rules-consistency list names only the adopter's own repos (2026-11-25)
 
 `starter/skills-evals/evals/rules-consistency.yml` lists the public repos that skills-evals' daily `rules-consistency.yml` workflow shallow-clones with no token (three tries, then `::error::could not clone <repo>` and exit 1; the checker is never reached). The source's list holds `_agent-guidance`, `acsi-agentskills`, the kit's own repo and the owner's website. An adopter has no `acsi-kit` repo (it is not in `FLEET_REPOS`, `bootstrap/lib/common.sh`) and only an optional website, so the workflow failed every day.
