@@ -31,7 +31,10 @@
 # (export/FIX-ROUTINE.md), at most once a day, which pushes a `resync-fix/`
 # branch that follows it; resync-fix-pr.yml opens the pull request, because the
 # routine can push but cannot open pull requests or comment (a second workflow,
-# resync-fix-pushed.yml, only triggers that one).
+# resync-fix-pushed.yml, only triggers that one). An open `resync-fix/` pull
+# request that still follows every held head stops the fire; one whose pins a
+# held source's head has moved past is stale, so the run closes it (with the
+# App's token) and fires the routine again.
 name: Re-sync from sources
 
 on:
@@ -112,7 +115,8 @@ jobs:
           # The failing output's tails go to a file for a fixer to read; they
           # are never printed here or copied into the pull request or issue.
           python3 export/resync_holdback.py --owner "$SOURCE_OWNER" --sources "$sources" \
-            --summary "$RUNNER_TEMP/resync-summary.md" --tails "$RUNNER_TEMP/holdback-tails.txt"
+            --summary "$RUNNER_TEMP/resync-summary.md" --tails "$RUNNER_TEMP/holdback-tails.txt" \
+            --held-heads "$RUNNER_TEMP/held-heads.json"
           echo "files changed: $(git status --porcelain | wc -l)"
 
       # Which hand-written pages describe a source this re-sync changed
@@ -135,9 +139,8 @@ jobs:
 
       - name: Check for the App
         id: app
-        # The holdback step is skipped when nothing changed, so its output is
-        # empty then and the App is still wanted, to close a stale pull request.
-        if: steps.holdback.outputs.all_held != 'true'
+        # Always: the App also closes a stale re-sync pull request (nothing
+        # changed) and a stale fix pull request (everything held back).
         env:
           APP_CLIENT_ID: ${{ vars.RESYNC_APP_CLIENT_ID }}
           HAS_PEM: ${{ secrets.RESYNC_APP_PEM != '' }}
@@ -163,7 +166,8 @@ jobs:
 
       - name: Push resync/auto and open or update the pull request
         id: push
-        if: steps.app.outputs.configured == 'true' && steps.resync.outputs.changed == 'true'
+        # With everything held back there is nothing to commit.
+        if: steps.app.outputs.configured == 'true' && steps.resync.outputs.changed == 'true' && steps.holdback.outputs.all_held != 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           APP_SLUG: ${{ steps.token.outputs.app-slug }}
@@ -286,8 +290,15 @@ jobs:
       # Starts the re-sync fix routine (export/FIX-ROUTINE.md), a Claude cloud
       # routine that follows a held source and pushes a `resync-fix/` branch
       # (resync-fix-pr.yml opens the pull request). It fires at most once a UTC
-      # day (a marker comment on the issue) and never while such a pull request
-      # is open.
+      # day (a marker comment on the issue), checked first so a second run
+      # closes nothing.
+      # * An open `resync-fix/` pull request that still pins every held
+      #   source's head stops the fire. One a held source has moved past is
+      #   stale (export/resync_stale_fix.py compares its manifests, read at its
+      #   head commit, with the held-heads file's heads): it is closed with
+      #   a comment, using the App's token because the job's own token only
+      #   reads pull requests, and the routine fires again. With no App to
+      #   close it, nothing fires.
       # * The routine's fire URL is a repository variable and its bearer an
       #   Actions secret, with no default: a missing one fails the step naming
       #   it.
@@ -300,6 +311,7 @@ jobs:
         if: success() && steps.holdback.outputs.held_back != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.token.outputs.token }}
           FIRE_URL: ${{ vars.RESYNC_FIXER_FIRE_URL }}
           FIRE_BEARER: ${{ secrets.RESYNC_FIXER_FIRE_BEARER }}
           OWNER: ${{ github.repository_owner }}
@@ -316,15 +328,8 @@ jobs:
             exit 1
           fi
           [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::the held-back issue step gave no issue number"; exit 1; }
-          # Only this repository's own branches and the job's own comments
-          # count: a fork's pull request or anyone's comment must not stop it.
-          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json headRefName,isCrossRepository \
-            --jq '[.[] | select((.isCrossRepository | not) and (.headRefName | startswith("resync-fix/")))] | length') \
-            || { echo "::error::could not list open pull requests; not firing"; exit 1; }
-          if [ "$open" != 0 ]; then
-            echo "::notice::a resync-fix pull request is already open; not firing"
-            exit 0
-          fi
+          # Once a day, checked before anything is closed: only the job's own
+          # comments count, so nobody else's can stop it.
           marker="<!-- resync-fixer-fired $(date -u +%F) -->"
           seen=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments" --paginate \
             --jq '.[] | select(.user.login == "github-actions[bot]") | .body') \
@@ -332,6 +337,56 @@ jobs:
           if grep -qF -- "$marker" <<<"$seen"; then
             echo "::notice::the fix routine already started today; not firing"
             exit 0
+          fi
+          # Only this repository's own branches count: a fork's pull request
+          # must not stop it.
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json number,headRefName,headRefOid,isCrossRepository \
+            --jq '.[] | select((.isCrossRepository | not) and (.headRefName | startswith("resync-fix/"))) | "\(.number) \(.headRefOid)"') \
+            || { echo "::error::could not list open pull requests; not firing"; exit 1; }
+          stale_numbers=()
+          stale_sources=()
+          fresh=0
+          if [ -n "$open" ]; then
+            held_heads="$RUNNER_TEMP/held-heads.json"
+            [ -f "$held_heads" ] || { echo "::error::the holdback step left no held-heads file; not firing"; exit 1; }
+            shopt -s nullglob
+            while read -r number head; do
+              [[ "$number" =~ ^[0-9]+$ && "$head" =~ ^[0-9a-f]{40}$ ]] \
+                || { echo "::error::unexpected pull request listing; not firing"; exit 1; }
+              copy=$(mktemp -d "$RUNNER_TEMP/fix-pr-manifests.XXXXXX")
+              for path in export/manifests/*.yml; do
+                name=${path##*/}
+                [ "$name" = _common.yml ] && continue
+                # gh api prints an error body on stdout, so a failed fetch's
+                # output goes to the copy and is discarded, never shown.
+                gh api -H "Accept: application/vnd.github.raw" \
+                  "repos/$GITHUB_REPOSITORY/contents/export/manifests/$name?ref=$head" > "$copy/$name" 2> /dev/null \
+                  || { echo "::error::could not read $name at the head of pull request #$number; not firing"; exit 1; }
+              done
+              # Exit 2 (an unreadable input) fails the step with its message.
+              stale=$(python3 export/resync_stale_fix.py "$held_heads" "$copy")
+              rm -rf "$copy"
+              if [ -z "$stale" ]; then
+                fresh=1
+              else
+                stale_numbers+=("$number")
+                stale_sources+=("$stale")
+              fi
+            done <<<"$open"
+            if [ "$fresh" = 1 ]; then
+              echo "::notice::a resync-fix pull request is open and still follows the held sources' heads; not firing"
+              exit 0
+            fi
+            if [ -z "$APP_TOKEN" ]; then
+              echo "::notice::a stale resync-fix pull request is open but there is no App to close it; not firing"
+              exit 0
+            fi
+            for i in "${!stale_numbers[@]}"; do
+              comment=$(printf 'The held source(s) %s moved past this pull request'"'"'s pins, so it follows old heads. The daily re-sync closed it and started the fix routine again: %s\n\n<sub>🤖 Written by the daily re-sync on behalf of @%s</sub>' \
+                "${stale_sources[$i]// /, }" "$RUN_URL" "$OWNER")
+              GH_TOKEN="$APP_TOKEN" gh pr close "${stale_numbers[$i]}" --repo "$GITHUB_REPOSITORY" --comment "$comment" > /dev/null
+              echo "closed stale pull request #${stale_numbers[$i]}"
+            done
           fi
           tails="$RUNNER_TEMP/holdback-tails.txt"
           [ -f "$tails" ] || : > "$tails"

@@ -3,13 +3,15 @@
 # (overlap lock, time limit, checkout update, log line) and
 # scripts/unix/install-schedule.sh (systemd units, launchd plists, the crontab
 # block). Everything runs in fixture checkouts under one temporary directory,
-# with stub systemctl, loginctl, launchctl and crontab; nothing is scheduled and
-# no network is used.
+# with stub systemctl, loginctl, launchctl, crontab and uname; nothing is
+# scheduled and no network is used. The launchd and macOS paths run only through
+# those stubs: no macOS machine was available.
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "$0")/.." && pwd)
 runner_src="$repository_root/scripts/unix/run-task.sh"
 installer_src="$repository_root/scripts/unix/install-schedule.sh"
+tool_path_src="$repository_root/scripts/unix/tool-path.sh"
 test_root=$(mktemp -d)
 trap 'rm -rf -- "$test_root"' EXIT
 
@@ -69,7 +71,7 @@ export PATH="$test_root/bin:$PATH"
 origin="$test_root/origin.git"
 upstream="$test_root/upstream"
 mkdir -p "$upstream/scripts/unix"
-cp -- "$runner_src" "$upstream/scripts/unix/run-task.sh"
+cp -- "$runner_src" "$tool_path_src" "$upstream/scripts/unix/"
 for entry in publish-usage-census.sh publish-waiting-feed.sh run-session-miner.sh; do
     cat >"$upstream/scripts/$entry" <<'EOF'
 #!/usr/bin/env bash
@@ -255,7 +257,7 @@ assert_match "$(last_log)" 'job=usage-census exit=0$' 'the newest line survives 
 #     the census entry starts no pwsh.exe and prints no bootstrap warning.
 real="$test_root/real"
 mkdir -p "$real/scripts/unix"
-cp -- "$runner_src" "$real/scripts/unix/run-task.sh"
+cp -- "$runner_src" "$tool_path_src" "$real/scripts/unix/"
 #     The census sources task-settings.sh for SKILLS_EVALS_URL, which the
 #     environment sets here.
 cp -- "$repository_root/scripts/publish-usage-census.sh" "$repository_root/scripts/update-task-checkout.sh" \
@@ -274,14 +276,30 @@ assert_match "$out" 'checkout update skipped' 'a directory that is not a checkou
 
 inst_repo="$test_root/install/wsl-automation"
 mkdir -p "$inst_repo/scripts/unix"
-cp -- "$runner_src" "$installer_src" "$inst_repo/scripts/unix/"
+cp -- "$runner_src" "$installer_src" "$tool_path_src" "$inst_repo/scripts/unix/"
 installer="$inst_repo/scripts/unix/install-schedule.sh"
 inst_runner="$inst_repo/scripts/unix/run-task.sh"
 export CALLS="$test_root/scheduler-calls"
-for tool in systemctl launchctl; do
-    # shellcheck disable=SC2016 # the stub's own $* and $CALLS
-    printf '#!/usr/bin/env bash\nprintf "%s %%s\\n" "$*" >>"$CALLS"\n' "$tool" >"$test_root/bin/fake-$tool"
-done
+# systemctl: `--user show-environment` is the installer's bus probe (FAKE_BUS_RC
+# makes it fail) and is not recorded; every other call is.
+cat >"$test_root/bin/fake-systemctl" <<'EOF'
+#!/usr/bin/env bash
+if [[ $* == '--user show-environment' ]]; then exit "${FAKE_BUS_RC:-0}"; fi
+printf 'systemctl %s\n' "$*" >>"$CALLS"
+EOF
+# launchctl: `bootstrap` fails when FAKE_BOOTSTRAP_FAILS is set (no GUI session).
+cat >"$test_root/bin/fake-launchctl" <<'EOF'
+#!/usr/bin/env bash
+printf 'launchctl %s\n' "$*" >>"$CALLS"
+if [[ $1 == bootstrap && -n ${FAKE_BOOTSTRAP_FAILS:-} ]]; then
+    echo 'Bootstrap failed: 125: Domain does not support specified action' >&2
+    exit 125
+fi
+EOF
+cat >"$test_root/bin/fake-uname" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "${FAKE_OS:-Linux}"
+EOF
 cat >"$test_root/bin/fake-loginctl" <<'EOF'
 #!/usr/bin/env bash
 printf 'Linger=%s\n' "${FAKE_LINGER:-no}"
@@ -299,6 +317,7 @@ EOF
 chmod +x "$test_root/bin/"fake-*
 export INSTALL_SCHEDULE_SYSTEMCTL=fake-systemctl INSTALL_SCHEDULE_LOGINCTL=fake-loginctl
 export INSTALL_SCHEDULE_LAUNCHCTL=fake-launchctl INSTALL_SCHEDULE_CRONTAB=fake-crontab
+export INSTALL_SCHEDULE_UNAME=fake-uname
 install() {  # install ARGS...: sets rc and out
     rc=0
     out=$(bash "$installer" "$@" 2>&1) || rc=$?
@@ -447,5 +466,136 @@ out=$(bash "$odd/scripts/unix/install-schedule.sh" cron 2>&1) || rc=$?
 assert_eq "$rc" 1 'an odd checkout path exits 1'
 assert_match "$out" 'move the checkout to a plain path' 'the refusal says what to do'
 assert_eq "$(cat "$CRONTAB_FILE")" "$before" 'the refused install changes nothing'
+
+# 20. Preflight: every missing piece is reported at once, and nothing is
+#     written (no unit, plist, crontab entry, call to a scheduler) until all
+#     probes pass. `command` hides flock, timeout or gtimeout the way test 12
+#     does; a date stub that rejects -d stands in for BSD date.
+agents="$HOME/Library/LaunchAgents"
+rm -rf -- "$XDG_CONFIG_HOME" "$agents" "$CALLS" "$CRONTAB_FILE"
+mkdir -p "$test_root/baddate" "$test_root/gtimeout-bin"
+cat >"$test_root/baddate/date" <<'EOF'
+#!/usr/bin/env bash
+for argument in "$@"; do
+    if [[ $argument == -d ]]; then echo 'date: illegal option -- d' >&2; exit 1; fi
+done
+exec /bin/date "$@"
+EOF
+printf '#!/usr/bin/env bash\nexec timeout "$@"\n' >"$test_root/gtimeout-bin/gtimeout"
+chmod +x "$test_root/baddate/date" "$test_root/gtimeout-bin/gtimeout"
+nothing_written() {  # nothing_written MESSAGE
+    assert_eq "$([[ -e $XDG_CONFIG_HOME || -e $agents || -e $CALLS || -e $CRONTAB_FILE ]] && echo touched || echo untouched)" untouched "$1"
+}
+install_without() {  # install_without "TOOLS TO HIDE" ARGS...: sets rc and out
+    local hide=$1
+    shift
+    rc=0
+    out=$(
+        export HIDE_TOOLS=$hide
+        # shellcheck disable=SC2317,SC2329
+        command() {
+            local tool
+            if [[ $1 == -v ]]; then
+                for tool in $HIDE_TOOLS; do
+                    if [[ ${2:-} == "$tool" ]]; then return 1; fi
+                done
+            fi
+            builtin command "$@"
+        }
+        export -f command
+        bash "$installer" "$@" 2>&1
+    ) || rc=$?
+}
+
+install_without flock systemd
+assert_eq "$rc" 1 'systemd: missing flock exits 1'
+assert_match "$out" 'flock is missing' 'the refusal names flock'
+assert_match "$out" 'util-linux' 'the Linux hint names util-linux'
+assert_no_match "$out" 'timeout \(or gtimeout\) is missing' 'timeout is present, so it is not reported'
+nothing_written 'missing flock writes nothing'
+install_without flock cron
+assert_eq "$rc" 1 'cron: missing flock exits 1'
+nothing_written 'missing flock writes no crontab'
+
+install_without 'timeout gtimeout' systemd
+assert_eq "$rc" 1 'missing timeout and gtimeout exits 1'
+assert_match "$out" 'timeout \(or gtimeout\) is missing' 'the refusal names timeout'
+assert_match "$out" 'coreutils' 'the Linux hint names coreutils'
+nothing_written 'missing timeout writes nothing'
+FAKE_OS=Darwin install_without 'flock timeout gtimeout' launchd
+assert_match "$out" 'brew install flock coreutils' 'the macOS hint for flock is brew install flock coreutils'
+assert_match "$out" 'brew install coreutils' 'the macOS hint for timeout is brew install coreutils'
+nothing_written 'macOS missing tools write nothing'
+
+# gtimeout alone satisfies the timeout probe, as it does the runner.
+PATH="$test_root/gtimeout-bin:$PATH" install_without timeout systemd
+assert_eq "$rc" 0 'gtimeout alone passes the timeout probe'
+rm -rf -- "$XDG_CONFIG_HOME" "$CALLS"
+
+# The date probe applies only to the jobs whose scripts need GNU date.
+PATH="$test_root/baddate:$PATH" install systemd --jobs waiting-feed
+assert_eq "$rc" 1 'waiting-feed with a BSD date exits 1'
+assert_match "$out" 'waiting-feed needs a date that accepts -d @0' 'the refusal names the job and the date test'
+assert_match "$out" 'coreutils' 'the date hint names coreutils'
+nothing_written 'a BSD date writes nothing'
+FAKE_OS=Darwin PATH="$test_root/baddate:$PATH" install launchd --jobs usage-census
+assert_eq "$rc" 0 'the census runs on a BSD date, so the date probe is skipped'
+rm -rf -- "$agents" "$CALLS"
+PATH="$test_root/baddate:$PATH" install cron --jobs waiting-feed,session-miner
+assert_match "$out" 'brew install coreutils|install the coreutils package' 'the date hint is given'
+assert_eq "$rc" 1 'cron: waiting-feed with a BSD date exits 1'
+nothing_written 'cron with a BSD date writes nothing'
+
+# systemd needs a user bus; cron does not.
+FAKE_BUS_RC=1 install systemd
+assert_eq "$rc" 1 'systemd without a user bus exits 1'
+assert_match "$out" 'systemctl --user show-environment' 'the refusal names the probe'
+assert_match "$out" '/etc/wsl.conf' 'the refusal names /etc/wsl.conf'
+assert_match "$out" 'systemd=true' 'the refusal names systemd=true'
+assert_match "$out" 'wsl.exe --shutdown' 'the refusal names wsl.exe --shutdown'
+assert_match "$out" 'install-schedule.sh cron' 'the refusal offers the cron mode'
+nothing_written 'no user bus writes no unit'
+FAKE_BUS_RC=1 install cron
+assert_eq "$rc" 0 'cron installs without a user bus'
+rm -f -- "$CRONTAB_FILE"
+install systemd
+assert_eq "$rc" 0 'systemd installs when the bus is reachable'
+rm -rf -- "$XDG_CONFIG_HOME" "$CALLS"
+
+# Everything missing at once: all four items in one message.
+FAKE_BUS_RC=1 PATH="$test_root/baddate:$PATH" install_without 'flock timeout gtimeout' systemd --jobs waiting-feed
+assert_eq "$rc" 1 'everything missing exits 1'
+for needle in 'flock is missing' 'timeout \(or gtimeout\) is missing' 'waiting-feed needs a date' 'no systemd user bus'; do
+    assert_match "$out" "$needle" "the all-missing message carries: $needle"
+done
+assert_eq "$(grep -c '^  - ' <<<"$out")" 4 'the all-missing message lists four items'
+nothing_written 'everything missing writes nothing'
+
+# launchd: a bootstrap that fails (no GUI session) leaves no plist and fails.
+FAKE_BOOTSTRAP_FAILS=1 install launchd --jobs usage-census
+assert_eq "$rc" 1 'a failed launchctl bootstrap exits 1'
+assert_match "$out" 'logged-in' 'the failure says to run from a logged-in session'
+assert_match "$out" 'Terminal' 'the failure names Terminal'
+assert_eq "$([[ -e $agents/local.wsl-automation.usage-census.plist ]] && echo left || echo removed)" removed 'no plist is left behind'
+assert_match "$out" 'so it is not installed' 'the failure says the job is not installed'
+rm -rf -- "$agents" "$CALLS"
+
+# macOS keeps Claude Code's credentials in the Keychain, so the waiting feed is
+# skipped there (the other jobs install); alone, it leaves nothing to install.
+FAKE_OS=Darwin install launchd --jobs usage-census,waiting-feed
+assert_eq "$rc" 0 'macOS install with the feed requested still exits 0'
+assert_match "$out" 'waiting-feed: .*Linux and WSL only' 'the skip says the feed is Linux and WSL only'
+assert_eq "$(find "$agents" -type f | sed 's|.*/||')" 'local.wsl-automation.usage-census.plist' 'only the other job is installed on macOS'
+rm -rf -- "$agents" "$CALLS"
+FAKE_OS=Darwin install launchd --jobs waiting-feed
+assert_eq "$rc" 1 'macOS with only the feed requested exits 1'
+nothing_written 'macOS feed-only writes nothing'
+FAKE_OS=Linux install cron --jobs waiting-feed --print
+assert_eq "$rc" 0 'Linux still offers the waiting feed'
+assert_match "$out" 'waiting-feed' 'the Linux feed is listed'
+
+# The installer and the runner share one lookup.
+assert_match "$(cat "$installer_src")" 'tool-path\.sh' 'the installer sources the shared lookup'
+assert_match "$(cat "$runner_src")" 'tool-path\.sh' 'the runner sources the shared lookup'
 
 printf 'PASS: %s assertions\n' "$passed"
