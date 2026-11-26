@@ -56,22 +56,34 @@ On older CLIs, add this marketplace alongside the public one, then install by
 ```
 
 Skills are namespaced by bundle, e.g. `/acsi-private-anything-anywhere:<skill>`.
+
 To refresh the catalog manually later, use
 `/plugin marketplace update acsi-agentskills-private`.
 
-## Install — Codex, Gemini, Cursor, and local use
+## Install — Codex, and `setup.sh`
 
-Run `setup.sh` once **in each environment** (Windows Git Bash *and* WSL). It links
-every private skill under `plugins/*/skills/*` into the standard per-agent skill
-homes — the same way the public repo does, and sharing the same de-dup so Claude
-Code stays marketplace-only (never `~/.claude/skills`):
+Codex installs these plugins from the same marketplace: register the catalog
+with `codex plugin marketplace add example-adopter/acsi-agentskills-private`,
+then install the bundle from it.
+
+`setup.sh` links no skill into another tool's folder (`~/.agents/skills/`,
+`~/.agent/skills/`, `~/.gemini/skills/`, `~/.gemini/antigravity/skills/`,
+`~/.cursor/skills/`): with Codex installing the plugins, a link would load
+every skill a second time, as the public registry's
+[ADR 0017](https://github.com/example-adopter/acsi-agentskills/blob/main/docs/decisions/0017-harness-aware-plugin-hooks-because-codex-loads-them-too.md)
+explains. It only removes such links, which an older version of the script
+made, so a new setup has nothing for it to do. To run it anyway, once
+**in each environment** (Windows Git Bash *and* WSL):
 
 ```bash
 bash setup.sh
 ```
 
-It is safe to run while a bundle has no skills yet — it simply reports that
-there are none to link.
+It removes only links that point into this repo's checkout (or into a
+checkout under the repo's earlier name beside it), in those five homes and in
+`~/.claude/skills/`. Files, real directories and links to anywhere else
+are left alone. It is safe to re-run, and safe to run while a bundle has no
+skills yet.
 
 ## Repo layout
 
@@ -81,7 +93,7 @@ plugins/
   <bundle>/                           # acsi-private-anything-anywhere (more may be added later)
     .claude-plugin/plugin.json        # bundle manifest
     skills/<skill>/SKILL.md           # one dir per skill (+ scripts/, tests/, hooks/)
-setup.sh                              # link private skills into per-agent dirs (non-Claude-Code)
+setup.sh                              # remove the skill links earlier versions made
 ```
 
 Validate the marketplace and any plugin with `claude plugin validate <path>`.
