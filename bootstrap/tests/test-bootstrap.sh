@@ -48,6 +48,9 @@ jqset()       { jq "$1" "$GH_STUB_STATE" > "$T/s" && mv "$T/s" "$GH_STUB_STATE";
 export PATH="$B/tests/stubs:$PATH"
 export TMPDIR="$T/tmp" HOME="$T/home"; mkdir -p "$TMPDIR" "$HOME"
 export GH_LOG="$T/gh.log" GH_STUB_STATE="$T/gh-state.json"
+# Most cases read App installations as a GitHub App user token can; the
+# "gh's own sign-in" case below unsets it and gets the real 403.
+export GH_STUB_APP_USER_TOKEN=1
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$T/gitconfig"
 export BOOTSTRAP_GIT_BASE="file://$T/remotes"
 export GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z
@@ -890,6 +893,27 @@ assert "step 7, the App installations, is next" grep -q '^Next: 7 ' "$OUT"
 assert "status names the section to read" grep -qF 'Read: docs/settings-and-apps.md#installing-the-apps' "$OUT"
 run bash "$B/verify.sh" --config "$CFGP" --only installs:guidance-sync; rc=$?
 assert_eq "verify fails an App that is not installed" "$rc" 1
+# gh's own sign-in (an OAuth token, no GitHub App user token) gets HTTP 403
+# from user/installations, so step 7 is then the user's answer: verify says
+# what to check and which step to mark, and --mark makes it done.
+SB7="$T/state-oauth/adopt.json"; mkdir -p "$T/state-oauth"; cp "$CHOICES" "$T/state-oauth/adopt.content-choices.json"
+INST=installs:guidance-sync,installs:settings-admin,installs:settings-read
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
+assert_eq "verify fails an installation gh's sign-in cannot read" "$rc" 1
+assert "it says to check by hand at settings/installations" has "$OUT" "gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: acme-example-guidance-sync must have access to acme-example/_agent-guidance, "
+assert "it names the step to mark" has "$OUT" "Then: bash bootstrap/status.sh --mark 7"
+assert_not "the 403's body is not printed" grep -q "BODY-MUST-NOT-BE-PRINTED" "$OUT" "$ERR"
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
+assert "with gh's sign-in, step 7 is not done before the answer" grep -qE '^next +7 ' "$OUT"
+run env ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --mark 7; rc=$?
+assert_eq "status --mark 7 is accepted (the installation step takes an answer)" "$rc" 0
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track base --only "$INST"; rc=$?
+assert_eq "verify passes the installations you confirmed" "$rc" 0
+assert "it says they were confirmed by you" has "$OUT" "confirmed by you (status.sh --mark 7); gh's sign-in cannot read installations (HTTP 403)"
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/status.sh" --config "$CFGP" --track base
+assert "with gh's sign-in, step 7 is done once answered" grep -qE '^done +7 ' "$OUT"
+run env -u GH_STUB_APP_USER_TOKEN ADOPT_STATE_FILE="$SB7" bash "$B/verify.sh" --config "$CFGP" --track evals --only installs:guidance-sync; rc=$?
+assert "the evals track's installation step needs its own answer" has "$OUT" "Then: bash bootstrap/status.sh --mark 34"
 # Install every App where it is needed.
 inst='[]'; i=0
 while IFS='|' read -r app _ installed _ _ _ _ key _; do

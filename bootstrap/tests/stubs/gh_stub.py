@@ -136,6 +136,10 @@ def api(args):
         u = m.group(1)
         return out({"login": u, "id": 5000 + sum(map(ord, u)), "type": "User"})
 
+    # Real GitHub answers 403 to gh's own (OAuth) sign-in here: the endpoint
+    # takes a GitHub App user token. GH_STUB_APP_USER_TOKEN=1 stands for one.
+    if path.startswith("user/installations") and os.environ.get("GH_STUB_APP_USER_TOKEN") != "1":
+        return err(403, "You must authenticate with an access token authorized to a GitHub App in order to list installations")
     if path == "user/installations":
         return out({"total_count": len(st.get("installations", [])),
                     "installations": [{k: v for k, v in i.items() if k != "repos"} for i in st.get("installations", [])]})

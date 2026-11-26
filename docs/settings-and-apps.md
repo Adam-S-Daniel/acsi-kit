@@ -180,7 +180,11 @@ and every consumer in `_agent-guidance`'s `repos.yml`. Once the evals track
 creates `skills-evals`, add it to their installations (step 34). With a
 second owner, the three are public Apps, so sign in as that owner and
 install them there too. `bash bootstrap/verify.sh --only installs:<app>`
-checks an installation.
+checks an installation when it can: GitHub lists installations only to a
+GitHub App user token, and answers gh's own sign-in with HTTP 403. Then
+verify.sh names each App and the repos it needs; check them at
+https://github.com/settings/installations and record your answer with
+`bash bootstrap/status.sh --mark 7` (step 34 on the evals track).
 
 ## The first apply
 

@@ -87,7 +87,12 @@ is in `docs/quick-start.md`.
    `bash bootstrap/status.sh --track base` again (and
    `bash bootstrap/verify.sh --only <groups>` for the detail) until it
    reads done. The browser steps that create or install the Apps (6, 7)
-   are `verify` steps.
+   are `verify` steps. One exception, like an `ask` step: gh's own sign-in
+   cannot read App installations (GitHub answers HTTP 403), so when
+   verify.sh says step 7 must be checked by hand, have the user open
+   https://github.com/settings/installations, confirm each App it names has
+   access to the repos it names, and then run
+   `bash bootstrap/status.sh --mark 7`.
 4. When a script fails, read the error, find the cause in the script or the
    docs, and help fix it. Then run the step again, dry run first.
 5. At the end of each sitting, name the next step and its time estimate, so

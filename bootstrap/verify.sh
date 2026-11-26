@@ -25,7 +25,13 @@
 #                   and private key are stored where the workflows read them
 #                   (by NAME only)
 #   installs:<app>  that App is installed on OWNER's repos it needs (read
-#                   from your installations: GET user/installations)
+#                   from your installations: GET user/installations). gh's
+#                   own sign-in gets HTTP 403 there (the endpoint takes a
+#                   GitHub App user token), so then it is your answer
+#                   instead: this says what to check at
+#                   https://github.com/settings/installations, and passes
+#                   once status.sh --mark records the step (steps.json's
+#                   "by_hand" verify checks)
 #   values:<group>  privacy (PRIVACY_DENYLIST in acsi-agentskills) or routine-fire
 #                   (the eval routine's bearer and trigger id), by name only
 #   settings        repo-settings' engine reports no drift from fleet.yml
@@ -236,6 +242,24 @@ has_name() { # kind repo env name
   if ! value_names "$1" "$O/$2" "$3"; then fail "$O/$2$(where "$3") ${1}s readable (HTTP $GH_HTTP)"; return; fi
   if grep -qxF -- "$4" <<<"$NAMES_OUT"; then pass "$O/$2$(where "$3") has $1 $4"; else fail "$O/$2$(where "$3") has $1 $4"; fi
 }
+# installs_by_hand <app> <installed>: GET user/installations answers 403 to
+# gh's own sign-in (it takes a GitHub App user token), so the installation is
+# then the user's answer: status.sh --mark on the steps that check it (a
+# verify check with "by_hand": true in steps.json, on the selected track).
+installs_by_hand() {
+  local app=$1 installed=$2 ids id missing="" repos
+  ids=$(jq -r --arg g "installs:$app" '.steps[] | select(.check.by_hand == true and (.check.groups | index($g))) | "\(.id) \(.track)"' "$HERE/steps.json" \
+    | while read -r id t; do if on_track "$TRACK" "$t"; then printf '%s\n' "$id"; fi; done)
+  local done_ids=""
+  if [ -f "${STATE:-}" ]; then done_ids=$(jq -r '.done[]?' "$STATE" 2>/dev/null || true); fi
+  for id in $ids; do grep -qxF -- "$id" <<<"$done_ids" || missing+="$id "; done
+  if [ "$installed" = fleet ]; then repos=$(track_repos "$TRACK" | sed "s|^|$O/|" | paste -sd, - | sed 's/,/, /g'); else repos=""; for id in $installed; do repos+="${repos:+, }$O/$id"; done; fi
+  if [ -n "$ids" ] && [ -z "$missing" ]; then
+    pass "$app App's installation on $repos: confirmed by you (status.sh --mark $(paste -sd' ' <<<"$ids")); gh's sign-in cannot read installations (HTTP 403)"
+  else
+    fail "$app App's installation: gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: ${CFG_APP_NAME_PREFIX}-$app must have access to $repos. Then: bash bootstrap/status.sh --mark ${missing% }"
+  fi
+}
 INSTALLS=""
 installs() { # sets INSTALLS to "app_id<TAB>installation id" lines, once
   [ -z "$INSTALLS" ] || return 0
@@ -262,7 +286,11 @@ for entry in "${APPS[@]}"; do
     fi
   fi
   sel "installs:$app" || continue
-  if ! installs; then fail "$app App: your installations readable (HTTP $GH_HTTP)"; continue; fi
+  if ! installs; then
+    if [ "$GH_HTTP" = 403 ]; then installs_by_hand "$app" "$installed"
+    else fail "$app App: your installations readable (HTTP $GH_HTTP)"; fi
+    continue
+  fi
   iid=$(awk -F'\t' -v a="${!cfg}" -v o="${O,,}" '$1 == a && tolower($3) == o {print $2; exit}' <<<"$INSTALLS")
   if [ -z "$iid" ]; then fail "$app App is installed on $O (create-apps.sh printed the link)"; continue; fi
   if ! gh_read "user/installations/$iid/repositories?per_page=100"; then fail "$app App: its repositories readable (HTTP $GH_HTTP)"; continue; fi

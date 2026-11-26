@@ -42,7 +42,10 @@ step is marked by hand: run `bash bootstrap/status.sh --mark <id>` once the
 user says it is done. A `verify` step is never marked: status.sh refuses
 `--mark` for it, so run `bash bootstrap/status.sh --track evals` again
 until it reads done. The browser steps that create or install the eval
-Apps (33, 34) and the federation step (26) are `verify` steps. Every evals
+Apps (33, 34) and the federation step (26) are `verify` steps. Like an
+`ask` step, step 34 takes `--mark 34` when verify.sh says gh's sign-in
+cannot read the installations (HTTP 403): the user confirms them at
+https://github.com/settings/installations first. Every evals
 check reads only the evals track's part (`verify.sh --track evals`), so
 the base stays done while you add `skills-evals`.
 

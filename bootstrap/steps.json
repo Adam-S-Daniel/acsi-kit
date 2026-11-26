@@ -1,5 +1,5 @@
 {
-  "about": "The quick start's steps, in order: the one source for docs/quick-start.md's table (render-quickstart.py) and for status.sh. Each step is at most one command or one visit to a page, plus the check that says it is done. check.type is config (fleet.env exists with OWNER, PLAN and CLAUDE_PLAN), verify (verify.sh --only <groups> passes), files (each file is on that repo's default branch, so its starter pull request is merged) or ask (status.sh --mark <id> once you say it is done; an ask check with \"record\": \"content\" is also done once add-content.sh has recorded your choices). link is a kit-relative path to the docs section that explains the step. An optional step is listed but never blocks the next. track is base (guidance, skills, settings, hooks, machines: what /adopt sets up) or evals (what exists only for the eval loop: what /adopt-evals adds); status.sh --track limits its report to one. A step that serves both is base, and its run text says which part only evals use. A verify check runs with its step's track (verify.sh --track): a base step never looks at skills-evals or what serves only it, and an evals step looks only at those, so the base needs no skills-evals and adding evals never undoes a base step.",
+  "about": "The quick start's steps, in order: the one source for docs/quick-start.md's table (render-quickstart.py) and for status.sh. Each step is at most one command or one visit to a page, plus the check that says it is done. check.type is config (fleet.env exists with OWNER, PLAN and CLAUDE_PLAN), verify (verify.sh --only <groups> passes), files (each file is on that repo's default branch, so its starter pull request is merged) or ask (status.sh --mark <id> once you say it is done; an ask check with \"record\": \"content\" is also done once add-content.sh has recorded your choices). link is a kit-relative path to the docs section that explains the step. An optional step is listed but never blocks the next. track is base (guidance, skills, settings, hooks, machines: what /adopt sets up) or evals (what exists only for the eval loop: what /adopt-evals adds); status.sh --track limits its report to one. A step that serves both is base, and its run text says which part only evals use. A verify check runs with its step's track (verify.sh --track): a base step never looks at skills-evals or what serves only it, and an evals step looks only at those, so the base needs no skills-evals and adding evals never undoes a base step. A verify check with \"by_hand\": true (the App installations) also takes status.sh --mark <id>: gh's own sign-in cannot read GET user/installations (HTTP 403), so verify.sh then accepts your answer for that step instead and says so.",
   "steps": [
     {
       "id": "0",
@@ -132,7 +132,8 @@
           "installs:guidance-sync",
           "installs:settings-admin",
           "installs:settings-read"
-        ]
+        ],
+        "by_hand": true
       },
       "minutes": 10
     },
@@ -515,7 +516,8 @@
           "installs:guidance-sync",
           "installs:settings-admin",
           "installs:settings-read"
-        ]
+        ],
+        "by_hand": true
       },
       "minutes": 10
     },
