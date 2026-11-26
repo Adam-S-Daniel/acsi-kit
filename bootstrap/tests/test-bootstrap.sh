@@ -2513,6 +2513,18 @@ run bash "$B/regenerate.sh" --config "$CFGB" --check --track evals run-health-sh
 assert_eq "regenerate --check --track evals fails without skills-evals" "$rc" 1
 run bash "$B/apply-settings.sh" --config "$CFGB" --check --track evals; rc=$?
 assert_eq "apply-settings --check --track evals fails without skills-evals" "$rc" 1
+# create-apps.sh on PLAN=free with no skills-evals (step 6 for a Free base
+# adopter): settings-admin is skipped, and a fleet-wide App goes on the five
+# base repos, never fleet.yml's example repos or skills-evals.
+CFGBF="$T/fleet-base-free.env"
+sed -e 's/^PLAN=.*/PLAN=free/' -e '/^GUIDANCE_SYNC_APP_ID=/d' -e '/^SETTINGS_ADMIN_APP_ID=/d' "$CFGB" > "$CFGBF"
+printf 'codefree1
+' | run bash "$B/create-apps.sh" --config "$CFGBF" --out "$T/manifests-free" guidance-sync settings-admin; rc=$?
+assert_eq "create-apps on a Free base-only setup exits 0" "$rc" 0
+assert "it skips settings-admin on PLAN=free" has "$OUT" "skip: settings-admin: its key would be in environment fleet-apply of the private repo repo-settings, and PLAN=free has none there."
+assert "it names the five base repos to pick" has "$OUT" "Pick: Only select repositories: acme-example/_agent-guidance, acme-example/repo-settings, acme-example/acsi-agentskills, acme-example/acsi-agentskills-private, acme-example/wsl-automation"
+assert_not "and no skills-evals" grep -q 'Pick: .*skills-evals' "$OUT"
+assert "the second owner picks their own repos" has "$OUT" "on the repos of acme-example-two's you want in the fleet"
 
 # ======================================================== the checkers, and that each can fail
 for c in check-refs.py check-branch-prefixes.py check-one-owner.py; do
