@@ -32,7 +32,7 @@
 #                   https://github.com/settings/installations, and passes
 #                   once status.sh --mark records the step (steps.json's
 #                   "by_hand" verify checks)
-#   values:<group>  privacy (PRIVACY_DENYLIST in acsi-agentskills) or routine-fire
+#   values:<group>  privacy (PRIVACY_DENYLIST in each repo of the track that reads it) or routine-fire
 #                   (the eval routine's bearer and trigger id), by name only
 #   fleet-worker    _agent-guidance's FLEET_WORKER_FIRE_URL is a routine fire
 #                   URL, https://api.anthropic.com/v1/claude_code/routines/

@@ -12,11 +12,12 @@
 #   skills-evals      routine-fire  secret   EVAL_ROUTINE_FIRE_BEARER  group routine-fire
 #   skills-evals      routine-fire  variable ROUTINE_TRIGGER_ID        group routine-fire
 #
-# PRIVACY_DENYLIST feeds acsi-agentskills' required `privacy` check
-# (scripts/check_privacy_denylist.py), which fails closed without it, so set
-# it before the acsi-agentskills starter pull request. The agent-checks CI
-# scan in _agent-guidance, repo-settings and wsl-automation reads it too, and
-# only warns where it is missing. skills-evals' required `test` job scans
+# PRIVACY_DENYLIST feeds the privacy scan in the agent-checks CI job of
+# acsi-agentskills, _agent-guidance, repo-settings and wsl-automation, the
+# only guard against personal data on the public repos. The scan only warns
+# where the secret is missing, so nothing fails without it; set it before
+# the first starter pull request anyway, so the scan reads every starter
+# file the pull requests add. skills-evals' required `test` job scans
 # with it and fails closed without it, so the evals track stores it there
 # once the repo exists (step 35: run --only privacy again); while
 # skills-evals does not exist, its entry is skipped with one line. It is a file OUTSIDE every
@@ -130,7 +131,7 @@ if public:
 if bad or public:
     sys.exit(1)
 if n == 0:
-    print("denylist: no patterns (it wants one regular expression per line; docs/skills.md, \"The privacy check\"); the privacy check would fail closed", file=sys.stderr)
+    print("denylist: no patterns (it wants one regular expression per line; docs/skills.md, \"The privacy check\"); every privacy scan would check nothing, and skills-evals' test job would fail closed", file=sys.stderr)
     sys.exit(1)
 PY
   # The mode bits from stat(2), not `find -perm /077`: BSD find (macOS) has

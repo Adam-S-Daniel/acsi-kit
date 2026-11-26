@@ -17,7 +17,7 @@ Two lists, two rules:
   list cannot be either. It is read at run time from PRIVACY_DENYLIST
   (newline-separated regular expressions) or PRIVACY_DENYLIST_FILE (a path to
   a file of them, outside the repo), the same mechanism and format as the
-  skills registry's scripts/check_privacy_denylist.py: one pattern per line,
+  fleet's .githooks/privacy-denylist.py, which agent-checks runs: one pattern per line,
   `#` comments, matched case-insensitively. Every file's path and text is
   scanned, the manifests included, with no allowance and no protected span.
   A hit is reported as `path: pattern #N` (or `<file #K>` when the path
