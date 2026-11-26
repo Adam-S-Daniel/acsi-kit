@@ -892,9 +892,11 @@ upstream() { ugit -C "$UP/origin" add -A && ugit -C "$UP/origin" commit -qm "$1"
 bump() { echo "$1" >> "$UP/origin/starter/wsl-automation/UPSTREAM-TEST.txt"; upstream "$1"; }
 workdirs() { find "$TMPDIR" -maxdepth 1 -name 'bootstrap.*' | wc -l | tr -d ' '; }   # common.sh's scratch folders
 cp -R "$K/bootstrap" "$K/starter" "$K/library" "$UP/origin/"
+# The adopter's kit predates TIME_ZONE: its example and fleet.env lack the key.
+sed -i '/^TIME_ZONE=/d' "$UP/origin/bootstrap/fleet.env.example"
 ugit -C "$UP/origin" init -q -b main && upstream "kit"
 ugit clone -q "$UP/origin" "$UP/kit"; UK="$UP/kit"
-cp "$CFGP" "$UK/fleet.env"; printf 'REVIEWER=zqmarkerrev\n' >> "$UK/fleet.env"
+grep -v '^TIME_ZONE=' "$CFGP" > "$UK/fleet.env"; printf 'REVIEWER=zqmarkerrev\n' >> "$UK/fleet.env"
 mkdir -p "$UK/app-manifests"; echo manifest > "$UK/app-manifests/x"
 run env ADOPT_STATE_FILE="$UP/state/adopt.json" bash "$UK/bootstrap/add-content.sh" --config "$UK/fleet.env" --items recommended; rc=$?
 assert_eq "the clone takes add-content recommended" "$rc" 0
@@ -905,6 +907,7 @@ assert "the choices are recorded outside the kit" test -f "$UCH"
 # new file, a new optional config key and a removed one.
 echo "# upstream line" >> "$UP/origin/starter/skills-evals/evals/stakes.yml"
 echo "new upstream file" > "$UP/origin/starter/wsl-automation/UPSTREAM-TEST.txt"
+cp "$K/bootstrap/fleet.env.example" "$UP/origin/bootstrap/fleet.env.example"   # TIME_ZONE arrives
 echo "NEW_KEY_FOR_TEST=" >> "$UP/origin/bootstrap/fleet.env.example"
 sed -i '/^REPOS_DIR=/d' "$UP/origin/bootstrap/fleet.env.example"
 upstream "upstream moves"
@@ -932,6 +935,10 @@ assert "the upstream file is there" has "$UK/starter/wsl-automation/UPSTREAM-TES
 assert "the optional item is back in starter/" test -f "$UK/$ITEM"
 assert "it reports the fast-forward" has "$OUT" "${h0:0:12} -> $(origin_head | cut -c1-12), 1 commit(s)"
 assert "it names the new key as optional" has "$OUT" "new, optional: NEW_KEY_FOR_TEST"
+COPY_STEP=$(jq -r '[.steps[] | select(.run | test("copy-starter[.]sh"))][0].id' "$K/bootstrap/steps.json")
+assert "it names TIME_ZONE as needed before the copy step, not as blocking the update" has "$OUT" "new, needed before the copy step (step $COPY_STEP): TIME_ZONE (copy-starter.sh refuses until it is set in your fleet.env; this update does not need it)"
+assert_not "TIME_ZONE is not called optional" has "$OUT" "new, optional: TIME_ZONE"
+assert "the update reports that no step reopened" has "$OUT" "Every setup step that was done before this update is still done."
 assert "it names the removed key, which this fleet.env sets" has "$OUT" "removed: REPOS_DIR (your fleet.env sets it"
 assert_not "it lists no key the old example already had" has "$OUT" "VISIBILITY_AGENT_GUIDANCE"
 assert_not "it prints no config value" grep -rq zqmarkerrev "$OUT" "$ERR"
@@ -1173,6 +1180,28 @@ assert_eq "a failed fetch makes update-kit exit 1" "$rc" 1
 assert "it shows git's own fetch error" grep -q "^  | .*no-such-origin" "$ERR"
 assert_eq "a failed fetch leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
 git -C "$UK" remote set-url origin "$UP/origin"
+# A newer kit whose check covers more reopens a step done before: step 3's
+# privacy list was stored in the registry alone, and the newer kit wants it in
+# four repos. The update says so, and status.sh shows step 3 not done.
+O4="$UP/o4"; mkdir -p "$O4"; cp -R "$K/bootstrap" "$K/starter" "$K/library" "$O4/"
+sed -i -E '/"(_agent-guidance|repo-settings|wsl-automation)\|-\|secret\|PRIVACY_DENYLIST\|file"/d' "$O4/bootstrap/lib/common.sh"
+assert_eq "the old kit stores the privacy list in the registry only" "$(grep -c 'PRIVACY_DENYLIST|file' "$O4/bootstrap/lib/common.sh")" 1
+ugit -C "$O4" init -q -b main && ugit -C "$O4" add -A && ugit -C "$O4" commit -qm "privacy list in the registry only"
+ugit clone -q "$O4" "$UP/k4"
+cp "$K/bootstrap/lib/common.sh" "$O4/bootstrap/lib/common.sh" && ugit -C "$O4" commit -qam "privacy list in four repos"
+cp "$GH_STUB_STATE" "$UP/stub-state.saved"
+jqset 'del(.values["acme-example/_agent-guidance||secret"].PRIVACY_DENYLIST, .values["acme-example/repo-settings||secret"].PRIVACY_DENYLIST, .values["acme-example/wsl-automation||secret"].PRIVACY_DENYLIST)'
+assert_not "the registry holds the privacy list" test "$(jqs '.values["acme-example/acsi-agentskills||secret"].PRIVACY_DENYLIST')" = null
+run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/status.sh" --config "$CFGP"
+assert "under the old kit step 3 is done" grep -qE '^done +3 ' "$OUT"
+run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/update-kit.sh" --config "$CFGP"; rc=$?
+assert_eq "the update with a reopened step exits 0" "$rc" 0
+[ "$rc" = 0 ] || sed 's/^/    update-kit: /' "$ERR"
+assert "it says which steps reopened" has "$OUT" "Steps that were done before this update and are NOT done under the newer kit"
+assert "it names step 3 and the command to run again" has "$OUT" "  step 3, Store the privacy denylist: \`bootstrap/set-secrets.sh --only privacy"
+run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/status.sh" --config "$CFGP"
+assert_not "after the update status.sh shows step 3 not done" grep -qE '^done +3 ' "$OUT"
+cp "$UP/stub-state.saved" "$GH_STUB_STATE"
 # A downloaded copy (no .git) cannot be updated in place.
 mkdir -p "$UP/dl"; cp -R "$UK/bootstrap" "$UK/starter" "$UK/library" "$UP/dl/"
 uk "$UP/dl" --config "$UK/fleet.env"; rc=$?

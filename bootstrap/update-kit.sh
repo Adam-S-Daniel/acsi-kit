@@ -45,8 +45,14 @@
 # but re-applying your choices, which add-content.sh skips when they are in
 # place.
 #
-# Internal: --after-update <sha> [--ids <list>] is how the script continues in
-# the new copy of itself after the fast-forward; do not pass it yourself.
+# Before the update it notes which setup steps status.sh counts as done (a
+# read-only run of the current kit's status.sh); afterwards it names any the
+# newer kit's checks no longer count as done (a check that now covers more,
+# such as a secret now needed in more repos), with the command to run again.
+#
+# Internal: --after-update <sha> [--ids <list>] [--done-before <lines>] is how
+# the script continues in the new copy of itself after the fast-forward; do
+# not pass it yourself.
 # Needs: bash 4.4+, git, tar, python3, jq; node and npm when you have content
 # choices (add-content.sh puts them back with them).
 
@@ -55,7 +61,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib/common.sh
 . "$HERE/lib/common.sh"
 
-DISCARD=0 AFTER="" PASSED_IDS="" HAVE_IDS=0 KIT_ARG=""
+DISCARD=0 AFTER="" PASSED_IDS="" HAVE_IDS=0 KIT_ARG="" DONE_BEFORE=""
 parse_common_args "$@"
 set -- "${REST_ARGS[@]}"
 while [ $# -gt 0 ]; do
@@ -64,6 +70,7 @@ while [ $# -gt 0 ]; do
     --kit) [ $# -ge 2 ] || die "--kit needs the path of the kit's clone"; KIT_ARG=$2; shift ;;
     --after-update) [ $# -ge 2 ] || die "--after-update needs a sha"; AFTER=$2; shift ;;
     --ids) [ $# -ge 2 ] || die "--ids needs a list"; PASSED_IDS=$2; HAVE_IDS=1; shift ;;
+    --done-before) [ $# -ge 2 ] || die "--done-before needs a list"; DONE_BEFORE=$2; shift ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
@@ -127,6 +134,13 @@ no_config_refusal() {
 # records: the content choices records in the state folder, one per line.
 records() { find "$(state_dir)" -maxdepth 1 -name '*.content-choices.json' 2>/dev/null || true; }
 
+# steps_done <status.sh> <out file>: "<id><TAB><title>" for each step that
+# status.sh (read-only) counts as done; 1 when status.sh fails.
+steps_done() {
+  "$BASH" "$1" --config "$CONFIG" > "$BOOT_WORK/status.txt" 2>/dev/null || return 1
+  sed -nE 's/^(done|asked: done) +([^ ]+) +(.*)$/\2	\3/p' "$BOOT_WORK/status.txt" > "$2"
+}
+
 # ------------------------------------------------------------------ config
 CFG_OK=0 CHOICES="" IDS="" CFG_ERR=""
 if [ -f "$CONFIG" ]; then
@@ -147,11 +161,22 @@ need_node
 # keys_of <fleet.env-like file>: its KEY names, sorted.
 keys_of() { sed -n 's/^[[:space:]]*\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$1" | sort -u; }
 
-# key_report <old commit> <new example> <file of required keys>: the keys the
-# example gained or lost since <old commit>. The kit keeps no rename table, so
+# required_lists <bootstrap folder>: writes $BOOT_WORK/keys.required (the keys
+# that kit's load_config requires), keys.copy (those it leaves optional but
+# its copy-starter.sh requires) and copy.step (the first steps.json step that
+# runs copy-starter.sh), all read from that kit, so the report says what the
+# NEW kit enforces.
+required_lists() {
+  "$BASH" -c '. "$1/lib/common.sh"; printf "%s\n" "${CONFIG_REQUIRED[@]}"' _ "$1" > "$BOOT_WORK/keys.required" 2>/dev/null || : > "$BOOT_WORK/keys.required"
+  "$BASH" -c '. "$1/lib/common.sh"; printf "%s\n" "${CONFIG_REQUIRED_BY_COPY[@]}"' _ "$1" > "$BOOT_WORK/keys.copy" 2>/dev/null || : > "$BOOT_WORK/keys.copy"
+  jq -r '[.steps[] | select(.run | tostring | test("copy-starter[.]sh"))][0].id // ""' "$1/steps.json" > "$BOOT_WORK/copy.step" 2>/dev/null || : > "$BOOT_WORK/copy.step"
+}
+
+# key_report <old commit> <new example>: the keys the example gained or lost
+# since <old commit> (required_lists first). The kit keeps no rename table, so
 # a renamed key shows as one removed and one new.
 key_report() {
-  local old_ex=$BOOT_WORK/example.old k mine
+  local old_ex=$BOOT_WORK/example.old k mine step
   if ! git -C "$KIT" show "$1:bootstrap/fleet.env.example" > "$old_ex" 2>/dev/null; then
     log "(no bootstrap/fleet.env.example at ${1:0:12}, so the fleet.env key changes are not listed)"
     return 0
@@ -165,9 +190,12 @@ key_report() {
     return 0
   fi
   log "fleet.env keys changed since ${1:0:12} (bootstrap/fleet.env.example explains each):"
+  step=$(cat "$BOOT_WORK/copy.step")
   while IFS= read -r k; do
-    if grep -qxF -- "$k" "$3"; then
+    if grep -qxF -- "$k" "$BOOT_WORK/keys.required"; then
       log "  new, required: $k (set it in your fleet.env)"
+    elif grep -qxF -- "$k" "$BOOT_WORK/keys.copy"; then
+      log "  new, needed before the copy step${step:+ (step $step)}: $k (copy-starter.sh refuses until it is set in your fleet.env; this update does not need it)"
     else
       log "  new, optional: $k (empty or absent means the default)"
     fi
@@ -206,14 +234,38 @@ config_refusal() {
   exit 1
 }
 
+# reopened: the steps done before the update (DONE_BEFORE, matched by title,
+# since a newer steps.json can renumber) that status.sh no longer counts done.
+reopened() {
+  local id title run n=0
+  printf '%s\n' "$DONE_BEFORE" > "$BOOT_WORK/done.before"
+  log ""
+  log "Checking which setup steps are still done under the newer kit (bootstrap/status.sh, read-only)..."
+  if ! steps_done "$B/status.sh" "$BOOT_WORK/done.after"; then
+    log "(status.sh failed, so steps that the newer kit's checks reopen are not listed: run bash bootstrap/status.sh${CONFIG_ARG})"
+    return 0
+  fi
+  while IFS=$'\t' read -r _ title; do
+    [ -n "$title" ] || continue
+    cut -f2- "$BOOT_WORK/done.after" | grep -qxF -- "$title" && continue
+    id=$(jq -r --arg t "$title" '[.steps[] | select(.title == $t) | .id][0] // ""' "$B/steps.json")
+    [ -n "$id" ] || continue   # the newer kit dropped or renamed that step
+    run=$(jq -r --arg t "$title" '[.steps[] | select(.title == $t) | .run][0] // ""' "$B/steps.json")
+    [ "$n" -gt 0 ] || log "Steps that were done before this update and are NOT done under the newer kit (its check for them now covers more; run them again):"
+    n=$((n + 1))
+    log "  step $id, $title: $run"
+  done < "$BOOT_WORK/done.before"
+  [ "$n" -gt 0 ] || log "Every setup step that was done before this update is still done."
+}
+
 # ------------------------------------------------------------------ the rest
 # Runs in the NEW copy of the script after a fast-forward, or on a current kit.
 rest() {
   local tier id kept=() gone=() core=() args reapply=1
   log ""
   if [ -n "$AFTER" ]; then
-    printf '%s\n' "${CONFIG_REQUIRED[@]}" > "$BOOT_WORK/keys.required"
-    key_report "$AFTER" "$B/fleet.env.example" "$BOOT_WORK/keys.required"
+    required_lists "$B"
+    key_report "$AFTER" "$B/fleet.env.example"
   fi
   if [ "$CFG_OK" = 0 ] && [ -f "$CONFIG" ]; then
     if [ -n "$AFTER" ]; then config_refusal after; else config_refusal current; fi
@@ -256,6 +308,9 @@ rest() {
     STAGE="nothing was left half done"
   elif [ -z "$IDS" ] && [ "$CFG_OK" = 1 ]; then
     log "No recorded content choices yet; choose with: bash bootstrap/add-content.sh${CONFIG_ARG} --items <ids|recommended|none>"
+  fi
+  if [ -n "$DONE_BEFORE" ] && [ "$CFG_OK" = 1 ]; then
+    reopened
   fi
   if [ "$CFG_OK" = 1 ]; then
     log ""
@@ -394,8 +449,8 @@ git -C "$KIT" archive "$new" bootstrap | tar -x -C "$nk"
 if [ -f "$CONFIG" ] && ! "$BASH" -c '. "$1/bootstrap/lib/common.sh"; load_config "$2"' _ "$nk" "$CONFIG" >/dev/null 2>"$BOOT_WORK/newcfg.err"; then
   CFG_ERR=$(sed -n 's/^ERROR: //p' "$BOOT_WORK/newcfg.err" | head -n1)
   [ -n "$CFG_ERR" ] || CFG_ERR=$(head -n1 "$BOOT_WORK/newcfg.err")
-  "$BASH" -c '. "$1/bootstrap/lib/common.sh"; printf "%s\n" "${CONFIG_REQUIRED[@]}"' _ "$nk" > "$BOOT_WORK/keys.required" 2>/dev/null || : > "$BOOT_WORK/keys.required"
-  key_report "$old" "$nk/bootstrap/fleet.env.example" "$BOOT_WORK/keys.required"
+  required_lists "$nk/bootstrap"
+  key_report "$old" "$nk/bootstrap/fleet.env.example"
   config_refusal before
 fi
 # A key only the newer kit knows (a new required one, set ahead of the
@@ -507,6 +562,15 @@ for rel in sorted(set(a) | set(b)):
   fi
 fi
 
+# ------------------------------------------------------------------ steps done now
+done_arg=()
+if [ "$DRY_RUN" = 0 ] && [ "$CFG_OK" = 1 ] && [ -f "$B/status.sh" ]; then
+  log "Noting which setup steps are done before the update (bootstrap/status.sh, read-only)..."
+  if steps_done "$B/status.sh" "$BOOT_WORK/done.before" && [ -s "$BOOT_WORK/done.before" ]; then
+    done_arg=(--done-before "$(cat "$BOOT_WORK/done.before")")
+  fi
+fi
+
 # ------------------------------------------------------------------ fast-forward
 n=$(git -C "$KIT" rev-list --count "$old..$new")
 summary="${old:0:12} -> ${new:0:12}, $n commit(s)"
@@ -540,6 +604,6 @@ log "$summary"
 rm -rf "$BOOT_WORK"
 ids_arg=()
 [ -z "$IDS" ] || ids_arg=(--ids "$IDS")
-exec "$BASH" "$B/update-kit.sh" --config "$CONFIG" --after-update "$old" "${ids_arg[@]}"
+exec "$BASH" "$B/update-kit.sh" --config "$CONFIG" --after-update "$old" "${ids_arg[@]}" "${done_arg[@]}"
 }
 update_kit; exit 0

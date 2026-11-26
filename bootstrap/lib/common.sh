@@ -182,6 +182,10 @@ _TIME_ZONE_HELP="set TIME_ZONE in fleet.env to your IANA time zone name, such as
 # TIME_ZONE_NODB_HELP: said where a zone is accepted on shape alone.
 _TIME_ZONE_NODB_HELP="this machine's python3 has no time zone database, so TIME_ZONE could not be checked against it: install one with 'pip install tzdata' for that python3 (or your OS's tzdata package), then run again"
 
+# Keys load_config leaves optional that a later step's script refuses to run
+# without (require_time_zone, in copy-starter.sh): update-kit.sh names a new
+# one as needed before the first copy-starter.sh step in steps.json.
+CONFIG_REQUIRED_BY_COPY=(TIME_ZONE)
 # require_time_zone: the scripts that write the merge window call this after
 # load_config. TIME_ZONE has no default and is not required by load_config, so
 # status.sh and verify.sh stay green for a setup that copied the starter before

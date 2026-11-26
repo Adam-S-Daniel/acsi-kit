@@ -98,6 +98,23 @@ request on your repo after `copy-starter.sh`, not in the kit. Your content
 choices are recorded outside the kit. Your `fleet.env` and your app manifests
 folder are untouched.
 
+Before and after the update it runs `bash bootstrap/status.sh` (read-only)
+and lists any setup step that was done before and is not done under the
+newer kit, because its check now covers more, with the command to run again.
+It also lists new `fleet.env` keys; a key only a later script needs, such as
+`TIME_ZONE` (needed by `copy-starter.sh`), is named with the step that needs
+it and does not stop the update. Two steps changed recently for a setup that
+already ran them:
+
+- Step 3 (the privacy denylist): `set-secrets.sh --only privacy` now stores
+  it in four repos (the registry, `_agent-guidance`, `repo-settings`,
+  `wsl-automation`), so a setup that stored it before shows step 3 as not
+  done again. Run step 3 again; it skips the repo that already has it.
+- Step 22 (the machine jobs): `~/.config/wsl-automation/settings.env` now
+  needs `WSL_AUTOMATION_AGENT_OWNER_ROOTS`, the folder that holds your clones
+  (on Windows, a user environment variable of that name instead;
+  [machine](docs/machine.md#scheduled-jobs-wsl-automation) has the details).
+
 On macOS, if it says it needs bash 4.4 or later, install it (`brew install
 bash`) and replace `bash` at the start of the last line with
 `"$(brew --prefix)/bin/bash"`; nothing was changed before that check.
