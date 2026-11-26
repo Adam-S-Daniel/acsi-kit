@@ -1765,6 +1765,27 @@ drop_from_repos_yml 'example-site-[a-z]+'
 run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
 assert_eq "verify --only repos-yml passes once both lists name only repos you have" "$rc" 0
 assert "it says so" has "$OUT" "PASS: acme-example/_agent-guidance repos.yml names only repos you have"
+# A read that is not a 404 (a 5xx, a rate limit) is "could not be checked", never "neither owner has".
+run env GH_STUB_REPO_STATUS=acme-example/wsl-automation=502 bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "a repo read that fails with 502 fails step 11's check" "$rc" 1
+assert "it says the name could not be checked, with the status" has "$OUT" "names wsl-automation, which could not be checked (HTTP 502); run this again"
+assert_not "and never that neither owner has it" has "$OUT" "wsl-automation, which neither owner has"
+# A list emptied to `repos:` is an empty list; a name that is not a repo name never reaches an API path.
+ag_main=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
+ag_edit() { # <python, given repos.yml's path>: commit that edit to _agent-guidance's main
+  local w="$T/tmp/ag-edit"
+  rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/_agent-guidance.git" "$w"
+  python3 -I -c "$1" "$w/repos.yml" && git -C "$w" commit -qam "test edit" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
+}
+ag_edit 'import re, sys; p = sys.argv[1]; t = open(p).read(); t = re.sub(r"(?m)^  repos:\n(    - \S+\n)+", "  repos:\n", t, count=1); open(p, "w").write(t)'
+run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "an emptied skills_bootstrap.repos passes" "$rc" 0
+git --git-dir="$T/remotes/$O/_agent-guidance.git" update-ref refs/heads/main "$ag_main"
+ag_edit 'import sys; p = sys.argv[1]; t = open(p).read(); t = t.replace("    - wsl-automation\n", "    - ../wsl-automation\n", 1); open(p, "w").write(t)'
+run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "a name that is not a repo name fails" "$rc" 1
+assert "it says the list is not one of repo names" has "$OUT" "repos.yml: skills_bootstrap.repos is not a list of repo names"
+git --git-dir="$T/remotes/$O/_agent-guidance.git" update-ref refs/heads/main "$ag_main"
 run bash "$B/verify.sh" --config "$CFGP"; rc=$?
 assert_eq "verify passes once everything is in place" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'

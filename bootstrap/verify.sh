@@ -358,15 +358,16 @@ if sel repos-yml && tracked base && [ "${EXISTS[_agent-guidance]:-0}" = 1 ]; the
     fail "$O/_agent-guidance repos.yml readable on the default branch (HTTP $GH_HTTP; merge its starter pull request)"
   elif ! printf '%s' "$GH_OUT" | jq -r '.content // "" | gsub("\n"; "") | @base64d' > "$BOOT_WORK/repos.yml" \
       || ! python3 -I - "$BOOT_WORK/repos.yml" > "$BOOT_WORK/repos-yml.names" 2>"$BOOT_WORK/repos-yml.err" <<'PY'
-import sys, yaml
+import re, sys, yaml
 try:
     doc = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 except yaml.YAMLError as e:
     sys.exit(f"is not valid YAML ({type(e).__name__})")
 for key, sub in (("cron_coverage", "fleet"), ("skills_bootstrap", "repos")):
     section = doc.get(key) if isinstance(doc, dict) else None
-    names = section.get(sub) if isinstance(section, dict) else None
-    if not isinstance(names, list) or not all(isinstance(n, str) and n for n in names):
+    names = section.get(sub, []) if isinstance(section, dict) else None
+    names = [] if names is None else names        # `repos:` with every name removed
+    if not isinstance(names, list) or not all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,100}", n) for n in names):
         sys.exit(f"{key}.{sub} is not a list of repo names")
     for n in names:
         print(f"{key}.{sub}\t{n}")
@@ -375,18 +376,26 @@ PY
     fail "$O/_agent-guidance repos.yml: $(tail -n 1 "$BOOT_WORK/repos-yml.err" 2>/dev/null || true)$([ -s "$BOOT_WORK/repos-yml.err" ] || echo "could not be read as text")"
   else
     missing=0
+    # HAS_REPO[name]: 1 when an owner has it, 404 when every owner answered
+    # 404, else the first other status (a 403, a rate limit, a 5xx), which
+    # is "could not check", never "neither owner has".
     declare -A HAS_REPO
     while IFS=$'\t' read -r list n; do
       if [ -z "${HAS_REPO[$n]+set}" ]; then
-        HAS_REPO[$n]=0
-        while IFS= read -r o; do if gh_read "repos/$o/$n"; then HAS_REPO[$n]=1; break; fi; done < <(owners)
+        HAS_REPO[$n]=404
+        while IFS= read -r o; do
+          if gh_read "repos/$o/$n"; then HAS_REPO[$n]=1; break; fi
+          [ "$GH_HTTP" = 404 ] || [ "${HAS_REPO[$n]}" != 404 ] || HAS_REPO[$n]=$GH_HTTP
+        done < <(owners)
       fi
-      [ "${HAS_REPO[$n]}" = 0 ] || continue
+      [ "${HAS_REPO[$n]}" != 1 ] || continue
       missing=1
-      if [ "$n" = "$EVALS_REPO" ]; then
-        fail "$O/_agent-guidance repos.yml $list names $n, which neither owner has: remove that line in a pull request (the evals track's regenerate.sh evals-fleet adds it back once $n exists)"
+      if [ "${HAS_REPO[$n]}" != 404 ]; then
+        fail "$O/_agent-guidance repos.yml $list names $n, which could not be checked (HTTP ${HAS_REPO[$n]}); run this again"
+      elif [ "$n" = "$EVALS_REPO" ]; then
+        fail "$O/_agent-guidance repos.yml $list names $n, which neither owner has, or gh cannot see (HTTP 404): remove that line in a pull request (the evals track's regenerate.sh evals-fleet adds it back once $n exists)"
       else
-        fail "$O/_agent-guidance repos.yml $list names $n, which neither owner has: remove it in a pull request (step 11)"
+        fail "$O/_agent-guidance repos.yml $list names $n, which neither owner has, or gh cannot see (HTTP 404): remove it in a pull request (step 11)"
       fi
     done < "$BOOT_WORK/repos-yml.names"
     [ "$missing" = 1 ] || pass "$O/_agent-guidance repos.yml names only repos you have (cron_coverage.fleet, skills_bootstrap.repos)"
