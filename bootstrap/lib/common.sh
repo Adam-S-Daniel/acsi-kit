@@ -459,13 +459,18 @@ _status_from() { grep -oE 'HTTP [0-9]{3}' "$1" 2>/dev/null | tail -n1 | cut -d' 
 # called repo-settings-fork. The kit must see "no such repo" there, or it
 # never creates the repo and later steps write into the other one. The
 # answer is cached per process until the next real write (run_write,
-# run_write_stdin, gh_write_api: creating the repo ends the redirect); a read that fails or names no repo is not a
-# rename (the read itself then reports what it got).
+# run_write_stdin, gh_write_api: creating the repo ends the redirect). A
+# probe that fails or names no repo is not a rename (the read itself then
+# reports what it got); of the failures, only a 404 is cached.
 declare -gA _RENAMED_CACHE=()
 _repo_renamed() { # owner/repo
   local key=${1,,} name
   case ${_RENAMED_CACHE[$key]-} in yes) return 0 ;; no) return 1 ;; esac
-  name=$("$GH" api "repos/$1" --jq '.full_name // ""' 2>/dev/null) || name=""
+  if ! name=$("$GH" api "repos/$1" --jq '.full_name // ""' 2>"$BOOT_WORK/rename-err"); then
+    # Only a 404 is a lasting answer; a 5xx or rate limit is asked again.
+    [ "$(_status_from "$BOOT_WORK/rename-err")" = 404 ] && _RENAMED_CACHE[$key]=no
+    return 1
+  fi
   if [ -n "$name" ] && [ "${name,,}" != "$key" ]; then
     _RENAMED_CACHE[$key]=yes; return 0
   fi
