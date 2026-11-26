@@ -128,7 +128,16 @@ Docker Desktop WSL integration watchdog. It registers a Codex Cloud
 environment sync too, which stays disabled unless you pass
 `-EnableCodexTasks`.
 
-**On Windows** (WSL), from the clone, once per machine:
+**Where the clone is.** `install-machine.sh` (step 21) clones
+`wsl-automation` into `REPOS_DIR` beside the other two (default
+`~/repos/wsl-automation`): that is the clone to copy the settings example
+from, and the one Linux and macOS schedule from. On Windows the tasks run
+from a Windows checkout instead (the Bash tasks reach it through its `/mnt`
+path, as the repo's README says), so clone it once on the Windows side, in
+PowerShell 7, with the line `install-machine.sh` prints under WSL:
+`git clone https://github.com/<you>/wsl-automation.git $HOME\repos\wsl-automation`.
+
+**On Windows** (WSL), from that Windows checkout, once per machine:
 
 1. Install PowerShell 7.6 or newer from the MSI, not the Microsoft Store
    (`winget install --id Microsoft.PowerShell --scope machine`).

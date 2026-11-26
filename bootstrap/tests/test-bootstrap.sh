@@ -2247,6 +2247,9 @@ fake_installer register-codex-hook.sh > "$w/scripts/register-codex-hook.sh"
 printf '#!/usr/bin/env bash\n' > "$w/.claude/hooks/memory-home.sh"
 git init -q "$w" && git -C "$w" add -A && git -C "$w" commit -qm fake
 git init -q --bare "$T/remotes/$F/_agent-guidance.git" && git -C "$w" push -q "$T/remotes/$F/_agent-guidance.git" HEAD:main; rm -rf "$w"
+w="$T/tmp/fake-wa"; mkdir -p "$w/config"; printf 'SKILLS_EVALS_URL=none\n' > "$w/config/settings.env.example"
+git init -q "$w" && git -C "$w" add -A && git -C "$w" commit -qm fake
+git init -q --bare "$T/remotes/$F/wsl-automation.git" && git -C "$w" push -q "$T/remotes/$F/wsl-automation.git" HEAD:main; rm -rf "$w"
 RD="$T/home/repos"
 run bash "$B/install-machine.sh" --config "$CFGF" --dry-run; rc=$?
 assert_eq "install-machine dry run exits 0" "$rc" 0
@@ -2258,6 +2261,16 @@ assert_eq "install-machine exits 0" "$rc" 0
 assert_eq "it runs the repos' own installers, in order, with their arguments" "$(cat "$INSTALL_LOG")" \
   "$(printf '%s\n' "setup.sh --owner-machine" "install-agent-hooks.sh " "register-memory-home-hook.sh --hook $RD/_agent-guidance/.claude/hooks/memory-home.sh")"
 assert "it cloned acsi-agentskills into REPOS_DIR" test -f "$RD/acsi-agentskills/setup.sh"
+# Step 22 reads wsl-automation's settings example: the clone sits beside the others.
+assert "it cloned wsl-automation into REPOS_DIR, where step 22 reads it" test -f "$RD/wsl-automation/config/settings.env.example"
+assert "it says step 22 works in that clone" has "$OUT" "Step 22 (Schedule the machine jobs) works in $RD/wsl-automation: copy its config/settings.env.example"
+run env PREFLIGHT_WSL=1 bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
+assert_eq "install-machine under WSL exits 0" "$rc" 0
+assert "under WSL it gives the Windows checkout's clone command" has "$OUT" "  git clone $BOOTSTRAP_GIT_BASE/$F/wsl-automation.git \$HOME\\repos\\wsl-automation"
+assert "and where register-tasks.ps1 runs" has "$OUT" '.\scripts\register-tasks.ps1 (step 22)'
+run env PREFLIGHT_WSL=0 bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
+assert_not "off WSL it names no Windows checkout" has "$OUT" "Windows checkout"
+: > "$INSTALL_LOG"
 : > "$INSTALL_LOG"
 run bash "$B/install-machine.sh" --config "$CFGF" --with-codex; rc=$?
 assert_eq "a second install-machine run exits 0" "$rc" 0
