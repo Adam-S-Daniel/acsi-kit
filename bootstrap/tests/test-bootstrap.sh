@@ -1705,6 +1705,36 @@ setvar PROMPT_AUDIT_SWEEP_FIRE_URL https://api.anthropic.com/v1/claude_code/rout
 run bash "$B/verify.sh" --config "$CFGP" --track base --only prompt-audit; rc=$?
 assert_eq "verify --only prompt-audit passes with a fire URL and the bearer" "$rc" 0
 assert_not "no URL value is printed" grep -qE 'trig_EXAMPLE' "$OUT" "$ERR"
+# Step 11 is checked against repos.yml on _agent-guidance's default branch:
+# both lists still name the starter's example repos, which neither owner has.
+run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "verify --only repos-yml fails while repos.yml names the example repos" "$rc" 1
+for l in cron_coverage.fleet skills_bootstrap.repos; do
+  assert "it names $l's example repo" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml $l names example-site-a, which neither owner has: remove it in a pull request (step 11)"
+done
+run bash "$B/status.sh" --config "$CFGP" --mark 11; rc=$?
+assert_eq "status refuses to mark step 11, which it checks itself" "$rc" 1
+# Step 11 as its pull request does it: the example names out of both lists.
+drop_from_repos_yml() { # <name pattern> ...: drop matching list lines from repos.yml on _agent-guidance's main
+  local w="$T/tmp/step11"
+  rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/_agent-guidance.git" "$w"
+  python3 -I - "$w/repos.yml" "$@" <<'PY'
+import re, sys, yaml
+path, pats = sys.argv[1], sys.argv[2:]
+text = open(path, encoding="utf-8").read()
+keep = [l for l in text.splitlines(True) if not any(re.fullmatch(r"\s+- " + p + r"\s*", l) for p in pats)]
+new = "".join(keep)
+for key, sub in (("cron_coverage", "fleet"), ("skills_bootstrap", "repos")):
+    names = yaml.safe_load(new)[key][sub]
+    assert not any(re.fullmatch(p, n) for p in pats for n in names), (key, names)
+open(path, "w", encoding="utf-8").write(new)
+PY
+  git -C "$w" commit -qam "drop repos neither owner has from repos.yml" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
+}
+drop_from_repos_yml 'example-site-[a-z]+'
+run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "verify --only repos-yml passes once both lists name only repos you have" "$rc" 0
+assert "it says so" has "$OUT" "PASS: acme-example/_agent-guidance repos.yml names only repos you have"
 run bash "$B/verify.sh" --config "$CFGP"; rc=$?
 assert_eq "verify passes once everything is in place" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'
@@ -1793,7 +1823,7 @@ rm -rf "$fw"
 # Before any regenerate step: status.sh shows step 14's reasons, the indented
 # NOT DONE lines verify.sh prints under its FAIL, not a FAIL line ending in a colon.
 SR="$T/state-regen/adopt.json"; mkdir -p "$T/state-regen"; cp "$CHOICES" "$T/state-regen/adopt.content-choices.json"
-run env ADOPT_STATE_FILE="$SR" bash "$B/status.sh" --config "$CFGP" --track base --mark 9 --mark 11
+run env ADOPT_STATE_FILE="$SR" bash "$B/status.sh" --config "$CFGP" --track base --mark 9
 assert "step 14 is next before skills-locks runs" grep -q '^Next: 14 ' "$OUT"
 grep -q '^Next: 14 ' "$OUT" || sed 's/^/    status: /' "$OUT"
 assert "status.sh names step 14's failing check" grep -qx '    FAIL: regenerate.sh skills-locks is done on the base track:' "$OUT"
@@ -2072,36 +2102,6 @@ run bash "$B/verify.sh" --config "$CFGP" --only regen:hook-pin,regen:codex-pin; 
 assert_eq "verify regen:<task> passes for a done task" "$rc" 0
 
 # ======================================================== status.sh (part 2)
-# Step 11 is checked against repos.yml on _agent-guidance's default branch:
-# both lists still name the starter's example repos, which neither owner has.
-run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
-assert_eq "verify --only repos-yml fails while repos.yml names the example repos" "$rc" 1
-for l in cron_coverage.fleet skills_bootstrap.repos; do
-  assert "it names $l's example repo" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml $l names example-site-a, which neither owner has: remove it in a pull request (step 11)"
-done
-run bash "$B/status.sh" --config "$CFGP" --mark 11; rc=$?
-assert_eq "status refuses to mark step 11, which it checks itself" "$rc" 1
-# Step 11 as its pull request does it: the example names out of both lists.
-drop_from_repos_yml() { # <name pattern> ...: drop matching list lines from repos.yml on _agent-guidance's main
-  local w="$T/tmp/step11"
-  rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/_agent-guidance.git" "$w"
-  python3 -I - "$w/repos.yml" "$@" <<'PY'
-import re, sys, yaml
-path, pats = sys.argv[1], sys.argv[2:]
-text = open(path, encoding="utf-8").read()
-keep = [l for l in text.splitlines(True) if not any(re.fullmatch(r"\s+- " + p + r"\s*", l) for p in pats)]
-new = "".join(keep)
-for key, sub in (("cron_coverage", "fleet"), ("skills_bootstrap", "repos")):
-    names = yaml.safe_load(new)[key][sub]
-    assert not any(re.fullmatch(p, n) for p in pats for n in names), (key, names)
-open(path, "w", encoding="utf-8").write(new)
-PY
-  git -C "$w" commit -qam "drop repos neither owner has from repos.yml" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
-}
-drop_from_repos_yml 'example-site-[a-z]+'
-run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
-assert_eq "verify --only repos-yml passes once both lists name only repos you have" "$rc" 0
-assert "it says so" has "$OUT" "PASS: acme-example/_agent-guidance repos.yml names only repos you have"
 # The steps no script can see are answered with --mark.
 bash "$B/status.sh" --config "$CFGP" --mark 9 >/dev/null 2>&1
 assert_eq "the marks are kept in the state file" "$(jq -c .done "$ADOPT_STATE_FILE")" '["9"]'
