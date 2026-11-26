@@ -191,7 +191,12 @@ CONFIG_REQUIRED_BY_COPY=(TIME_ZONE)
 # status.sh and verify.sh stay green for a setup that copied the starter before
 # the key existed.
 require_time_zone() {
-  [ -n "$CFG_TIME_ZONE" ] || die "${CONFIG_PATH:-fleet.env}: TIME_ZONE is required: $_TIME_ZONE_HELP"
+  [ -n "$CFG_TIME_ZONE" ] || die "$(time_zone_required_message)"
+}
+# time_zone_required_message: the one text both require_time_zone and status.sh's
+# step 0 say when TIME_ZONE is empty.
+time_zone_required_message() {
+  printf '%s' "${CONFIG_PATH:-fleet.env}: TIME_ZONE is required: $_TIME_ZONE_HELP"
 }
 
 _valid_value() { # key value
