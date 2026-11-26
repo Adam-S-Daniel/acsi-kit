@@ -8,7 +8,7 @@
 repo: repo-settings
 kit_name: repo-settings
 source: repo-settings
-source_sha: 4eeed17191dd6093d78dc42608d2014b0b4bdf85
+source_sha: b63c70a5e0e92527176074273bb02f2eb5e9d66a
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror)
 # are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -41,6 +41,54 @@ edits:
       name each path copy-starter.sh skips (__pycache__/, *.pyc,
       .pytest_cache/, node_modules/, .DS_Store); the lines already present
       are not repeated.
+
+  # ---- Re-pin round 23: the privacy denylist fan-out is opt-in in the kit
+  - path: README.md
+    old: |2
+         creates and edits labels), **Secrets: Read & write** (the `secrets` surface
+         stores the fanned-out `PRIVACY_DENYLIST`; see "Secrets fan-out" below),
+         **Metadata: Read-only**. No webhook. The
+    new: |2
+         creates and edits labels), **Metadata: Read-only**, and **Secrets: Read &
+         write** only if you declare a `secrets` fan-out ("Secrets fan-out" below).
+         No webhook. The
+    why: >-
+      Re-pin round 23. The kit's fleet.yml declares no `secrets` fan-out and
+      bootstrap/create-apps.sh grants the settings Apps no Secrets
+      permission, so the README asks for it only when an adopter declares one.
+  - path: README.md
+    old: |2
+         Administration: Read, Actions: Read, Issues: Read, Secrets: Read and
+         Metadata: Read,
+    new: |2
+         Administration: Read, Actions: Read, Issues: Read and Metadata: Read
+         (and Secrets: Read if you declare a `secrets` fan-out),
+    why: Re-pin round 23. The read-only App's permissions, as the kit's bootstrap creates it.
+  - path: README.md
+    old: |
+      The `secrets` surface copies the fleet's privacy denylist into every repo as
+      the Actions secret `PRIVACY_DENYLIST`, because a personal account has no
+      organization secrets
+    new: |
+      The `secrets` surface can copy a privacy denylist into every repo as the
+      Actions secret `PRIVACY_DENYLIST`, because a personal account has no
+      organization secrets. The adoption kit's `fleet.yml` declares no fan-out,
+      and its plan jobs do not ask for Secrets: Read, because only your skills
+      registry reads that secret and the kit's bootstrap stores it there. To fan
+      it out, add `secrets: [{name: PRIVACY_DENYLIST}]` under `defaults` in
+      `fleet.yml`; in `.github/workflows/repo-settings.yml`, add
+      `permission-secrets: read` to the three read-only token steps, the
+      `PRIVACY_DENYLIST` secret to the two apply steps' `env`, and the
+      `PRIVACY_DENYLIST_UPDATED_AT` variable to the workflow's `env`; then
+      follow these steps
+    why: >-
+      Re-pin round 23. The source fans its denylist out to every repo; in the
+      kit only the skills registry reads it, so the fan-out ships off and this
+      says how to turn it on.
+  - path: README.md
+    old: "   python3 scripts/set_privacy_denylist.py --file ~/.config/privacy-denylist.txt\n"
+    new: "   python3 scripts/set_privacy_denylist.py --repo <owner>/repo-settings --file ~/.config/privacy-denylist.txt\n"
+    why: Re-pin round 23. The kit's setter has no default repo (the source's names its owner's), so --repo is required.
 
 patches:
   - file: kit_config.py

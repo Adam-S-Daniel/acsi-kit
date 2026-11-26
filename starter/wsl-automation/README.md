@@ -176,6 +176,7 @@ its placeholder values with yours.
 | `WAITING_FEED_URL` | Waiting feed (the feed repository it pushes to) |
 | `LESSONS_CLONE` | Session miner (the private registry clone that receives lesson records) |
 | `CODEX_CLOUD_GUIDANCE_REPOSITORY` | Codex Cloud environment sync (the guidance repository as `owner/name`) |
+| `WSL_AUTOMATION_AGENT_OWNER_ROOTS` | Agent workspace trust scripts and git hook, off Windows only (`:`-separated clone folders; see [Pre-trusting workspaces](#pre-trusting-workspaces-for-claude-code-and-codex)); read by PowerShell, not by the Bash tasks |
 
 - **The file is read as data, never sourced.** One `KEY=VALUE` per line; blank
   lines and `#` comments are skipped, only the key a task asks for is taken
@@ -514,6 +515,10 @@ up the new PATH.
   [Checkout update before every scripted task](#checkout-update-before-every-scripted-task)).
   `wsl.exe --exec` starts a non-login shell, so the script
   appends `~/.local/bin` to `PATH` itself to find a user-installed `jq`.
+- **Linux and WSL only.** On macOS, Claude Code keeps its login in the
+  Keychain and writes `~/.claude/.credentials.json` only as a fallback, and this
+  script does not read the Keychain. Without that file it prints one line
+  saying so, logs it and exits `1`.
 - **It never refreshes the login.** The token comes from
   `.claudeAiOauth.accessToken` in `~/.claude/.credentials.json` (the
   organization from `~/.claude.json`) and is passed to curl through a private
@@ -667,19 +672,25 @@ by anything.
 
 Both agents ask for trust once per git working tree, and trusting a parent
 folder does not extend to nested repositories. Two optional scripts remove
-the prompts for the repos under your owner roots (default
-`C:\repos\example-adopter` and `C:\repos\example-adopter-two`):
+the prompts for the repos under your owner roots. There is no built-in
+value: name your roots once, or pass `-OwnerRoot` each time. **Windows:** the
+user environment variable `WSL_AUTOMATION_AGENT_OWNER_ROOTS` (separated by
+`;`). **Linux, WSL and macOS:** the key `WSL_AUTOMATION_AGENT_OWNER_ROOTS`
+(separated by `:`) in `~/.config/wsl-automation/settings.env`, or the
+environment variable, which wins. With none of them, the scripts fail with an
+error that names `-OwnerRoot`, the variable and the settings file.
 
 ```powershell
+[Environment]::SetEnvironmentVariable('WSL_AUTOMATION_AGENT_OWNER_ROOTS', 'C:\src\<owner>', 'User')   # once; then open a new terminal
 .\scripts\trust-agent-workspaces.ps1                  # each owner root + its direct git children
-.\scripts\trust-agent-workspaces.ps1 -Path C:\repos\example-adopter-two\new-repo
+.\scripts\trust-agent-workspaces.ps1 -Path C:\src\<owner>\new-repo
 .\scripts\install-agent-trust-hook.ps1                # trust every future clone and worktree
 ```
 
 - `trust-agent-workspaces.ps1` marks each owner root and every direct child
   with a `.git` directory or file (worktrees included) as trusted. With
   `-Path`, only those directories are trusted, and any path outside the owner
-  roots is skipped. It writes `projects[<path>].hasTrustDialogAccepted` in
+  roots is skipped with a warning that names the path and the roots in force. It writes `projects[<path>].hasTrustDialogAccepted` in
   `~/.claude.json` (forward-slash keys; that file is never created) and a
   `[projects.'<path>']` `trust_level = "trusted"` table in
   `~/.codex/config.toml` for both the Windows path and the WSL `/mnt/<drive>/`
@@ -696,12 +707,21 @@ the prompts for the repos under your owner roots (default
   git ignores template hooks and the installer warns). It refuses to replace a
   different `init.templateDir` or a foreign hook unless you pass `-Force`.
 - **On Linux / inside WSL** both scripts also run under the Linux pwsh
-  (`pwsh` on `PATH`). The default owner root there is `~/repos` (clones live
-  flat under it), the config files are `/home/<user>/.claude.json` and
+  (`pwsh` on `PATH`). Add `WSL_AUTOMATION_AGENT_OWNER_ROOTS=~/src` to
+  `~/.config/wsl-automation/settings.env` (there is no `~/repos` default, and
+  not a shell profile: the git hook runs in whatever process runs git, and a
+  non-interactive or long-running process never reads a profile). The file is
+  the same one the Bash tasks use (`WSL_AUTOMATION_SETTINGS` overrides its
+  path), read as data: `#` comments and blank lines are skipped, the last
+  assignment wins, one pair of surrounding quotes is removed, a leading `~/`
+  expands to your home directory, other values must be absolute, and a
+  missing, unreadable or malformed file counts as unset. The environment
+  variable still wins. The config files are `/home/<user>/.claude.json` and
   `/home/<user>/.codex/config.toml`, and Codex keys are the plain Linux path,
   for example `[projects."/home/<user>/repos/x"]`; no `/mnt/<drive>/` key is
   written. Path containment is case-sensitive there (case-insensitive on
-  Windows). The hook runs the Linux `pwsh` (the installer prefers a stable path such as
+  Windows). The hook resolves the roots the same way in whatever process runs git, and
+  its errors stay visible on stderr. The hook runs the Linux `pwsh` (the installer prefers a stable path such as
   `/usr/bin/pwsh` or `/snap/bin/pwsh` over a version-pinned snap path, which vanishes on
   the next snap refresh, and warns if it has to fall back to one; pass `-PwshPath` to
   override), and the installer sets the hook

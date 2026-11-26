@@ -29,11 +29,11 @@ needs the `gh actions-lock` extension. Claude Code installs the plugins
 
 | Script | Does | Cannot |
 |---|---|---|
-| `fleet.env.example` | The only file you fill in: owners, plan, visibility, `REPOS_DIR`, and the App ids `create-apps.sh` records. No secrets, ever. | |
+| `fleet.env.example` | The only file you fill in: owners, plan, `TIME_ZONE`, visibility, `REPOS_DIR`, and the App ids `create-apps.sh` records. No secrets, ever. | |
 | `add-content.sh` | Adds the recommended and opinionated items you name (`--items <ids\|recommended\|none>`, from `content-catalog.json`) to the kit copy's `../starter/` from `../library/`, rebuilds the generated files they feed (through `lib/content.py`), and records your choices beside `status.sh`'s state file. Idempotent; `--dry-run` lists the files it would add or change. | Write to GitHub: once the repos exist it lists the repos that need a pull request. Run inside a git work tree. |
 | `update-kit.sh` | Moves a clone of the kit to the newest kit; the README's update block runs the newest copy of it from a temporary folder (`--kit <clone>`), so it also updates a clone older than the script (`--dry-run` reports only). It checks your `fleet.env` with the newer kit's loader, proves that your `starter/` changes are exactly what `add-content.sh` wrote (contents and executable bits), saves every `starter/` change to `~/kit-starter-backup-<commit>`, discards them, fast-forwards to `origin/HEAD`, lists the `fleet.env` keys `fleet.env.example` added (required or optional) or removed since your old commit (names only), and runs `add-content.sh` again with your recorded choices, dropping any the catalog no longer offers. A detached HEAD, a merge or rebase in progress, a tracked edit outside `starter/`, a hand edit in `starter/` (unless `--discard-starter-edits`), no `fleet.env` at `--config` while `starter/` has changes or a choices record exists, a `fleet.env` the newer kit refuses or a local commit makes it refuse before it changes anything. Exits 0 only when it all worked; an interrupt or failure says where things stand and what to run next. | Change repos you already filled from an older starter (use `copy-starter.sh --dry-run`), update a downloaded copy that is not a git clone, or write to GitHub. |
 | `create-repos.sh` | The five base repos, and `skills-evals` only when named (the evals track's first step) or once it exists (`FLEET_REPOS` and `EVALS_REPO` in `lib/common.sh`), with the owner's visibility, a generated README as the first commit, the labels `agent-ready` and `on-hold`, and, in `skills-evals`, the orphan branch `persistent/eval-results` (a README only) that the eval loop's workflows fetch and nothing else creates. `--with-optional` adds the private `waiting-feed`. | Change an existing repo's visibility (it reports the mismatch and exits 1). Every other setting is `fleet.yml`'s, applied by `apply-settings.sh`. |
-| `copy-starter.sh` | Clones one of your repos, copies an export from `../starter/` into it with your names (every form of the invented owners, and `<your name>`, through `lib/substitute.py`), commits on `starter/<folder>`, pushes, checks the commit is on the remote branch, and opens a pull request. Refuses to overwrite a file that differs unless `--force`, except the README `create-repos.sh` generated. | Merge it: review it yourself, above all `.github/workflows/`. |
+| `copy-starter.sh` | Clones one of your repos, copies an export from `../starter/` into it with your names (every form of the invented owners, and `<your name>`, through `lib/substitute.py`, and your `TIME_ZONE` into `_agent-guidance`'s `scripts/base-md-merge-window.yml`, through `lib/time_zone.py`, which refuses a tree without that one `timezone: UTC` line), commits on `starter/<folder>`, pushes, checks the commit is on the remote branch, and opens a pull request. Refuses to overwrite a file that differs unless `--force`, except the README `create-repos.sh` generated. | Merge it: review it yourself, above all `.github/workflows/`. |
 | `create-environments.sh` | The three environments (`ENVIRONMENTS`): `fleet-apply` in `repo-settings` and `routine-fire` in `skills-evals`, limited to the default branch, and `plugin-runtime-review` in `acsi-agentskills` with you as reviewer. Then the repository variables in `REPO_VARIABLES` (`repo-settings`' `GUIDANCE_SYNC_APP_ID` and `ROSTER_WRITER_APP_ID`, `skills-evals`' required `SITE_REPO` (`none`: no website), and, when you fill them in, `skills-evals`' four optional `ANTHROPIC_*` federation ids, all from `fleet.env`). While `skills-evals` does not exist, what lives in it is skipped. | Create an environment in a private repo on GitHub Free (it says so and skips it). Delete an extra branch policy (it reports it). |
 | `create-apps.sh` | The six Apps (`APPS`) through GitHub's App manifest flow: writes `app-manifests/<app>.html`, exchanges the code from the URL you paste, records the App id in `fleet.env`, stores the client id and private key under the names the workflows read, on stdin, and prints the install link and the repos to pick. The three evals Apps keep their credentials in `skills-evals`, so they wait for it. | Click Create or install an App for you. Recover a lost key. |
 | `set-secrets.sh` | `PRIVACY_DENYLIST` in `acsi-agentskills` (`--only privacy`: the file must be outside every git work tree and every line must compile), and `EVAL_ROUTINE_FIRE_BEARER` and `ROUTINE_TRIGGER_ID` in `skills-evals`' `routine-fire` environment (`--only routine-fire`), from a hidden prompt or the file, on stdin. `--rotate` replaces values already set. | Read the bearer from claude.ai: you copy it from the routine's API trigger. Compare a stored secret (GitHub never shows one). |
@@ -94,6 +94,23 @@ them unset with `SITE_REPO=none`.
   preview page's URL with `{pr}` where the site pull request's number goes,
   which `site-preview.yml` comments on a pull request. Set it the same way as
   `SITE_PAGE_URL`.
+
+The privacy comment alert (`privacy-comment-alert.yml`, which the sync
+delivers with agent-checks) sends its alert through a self-alert route that
+the kit does not include: a GitHub App that can dispatch a self-alert
+workflow you write, named send-self-alert.yml, in a repository of your own. Without
+these three values it scans nothing it can report and only warns, so leave
+them unset unless you build that route.
+
+- `SELF_ALERT_APP_ID`: a repository variable on each repo that runs the
+  alert, the route App's client id. Set it with
+  `gh variable set SELF_ALERT_APP_ID --repo <you>/<repo> --body <id>`.
+- `SELF_ALERT_REPO`: a repository variable on the same repos, the
+  `owner/name` of the repository that holds that workflow. Set it the
+  same way.
+- `SELF_ALERT_APP_PRIVATE_KEY`: a repository secret on the same repos, the
+  route App's private key. Set it with
+  `gh secret set SELF_ALERT_APP_PRIVATE_KEY --repo <you>/<repo> < <key file>`.
 
 The prompt-audit sweep's fire values live on `_agent-guidance`, where
 `prompt-audit-fire.yml` fires the sweep for each trigger issue the changelog

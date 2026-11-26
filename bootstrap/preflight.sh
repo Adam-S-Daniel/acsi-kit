@@ -267,10 +267,24 @@ check_kit_location() {
 
 check_config() {
   case $CONFIG_STATE in
-    ok) pass "$CONFIG parses (OWNER $CFG_OWNER)" ;;
+    ok) pass "$CONFIG parses (OWNER $CFG_OWNER)"; check_time_zone ;;
     missing) skp "$CONFIG does not exist yet, so the account checks are skipped: do step 0 (cp bootstrap/fleet.env.example fleet.env, then fill it in)" ;;
     *) fail "$CONFIG does not parse: $CONFIG_ERR"; fix "edit $CONFIG; bootstrap/fleet.env.example shows each key" ;;
   esac
+}
+
+# A WARN, not a FAIL: only copy-starter.sh needs TIME_ZONE (step 6 onward), and
+# a setup that copied the starter before the key existed must not fail here.
+check_time_zone() {
+  if [ -z "$CFG_TIME_ZONE" ]; then
+    warn_ "$CONFIG has no TIME_ZONE; copy-starter.sh will refuse until it is set"
+    fix "$_TIME_ZONE_HELP"
+  elif [ "$(time_zone_state "$CFG_TIME_ZONE")" = nodb ]; then
+    warn_ "TIME_ZONE $CFG_TIME_ZONE could not be checked: $_TIME_ZONE_NODB_HELP"
+    fix "pip install tzdata (for the python3 that preflight.sh found), or your OS's tzdata package"
+  else
+    pass "TIME_ZONE $CFG_TIME_ZONE is a zone this machine knows"
+  fi
 }
 
 check_wsl() {

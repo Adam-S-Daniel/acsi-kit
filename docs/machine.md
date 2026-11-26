@@ -95,6 +95,10 @@ register the jobs, copy the repo's `config/settings.env.example` to
 (usage census and session miner), `LESSONS_CLONE` (session miner),
 `WAITING_FEED_URL` (waiting feed), `AGENT_GUIDANCE_URL` (memory curation),
 and `CODEX_CLOUD_GUIDANCE_REPOSITORY` (Codex Cloud sync, as `owner/name`).
+Set `WSL_AUTOMATION_AGENT_OWNER_ROOTS` to the folder that holds your clones
+(several separated by `:`): the agent workspace trust scripts read it off
+Windows and have no default. On Windows they read the user environment
+variable of that name instead, with `;` between folders.
 The README's "Settings file for the Bash tasks" has the format.
 
 **The session miner refuses to run** until you set it up and run it once by

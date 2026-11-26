@@ -83,6 +83,7 @@ OWNER_TWO=${3:-$O}-two
 OWNER_TYPE=user
 PLAN=$2
 CLAUDE_PLAN=max20x
+TIME_ZONE=Europe/Berlin
 OWNER_NAME=Acme Example
 REPOS_DIR=$T/home/repos
 EOF
@@ -103,7 +104,7 @@ for s in "${SCRIPTS[@]}"; do
   assert "$s uses set -euo pipefail" grep -qx 'set -euo pipefail' "$B/$s"
   assert "$s --help prints its usage" bash -c '"$1" "$2" --help | grep -qF "$3"' _ bash "$B/$s" "$s ["
 done
-for p in lib/substitute.py lib/plan_sizing.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
+for p in lib/substitute.py lib/plan_sizing.py lib/time_zone.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
          tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
@@ -146,6 +147,36 @@ assert "the refusal names CLAUDE_PLAN" has "$ERR" "CLAUDE_PLAN is required"
 sed 's/^CLAUDE_PLAN=.*/CLAUDE_PLAN=max/' "$CFG" > "$T/badplan.env"
 assert_not "an invalid CLAUDE_PLAN is refused" bash "$B/create-repos.sh" --config "$T/badplan.env" --dry-run
 assert_eq "fleet.env.example leaves CLAUDE_PLAN for the adopter" "$(grep -c '^CLAUDE_PLAN=$' "$B/fleet.env.example")" 1
+# TIME_ZONE: no default; loader checks shape and the tz database; required where it is written.
+assert_eq "fleet.env.example leaves TIME_ZONE for the adopter" "$(grep -c '^TIME_ZONE=$' "$B/fleet.env.example")" 1
+for bad in 'Berlin' 'Europe/' 'europe berlin' 'Mars/Olympus' 'Europe/Berlin;x'; do
+  sed "s|^TIME_ZONE=.*|TIME_ZONE=$bad|" "$CFG" > "$T/badtz.env"
+  run bash "$B/create-repos.sh" --config "$T/badtz.env" --dry-run; rc=$?
+  assert_eq "TIME_ZONE=$bad is refused" "$rc" 1
+  assert "the refusal for TIME_ZONE=$bad says where and how" has "$ERR" "timedatectl show -p Timezone --value"
+done
+for good in UTC America/Chicago America/Argentina/Buenos_Aires Etc/GMT+5; do
+  sed "s|^TIME_ZONE=.*|TIME_ZONE=$good|" "$CFG" > "$T/goodtz.env"
+  run bash "$B/create-repos.sh" --config "$T/goodtz.env" --dry-run; rc=$?
+  assert_eq "TIME_ZONE=$good is accepted" "$rc" 0
+done
+grep -v '^TIME_ZONE=' "$CFG" > "$T/notz.env"
+run bash "$B/create-repos.sh" --config "$T/notz.env" --dry-run; rc=$?
+assert_eq "a config without TIME_ZONE still loads (an existing setup stays green)" "$rc" 0
+run bash "$B/copy-starter.sh" --config "$T/notz.env" --dry-run starter/agent-guidance "$O/_agent-guidance"; rc=$?
+assert_eq "copy-starter refuses a config without TIME_ZONE" "$rc" 1
+assert "the refusal names TIME_ZONE and fleet.env" has "$ERR" "TIME_ZONE is required"
+# lib/time_zone.py: the one line, exactly once.
+mkdir -p "$T/tz/scripts"; printf '# c\ntimezone: UTC\nweekday: 1\n' > "$T/tz/scripts/base-md-merge-window.yml"
+assert "time_zone.py writes the zone" python3 -I "$B/lib/time_zone.py" "$T/tz" --zone Asia/Tokyo
+assert_eq "the file now names the zone, once" "$(grep -c '^timezone: Asia/Tokyo$' "$T/tz/scripts/base-md-merge-window.yml")" 1
+run python3 -I "$B/lib/time_zone.py" "$T/tz" --zone Asia/Tokyo; rc=$?
+assert_eq "time_zone.py fails when the UTC line is not there" "$rc" 1
+assert "and says which file" has "$ERR" "base-md-merge-window.yml"
+printf 'timezone: UTC\ntimezone: UTC\n' > "$T/tz/scripts/base-md-merge-window.yml"
+run python3 -I "$B/lib/time_zone.py" "$T/tz" --zone Asia/Tokyo; rc=$?
+assert_eq "time_zone.py fails when the line is there twice" "$rc" 1
+mkdir -p "$T/tz2"; assert "time_zone.py leaves a tree without the file alone" python3 -I "$B/lib/time_zone.py" "$T/tz2" --zone Asia/Tokyo
 for plan in pro max5x ultra max20x; do
   assert_eq "fleet_worker_hours $plan" "$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
     "$(case $plan in pro) echo 168;; max5x) echo 12;; ultra|max20x) echo 3;; esac)"
@@ -195,6 +226,51 @@ pf() { # [env VAR=value ...] -- args to preflight.sh: runs it on PFBIN with a pi
   cat "$OUT" "$ERR" >> "$T/pf-all.out"
   return $rc
 }
+# TIME_ZONE left empty (a copy of the new fleet.env.example), absent, or valid.
+sed -e 's/^OWNER=.*/OWNER=acme-example/' -e 's/^OWNER_TWO=.*/OWNER_TWO=acme-example/' -e 's/^PLAN=.*/PLAN=free/' \
+  -e 's/^CLAUDE_PLAN=.*/CLAUDE_PLAN=pro/' -e "s|^REPOS_DIR=.*|REPOS_DIR=$T/home/repos|" "$B/fleet.env.example" > "$T/tz-empty.env"
+assert_eq "the example's TIME_ZONE is empty in this copy" "$(grep -c '^TIME_ZONE=$' "$T/tz-empty.env")" 1
+grep -v '^TIME_ZONE=' "$T/tz-empty.env" > "$T/tz-absent.env"
+sed 's/^TIME_ZONE=.*/TIME_ZONE=Europe\/Berlin/' "$T/tz-empty.env" > "$T/tz-valid.env"
+for v in empty absent valid; do
+  pf -- --config "$T/tz-$v.env"; rc=$?
+  assert_eq "preflight exits 0 with TIME_ZONE $v" "$rc" 0
+  assert_not "preflight does not FAIL on TIME_ZONE $v" grep -q '^FAIL' "$OUT"
+  run env ADOPT_STATE_FILE="$T/tz-state-$v.json" bash "$B/status.sh" --config "$T/tz-$v.env"; rc=$?
+  assert_eq "status.sh exits 0 with TIME_ZONE $v" "$rc" 0
+  assert_not "status.sh's step 0 is not undone by TIME_ZONE $v" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
+  run bash "$B/verify.sh" --config "$T/tz-$v.env" --only repos
+  assert_not "verify.sh does not stop on TIME_ZONE $v" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
+  run bash "$B/copy-starter.sh" --config "$T/tz-$v.env" --dry-run starter/agent-guidance acme-example/_agent-guidance; rc=$?
+  if [ "$v" = valid ]; then
+    assert_not "copy-starter does not refuse on TIME_ZONE $v" grep -q 'TIME_ZONE' "$ERR"
+  else
+    assert_eq "copy-starter refuses with TIME_ZONE $v" "$rc" 1
+    assert "its message says what to set and how to find it" has "$ERR" "timedatectl show -p Timezone --value"
+  fi
+done
+pf -- --config "$T/tz-empty.env"
+assert "preflight WARNs about an empty TIME_ZONE with the help text" grep -q '^WARN: .*has no TIME_ZONE' "$OUT"
+assert "and prints the fix line" grep -q 'fix: set TIME_ZONE in fleet.env' "$OUT"
+pf -- --config "$T/tz-valid.env"
+assert "preflight PASSes a valid TIME_ZONE" grep -q '^PASS: TIME_ZONE Europe/Berlin' "$OUT"
+# No tz database in python3: shape-valid is accepted with a warning; an unknown zone on a machine WITH one is refused.
+pf ACSI_TEST_NO_TZDB=1 -- --config "$T/tz-valid.env"; rc=$?
+assert_eq "preflight exits 0 on a machine with no tz database" "$rc" 0
+assert "it WARNs and says to install tzdata" grep -q '^WARN: TIME_ZONE Europe/Berlin could not be checked.*pip install tzdata' "$OUT"
+sed 's/^TIME_ZONE=.*/TIME_ZONE=Mars\/Olympus/' "$T/tz-empty.env" > "$T/tz-mars.env"
+pf ACSI_TEST_NO_TZDB=1 -- --config "$T/tz-mars.env"; rc=$?
+assert_eq "a shape-valid but unknown zone is accepted when there is no database to check" "$rc" 0
+pf -- --config "$T/tz-mars.env"; rc=$?
+assert_eq "the same zone is refused when the database is there" "$rc" 1
+sed 's/^TIME_ZONE=.*/TIME_ZONE=Europe/' "$T/tz-empty.env" > "$T/tz-shape.env"
+pf ACSI_TEST_NO_TZDB=1 -- --config "$T/tz-shape.env"; rc=$?
+assert_eq "a malformed zone is refused even with no database" "$rc" 1
+mkdir -p "$T/tzn/scripts"; printf 'timezone: UTC\n' > "$T/tzn/scripts/base-md-merge-window.yml"
+run env ACSI_TEST_NO_TZDB=1 python3 -I "$B/lib/time_zone.py" "$T/tzn" --zone Europe/Berlin; rc=$?
+assert_eq "time_zone.py writes a shape-valid zone with no database" "$rc" 0
+assert "and warns that it was checked for shape only" has "$ERR" "checked for shape only"
+assert_eq "the file holds the zone" "$(grep -c '^timezone: Europe/Berlin$' "$T/tzn/scripts/base-md-merge-window.yml")" 1
 pf -- --config "$PFCFG"; rc=$?
 assert_eq "preflight exits 0 when everything is in place" "$rc" 0
 assert "preflight's summary says 0 failed" grep -qE ' 0 failed,' "$OUT"
@@ -620,7 +696,11 @@ run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --denylist "$T/priv
 assert_eq "set-secrets privacy exits 0" "$rc" 0
 assert "a denylist other users can read is warned about" has "$ERR" "the denylist is readable by other users"
 assert_eq "PRIVACY_DENYLIST is a repository secret in acsi-agentskills" "$(jqs '.values["acme-example/acsi-agentskills||secret"].PRIVACY_DENYLIST')" "$(sha256sum < "$T/private/denylist" | cut -d' ' -f1)"
-assert "set-secrets counts the write" has "$OUT" "Done: 1 change(s)"
+assert_eq "PRIVACY_DENYLIST is a repository secret in _agent-guidance, for its agent-checks CI scan" "$(jqs '.values["acme-example/_agent-guidance||secret"].PRIVACY_DENYLIST')" "$(sha256sum < "$T/private/denylist" | cut -d' ' -f1)"
+for r in repo-settings wsl-automation; do
+  assert_eq "PRIVACY_DENYLIST is a repository secret in $r, for its agent-checks CI scan" "$(jqs ".values[\"acme-example/$r||secret\"].PRIVACY_DENYLIST")" "$(sha256sum < "$T/private/denylist" | cut -d' ' -f1)"
+done
+assert "set-secrets counts the writes" has "$OUT" "Done: 4 change(s)"
 chmod 600 "$T/private/denylist"
 run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate --denylist "$T/private/denylist"; rc=$?
 assert_eq "set-secrets privacy --rotate exits 0" "$rc" 0
@@ -681,6 +761,7 @@ for r in "${FLEET[@]}"; do
   assert_not "no invented owner is left in $t's paths" bash -c 'git --git-dir="$1" ls-tree -r --name-only "$2" | grep -qiE "example[-_]adopter"' _ "$g" "starter/$t"
   assert "the README create-repos.sh wrote was replaced" bash -c '! git --git-dir="$1" show "$2:README.md" | grep -qF "generated by bootstrap/create-repos.sh"' _ "$g" "starter/$t"
 done
+assert "copy-starter wrote TIME_ZONE into the merge window" bash -c 'git --git-dir="$1" show starter/agent-guidance:scripts/base-md-merge-window.yml | grep -qx "timezone: Europe/Berlin"' _ "$T/remotes/$O/_agent-guidance.git"
 assert_eq "six starter pull requests are open" "$(jqs '[.prs[][] | select(.head | startswith("starter/"))] | length')" 6
 assert "your owner replaced the invented one in fleet.evals.yml" bash -c 'git --git-dir="$1" show starter/repo-settings:repo-settings/fleet.evals.yml | grep -q "name: acme-example/skills-evals"' _ "$T/remotes/$O/repo-settings.git"
 # The base fleet.yml declares no skills-evals (parsed, not grepped); its element is the fragment's.
