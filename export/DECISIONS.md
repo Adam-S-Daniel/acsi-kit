@@ -3296,3 +3296,27 @@ A commit of the adopter's repo cannot be substituted at export or copy time, bec
 `export/tests/test_guidance_pins.py` runs the locators over the kit's own `starter/agent-skills` and `starter/wsl-automation` trees, so a source change that moves or reshapes a pin fails at re-sync time, and holds the kit's two copies of the installer to one digest. `bootstrap/tests/test-bootstrap.sh` covers the tasks end to end on the copied starters.
 
 Reverse: restore `task_run_health_sha`, `task_codex_pin` and the header comment in `bootstrap/regenerate.sh`, delete `bootstrap/lib/guidance_pins.py` and `export/tests/test_guidance_pins.py`, restore the comment text in the `wsl-automation` manifest's fleet-pin edit, re-run the export, and restore the docs (`docs/generated-files.md`, `docs/machine.md`, `export/REGENERATE.md`, steps 16 and 17).
+
+## Re-pin of the private registry (2026-11-26)
+
+The daily re-sync never moves `agentskills-private` (its source is private), so this re-pin is by hand: `export/manifests/agentskills-private.yml` moves from `c5b1bc9` (2026-10-29) to `f5bda10`, the source's main, 152 commits later. Every other pin is unchanged; the re-sync job owns those. The export ran with every source checked out at its pin, so `library/` was regenerated too and did not change (it takes nothing from this source).
+
+Of the 24 files the `include` list named, 17 changed at the source and two were deleted. The list now:
+
+- **drops** `.claude/hooks/fleet-guidance.md` and `.claude/hooks/fleet-memory.sh`, which the source removed under `_agent-guidance` ADR 0043 (a consumer repo carries neither; the sync deletes them), with the two `regenerate` steps that copied the kit's versions in. `.claude/settings.json` follows the source and no longer registers `fleet-memory.sh`.
+- **adds** `.githooks/privacy-denylist.py` and `.githooks/privacy-comment-scan.py`, the sync-delivered scanners the agent-checks runner calls. Without them the runner only warned; they are byte-identical to the public registry's copies and to `_agent-guidance`'s templates.
+
+The source also added, outside the list and so left out by it: the eval-results lane (`eval-results-ingest.yml`, `eval-results-pushed.yml`), the private explorer (`explorer-private.yml`), the usage sink (`infrastructure/usage-sink/`, `usage-sink-ingest.yml`), `scheduled-run-health.yml`, `dependabot-auto-merge.yml`, `.github/dependabot.yml`, `.agent-checks/local.sh`, `docs/claude-account-preferences.md`, and the bundle's two Stop hooks (`plugins/*/hooks/`), which send the owner's usage and setup records to the owner's usage sink. The owner's skills stay out (X2), and `docs/credential-runbook.md` stays excluded (X3).
+
+The files that do ship described some of those parts, so a new patch, `export/patches/agentskills-private/owner_only.py`, cuts them, checking each shape and failing the export when a block moves:
+
+- `agent-checks.yml`: the eval-protection gate (ADR 0034 in the source) and the job's `pull-requests: read`. The gate checks out the owner's `_agent-guidance` and `skills-evals` at the owner's commits, which an adopter's repos do not have, and on the base track there is no `skills-evals` at all, so this required check would fail on every pull request. The kit's private registry ships no skills, so the gate has nothing to protect. The rest of the source's change ships: `edited` in the triggers, `verify-actions-lock@v1.2.0`, and `PRIVACY_DENYLIST` passed to the runner (which only warns while the secret is unset; `set-secrets.sh` does not store it in this repo).
+- `actions.lock`: the entries of the left-out workflows and the one tag only they used (`aws-actions/configure-aws-credentials`). What is left is what `gh actions-lock` writes for the shipped workflow.
+- `AGENTS.md`: the repo-specific sections after the starter's marker comment (the eval-results lane, the workflow table, the usage-sink stack).
+- `README.md`: the two paragraphs about the bundle's Stop hooks.
+
+The `marketplace.json` and `plugin.json` edits follow the source's new descriptions, and `plugin.json` loses its `hooks` key, since `hooks/` is left out. `export/tests/test_private_owner_only.py` holds the shipped tree to all of this by parsing each file, and the patch's cuts to their shapes; against an export without the patch, four of its tests fail.
+
+The other changed files ship as the source has them: `setup.sh` no longer links skills into the other agent tools' homes and only removes links an earlier version made (the kit's suite runs it with a scratch `HOME`), `README.md`'s install section says so, `lessons/README.md` documents the day's `DIGEST.md` and the cluster subjects of `new-skill`, `.gitattributes` marks synced tooling vendored, and `dated-phrasing.js` matches the public registry's copy. No docs page needed a change (`export/doc_review.py` named `how-it-works.md`, `quick-start.md` and `skills.md`, and none describes what changed).
+
+Reverse: set `source_sha` back to `c5b1bc9dfaaec3651ad9cb35f8d04192a126319b`, restore the `include` list, the two `regenerate` steps and the two description edits, remove the `patches` block, `export/patches/agentskills-private/` and `export/tests/test_private_owner_only.py`, and re-run the export.

@@ -6,7 +6,7 @@
 repo: agentskills-private
 kit_name: agent-skills-private
 source: adam-agentskills-private
-source_sha: c5b1bc9dfaaec3651ad9cb35f8d04192a126319b
+source_sha: f5bda1091249b0d2d68699e6de8106d13c793c7e
 # The sync-delivered files come from the exported _agent-guidance, and the
 # lock pins the exported public registry.
 after: [_agent-guidance, agentskills]
@@ -23,8 +23,6 @@ exclude:
 include:
   - .claude-plugin/marketplace.json
   - .claude/hooks/agent-checks-guard.sh
-  - .claude/hooks/fleet-guidance.md
-  - .claude/hooks/fleet-memory.sh
   - .claude/hooks/skills-bootstrap.sh
   - .claude/settings.json
   - .gitattributes
@@ -33,6 +31,8 @@ include:
   - .githooks/dated-phrasing.js
   - .githooks/dated-phrasing/package-lock.json
   - .githooks/dated-phrasing/package.json
+  - .githooks/privacy-comment-scan.py
+  - .githooks/privacy-denylist.py
   - .github/workflows/actions.lock
   - .github/workflows/agent-checks.yml
   - AGENTS.md
@@ -69,22 +69,40 @@ edits:
       not the owner.
   - path: .claude-plugin/marketplace.json
     stage: output
-    old: '"description": "the owner''s personal skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code.",'
+    old: '"description": "the owner''s personal skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code. In Claude Code it also records, once per session, whether the full fleet guidance loaded.",'
     new: '"description": "Private skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code.",'
-    why: C10. Describes the bundle, not the owner.
+    why: >-
+      C10. Describes the bundle, not the owner, and without the guidance-load
+      record the kit leaves out (DECISIONS "Re-pin of the private registry,
+      2026-11-26").
   - path: plugins/acsi-private-anything-anywhere/.claude-plugin/plugin.json
     stage: output
     old: |
-      "description": "the owner's personal skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code.",
-        "author": { "name": "the owner" }
+      "description": "the owner's personal skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code. In Claude Code it also records, once per session, whether the full fleet guidance loaded.",
+        "author": { "name": "the owner" },
+        "hooks": "./hooks/claude-code.json"
     new: |
       "description": "Private skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code.",
         "author": { "name": "<your name>" }
-    why: The same description as the marketplace entry, and the `<your name>` placeholder.
+    why: >-
+      The same description as the marketplace entry, the `<your name>`
+      placeholder, and no `hooks` key: the bundle's two Stop hooks send the
+      source owner's usage records to the source owner's usage sink, so the
+      kit leaves hooks/ out (DECISIONS "Re-pin of the private registry,
+      2026-11-26").
 
 # overlay/agentskills-private/ adds NOTICE and .gitignore (the source has
 # no .gitignore; the kit's bootstrap test wants every starter tree to ignore
 # what copy-starter.sh skips).
+
+patches:
+  - file: owner_only.py
+    why: >-
+      DECISIONS "Re-pin of the private registry (2026-11-26)". The source's
+      agent-checks.yml runs an eval-protection gate against the owner's
+      _agent-guidance and skills-evals commits, its actions.lock lists the
+      owner's left-out workflows, and its AGENTS.md and README.md describe the
+      usage sink and the private explorer; this cuts each, checking its shape.
 
 regenerate:
   - copy_from_kit: {repo: _agent-guidance, from: .github/fleet-contributor-rules.md, to: .github/fleet-contributor-rules.md}
@@ -92,16 +110,12 @@ regenerate:
       The sync delivers _agent-guidance's contributor rules here byte for
       byte, and that repo's copy is rebuilt from the kit's base.md; the
       source copy holds the owner's sections the kit leaves out (acsi-kit#72).
-  - copy_from_kit: {repo: _agent-guidance, from: agents-md/base.md, to: .claude/hooks/fleet-guidance.md}
-    why: The sync delivers _agent-guidance's base.md here byte for byte; it carries that repo's X9 blanking.
   - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/agent-checks, to: .githooks/agent-checks}
     why: The sync delivers the agent-checks runner from _agent-guidance's templates; X9 ships it with no checks.
   - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/dated-phrasing-allowlist.txt, to: .githooks/dated-phrasing-allowlist.txt}
     why: The sync delivers the dated-phrasing allowlist from _agent-guidance's templates; it carries that repo's C11 trim.
   - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/agent-checks-guard.sh, to: .claude/hooks/agent-checks-guard.sh}
     why: The sync delivers the guard (byte-identical in the sources).
-  - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/fleet-memory.sh, to: .claude/hooks/fleet-memory.sh}
-    why: The sync delivers the fleet-memory hook (byte-identical in the sources).
   - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/skills-bootstrap.sh, to: .claude/hooks/skills-bootstrap.sh}
     why: Byte-identical in the sources; _agent-guidance's repos.yml pins its sha256.
   - copy_from_kit: {repo: agentskills, from: skills.lock, to: skills.lock}
