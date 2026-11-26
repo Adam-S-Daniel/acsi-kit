@@ -1499,7 +1499,7 @@ git -C "$UK" remote set-url origin "$UP/origin"
 # privacy list was stored in the registry alone, and the newer kit wants it in
 # four repos. The update says so, and status.sh shows step 3 not done.
 O4="$UP/o4"; mkdir -p "$O4"; cp -R "$K/bootstrap" "$K/starter" "$K/library" "$O4/"
-sed -i -E '/"(_agent-guidance|repo-settings|wsl-automation)\|-\|secret\|PRIVACY_DENYLIST\|file"/d' "$O4/bootstrap/lib/common.sh"
+sed -i -E '/^  "acsi-agentskills\|/!{/\|-\|secret\|PRIVACY_DENYLIST\|file"/d;}' "$O4/bootstrap/lib/common.sh"
 assert_eq "the old kit stores the privacy list in the registry only" "$(grep -c 'PRIVACY_DENYLIST|file' "$O4/bootstrap/lib/common.sh")" 1
 ugit -C "$O4" init -q -b main && ugit -C "$O4" add -A && ugit -C "$O4" commit -qm "privacy list in the registry only"
 ugit clone -q "$O4" "$UP/k4"
