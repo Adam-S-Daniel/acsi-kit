@@ -4233,18 +4233,22 @@ class CmsLabelOnlyTests(unittest.TestCase):
         self.assertEqual(len(rs.resolve_targets(cfg, None)), 1)
 
     def test_cms_label_repos_on_the_real_fleet(self):
-        # One line per owner the file names, whatever their number: an owner's
-        # label-only repos are the file's `manage: ["labels"]` rows that the
-        # engine guards, sorted. A one-owner fleet has one line holding all
-        # of them, and a fleet without the example repos has empty lines.
-        targets = rs.resolve_targets(rs.load_config(str(self.FLEET)), None)
-        owners = {t["repo"].split("/", 1)[0] for t in targets}
+        # One line per owner the file names, whatever their number. The
+        # expectation is this test's own list of the three example sites, cut
+        # to the rows the file still marks `manage: ["labels"]`, and never
+        # the engine's list: a one-owner fleet has one line holding all
+        # three, and a fleet without the example repos has empty lines.
+        sites = ("example-adopter/example-site-a", "example-adopter/example-site-platform",
+                 "example-adopter-two/example-site-b")
+        rows = {e["name"].casefold(): e["manage"]
+                for e in rs.load_config(str(self.FLEET))["repos"]}
+        owners = {name.split("/", 1)[0] for name in rows}
         self.assertTrue(owners)
         for owner in sorted(owners):
             want = ",".join(sorted(
-                t["repo"].split("/", 1)[1] for t in targets
-                if t["repo"].split("/", 1)[0] == owner
-                and t["manage"] == ["labels"] and rs.is_cms_label_only(t["repo"])))
+                s.split("/", 1)[1] for s in sites
+                if s.casefold().split("/", 1)[0] == owner
+                and rows.get(s.casefold()) == ["labels"]))
             with self.subTest(owner=owner):
                 rc, out = self._run("cms-label-repos", "--config", str(self.FLEET),
                                     "--owner", owner)
