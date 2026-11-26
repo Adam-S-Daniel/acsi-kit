@@ -868,11 +868,6 @@ assert "a second run says the kit is current" has "$OUT" "the kit is current"
 assert_not "a current kit lists no fleet.env key (this fleet.env sets few of them)" grep -qE 'new, |removed: |VISIBILITY_AGENT_GUIDANCE' "$OUT"
 assert_eq "a second run changes no status" "$(git -C "$UK" status --porcelain)" "$st1"
 assert_eq "a second run keeps HEAD" "$(git -C "$UK" rev-parse HEAD)" "$h1"
-# After an update by hand (a copy older than the script), --since lists the key changes.
-uk "$UK" --config "$UK/fleet.env" --since "$h0"; rc=$?
-assert_eq "update-kit --since on a current kit exits 0" "$rc" 0
-assert "--since names the key added since then" has "$OUT" "new, optional: NEW_KEY_FOR_TEST"
-assert "--since names the commit, not the name given" has "$OUT" "changed since ${h0:0:12}"
 assert_not "it does not say nothing changed after re-applying the choices" has "$OUT" "Nothing to change"
 # Hand edits inside starter/ are not add-content's, so they are refused.
 bump "upstream again"
@@ -883,7 +878,7 @@ uk "$UK" --config "$UK/fleet.env"; rc=$?
 assert_eq "a hand edit in starter/ makes update-kit exit 1" "$rc" 1
 assert "it names the hand-edited path" has "$ERR" "starter/repo-settings/README.md"
 assert_not "it does not blame add-content's own files" has "$ERR" "fleet-guidance.md"
-assert "it says how to save the edits outside the clone" has "$ERR" "git diff --binary HEAD -- starter > ~/kit-starter-backup/starter-edits.patch"
+assert "it says --discard-starter-edits saves them outside the clone first" has "$ERR" "to ~/kit-starter-backup-${h1:0:12}"
 assert "the edit is intact" has "$UK/starter/repo-settings/README.md" "my own edit"
 assert_eq "the refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
 uk "$UK" --config "$UK/fleet.env" --discard-starter-edits; rc=$?
@@ -891,6 +886,16 @@ assert_eq "--discard-starter-edits lets it go ahead" "$rc" 0
 assert_eq "HEAD is the upstream head again" "$(git -C "$UK" rev-parse HEAD)" "$(origin_head)"
 assert_not "the hand edit is gone" has "$UK/starter/repo-settings/README.md" "my own edit"
 assert "the optional item is still installed" test -f "$UK/$ITEM"
+assert "the hand edit was saved outside the clone" has "$HOME/kit-starter-backup-${h1:0:12}/starter-edits.patch" "my own edit"
+assert "it says where it saved starter/" has "$OUT" "Saved "
+# A changed executable bit is a hand edit too, never add-content.sh's.
+bump "upstream after the mode"
+chmod +x "$UK/starter/repo-settings/README.md"; h1=$(git -C "$UK" rev-parse HEAD)
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "a hand chmod +x in starter/ makes update-kit exit 1" "$rc" 1
+assert "it names the file whose mode changed" has "$ERR" "starter/repo-settings/README.md"
+assert_eq "that refusal leaves HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+chmod -x "$UK/starter/repo-settings/README.md"
 # A tracked edit outside starter/ is refused whatever else is true.
 bump "upstream third"
 echo "my note" >> "$UK/bootstrap/README.md"; h1=$(git -C "$UK" rev-parse HEAD)
@@ -982,15 +987,34 @@ printf 'OWNER=acme-example\nPLAN=free\nCLAUDE_PLAN=max20x\nNOT_A_KEY=1\n' > "$UP
 uk "$UK" --config "$UP/bad.env" --after-update "$h1" --ids security,git-habits; rc=$?
 assert_eq "after the update, a fleet.env that does not load exits 1" "$rc" 1
 assert "it names the choices that are not back" has "$ERR" "(security,git-habits) are NOT in it"
-assert "it says to run the script again" has "$ERR" "then run: bash bootstrap/update-kit.sh --config $UP/bad.env"
+assert "it says to run the script again" has "$ERR" "bash bootstrap/update-kit.sh --config $UP/bad.env"
 assert_not "it does not send the adopter on to status.sh" has "$OUT" "Next:"
 # On a current kit an invalid fleet.env is refused too, and changes nothing; a missing one is fine.
 uk "$UK" --config "$UP/bad.env"; rc=$?
 assert_eq "an invalid fleet.env makes update-kit exit 1" "$rc" 1
 assert "it says the config does not load" has "$ERR" "does not load under the current kit"
 assert "it names the unknown key to remove" has "$ERR" "NOT_A_KEY"
+# No fleet.env at --config while a record exists or starter/ has changes: refused,
+# naming --config, even with --discard-starter-edits (it would drop the choices).
+bump "upstream while the config is elsewhere"
+h1=$(git -C "$UK" rev-parse HEAD)
 uk "$UK" --config "$UP/none.env"; rc=$?
-assert_eq "a missing fleet.env does not stop update-kit" "$rc" 0
+assert_eq "a missing fleet.env with changes in starter/ makes update-kit exit 1" "$rc" 1
+assert "it names --config" has "$ERR" "--config /path/to/fleet.env"
+assert "it says starter/ has changes" has "$ERR" "starter/ has changes"
+uk "$UK" --config "$UP/none.env" --discard-starter-edits; rc=$?
+assert_eq "--discard-starter-edits does not get past a missing fleet.env" "$rc" 1
+assert "the optional item is still there" test -f "$UK/$ITEM"
+assert_eq "those refusals leave HEAD alone" "$(git -C "$UK" rev-parse HEAD)" "$h1"
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "with the right --config it updates" "$rc" 0
+git -C "$UK" stash list > "$UP/stash.txt"; assert_eq "it stashes nothing" "$(wc -l < "$UP/stash.txt" | tr -d ' ')" 0
+mkdir -p "$UP/clean"; ugit clone -q "$UP/origin" "$UP/clean/kit"
+run env ADOPT_STATE_FILE="$UP/state/adopt.json" bash "$UP/clean/kit/bootstrap/update-kit.sh" --config "$UP/none.env"; rc=$?
+assert_eq "a missing fleet.env with a record exits 1, even on a clean current kit" "$rc" 1
+assert "it says a record exists" has "$ERR" "a content choices record exists"
+run env ADOPT_STATE_FILE="$UP/nostate/adopt.json" bash "$UP/clean/kit/bootstrap/update-kit.sh" --config "$UP/none.env"; rc=$?
+assert_eq "a missing fleet.env with no record and a clean starter/ is fine" "$rc" 0
 # An item the newer catalog drops is named and dropped from the record; the rest come back.
 jq 'del(.items[] | select(.id == "security"))' "$UP/origin/bootstrap/content-catalog.json" > "$UP/cat.json" && mv "$UP/cat.json" "$UP/origin/bootstrap/content-catalog.json"
 upstream "the catalog drops security"
@@ -1002,6 +1026,65 @@ assert_eq "the record keeps the other items" "$(jq -c '.installed | length' "$UC
 assert_eq "the record drops the item" "$(jq -c '.installed | index("security")' "$UCH")" null
 assert "the other items are back" test -f "$UK/$ITEM"
 assert_eq "the clone caught up once more" "$(git -C "$UK" rev-parse HEAD)" "$(origin_head)"
+# Ctrl-C while the choices are put back: it says where things stand and what to
+# run next. npm's second call (the re-apply; the first is the proof) interrupts
+# update-kit's own process group, which setsid made a new one; the stub refuses
+# any group that is not an integer above 1 or is the test's own (bash, since
+# dash's kill takes no --).
+REALNPM=$(command -v npm); TESTPG=$(ps -o pgid= -p $$ | tr -d ' ')
+mkdir -p "$UP/intnpm"; rm -f "$UP/npm.count"
+cat > "$UP/intnpm/npm" <<EOF
+#!$BASH
+n=\$((\$(cat "$UP/npm.count" 2>/dev/null || echo 0) + 1)); echo "\$n" > "$UP/npm.count"
+if [ "\$n" = 2 ]; then
+  pg=\$(ps -o pgid= -p \$\$ | tr -d ' ')
+  case \$pg in ''|*[!0-9]*) exit 1 ;; esac
+  if [ "\$pg" -le 1 ] || [ "\$pg" = "$TESTPG" ]; then exit 1; fi
+  kill -INT -- "-\$pg"; exit 130
+fi
+exec "$REALNPM" "\$@"
+EOF
+chmod +x "$UP/intnpm/npm"
+bump "upstream before the interrupt"
+run env PATH="$UP/intnpm:$PATH" ADOPT_STATE_FILE="$UP/state/adopt.json" setsid -w "$BASH" "$UK/bootstrap/update-kit.sh" --config "$UK/fleet.env"; rc=$?
+assert_eq "an interrupt during the re-apply exits 130" "$rc" 130
+assert "it says the kit is updated but the choices are not back" has "$ERR" "INTERRUPTED: the kit is updated, but your content choices"
+assert "it gives the command to run next" has "$ERR" "Next: cd $UK && bash bootstrap/update-kit.sh --config $UK/fleet.env"
+assert_eq "npm was called twice (the proof, then the re-apply)" "$(cat "$UP/npm.count")" 2
+assert_eq "the kit was updated before the interrupt" "$(git -C "$UK" rev-parse HEAD)" "$(origin_head)"
+uk "$UK" --config "$UK/fleet.env"; rc=$?
+assert_eq "running it again finishes" "$rc" 0
+assert "the optional item is back after the interrupt" test -f "$UK/$ITEM"
+# The README's update block, as written, on a clone older than update-kit.sh,
+# with fleet.env outside the kit (a space in its path) and run by sh: a failed
+# fetch changes nothing; then it updates and puts the choice back.
+O3="$UP/o3"; mkdir -p "$O3"; cp -R "$K/bootstrap" "$K/starter" "$K/library" "$O3/"; rm "$O3/bootstrap/update-kit.sh"
+ugit -C "$O3" init -q -b main && ugit -C "$O3" add -A && ugit -C "$O3" commit -qm "a kit before update-kit.sh"
+ugit clone -q "$O3" "$UP/k3"
+cp "$K/bootstrap/update-kit.sh" "$O3/bootstrap/" && ugit -C "$O3" add -A && ugit -C "$O3" commit -qm "update-kit.sh arrives"
+mkdir -p "$UP/my config"; cp "$CFGP" "$UP/my config/fleet.env"
+run env ADOPT_STATE_FILE="$UP/state3/adopt.json" bash "$UP/k3/bootstrap/add-content.sh" --config "$UP/my config/fleet.env" --items security; rc=$?
+assert_eq "the old clone takes add-content" "$rc" 0
+SEC="starter/skills-evals/evals/guidance/security/search-query/fixture.yaml"
+assert "the item is in the old clone" test -f "$UP/k3/$SEC"
+assert_not "the old clone has no update-kit.sh" test -e "$UP/k3/bootstrap/update-kit.sh"
+awk '/^## Update your copy of the kit/{f=1} f&&/^```bash$/{g=1;next} g&&/^```$/{exit} g' "$K/README.md" > "$UP/block.sh"
+assert_eq "the README block's first line is the config path" "$(head -n1 "$UP/block.sh")" "cfg=./fleet.env"
+{ printf "cfg='%s'\n" "$UP/my config/fleet.env"; tail -n +2 "$UP/block.sh"; } > "$UP/block-mine.sh"
+h3=$(git -C "$UP/k3" rev-parse HEAD)
+git -C "$UP/k3" remote set-url origin "$UP/no-such-origin.git"
+run env ADOPT_STATE_FILE="$UP/state3/adopt.json" sh -c 'cd "$1" && sh "$2"' _ "$UP/k3" "$UP/block-mine.sh"; rc=$?
+assert_not "the block stops when the fetch fails" test "$rc" = 0
+assert "it shows git's own fetch error" grep -q "^  | .*no-such-origin" "$ERR"
+assert_eq "a failed fetch leaves HEAD alone" "$(git -C "$UP/k3" rev-parse HEAD)" "$h3"
+assert "a failed fetch leaves the item in place" test -f "$UP/k3/$SEC"
+git -C "$UP/k3" remote set-url origin "$O3"
+run env ADOPT_STATE_FILE="$UP/state3/adopt.json" sh -c 'cd "$1" && sh "$2"' _ "$UP/k3" "$UP/block-mine.sh"; rc=$?
+assert_eq "the README block updates a clone older than the script" "$rc" 0
+[ "$rc" = 0 ] || sed 's/^/    block: /' "$ERR"
+assert_eq "the old clone reached the upstream head" "$(git -C "$UP/k3" rev-parse HEAD)" "$(git -C "$O3" rev-parse HEAD)"
+assert "the item is back in the old clone" test -f "$UP/k3/$SEC"
+assert "it ends with status.sh and the config path" has "$OUT" "Next: bash bootstrap/status.sh --config"
 # A downloaded copy (no .git) cannot be updated in place.
 mkdir -p "$UP/dl"; cp -R "$UK/bootstrap" "$UK/starter" "$UK/library" "$UP/dl/"
 uk "$UP/dl" --config "$UK/fleet.env"; rc=$?

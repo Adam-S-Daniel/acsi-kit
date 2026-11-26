@@ -62,47 +62,43 @@ costs](docs/before-you-start.md#what-it-costs)).
 
 ## Update your copy of the kit
 
-The kit changes often. To move your clone to the newest kit, run these from
-the kit's folder:
+The kit changes often. To move your clone to the newest kit, open a terminal
+in the kit's folder and paste this block. The same block works for every copy,
+including one made before `bootstrap/update-kit.sh` existed: it fetches the
+newest kit and runs the newest `update-kit.sh` from a temporary folder. If your
+`fleet.env` is not in the kit's folder, put its path in the first line in
+place of `./fleet.env`.
 
 ```bash
-bash bootstrap/update-kit.sh --dry-run
-bash bootstrap/update-kit.sh
-bash bootstrap/status.sh
+cfg=./fleet.env
+git fetch origin &&
+tool=$(mktemp -d) &&
+git archive origin/main bootstrap | tar -x -C "$tool" &&
+bash "$tool/bootstrap/update-kit.sh" --kit . --config "$cfg"
 ```
 
-The script fast-forwards your clone, puts the optional content you chose
-back, and lists the `fleet.env` keys that are new (saying which are
-required) or gone. It refuses, changing nothing, when you have edited a
-tracked file outside `starter/`, edited `starter/` yourself (it tells you how
-to keep those edits), or when your `fleet.env` does not load under the newer
-kit (it names the key to fix). It exits 0 only when everything worked.
+Nothing in the block changes your clone; only the last line's script does,
+and it refuses, changing nothing, when you have edited a tracked file outside
+`starter/`, edited `starter/` yourself, when it cannot find your `fleet.env`,
+or when your `fleet.env` does not load under the newer kit (it names the key
+to fix). To see its plan first, add ` --dry-run` to the last line. It
+fast-forwards your clone, puts the optional content you chose back, and lists
+the `fleet.env` keys that are new (saying which are required) or gone. It
+exits 0 only when everything worked; then run what it prints last,
+`bash bootstrap/status.sh` (with your `--config`).
 
-If your copy predates the script (it has no `bootstrap/update-kit.sh`), run
-this block from the kit's folder instead. It first saves everything under
-`starter/` that differs from the kit, your own edits and new files included,
-to `~/kit-starter-backup` outside the clone (it stops if that folder already
-exists, so a second run cannot overwrite the backup), then resets `starter/`,
-pulls, and runs the script, which puts your content choices back and lists
-the `fleet.env` keys changed since your old copy:
+If it stops, it says what changed and what to run next; once you have done
+that, paste the block again. Before it discards anything under `starter/` it
+saves all of it, your own edits and new files included, to a new folder
+`~/kit-starter-backup-<commit>` (a patch, `starter-edits.patch`, and a copy of
+the new files, `new-files/`). Your own `starter/` edits belong in a pull
+request on your repo after `copy-starter.sh`, not in the kit. Your content
+choices are recorded outside the kit. Your `fleet.env` and your app manifests
+folder are untouched.
 
-```bash
-mkdir ~/kit-starter-backup &&
-git diff --binary HEAD -- starter > ~/kit-starter-backup/starter-edits.patch &&
-git ls-files -z --others --exclude-standard -- starter | tar --null -cf ~/kit-starter-backup/starter-new-files.tar -T - &&
-git restore --source=HEAD --staged --worktree starter && git clean -fd starter &&
-git pull --ff-only &&
-bash bootstrap/update-kit.sh --since ORIG_HEAD
-```
-
-If the last command exits with an error, fix what it says and run
-`bash bootstrap/update-kit.sh` again before anything else: until it succeeds
-your content choices are not back in `starter/`. The backup holds
-`add-content.sh`'s changes as well as yours; `tar -tf
-~/kit-starter-backup/starter-new-files.tar` lists the new files. Your own
-`starter/` edits belong in a pull request on your repo after
-`copy-starter.sh`, not in the kit. Your content choices are recorded outside
-the kit. Your `fleet.env` and your app manifests folder are untouched.
+On macOS, if it says it needs bash 4.4 or later, install it (`brew install
+bash`) and replace `bash` at the start of the last line with
+`"$(brew --prefix)/bin/bash"`; nothing was changed before that check.
 
 It does not change repos you already filled from an older starter. For
 those, `bash bootstrap/copy-starter.sh --dry-run <starter-subdir> <owner/repo>`

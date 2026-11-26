@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# update-kit.sh [--config fleet.env] [--dry-run] [--discard-starter-edits] [--since <commit>]
+# update-kit.sh [--config fleet.env] [--dry-run] [--discard-starter-edits] [--kit <clone>]
 #
-# Moves this clone of the kit to the newest kit, even after add-content.sh
-# changed files under starter/ (which makes a plain git pull fail). It:
+# Moves a clone of the kit to the newest kit, even after add-content.sh
+# changed files under starter/ (which makes a plain git pull fail). The
+# README's "Update your copy of the kit" runs the NEWEST copy of this script
+# from a temporary folder with --kit <clone>, so it works on a clone older
+# than the script too. It:
 #
 #   1. refuses unless the kit folder is the top of its own git clone, on a
 #      branch (not a detached HEAD), with no merge, rebase, cherry-pick,
 #      revert or bisect in progress;
-#   2. reads fleet.env to find add-content.sh's record of your content
-#      choices (a missing fleet.env is fine: then there are none);
+#   2. reads fleet.env (--config) to find add-content.sh's record of your
+#      content choices. With no fleet.env at that path it refuses when
+#      starter/ has changes or a choices record exists, and names --config;
 #   3. refuses when a tracked file outside starter/ is modified or staged,
 #      since it only fast-forwards (commit it on a branch of your own, or
 #      git restore it); untracked files (fleet.env, app-manifests/) are left
@@ -19,10 +23,12 @@
 #   5. before discarding starter/ changes, proves they are exactly what
 #      add-content.sh wrote: it runs the unmodified add-content.sh of your
 #      current commit with your recorded choices in a scratch copy and
-#      compares the two starter/ folders. A difference is a hand edit: it
-#      refuses and says how to keep it, unless you pass --discard-starter-edits;
-#   6. restores starter/ and fast-forwards to origin/HEAD (or origin/main).
-#      It refuses when you have local commits;
+#      compares the two starter/ folders (contents and executable bits). A
+#      difference is a hand edit: it refuses, unless you pass
+#      --discard-starter-edits;
+#   6. saves every starter/ change (a patch, and a copy of new files) to
+#      ~/kit-starter-backup-<old commit>, restores starter/ and fast-forwards
+#      to origin/HEAD (or origin/main). It refuses when you have local commits;
 #   7. with the new code, lists the fleet.env keys the new
 #      bootstrap/fleet.env.example added or removed since your old commit
 #      (names only, never a value; "required" is the new loader's list), then
@@ -30,16 +36,15 @@
 #      catalog no longer offers is named and dropped from the record.
 #
 # It exits 0 only when the kit is current and your choices are back in
-# starter/; every other ending exits 1 and says what was and was not changed.
-# It changes only this kit folder and your choices record, and writes nothing
-# to GitHub. Repos you already filled from an older starter are not changed:
-# see copy-starter.sh --dry-run. --dry-run fetches (which changes no file you
-# see) and only reports the rest. Idempotent: on a current kit it changes
-# nothing but re-applying your choices, which add-content.sh skips when they
-# are in place.
+# starter/; every other ending (an interrupt included) exits non-zero and
+# says what was and was not changed and the command to run next. It changes
+# only the kit folder, your choices record and the backup folder, and writes
+# nothing to GitHub. Repos you already filled from an older starter are not
+# changed: see copy-starter.sh --dry-run. --dry-run fetches (which changes no
+# file you see) and only reports the rest. On a current kit it changes nothing
+# but re-applying your choices, which add-content.sh skips when they are in
+# place.
 #
-# --since <commit>: after you pulled by hand (a copy older than this script),
-# list the fleet.env keys changed since <commit>, such as ORIG_HEAD.
 # Internal: --after-update <sha> [--ids <list>] is how the script continues in
 # the new copy of itself after the fast-forward; do not pass it yourself.
 # Needs: bash 4.4+, git, tar, python3, jq; node and npm when you have content
@@ -50,13 +55,13 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib/common.sh
 . "$HERE/lib/common.sh"
 
-DISCARD=0 AFTER="" SINCE="" PASSED_IDS="" HAVE_IDS=0
+DISCARD=0 AFTER="" PASSED_IDS="" HAVE_IDS=0 KIT_ARG=""
 parse_common_args "$@"
 set -- "${REST_ARGS[@]}"
 while [ $# -gt 0 ]; do
   case $1 in
     --discard-starter-edits) DISCARD=1 ;;
-    --since) [ $# -ge 2 ] || die "--since needs a commit"; SINCE=$2; shift ;;
+    --kit) [ $# -ge 2 ] || die "--kit needs the path of the kit's clone"; KIT_ARG=$2; shift ;;
     --after-update) [ $# -ge 2 ] || die "--after-update needs a sha"; AFTER=$2; shift ;;
     --ids) [ $# -ge 2 ] || die "--ids needs a list"; PASSED_IDS=$2; HAVE_IDS=1; shift ;;
     *) die "unknown argument: $1" ;;
@@ -64,9 +69,32 @@ while [ $# -gt 0 ]; do
   shift
 done
 require_tools git tar python3 jq
-[ -z "$AFTER" ] || SINCE=$AFTER
+if [ -n "$KIT_ARG" ]; then
+  KIT=$(cd "$KIT_ARG" 2>/dev/null && pwd -P) || die "--kit $KIT_ARG is not a folder"
+fi
+B=$KIT/bootstrap   # the kit's own scripts (this file may run from a temporary copy)
+
+# q <word>: the word quoted for pasting into a shell.
+q() { printf '%q' "$1"; }
 CONFIG_ARG=""
-[ "$CONFIG" = ./fleet.env ] || CONFIG_ARG=" --config $CONFIG"
+[ "$CONFIG" = ./fleet.env ] || CONFIG_ARG=" --config $(q "$CONFIG")"
+# next_cmd: how to run the update again from where the kit is now.
+next_cmd() {
+  if [ -f "$B/update-kit.sh" ]; then
+    printf 'cd %s && bash bootstrap/update-kit.sh%s' "$(q "$KIT")" "$CONFIG_ARG"
+  else
+    printf 'the update block in the kit'"'"'s README ("Update your copy of the kit"), from %s' "$(q "$KIT")"
+  fi
+}
+
+# Interrupts (Ctrl-C) and failures after the first change say where things stand.
+STAGE="nothing was changed"
+on_signal() {
+  trap - INT TERM
+  printf '\nINTERRUPTED: %s.\nNext: %s\n' "$STAGE" "$(next_cmd)" >&2
+  exit 130
+}
+trap on_signal INT TERM
 
 # read_choices: IDS from the record at $CHOICES (none when it lists nothing).
 read_choices() {
@@ -86,6 +114,18 @@ need_node() {
     die "$t is required to put your content choices back with add-content.sh ($IDS), and was not found on PATH. Install it: $(node_install_cmd "$t"). Then run this again; bash bootstrap/preflight.sh checks every tool. Nothing was changed."
   done
 }
+# no_config_refusal <why>: no fleet.env at $CONFIG, yet there are choices to keep.
+no_config_refusal() {
+  {
+    printf 'ERROR: there is no fleet.env at %s, and %s.\n' "$CONFIG" "$1"
+    printf 'Without it this script cannot find your content choices to put back. If your fleet.env is elsewhere, pass its path:\n'
+    printf '  --config /path/to/fleet.env   (the README'"'"'s update block sets it on its first line)\n'
+    printf 'Nothing was changed.\n'
+  } >&2
+  exit 1
+}
+# records: the content choices records in the state folder, one per line.
+records() { find "$(state_dir)" -maxdepth 1 -name '*.content-choices.json' 2>/dev/null || true; }
 
 # ------------------------------------------------------------------ config
 CFG_OK=0 CHOICES="" IDS="" CFG_ERR=""
@@ -153,42 +193,38 @@ config_refusal() {
     case $1 in
       before)
         printf 'Nothing was changed: HEAD, starter/ (with %s) and %s are as they were.\n' "$choices" "$CONFIG"
-        printf 'The newer example: git -C %q show %s:bootstrap/fleet.env.example\n' "$KIT" "$target" ;;
+        printf 'The newer example: git -C %s show %s:bootstrap/fleet.env.example\n' "$(q "$KIT")" "$target" ;;
       after)
         printf 'The kit WAS updated, and starter/ now holds only the new kit'"'"'s files: %s are NOT in it.\n' "$choices"
         printf 'Your record of them is unchanged, and this script puts them back once fleet.env loads.\n' ;;
       current)
-        printf 'Nothing was changed. If starter/ lacks %s (after an update by hand), this script puts them back once fleet.env loads.\n' "$choices" ;;
+        printf 'Nothing was changed. If starter/ lacks %s, this script puts them back once fleet.env loads.\n' "$choices" ;;
     esac
-    printf 'Fix that in %s (bootstrap/fleet.env.example explains every key), then run: bash bootstrap/update-kit.sh%s\n' "$CONFIG" "$CONFIG_ARG"
+    printf 'Fix that in %s (bootstrap/fleet.env.example explains every key), then run: %s\n' "$CONFIG" "$(next_cmd)"
     [ "$1" = before ] || printf 'Until it succeeds, status.sh counts step 1 as done from the record alone.\n'
   } >&2
   exit 1
 }
 
 # ------------------------------------------------------------------ the rest
-# Runs in the NEW copy of the script after a fast-forward, or directly on a
-# current kit.
+# Runs in the NEW copy of the script after a fast-forward, or on a current kit.
 rest() {
-  local tier id kept=() gone=() core=() out=$BOOT_WORK/reapply.out args reapply=1 since
+  local tier id kept=() gone=() core=() args reapply=1
   log ""
-  if [ -n "$SINCE" ]; then
-    if since=$(git -C "$KIT" rev-parse --verify -q "$SINCE^{commit}"); then
-      printf '%s\n' "${CONFIG_REQUIRED[@]}" > "$BOOT_WORK/keys.required"
-      key_report "$since" "$HERE/fleet.env.example" "$BOOT_WORK/keys.required"
-    else
-      log "(--since $SINCE is not a commit here, so the fleet.env key changes are not listed)"
-    fi
+  if [ -n "$AFTER" ]; then
+    printf '%s\n' "${CONFIG_REQUIRED[@]}" > "$BOOT_WORK/keys.required"
+    key_report "$AFTER" "$B/fleet.env.example" "$BOOT_WORK/keys.required"
   fi
   if [ "$CFG_OK" = 0 ] && [ -f "$CONFIG" ]; then
     if [ -n "$AFTER" ]; then config_refusal after; else config_refusal current; fi
   elif [ "$CFG_OK" = 0 ]; then
+    [ -z "$(records)" ] || no_config_refusal "a content choices record exists ($(records | tr '\n' ' '))"
     log "No $CONFIG yet; copy bootstrap/fleet.env.example to it and run: bash bootstrap/status.sh${CONFIG_ARG}"
   fi
   if [ -n "$IDS" ] && [ "$IDS" != none ]; then
     IFS=, read -r -a ids <<<"$IDS"
     for id in "${ids[@]}"; do
-      tier=$(jq -r --arg id "$id" '[.items[] | select(.id == $id) | .tier][0] // "gone"' "$HERE/content-catalog.json")
+      tier=$(jq -r --arg id "$id" '[.items[] | select(.id == $id) | .tier][0] // "gone"' "$B/content-catalog.json")
       case $tier in
         recommended|opinionated) kept+=("$id") ;;
         core) core+=("$id") ;;
@@ -212,11 +248,12 @@ rest() {
   if [ -n "$IDS" ] && [ "$reapply" = 1 ]; then
     args=(--config "$CONFIG" --items "$IDS")
     [ "$DRY_RUN" = 0 ] || args+=(--dry-run)
-    if ! "$BASH" "$HERE/add-content.sh" "${args[@]}" >"$out" 2>&1; then
-      cat "$out" >&2
-      die "add-content.sh failed on your recorded choices ($IDS; its output is above), so they are NOT all in starter/. Fix what it says, then run: bash bootstrap/update-kit.sh${CONFIG_ARG}"
+    [ "$DRY_RUN" = 1 ] || STAGE="the kit is updated, but your content choices ($IDS) are not all back in starter/"
+    log "Putting your content choices back with add-content.sh ($IDS; npm ci can take a minute):"
+    if ! "$BASH" "$B/add-content.sh" "${args[@]}"; then
+      die "add-content.sh failed on your recorded choices ($IDS; its output is above), so they are NOT all in starter/. Fix what it says, then run: $(next_cmd)"
     fi
-    cat "$out"
+    STAGE="nothing was left half done"
   elif [ -z "$IDS" ] && [ "$CFG_OK" = 1 ]; then
     log "No recorded content choices yet; choose with: bash bootstrap/add-content.sh${CONFIG_ARG} --items <ids|recommended|none>"
   fi
@@ -246,13 +283,13 @@ if [ -z "$top" ] || [ "$(cd "$top" && pwd -P)" != "$kit_real" ]; then
   } >&2
   exit 1
 fi
-[ -z "$AFTER" ] || { log "Updated from ${AFTER:0:12} to $(git -C "$KIT" rev-parse --short=12 HEAD)."; rest; }
+[ -z "$AFTER" ] || { STAGE="the kit is updated, but your content choices are not put back yet"; log "Updated from ${AFTER:0:12} to $(git -C "$KIT" rev-parse --short=12 HEAD)."; rest; }
 
 # A merge, rebase, cherry-pick, revert or bisect half done, or a detached HEAD:
 # a fast-forward on top of either would be wrong, so say how to get out.
 gp() { git -C "$KIT" rev-parse --path-format=absolute --git-path "$1"; }
 in_progress() { # what, command
-  die "a $1 is in progress in $KIT, so it cannot be updated. Finish it, or undo it with: git -C $KIT $2 (then run this again). Nothing was changed."
+  die "a $1 is in progress in $KIT, so it cannot be updated. Finish it, or undo it with: git -C $(q "$KIT") $2 (then run this again). Nothing was changed."
 }
 [ ! -e "$(gp MERGE_HEAD)" ] || in_progress merge "merge --abort"
 if [ -d "$(gp rebase-apply)" ]; then
@@ -263,15 +300,37 @@ fi
 [ ! -e "$(gp REVERT_HEAD)" ] || in_progress revert "revert --abort"
 [ ! -e "$(gp BISECT_LOG)" ] || in_progress bisect "bisect reset"
 if ! git -C "$KIT" symbolic-ref -q HEAD >/dev/null; then
-  die "HEAD is detached in $KIT (at $(git -C "$KIT" rev-parse --short=12 HEAD), not on a branch), so a fast-forward would move no branch. Go back to your branch with: git -C $KIT switch main (git warns if that leaves commits behind), then run this again. Nothing was changed."
+  die "HEAD is detached in $KIT (at $(git -C "$KIT" rev-parse --short=12 HEAD), not on a branch), so a fast-forward would move no branch. Go back to your branch with: git -C $(q "$KIT") switch main (git warns if that leaves commits behind), then run this again. Nothing was changed."
 fi
 if [ "$CFG_OK" = 0 ]; then
   if [ -f "$CONFIG" ]; then
     log "note: $CONFIG does not load under your current kit (${CFG_ERR:-invalid}); the newer kit's loader decides below."
   else
-    log "note: no $CONFIG, so there are no content choices to put back."
+    [ -z "$(git -C "$KIT" status --porcelain -- starter)" ] || no_config_refusal "starter/ has changes (add-content.sh's, or your own)"
+    [ -z "$(records)" ] || no_config_refusal "a content choices record exists ($(records | tr '\n' ' '))"
+    log "note: no $CONFIG and no content choices record, so there are no choices to put back."
   fi
 fi
+
+# save_starter: every starter/ change, to a new folder outside the clone.
+save_starter() {
+  local n=1
+  BACKUP=$HOME/kit-starter-backup-${old:0:12}
+  while [ -e "$BACKUP" ]; do n=$((n + 1)); BACKUP=$HOME/kit-starter-backup-${old:0:12}-$n; done
+  case $BACKUP/ in "$KIT"/*) die "the backup folder $BACKUP would be inside the kit; set HOME to a folder outside it. Nothing was changed." ;; esac
+  mkdir -p "$BACKUP"
+  git -C "$KIT" diff --binary HEAD -- starter > "$BACKUP/starter-edits.patch"
+  git -C "$KIT" ls-files -z --others --exclude-standard -- starter > "$BOOT_WORK/untracked.z"
+  python3 -I -B -c '
+import os, shutil, sys
+kit, dest, lst = sys.argv[1:4]
+for rel in open(lst, "rb").read().split(b"\0"):
+    if rel:
+        rel = os.fsdecode(rel)
+        os.makedirs(os.path.join(dest, os.path.dirname(rel)), exist_ok=True)
+        shutil.copy2(os.path.join(kit, rel), os.path.join(dest, rel), follow_symlinks=False)
+' "$KIT" "$BACKUP/new-files" "$BOOT_WORK/untracked.z"
+}
 
 # Everything from here on is one function, so bash has read all of it before
 # the fast-forward replaces this very file.
@@ -305,15 +364,17 @@ if [ ${#bad[@]} -gt 0 ]; then
 fi
 
 # ------------------------------------------------------------------ fetch
-git -C "$KIT" fetch --quiet origin 2>"$BOOT_WORK/fetch.err" \
-  || die "git fetch origin failed in $KIT; check the remote with: git -C $KIT remote -v. Nothing was changed."
+if ! git -C "$KIT" fetch --quiet origin 2>"$BOOT_WORK/fetch.err"; then
+  sed 's/^/  | /' "$BOOT_WORK/fetch.err" | tail -n 5 >&2
+  die "git fetch origin failed in $KIT (git's last lines are above); check the network and the remote (git -C $(q "$KIT") remote -v). Nothing was changed."
+fi
 target=""
 if t=$(git -C "$KIT" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) && [ -n "$t" ]; then
   target=$t
 elif git -C "$KIT" rev-parse --verify -q refs/remotes/origin/main >/dev/null; then
   target=origin/main
 else
-  die "no origin/HEAD or origin/main in $KIT; check the remote with: git -C $KIT remote -v"
+  die "no origin/HEAD or origin/main in $KIT; check the remote with: git -C $(q "$KIT") remote -v. Nothing was changed."
 fi
 old=$(git -C "$KIT" rev-parse HEAD)
 new=$(git -C "$KIT" rev-parse "$target^{commit}")
@@ -322,7 +383,7 @@ if [ "$old" = "$new" ]; then
   rest
 fi
 if ! git -C "$KIT" merge-base --is-ancestor "$old" "$new"; then
-  die "your HEAD ($(git -C "$KIT" rev-parse --short HEAD)) is not an ancestor of $target ($(git -C "$KIT" rev-parse --short "$new")): you have local commits or are on another branch. See them with: git -C $KIT log --oneline origin/main..HEAD"
+  die "your HEAD ($(git -C "$KIT" rev-parse --short HEAD)) is not an ancestor of $target ($(git -C "$KIT" rev-parse --short "$new")): you have local commits or are on another branch. See them with: git -C $(q "$KIT") log --oneline $target..HEAD. Nothing was changed."
 fi
 
 # ------------------------------------------------------------------ the newer kit's checks
@@ -343,18 +404,6 @@ if [ "$CFG_OK" = 0 ] && [ -f "$CONFIG" ]; then
   CHOICES=$("$BASH" -c '. "$1/bootstrap/lib/common.sh"; load_config "$2"; choices_file; printf "%s" "$CHOICES"' _ "$nk" "$CONFIG" 2>/dev/null) || CHOICES=""
   [ -z "$CHOICES" ] || read_choices
   need_node
-fi
-# The proof below runs the CURRENT add-content.sh, whose loader refuses keys
-# it does not know yet: hand it fleet.env without them.
-proof_cfg=$BOOT_WORK/proof.env
-known=" ${CONFIG_KEYS[*]} "
-: > "$proof_cfg"
-if [ -f "$CONFIG" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    k=$(printf '%s' "$line" | sed -n 's/^[[:space:]]*\([A-Z][A-Z0-9_]*\)=.*/\1/p')
-    [ -n "$k" ] && [[ $known != *" $k "* ]] && continue
-    printf '%s\n' "$line" >> "$proof_cfg"
-  done < "$CONFIG"
 fi
 git -C "$KIT" diff --name-only -z --diff-filter=A "$old" "$new" > "$BOOT_WORK/added.z"
 collide=()
@@ -378,18 +427,39 @@ if [ ${#starter_paths[@]} -gt 0 ] && [ "$DISCARD" = 0 ]; then
     tmp=$(mktemp -d "$BOOT_WORK/pristine.XXXXXX")
     git -C "$KIT" archive HEAD bootstrap starter library | tar -x -C "$tmp"
     mkdir -p "$BOOT_WORK/state"
+    # The CURRENT add-content.sh's loader refuses keys it does not know yet
+    # (a new required one): hand it fleet.env without them.
+    proof_cfg=$BOOT_WORK/proof.env
+    known=" $("$BASH" -c '. "$1/bootstrap/lib/common.sh"; printf "%s " "${CONFIG_KEYS[@]}"' _ "$tmp") "
+    : > "$proof_cfg"
+    if [ -f "$CONFIG" ]; then
+      while IFS= read -r line || [ -n "$line" ]; do
+        k=$(printf '%s' "$line" | sed -n 's/^[[:space:]]*\([A-Z][A-Z0-9_]*\)=.*/\1/p')
+        [ -n "$k" ] && [[ $known != *" $k "* ]] && continue
+        printf '%s\n' "$line" >> "$proof_cfg"
+      done < "$CONFIG"
+    fi
+    if ! "$BASH" -c '. "$1/bootstrap/lib/common.sh"; load_config "$2"' _ "$tmp" "$proof_cfg" >/dev/null 2>"$BOOT_WORK/oldcfg.err"; then
+      {
+        printf 'ERROR: your fleet.env loads under the newer kit but not under your current one (%s),\n' "$(sed -n 's/^ERROR: //p' "$BOOT_WORK/oldcfg.err" | head -n1)"
+        printf 'so add-content.sh cannot be re-run to prove starter/ holds only its changes.\n'
+        printf 'If you made no edits of your own under starter/, run again with --discard-starter-edits: it saves every starter/ change to ~/kit-starter-backup-%s first. Nothing was changed.\n' "${old:0:12}"
+      } >&2
+      exit 1
+    fi
+    log "Checking that starter/ holds only add-content.sh's changes (it re-runs in a scratch copy; npm ci can take a minute)..."
     if ! ADOPT_STATE_FILE="$BOOT_WORK/state/proof.json" GH=/nonexistent \
         "$BASH" "$tmp/bootstrap/add-content.sh" --config "$proof_cfg" --items "$IDS" >"$BOOT_WORK/proof.out" 2>&1; then
       {
         printf 'ERROR: add-content.sh could not be re-run in a scratch copy, so whether starter/ holds only its files is unknown. Its last lines:\n'
         tail -n 15 "$BOOT_WORK/proof.out" | sed 's/^/  | /'
         printf 'It installs npm packages from the npm registry: check the network and node/npm (bash bootstrap/preflight.sh), then run this again.\n'
-        printf 'If you have no edits of your own under starter/, --discard-starter-edits skips this check. Nothing was changed.\n'
+        printf 'If you have no edits of your own under starter/, --discard-starter-edits skips this check (it saves every starter/ change first). Nothing was changed.\n'
       } >&2
       exit 1
     fi
     if ! python3 -I -B -c '
-import os, sys
+import os, stat, sys
 IGN_DIRS = {"__pycache__", ".pytest_cache", "node_modules"}
 def walk(root):
     out = {}
@@ -406,7 +476,7 @@ def walk(root):
                 out[rel] = ("l", os.readlink(p))
             elif os.path.isfile(p):
                 with open(p, "rb") as fh:
-                    out[rel] = ("f", fh.read())
+                    out[rel] = ("f", bool(os.stat(p).st_mode & stat.S_IXUSR), fh.read())
     return out
 a, b = walk(sys.argv[1]), walk(sys.argv[2])
 for rel in sorted(set(a) | set(b)):
@@ -428,12 +498,9 @@ for rel in sorted(set(a) | set(b)):
       fi
       printf '  %s\n' "${hand[@]:0:20}"
       [ ${#hand[@]} -le 20 ] || printf '  ... and %d more\n' $((${#hand[@]} - 20))
-      printf 'Save them outside the clone first (a patch of the changes plus a tar of the new files):\n'
-      printf '  mkdir ~/kit-starter-backup && cd %q &&\n' "$KIT"
-      printf '  git diff --binary HEAD -- starter > ~/kit-starter-backup/starter-edits.patch &&\n'
-      printf '  git ls-files -z --others --exclude-standard -- starter | tar --null -cf ~/kit-starter-backup/starter-new-files.tar -T -\n'
       printf 'Starter edits belong in a pull request on your own repo after copy-starter.sh, not in the kit.\n'
-      printf 'Then discard them: run this again with --discard-starter-edits. Nothing was changed.\n'
+      printf 'To go ahead, run this again with --discard-starter-edits: it first saves every starter/ change\n'
+      printf '(a patch, and a copy of new files) to ~/kit-starter-backup-%s. Nothing was changed.\n' "${old:0:12}"
     } >&2
     exit 1
   fi
@@ -443,7 +510,7 @@ fi
 n=$(git -C "$KIT" rev-list --count "$old..$new")
 summary="${old:0:12} -> ${new:0:12}, $n commit(s)"
 if [ "$DRY_RUN" = 1 ]; then
-  [ ${#starter_paths[@]} -eq 0 ] || did "discard ${#starter_paths[@]} starter/ change(s) (add-content.sh rewrites them afterward)"
+  [ ${#starter_paths[@]} -eq 0 ] || did "save ${#starter_paths[@]} starter/ change(s) to ~/kit-starter-backup-${old:0:12} and discard them (add-content.sh rewrites its own afterward)"
   did "fast-forward $target: $summary"
   WRITES=$((WRITES + 1))
   log ""
@@ -452,13 +519,19 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 if [ ${#starter_paths[@]} -gt 0 ]; then
-  git -C "$KIT" restore --source=HEAD --staged --worktree -- starter
-  git -C "$KIT" clean -fdq -- starter
-  log "Discarded ${#starter_paths[@]} starter/ change(s); add-content.sh puts your choices back."
+  save_starter
+  log "Saved ${#starter_paths[@]} starter/ change(s) to $BACKUP (starter-edits.patch, new-files/)."
+  STAGE="starter/ may be partly reset (its changes are saved in $BACKUP) and the kit is not updated yet"
+  if ! git -C "$KIT" restore --source=HEAD --staged --worktree -- starter || ! git -C "$KIT" clean -fdq -- starter; then
+    die "resetting starter/ failed (git's message is above): $STAGE. Next: $(next_cmd)"
+  fi
+  STAGE="starter/ is reset (its changes are saved in $BACKUP) and the kit is not updated yet"
+  log "Discarded them; add-content.sh puts your choices back after the update."
 fi
 if ! git -C "$KIT" merge --ff-only --quiet "$new"; then
-  die "the fast-forward failed (git's message is above) after starter/ was reset, so your content choices (${IDS:-none recorded}) are NOT in starter/. Fix what git says, then run: bash bootstrap/update-kit.sh${CONFIG_ARG} (it puts them back)"
+  die "the fast-forward failed (git's message is above): $STAGE; your content choices (${IDS:-none recorded}) are NOT in starter/. Fix what git says, then run: $(next_cmd)"
 fi
+STAGE="the kit is updated, but your content choices are not put back yet"
 log "$summary"
 # exec skips the EXIT trap: remove the scratch folder now, and hand the new
 # copy everything it needs on its command line ("$BASH": the bash running
@@ -466,6 +539,6 @@ log "$summary"
 rm -rf "$BOOT_WORK"
 ids_arg=()
 [ -z "$IDS" ] || ids_arg=(--ids "$IDS")
-exec "$BASH" "$HERE/update-kit.sh" --config "$CONFIG" --after-update "$old" "${ids_arg[@]}"
+exec "$BASH" "$B/update-kit.sh" --config "$CONFIG" --after-update "$old" "${ids_arg[@]}"
 }
 update_kit; exit 0

@@ -99,10 +99,15 @@ state_path_ok() {
     die "the state file must be outside every git work tree: $p"
   fi
 }
+# state_dir: the folder of the state file and the content choices records
+# (update-kit.sh looks there for a record when no fleet.env is found).
+state_dir() {
+  if [ -n "${ADOPT_STATE_FILE:-}" ]; then dirname -- "$ADOPT_STATE_FILE"; else printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/adopt-the-whole-system"; fi
+}
 # state_file: sets STATE, status.sh's answers for CFG_OWNER (load_config first):
 # ${ADOPT_STATE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/adopt-the-whole-system/<owner>.json}.
 state_file() {
-  STATE=${ADOPT_STATE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/adopt-the-whole-system/$CFG_OWNER.json}
+  STATE=${ADOPT_STATE_FILE:-$(state_dir)/$CFG_OWNER.json}
   case $STATE in /*) ;; *) STATE=$PWD/$STATE ;; esac
   state_path_ok "$STATE"
 }
