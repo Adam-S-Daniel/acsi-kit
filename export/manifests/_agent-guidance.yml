@@ -459,6 +459,63 @@ edits:
       weekday and hours and that a zone is present, not which one.
 
 
+  # ---- One-owner and reordered-owner forms (DECISIONS, One-owner fleets): tests that read the owners from the
+  # ---- workflow or the files, so the suite holds for any number of owners.
+  - path: test/test-on-hold-label.js
+    stage: output
+    old: "assert.deepEqual(result.calls.filter(call => call[0] === 'repo').map(call => call[2]), ['example-adopter', 'example-adopter-two']);\n  const writes = result.calls.filter(call => call[0] === 'label');\n  assert.equal(writes.length, 2);\n"
+    new: "// One listing per owner the workflows' SYNC_OWNERS name, in their order, and (the fake lists one\n  // repo per owner) one write for each: a one-owner fleet has one of each.\n  const owners = [...new Set(Object.values(YAML.parse(read('.github/workflows/sync.yml')).jobs)\n    .flatMap(job => job.steps).map(step => step.env?.SYNC_OWNERS).filter(Boolean).flatMap(value => value.split(/\\s+/)))];\n  assert.ok(owners.length >= 1);\n  assert.deepEqual(result.calls.filter(call => call[0] === 'repo').map(call => call[2]), owners);\n  const writes = result.calls.filter(call => call[0] === 'label');\n  assert.equal(writes.length, owners.length);\n"
+    why: >-
+      One-owner forms. The expectation named the two invented owners, so a fleet with one owner (listed once, one write) or two other names failed. It reads the owners from the workflow the script reads.
+  - path: test/test-on-hold-label.js
+    stage: output
+    old: "assert.ok(result.calls.slice(0, 2).every(call => call[0] === 'repo'));\n"
+    new: "assert.ok(result.calls.slice(0, owners.length).every(call => call[0] === 'repo'));\n"
+    why: >-
+      One-owner forms. Every owner is listed before the first write, whatever the number of owners.
+  - path: test/test-dependabot-config-health.js
+    stage: output
+    old: "test(\"shapeGaps: own-not-excluded needs BOTH owners\", () => {\n  const one = \"    cooldown:\\n      default-days: 7\\n      exclude: [\\\"example-adopter/*\\\"]\\n\" +\n    \"    groups:\\n      actions:\\n        patterns: [\\\"*\\\"]\\n      sec:\\n        applies-to: security-updates\\n\";\n  const raw = cfg(entry(\"github-actions\", \"/\", one));\n  assert.deepEqual(shapeGaps(raw), [\"github-actions@/:own-not-excluded\"]);\n});\n"
+    new: "test(\"shapeGaps: own-not-excluded needs EVERY owner\", () => {\n  // Leave each owner's pattern out in turn: two owners give two cases, a one-owner fleet one.\n  const own = [...new Set(JSON.parse(OWN_EXCL.slice(OWN_EXCL.indexOf(\"[\"))))];\n  assert.ok(own.length >= 1);\n  for (const missing of own) {\n    const one = \"    cooldown:\\n      default-days: 7\\n      exclude: \" + JSON.stringify(own.filter((p) => p !== missing)) + \"\\n\" +\n      \"    groups:\\n      actions:\\n        patterns: [\\\"*\\\"]\\n      sec:\\n        applies-to: security-updates\\n\";\n    const raw = cfg(entry(\"github-actions\", \"/\", one));\n    assert.deepEqual(shapeGaps(raw), [\"github-actions@/:own-not-excluded\"], missing);\n  }\n});\n"
+    why: >-
+      One-owner forms. The test left out the second owner's pattern, which a one-owner fleet does not have, so nothing was missing. It leaves out each owner's pattern in turn.
+  - path: test/test-impact-report.js
+    stage: output
+    old: "assert.equal(mints.length, 3);\n"
+    new: "assert.ok(mints.length >= 2, \"one read mint per owner and the one write mint\");\n"
+    why: >-
+      One-owner forms. The workflow mints a read token per owner and one write token, and a one-owner fleet has one read token. The per-owner count is checked below (each owner minted once).
+  - path: test/test-impact-report.js
+    stage: output
+    old: "assert.equal(writers.length, 1);\n  assert.deepEqual(perms(writers[0]), { \"permission-contents\": \"write\" });\n"
+    new: "assert.equal(writers.length, 1);\n  const readers = mints.filter((m) => m !== writers[0]);\n  assert.equal(new Set(readers.map((m) => m.with.owner)).size, readers.length, \"no owner is minted twice\");\n  assert.deepEqual(perms(writers[0]), { \"permission-contents\": \"write\" });\n"
+    why: >-
+      One-owner forms. With the read-token count no longer fixed at two, each owner must still be minted once.
+  - path: test/run-tests.sh
+    stage: output
+    old: "    local n\n    n=\"$(git config --file \"$sys\" --get-regexp '^includeif\\..*\\.path$' | grep -c 'agent-hooks.inc$' || true)\"\n    [[ \"$n\" -eq 6 ]] && pass \"git hooks: six system includeIf entries (2 owners x 3 URL forms)\" \\\n        || fail \"git hooks: expected 6 system entries, got $n\"\n"
+    new: "    # Three URL forms for each owner the sync workflow names: one for a one-owner fleet.\n    local n want\n    want=\"$(( 3 * $(yq -r '.. | select(type == \"!!map\" and has(\"SYNC_OWNERS\")) | .SYNC_OWNERS' \"$REPO_ROOT/.github/workflows/sync.yml\" | tr ' ' '\\n' | sort -u | grep -c . || true) ))\"\n    [[ \"$want\" -ge 3 ]] || fail \"git hooks: no SYNC_OWNERS found in sync.yml\"\n    n=\"$(git config --file \"$sys\" --get-regexp '^includeif\\..*\\.path$' | grep -c 'agent-hooks.inc$' || true)\"\n    [[ \"$n\" -eq \"$want\" ]] && pass \"git hooks: the system includeIf entries (every owner x 3 URL forms)\" \\\n        || fail \"git hooks: expected $want system entries, got $n\"\n"
+    why: >-
+      One-owner forms. The count was 6, two owners times three URL forms. It is three per owner the sync workflow's SYNC_OWNERS names.
+  - path: test/run-tests.sh
+    stage: output
+    old: "    [[ \"$n\" -eq 6 ]] && pass \"git hooks: unwritable system config falls back to global\" \\\n        || fail \"git hooks: expected 6 global entries, got $n\"\n"
+    new: "    [[ \"$n\" -eq \"$want\" ]] && pass \"git hooks: unwritable system config falls back to global\" \\\n        || fail \"git hooks: expected $want global entries, got $n\"\n"
+    why: >-
+      One-owner forms. The expected entry count follows the owners (see the first case above).
+  - path: test/run-tests.sh
+    stage: output
+    old: "    [[ \"$n\" -eq 6 ]] && pass \"git hooks: the entries missing from the write scope are added (6 system entries)\" \\\n        || fail \"git hooks: expected 6 system entries, got $n\"\n"
+    new: "    [[ \"$n\" -eq \"$want\" ]] && pass \"git hooks: the entries missing from the write scope are added (every system entry)\" \\\n        || fail \"git hooks: expected $want system entries, got $n\"\n"
+    why: >-
+      One-owner forms. The expected entry count follows the owners (see the first case above).
+  - path: test/run-tests.sh
+    stage: output
+    old: "    [[ \"$n\" -eq 6 ]] && pass \"git hooks: repo-local includeIf entries do not suppress the system entries\" \\\n"
+    new: "    [[ \"$n\" -eq \"$want\" ]] && pass \"git hooks: repo-local includeIf entries do not suppress the system entries\" \\\n"
+    why: >-
+      One-owner forms. The expected entry count follows the owners (see the first case above).
+
   # ---- Base-only track (DECISIONS "Base-only track runs green"): EVALS_REPO and
   # ARTICLE_WATCH_FEED_URL turn the eval-dependent and optional workflows off.
   - path: .github/workflows/fleet-worker-fire.yml

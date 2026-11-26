@@ -27,6 +27,11 @@
 #      the repo's CI fails when they differ from a build, so for skills-evals
 #      it then rebuilds them (npm ci and node build.js in explorer/, which
 #      needs node and npm) unless TIME_ZONE is UTC;
+#   2d. re-pins, with lib/repin.py, each sha256 that names a file of the same
+#      tree, because step 2 changed that file's bytes (the digest of the
+#      bundled fleet-memory.sh in agent-skills' scripts/cloud-env-setup.sh,
+#      and the one docs/codex-cloud.md pins in agent-guidance). It stays the
+#      last step that changes the staged tree;
 #   3. clones <owner/repo> and refuses, listing the paths, when a file
 #      already on the default branch differs from the starter's, unless
 #      --force. The one exception is a README.md that is still byte for byte
@@ -126,6 +131,10 @@ if [ -f "$W/stage/explorer/display.json" ] && [ "$CFG_TIME_ZONE" != UTC ]; then
   rm -rf "$W/stage/explorer/node_modules"
   log "rebuilt the explorer pages for TIME_ZONE=$CFG_TIME_ZONE"
 fi
+# Last of the steps that change the staged tree: a pin is the digest of the
+# file as every step above left it.
+python3 -I "$HERE/lib/repin.py" "$W/stage" \
+  || die "could not re-pin the starter's digests (see above)"
 
 # ---- clone and compare with the default branch
 clone_repo "$REPO" "$W/repo"

@@ -2,6 +2,7 @@
 """run_suites.py: run each exported starter tree's own test suite.
 
 Usage: python3 run_suites.py [--kit-name NAME ...] [--keep] [--known-failures FILE]
+                            [--owners {invented,one,two}]
 
 For every manifest with a `suite:` block (optionally only the named kit
 trees), copies starter/<kit_name>/ to a temporary directory, makes it a git
@@ -10,6 +11,16 @@ own history), runs `setup`, then `command`, in a PID namespace so a test that
 signals cannot reach a process outside it. Prints one PASS or FAIL line per
 tree with the suite's own summary line and exits 1 if any failed. A failing
 tree's log is printed in full.
+
+--owners picks the names the copy is given before it runs (owner_forms.py):
+`invented` (the default) leaves the tree as exported; `one` runs what
+copy-starter.sh runs for a one-account adopter (substitute.py with the second
+owner equal to the first, plan_sizing.py, repin.py); `two` does the same for
+two accounts whose names sort the other way round, then drops the example
+repos' rows as docs/generated-files.md tells an adopter to. The substitution
+happens after the copy and before the git commit, so a suite that reads its
+own history sees the adopter's tree. A tree that fails to stage fails with
+the reason. The PASS or FAIL line names the form when it is not `invented`.
 
 --known-failures FILE names failures that come from the machine running the
 suite, not from the export (starter/known-failures.txt): one "<tree> <id>"
@@ -55,6 +66,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import export  # noqa: E402
+import owner_forms  # noqa: E402
 
 
 def pid_namespace_prefix() -> list:
@@ -158,7 +170,8 @@ def venv_env(env: dict, venv: Path) -> dict:
     return out
 
 
-def run_one(kit_name: str, suite: dict, keep: bool, known: dict | None = None) -> tuple[bool, str, str, list]:
+def run_one(kit_name: str, suite: dict, keep: bool, known: dict | None = None,
+            owners: str = "invented") -> tuple[bool, str, str, list]:
     src = export.STARTER / kit_name
     tmp = Path(tempfile.mkdtemp(prefix=f"kit-suite-{kit_name}-"))
     work = tmp / kit_name
@@ -167,6 +180,10 @@ def run_one(kit_name: str, suite: dict, keep: bool, known: dict | None = None) -
         shutil.copytree(src, work, symlinks=True,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "node_modules"))
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        try:
+            owner_forms.stage(work, kit_name, owners)
+        except owner_forms.FormError as e:
+            return False, f"the {owners} owner form could not be staged: {e}", "", []
         if suite.get("venv"):
             venv = tmp / "venv"
             p = subprocess.run(["python3", "-m", "venv", str(venv)], capture_output=True, text=True, env=env)
@@ -216,6 +233,8 @@ def main(argv=None) -> int:
     ap.add_argument("--kit-name", nargs="*", help="starter tree names (default: every manifest with a suite)")
     ap.add_argument("--keep", action="store_true", help="keep the temporary copies")
     ap.add_argument("--known-failures", type=Path, help="failures to excuse, by exact id (see the docstring)")
+    ap.add_argument("--owners", choices=owner_forms.CHOICES, default="invented",
+                    help="the names to give each copy before it runs (default: the export's invented ones)")
     args = ap.parse_args(argv)
     known = load_known(args.known_failures) if args.known_failures else {}
     manifests = export.load_manifests()
@@ -227,8 +246,10 @@ def main(argv=None) -> int:
             return 1
     failed = 0
     for m in sorted(wanted, key=lambda m: m["kit_name"]):
-        ok, summary, log, notes = run_one(m["kit_name"], m["suite"], args.keep, known.get(m["kit_name"]))
-        print(f"{'PASS' if ok else 'FAIL'} {m['kit_name']}: {summary}")
+        ok, summary, log, notes = run_one(m["kit_name"], m["suite"], args.keep, known.get(m["kit_name"]),
+                                          args.owners)
+        label = m["kit_name"] if args.owners == "invented" else f"{m['kit_name']} ({args.owners})"
+        print(f"{'PASS' if ok else 'FAIL'} {label}: {summary}")
         for line in notes:
             print(f"    {line}")
         if not ok:
