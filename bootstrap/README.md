@@ -112,10 +112,13 @@ configured, and you start the sweep by hand.
   `gh secret set PROMPT_AUDIT_SWEEP_FIRE_BEARER --repo <you>/_agent-guidance`
   and type the value at its prompt.
 
-`_agent-guidance`'s `fleet-worker-fire.yml` fires the fleet worker every 3
-hours ([routines](../docs/routines.md#fleet-worker)). The workflow has no
-default for either value, so if one is unset, each scheduled run fails and
-names it.
+`_agent-guidance`'s `fleet-worker-fire.yml` fires the fleet worker on the
+cadence in `FLEET_WORKER_EVERY_HOURS`, which `create-environments.sh` sets
+from `CLAUDE_PLAN`: weekly (168) on Pro, every 12 hours on Max 5x, every 3
+hours on Ultra ([routines](../docs/routines.md#fleet-worker)). The workflow
+has no default for either value below, so if one is unset, each scheduled
+run fails and names it (until step 27 sets them, the one expected failure:
+docs/settings-and-apps.md, "Merging the starter pull requests").
 
 - `FLEET_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
   the fleet worker routine's fire URL. Set it like

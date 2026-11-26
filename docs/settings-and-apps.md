@@ -118,8 +118,19 @@ It also sets `repo-settings`' variables `GUIDANCE_SYNC_APP_ID` and
 them in, so run it again after creating the Apps. From the same file, it
 sets `_agent-guidance`'s `FLEET_WORKER_EVERY_HOURS` and `LOOP_WORKER_EVERY_HOURS` (from `CLAUDE_PLAN`),
 its `EVALS_REPO` and `ARTICLE_WATCH_FEED_URL` (see [routines](routines.md#fleet-worker)),
+`acsi-agentskills`' `EVALS_REPO` (its `ci.yml` reads it too),
 and, once `skills-evals` exists, that repo's `SITE_REPO` and four federation
 ids. It skips any key left empty in `fleet.env`.
+
+**Updating an existing setup:** each run sets these values to what the plan
+and `fleet.env` say, so it replaces a value you set by hand. In particular,
+if you set `LOOP_WORKER_EVERY_HOURS` yourself (an earlier kit left it to
+you), running `create-environments.sh` again replaces it with your plan's
+value (168 on Pro, 24 on Max 5x and Ultra); to keep a different cadence, set
+it again afterwards and expect `verify.sh` to report it as differing. The
+same run also adds `EVALS_REPO` to `acsi-agentskills`, which its `ci.yml`
+now needs, and `bash bootstrap/create-repos.sh` again adds the `ci` label
+to repos made before the kit created it.
 
 Until the evals track creates `skills-evals`, the script skips
 `routine-fire`, and `ROSTER_WRITER_APP_ID` waits for the `roster` App. The
