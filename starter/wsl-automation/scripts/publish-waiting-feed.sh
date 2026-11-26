@@ -35,7 +35,8 @@
 # Required setting, with no default: WAITING_FEED_URL, the feed remote. Set it in
 # ~/.config/wsl-automation/settings.env or the environment (see task-settings.sh
 # and config/settings.env.example); when it is missing the run logs a line naming
-# it and exits 2.
+# it and exits 2. WAITING_FEED_URL=none (no feed repository, the kit's base
+# track) logs one skip line and exits 0 before anything else is read or run.
 #
 # Usage: publish-waiting-feed.sh [--dry-run]   (--dry-run: no write, commit or push)
 #
@@ -87,6 +88,33 @@ log_file=${WAITING_FEED_LOG:-$HOME/.cache/waiting-feed.log}
 now=${WAITING_FEED_NOW:-$(date +%s)}
 readonly feed_branch=persistent/waiting-feed
 
+timestamp=$(wsl_automation_epoch_format "$now" %Y-%m-%dT%H:%M:%SZ)
+
+log_line() {
+    mkdir -p -- "$(dirname -- "$log_file")"
+    printf '%s exit=%s %s\n' "$timestamp" "$2" "$1" >>"$log_file"
+    # A long outage logs every minute; keep only the most recent lines.
+    if (($(wc -l <"$log_file") > log_max_lines)); then
+        tail -n "$((log_max_lines / 2))" -- "$log_file" >"$log_file.tmp" && mv -f -- "$log_file.tmp" "$log_file"
+    fi
+}
+
+if ! wsl_automation_require_setting WAITING_FEED_URL; then
+    line='waiting feed: setting WAITING_FEED_URL is missing or invalid; set it to none if you have no feed repository'
+    printf '%s\n' "$line"
+    log_line "$line" 2
+    exit 2
+fi
+# WAITING_FEED_URL=none (a setup with no feed repository, the kit's base
+# track) turns the job off before the credentials, the lock or the network
+# are touched, so the every-minute task stays green.
+if [[ $WAITING_FEED_URL == none ]]; then
+    line='waiting feed: skipped: WAITING_FEED_URL is none, so there is no feed repository to publish to'
+    printf '%s\n' "$line"
+    log_line "$line" 0
+    exit 0
+fi
+
 # Claude Code on macOS keeps its login in the Keychain and writes
 # ~/.claude/.credentials.json only as a fallback (code.claude.com/docs/en/
 # authentication, "Credential management"). This script reads the file only and
@@ -131,23 +159,6 @@ if [[ ! -d $temporary_dir || $temporary_dir != "${runtime_dir%/}"/* ]]; then
 fi
 trap 'rm -rf -- "$temporary_dir"' EXIT
 
-timestamp=$(wsl_automation_epoch_format "$now" %Y-%m-%dT%H:%M:%SZ)
-
-log_line() {
-    mkdir -p -- "$(dirname -- "$log_file")"
-    printf '%s exit=%s %s\n' "$timestamp" "$2" "$1" >>"$log_file"
-    # A long outage logs every minute; keep only the most recent lines.
-    if (($(wc -l <"$log_file") > log_max_lines)); then
-        tail -n "$((log_max_lines / 2))" -- "$log_file" >"$log_file.tmp" && mv -f -- "$log_file.tmp" "$log_file"
-    fi
-}
-
-if ! wsl_automation_require_setting WAITING_FEED_URL; then
-    line='waiting feed: setting WAITING_FEED_URL is missing or invalid'
-    printf '%s\n' "$line"
-    log_line "$line" 2
-    exit 2
-fi
 feed_url=$WAITING_FEED_URL
 
 # The clone is the only state: its origin/persistent/waiting-feed is the
