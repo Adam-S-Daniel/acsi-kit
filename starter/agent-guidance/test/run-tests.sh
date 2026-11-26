@@ -23581,10 +23581,13 @@ INC
     [[ "$(grep -c '^fleet-guidance:' <<< "$out")" -eq 1 && "$(wc -l <<< "$out")" -eq 1 ]] \
         && pass "git hooks: hosted run stays silent beyond the verdict line" \
         || fail "git hooks: extra output: $out"
-    local n
+    # Three URL forms for each owner the sync workflow names: one for a one-owner fleet.
+    local n want
+    want="$(( 3 * $(yq -r '.. | select(type == "!!map" and has("SYNC_OWNERS")) | .SYNC_OWNERS' "$REPO_ROOT/.github/workflows/sync.yml" | tr ' ' '\n' | sort -u | grep -c . || true) ))"
+    [[ "$want" -ge 3 ]] || fail "git hooks: no SYNC_OWNERS found in sync.yml"
     n="$(git config --file "$sys" --get-regexp '^includeif\..*\.path$' | grep -c 'agent-hooks.inc$' || true)"
-    [[ "$n" -eq 6 ]] && pass "git hooks: six system includeIf entries (2 owners x 3 URL forms)" \
-        || fail "git hooks: expected 6 system entries, got $n"
+    [[ "$n" -eq "$want" ]] && pass "git hooks: the system includeIf entries (every owner x 3 URL forms)" \
+        || fail "git hooks: expected $want system entries, got $n"
     [[ ! -e "$glob" ]] && pass "git hooks: global config untouched when system is writable" \
         || fail "git hooks: wrote global config although system was writable"
     git config --file "$sys" --get-all 'includeIf.hasconfig:remote.*.url:https://github.com/example-adopter-two/**.path' \
@@ -23603,8 +23606,8 @@ INC
     reset_githooks
     out="$(run_githooks CLAUDE_CODE_REMOTE=true GIT_CONFIG_SYSTEM=/proc/no-such-dir/gitconfig)"
     n="$(git config --file "$glob" --get-regexp '^includeif\..*\.path$' | grep -c 'agent-hooks.inc$' || true)"
-    [[ "$n" -eq 6 ]] && pass "git hooks: unwritable system config falls back to global" \
-        || fail "git hooks: expected 6 global entries, got $n"
+    [[ "$n" -eq "$want" ]] && pass "git hooks: unwritable system config falls back to global" \
+        || fail "git hooks: expected $want global entries, got $n"
 
     # 5. An existing includeIf for the file (any scope) means leave it alone.
     reset_githooks
@@ -23625,8 +23628,8 @@ INC
     # does not count for the system one: all six system entries are written
     # and the global entry stays as it was.
     n="$(git config --file "$sys" --get-regexp '^includeif\..*\.path$' | grep -c 'agent-hooks.inc$' || true)"
-    [[ "$n" -eq 6 ]] && pass "git hooks: the entries missing from the write scope are added (6 system entries)" \
-        || fail "git hooks: expected 6 system entries, got $n"
+    [[ "$n" -eq "$want" ]] && pass "git hooks: the entries missing from the write scope are added (every system entry)" \
+        || fail "git hooks: expected $want system entries, got $n"
     n="$(git config --file "$glob" --get-all 'includeIf.hasconfig:remote.*.url:https://github.com/example-adopter-two/**.path' | wc -l)"
     [[ "$n" -eq 1 ]] && pass "git hooks: the present global entry is not duplicated" || fail "git hooks: entry duplicated ($n)"
 
@@ -23642,7 +23645,7 @@ INC
     done
     ( cd "$proj" && run_githooks CLAUDE_CODE_REMOTE=true >/dev/null )
     n="$(git config --file "$sys" --get-regexp '^includeif\..*\.path$' | grep -c 'agent-hooks.inc$' || true)"
-    [[ "$n" -eq 6 ]] && pass "git hooks: repo-local includeIf entries do not suppress the system entries" \
+    [[ "$n" -eq "$want" ]] && pass "git hooks: repo-local includeIf entries do not suppress the system entries" \
         || fail "git hooks: repo-local includeIf suppressed the install (got $n system entries)"
 
     # 6. Opt-out.

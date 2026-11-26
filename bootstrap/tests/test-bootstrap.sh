@@ -121,7 +121,7 @@ for s in "${SCRIPTS[@]}"; do
   assert "$s uses set -euo pipefail" grep -qx 'set -euo pipefail' "$B/$s"
   assert "$s --help prints its usage" bash -c '"$1" "$2" --help | grep -qF "$3"' _ bash "$B/$s" "$s ["
 done
-for p in lib/substitute.py lib/plan_sizing.py lib/time_zone.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
+for p in lib/substitute.py lib/plan_sizing.py lib/time_zone.py lib/repin.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
          tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/check-evals-refs.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
@@ -478,6 +478,84 @@ python3 -I "$B/lib/plan_sizing.py" "$T/size" --plan pro >/dev/null; rc=$?
 assert_eq "a tree without evals/budget.yml is left alone" "$rc" 0
 assert_not "an unknown repo name is refused" bash "$B/create-repos.sh" --config "$CFG" --dry-run agent-skills
 
+# ======================================================== lib/repin.py
+# A pin that names another file of the tree is recomputed after substitute.py changed that file.
+RP="$B/lib/repin.py" rw="$T/tmp/repin"
+sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+mkrepin() { # tree kind: a staged tree holding one pin file and the file it digests, the pin stale
+  rm -rf "$1" && mkdir -p "$1/scripts" "$1/plugins/acsi-anything-anywhere/hooks/fleet-guidance" "$1/docs" "$1/.claude/hooks"
+  printf 'echo bundled\n' > "$1/plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh"
+  printf 'echo checkout\n' > "$1/.claude/hooks/fleet-memory.sh"
+  stale=$(printf '%064d' 7)
+  case $2 in
+    skills) printf 'a=1\nfleet_pin_commit=%s\nfleet_pin_sha256=%s\nother=sha256:%s\n' "$(printf '%040d' 1)" "$stale" "$stale" > "$1/scripts/cloud-env-setup.sh"; chmod 755 "$1/scripts/cloud-env-setup.sh" ;;
+    guidance) printf '# doc\n```bash\nfleet_pin_commit=%s\nfleet_pin_sha256=%s\n```\npinned `%s` elsewhere\n' "$(printf '%040d' 1)" "$stale" "$stale" > "$1/docs/codex-cloud.md" ;;
+  esac
+}
+rm -rf "$rw" && mkdir -p "$rw/empty"
+run python3 -I "$RP" "$rw/empty"; rc=$?
+assert_eq "repin leaves a tree with none of the pin files alone" "$rc" 0
+assert_eq "and prints nothing for it" "$(cat "$OUT")" ""
+mkrepin "$rw/s" skills
+bundled=$(sha_of "$rw/s/plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh")
+run python3 -I "$RP" "$rw/s"; rc=$?
+assert_eq "repin exits 0 on agent-skills' pin" "$rc" 0
+assert "it names the file it re-pinned" has "$OUT" "repinned: scripts/cloud-env-setup.sh"
+assert_eq "fleet_pin_sha256 is the digest of the bundled fleet-memory.sh" "$(sed -n 's/^fleet_pin_sha256=//p' "$rw/s/scripts/cloud-env-setup.sh")" "$bundled"
+assert_eq "fleet_pin_commit and the other lines are left alone" "$(grep -v '^fleet_pin_sha256=' "$rw/s/scripts/cloud-env-setup.sh")" \
+  "$(printf 'a=1\nfleet_pin_commit=%s\nother=sha256:%s' "$(printf '%040d' 1)" "$(printf '%064d' 7)")"
+assert "the file keeps its exec bit" test -x "$rw/s/scripts/cloud-env-setup.sh"
+run python3 -I "$RP" "$rw/s"; rc=$?
+assert_eq "a second run exits 0" "$rc" 0
+assert "and says the pin is unchanged" has "$OUT" "unchanged: scripts/cloud-env-setup.sh"
+mkrepin "$rw/g" guidance
+run python3 -I "$RP" "$rw/g"; rc=$?
+assert_eq "repin exits 0 on agent-guidance's pin" "$rc" 0
+assert_eq "docs/codex-cloud.md pins the digest of .claude/hooks/fleet-memory.sh" "$(sed -n 's/^fleet_pin_sha256=//p' "$rw/g/docs/codex-cloud.md")" "$(sha_of "$rw/g/.claude/hooks/fleet-memory.sh")"
+assert "a digest quoted in prose is not a pin and stays" grep -qF "pinned \`$(printf '%064d' 7)\` elsewhere" "$rw/g/docs/codex-cloud.md"
+# A table row that no longer matches the tree is an error, and nothing is written.
+mkrepin "$rw/m" skills; rm "$rw/m/plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh"
+cp "$rw/m/scripts/cloud-env-setup.sh" "$rw/m.before"
+run python3 -I "$RP" "$rw/m"; rc=$?
+assert_eq "repin fails when the file the pin names is missing" "$rc" 1
+assert "it names the missing file" has "$ERR" "fleet-memory.sh, which is not in the tree"
+assert "and leaves the pin file as it was" cmp -s "$rw/m/scripts/cloud-env-setup.sh" "$rw/m.before"
+mkrepin "$rw/n" skills; grep -v '^fleet_pin_sha256=' "$rw/n/scripts/cloud-env-setup.sh" > "$rw/n.tmp" && mv "$rw/n.tmp" "$rw/n/scripts/cloud-env-setup.sh"
+run python3 -I "$RP" "$rw/n"; rc=$?
+assert_eq "repin fails when the pin line is missing" "$rc" 1
+assert "it says it wants exactly one pin line" has "$ERR" "want exactly 1"
+mkrepin "$rw/d" skills; printf 'fleet_pin_sha256=%s\n' "$(printf '%064d' 8)" >> "$rw/d/scripts/cloud-env-setup.sh"
+run python3 -I "$RP" "$rw/d"; rc=$?
+assert_eq "repin fails on a second pin line" "$rc" 1
+mkrepin "$rw/h" skills; sed -i 's/^fleet_pin_sha256=.*/fleet_pin_sha256=short/' "$rw/h/scripts/cloud-env-setup.sh"
+run python3 -I "$RP" "$rw/h"; rc=$?
+assert_eq "repin fails on a pin that is not 64 hex digits" "$rc" 1
+# One bad row blocks every write: a tree with both pin files, the second broken.
+mkrepin "$rw/b" skills; mkrepin "$rw/b2" guidance; cp "$rw/b2/docs/codex-cloud.md" "$rw/b/docs/"; rm "$rw/b/.claude/hooks/fleet-memory.sh"
+cp "$rw/b/scripts/cloud-env-setup.sh" "$rw/b.before"
+run python3 -I "$RP" "$rw/b"; rc=$?
+assert_eq "repin fails when any row fails" "$rc" 1
+assert "and writes none of them" cmp -s "$rw/b/scripts/cloud-env-setup.sh" "$rw/b.before"
+run python3 -I "$RP" "$rw/no-such-dir"; rc=$?
+assert_eq "repin refuses a path that is not a directory" "$rc" 2
+run python3 -I "$RP"; rc=$?
+assert_eq "repin without a path exits 2" "$rc" 2
+# On the exported files: the shipped pins are current, substitute.py makes them stale, repin fixes them.
+rm -rf "$rw/real" && mkdir -p "$rw/real/scripts" "$rw/real/plugins/acsi-anything-anywhere/hooks/fleet-guidance" "$rw/real/docs" "$rw/real/.claude/hooks"
+cp "$B/../starter/agent-skills/scripts/cloud-env-setup.sh" "$rw/real/scripts/"
+cp "$B/../starter/agent-skills/plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh" "$rw/real/plugins/acsi-anything-anywhere/hooks/fleet-guidance/"
+cp "$B/../starter/agent-guidance/docs/codex-cloud.md" "$rw/real/docs/"; cp "$B/../starter/agent-guidance/.claude/hooks/fleet-memory.sh" "$rw/real/.claude/hooks/"
+run python3 -I "$RP" "$rw/real"; rc=$?
+assert_eq "the exported pins are current" "$rc" 0
+assert_eq "so repin changes neither file" "$(grep -c '^unchanged: ' "$OUT")" 2
+python3 -I "$B/lib/substitute.py" "$rw/real" --owner acme-solo --owner-two ACME-Solo --name "Acme Solo" >/dev/null
+assert_not "after substitution the pin in cloud-env-setup.sh is stale" grep -qx "fleet_pin_sha256=$(sha_of "$rw/real/plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh")" "$rw/real/scripts/cloud-env-setup.sh"
+run python3 -I "$RP" "$rw/real"; rc=$?
+assert_eq "repin exits 0 on the substituted files" "$rc" 0
+assert_eq "both pins were re-pinned" "$(grep -c '^repinned: ' "$OUT")" 2
+assert "cloud-env-setup.sh pins the substituted bundled hook" grep -qx "fleet_pin_sha256=$(sha_of "$rw/real/plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh")" "$rw/real/scripts/cloud-env-setup.sh"
+assert "codex-cloud.md pins the substituted checkout hook" grep -qx "fleet_pin_sha256=$(sha_of "$rw/real/.claude/hooks/fleet-memory.sh")" "$rw/real/docs/codex-cloud.md"
+
 # ======================================================== create-repos.sh
 # The default is the five base repos: skills-evals is the evals track's.
 run bash "$B/create-repos.sh" --config "$CFG" --dry-run; rc=$?
@@ -723,6 +801,49 @@ assert_eq "substitute.py renames a tree with symlinks" "$rc" 0
 assert_eq "a file symlink follows its renamed target" "$(readlink "$T/subst-l/link.md")" "$O-notes/a.md"
 assert_eq "a folder symlink follows its renamed target" "$(readlink "$T/subst-l/dirlink")" "$O-notes"
 assert "the file symlink resolves" test -f "$T/subst-l/link.md"
+# A one-owner tree loses a duplicated owner pair outside YAML, for the shapes the docstring names and no others.
+sp="$T/subst-p"; rm -rf "$sp"; mkdir -p "$sp"
+cat > "$sp/code.sh" <<'EOF'
+owners="example-adopter example-adopter-two"
+for owner in example-adopter-two example-adopter; do :; done
+list=["example-adopter", "example-adopter-two"]
+globs=['example-adopter-two/*', 'example-adopter/*']
+upper=("EXAMPLE_ADOPTER_TWO EXAMPLE_ADOPTER")
+# SYNC_OWNERS ordered "example-adopter example-adopter-two", one
+ * SYNC_OWNERS="example-adopter example-adopter-two" node
+// ["example-adopter", "example-adopter-two"]
+three=["example-adopter", "example-adopter-two", "x"]
+mixed=["example-adopter/*", "example-adopter-two/x"]
+tuple=("example-adopter", "example-adopter-two")
+longer="example-adopter example-adopter-two-foo"
+EOF
+printf 'run: SYNC_OWNERS="example-adopter example-adopter-two" node x\n' > "$sp/README.md"
+printf 'owners: ["example-adopter", "example-adopter-two"]\n' > "$sp/f.yml"
+printf '#!/bin/sh\nowners="example-adopter example-adopter-two"\n' > "$sp/run"; chmod 755 "$sp/run"
+run python3 -I "$B/lib/substitute.py" "$sp" --owner acme-solo --owner-two ACME-Solo; rc=$?
+assert_eq "substitute.py fills a one-owner tree with owner pairs outside YAML" "$rc" 0
+assert "it names the file it collapsed" has "$OUT" "collapsed: code.sh"
+assert_eq "a quoted space-separated pair becomes one owner" "$(sed -n 1p "$sp/code.sh")" 'owners="acme-solo"'
+assert_eq "a shell loop over the pair becomes one owner, in either order" "$(sed -n 2p "$sp/code.sh")" 'for owner in acme-solo; do :; done'
+assert_eq "a bracketed quoted pair becomes one owner" "$(sed -n 3p "$sp/code.sh")" 'list=["acme-solo"]'
+assert_eq "a pair with the same suffix, in either order, keeps the suffix" "$(sed -n 4p "$sp/code.sh")" "globs=['acme-solo/*']"
+assert_eq "the upper-case spelling is collapsed too" "$(sed -n 5p "$sp/code.sh")" 'upper=("ACME_SOLO")'
+assert_eq "a # comment line is left alone, as two names" "$(sed -n 6p "$sp/code.sh")" '# SYNC_OWNERS ordered "acme-solo acme-solo", one'
+assert_eq "a * comment line is left alone" "$(sed -n 7p "$sp/code.sh")" ' * SYNC_OWNERS="acme-solo acme-solo" node'
+assert_eq "a // comment line is left alone" "$(sed -n 8p "$sp/code.sh")" '// ["acme-solo", "acme-solo"]'
+assert_eq "a list of three is left to the substitution" "$(sed -n 9p "$sp/code.sh")" 'three=["acme-solo", "acme-solo", "x"]'
+assert_eq "a pair with different suffixes is left to the substitution" "$(sed -n 10p "$sp/code.sh")" 'mixed=["acme-solo/*", "acme-solo/x"]'
+assert_eq "a tuple is left to the substitution" "$(sed -n 11p "$sp/code.sh")" 'tuple=("acme-solo", "acme-solo")'
+assert_eq "a pair followed by more of the word is left to the substitution" "$(sed -n 12p "$sp/code.sh")" 'longer="acme-solo acme-solo-foo"'
+assert "Markdown is left alone" has "$sp/README.md" 'SYNC_OWNERS="acme-solo acme-solo" node x'
+assert "a YAML flow list is the YAML pass's, and has one owner" has "$sp/f.yml" 'owners: ["acme-solo"]'
+assert_eq "a script with no extension is collapsed" "$(sed -n 2p "$sp/run")" 'owners="acme-solo"'
+assert "and keeps its exec bit" test -x "$sp/run"
+# Two owners, or the invented ones, keep both.
+sp2="$T/subst-p2"; rm -rf "$sp2"; mkdir -p "$sp2"; printf 'owners="example-adopter example-adopter-two"\nl=["example-adopter", "example-adopter-two"]\n' > "$sp2/code.sh"
+run python3 -I "$B/lib/substitute.py" "$sp2" --owner zeta-user --owner-two alpha-org; rc=$?
+assert_eq "substitute.py fills a two-owner tree" "$rc" 0
+assert_eq "two owners keep the pair" "$(cat "$sp2/code.sh")" "$(printf 'owners="zeta-user alpha-org"\nl=["zeta-user", "alpha-org"]')"
 printf 'not a code!\n' | run bash "$B/create-apps.sh" --config "$CFGP" --out "$T/manifests" roster; rc=$?
 assert_eq "a malformed code is refused" "$rc" 1
 printf 'http://127.0.0.1/?code=abc&state=0000\n' | run bash "$B/create-apps.sh" --config "$CFGP" --out "$T/manifests" roster; rc=$?
@@ -892,6 +1013,15 @@ assert_eq "the starter's fleet.evals.yml declares only skills-evals" \
   "$(git --git-dir="$T/remotes/$O/repo-settings.git" show starter/repo-settings:repo-settings/fleet.evals.yml | fleet_names)" acme-example/skills-evals
 assert "the second owner is OWNER_TWO" bash -c 'git --git-dir="$1" show starter/repo-settings:.github/workflows/repo-settings.yml | grep -qF "acme-example-two"' _ "$T/remotes/$O/repo-settings.git"
 assert "<your name> became OWNER_NAME" bash -c 'git --git-dir="$1" show starter/agent-skills:.claude-plugin/marketplace.json | grep -qF "\"Acme Example\""' _ "$T/remotes/$O/acsi-agentskills.git"
+# copy-starter.sh re-pins what substitution changed: each pushed pin is the digest of the file it names.
+pin_in() { git --git-dir="$1" show "$2" | sed -n 's/^fleet_pin_sha256=//p'; }
+digest_in() { git --git-dir="$1" show "$2" | sha256sum | cut -d' ' -f1; }
+as="$T/remotes/$O/acsi-agentskills.git" ag="$T/remotes/$O/_agent-guidance.git"
+assert_eq "agent-skills' cloud-env-setup.sh pins the substituted bundled fleet-memory.sh" \
+  "$(pin_in "$as" starter/agent-skills:scripts/cloud-env-setup.sh)" "$(digest_in "$as" starter/agent-skills:plugins/acsi-anything-anywhere/hooks/fleet-guidance/fleet-memory.sh)"
+assert_not "and that is not the digest the export wrote" test "$(pin_in "$as" starter/agent-skills:scripts/cloud-env-setup.sh)" = "$(sed -n 's/^fleet_pin_sha256=//p' "$K/starter/agent-skills/scripts/cloud-env-setup.sh")"
+assert_eq "agent-guidance's docs/codex-cloud.md pins the substituted .claude/hooks/fleet-memory.sh" \
+  "$(pin_in "$ag" starter/agent-guidance:docs/codex-cloud.md)" "$(digest_in "$ag" starter/agent-guidance:.claude/hooks/fleet-memory.sh)"
 uid=$(uid_of "$O")
 assert "the waiting feed commits as your own noreply identity" bash -c 'git --git-dir="$1" show starter/wsl-automation:scripts/publish-waiting-feed.sh | grep -qF "$2+acme-example@users.noreply.github.com"' _ "$T/remotes/$O/wsl-automation.git" "$uid"
 n=$(log_lines "$GH_LOG")

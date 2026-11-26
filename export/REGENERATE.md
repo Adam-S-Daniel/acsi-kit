@@ -84,8 +84,8 @@ a pull request with the result.
 
 - **`repo-settings/fleet.yml`'s repo list** names only the kit's repos
   (DECISIONS C11). If you leave one out of your fleet (the example platform
-  and its two sites, say), remove its element, and its rows in
-  `tests/test_repo_settings.py`, before the first apply.
+  and its two sites, say), remove its element before the first apply. The
+  tests read the file, so none of them needs an edit.
 
 - **`repo-settings/fleet.evals.yml`** (DECISIONS C13) holds `skills-evals`'
   element of `fleet.yml`, which the export moved out so that `fleet.yml`
