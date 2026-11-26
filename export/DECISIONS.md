@@ -2982,3 +2982,13 @@ The source's fleet-worker spec (`docs/routines/fleet-worker.md`) gains a rule th
 - `export/tests/test_kit_only.py` covers the patch and holds the shipped fleet-worker spec to no marker, no `resync/auto` and no `resync-fix/`, and the shipped `repos.yml` to no `kit_resync`.
 
 Reverse: delete the patch, its manifest entry and its test file. The next re-pin then ships the owner's merge rule and key as exported.
+
+## The rules-consistency list names only the adopter's own repos (2026-11-25)
+
+`starter/skills-evals/evals/rules-consistency.yml` lists the public repos that skills-evals' daily `rules-consistency.yml` workflow shallow-clones with no token (three tries, then `::error::could not clone <repo>` and exit 1; the checker is never reached). The source's list holds `_agent-guidance`, `acsi-agentskills`, the kit's own repo and the owner's website. An adopter has no `acsi-kit` repo (it is not in `FLEET_REPOS`, `bootstrap/lib/common.sh`) and only an optional website, so the workflow failed every day.
+
+- The export drops the `acsi-kit` and website rows, leaving `_agent-guidance` and `acsi-agentskills`, both in `FLEET_REPOS` and neither in `ALWAYS_PRIVATE`. A conditional website row (from `SITE_REPO`) was not built: it needs a new substitution path in `copy-starter.sh` for one optional line, and an adopter with a site adds one `- repo:` row by hand, which the list's header now says. The checker itself needs nothing changed: it reads whatever clones it is given, and a removed row only means that repo is not checked.
+- The workflow cannot clone a private repo without a token, and the kit adds none. `_agent-guidance` is private when a paid-plan adopter sets `VISIBILITY_AGENT_GUIDANCE=private`; the list's header says to remove its row then. The clone failure message now says the repo must be public and exist, with the file to change, and `docs/workflows.md` says the same of the workflow's row.
+- `export/tests/test_rules_consistency_list.py` parses the shipped list and holds it to `FLEET_REPOS` (read from `common.sh`), never `ALWAYS_PRIVATE`, never `acsi-kit` or a site. The source's own test (`test_the_fleet_workflow_is_scheduled_read_only_and_names_no_repo`) asserts only that the list is non-empty and duplicate-free, so it passes unchanged.
+
+Reverse: delete the three manifest edits (and the `docs/workflows.md` one), the test file and this section, and re-run the export.
