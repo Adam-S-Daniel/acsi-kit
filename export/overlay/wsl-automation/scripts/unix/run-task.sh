@@ -16,8 +16,8 @@
 #   1. PATH. A scheduler starts jobs with a minimal environment and no profile
 #      (cron's PATH is /usr/bin:/bin), so ~/.local/bin, Homebrew's and the
 #      usual system directories are appended, and GNU coreutils' gnubin
-#      directories (Homebrew on macOS) go first: publish-waiting-feed.sh needs
-#      GNU date. tool-path.sh holds this and the tool lookups, shared with
+#      directories (Homebrew on macOS) go first. tool-path.sh holds this and
+#      the tool lookups, shared with
 #      install-schedule.sh so its checks cannot disagree with this runner.
 #   2. No overlap. `flock -n` on a per-job lock; a run that finds the previous
 #      one still going logs `skipped=running` and exits 0, like Task

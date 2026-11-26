@@ -4,7 +4,7 @@
 repo: agentskills
 kit_name: agent-skills
 source: adam-agentskills
-source_sha: b7c639206bb12756ab075cf40adfca35344ab3d9
+source_sha: afa3347671f23277e0fc0629de14356063ea927b
 after: [_agent-guidance]
 
 exclude:
@@ -318,6 +318,36 @@ edits:
 
 # DECISIONS X9 and Content tiers: the plugins ship with the four core skills
 # (see each patch's docstring).
+  # ---- Re-pin round 23: a stock hostname is not an identity (regression test)
+  - path: scripts/test_github_write_marker_hook.py
+    old: |
+      @posix_only
+      def test_a_codex_event_is_checked_and_gets_the_codex_footer() -> None:
+    new: |
+      # A stock hostname (a VM or cloud image's default) is not this machine's
+      # identity, as in agent-checks' local_generic_hosts, so a body naming a
+      # runner image passes with no denylist; an invented specific hostname is
+      # still blocked. GITHUB_ACTIONS is unset: under it no identity is checked.
+      @posix_only
+      @pytest.mark.parametrize("host, rc", [("ubuntu", 0), ("Debian", 0), ("zephyrbox", BLOCK)])
+      def test_a_stock_hostname_is_not_treated_as_an_identity(host, rc):
+          event = bash('gh pr comment 7 --body "Runs on ubuntu-latest, debian and zephyrbox.\n\n%s"' % MARKER)
+          env = {k: v for k, v in os.environ.items() if k not in ("AGENT_NAME", "GITHUB_ACTIONS")}
+          env.update(PRIVACY_DENYLIST_FILE=str(REPO / "nonexistent-denylist.txt"),
+                     AGENT_CHECKS_LOCAL_USER="", AGENT_CHECKS_LOCAL_HOST=host)
+          proc = subprocess.run(["bash", str(SCRIPT)], input=json.dumps(event), capture_output=True,
+                                text=True, env=env, timeout=30, cwd=str(REPO))
+          assert proc.returncode == rc, proc.stderr
+
+
+      @posix_only
+      def test_a_codex_event_is_checked_and_gets_the_codex_footer() -> None:
+    why: >-
+      Re-pin round 23. The regression test for the write-marker hook's stock
+      hostname edit in _agent-guidance.yml: with no denylist, a machine named
+      like its image (ubuntu) blocked every pull request body that named the
+      ubuntu-latest runner.
+
 patches:
   - file: library_skills.py
     why: >-
