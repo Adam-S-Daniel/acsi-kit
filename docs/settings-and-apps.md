@@ -309,6 +309,9 @@ the read App and reports drift. You apply from your machine with
 On `PLAN=paid`, until step 20, `repo-settings.yml`'s apply job waits for
 your approval on each merge to `repo-settings`. Reject those deployments
 until then. On `PLAN=free` nothing waits for you: `repo-settings` has no
-`fleet-apply` environment, so each merge's run shows both apply jobs as
-skipped and the `plan` job's drift report, with nothing to approve or reject;
-step 20 applies from your machine.
+`fleet-apply` environment. A merge that changes one of the files
+`repo-settings.yml` watches on a push (`repo-settings/fleet.yml`,
+`scripts/repo_settings.py`, the workflow itself, `requirements.txt`) starts
+a run that shows both apply jobs as skipped and the `plan` job's drift
+report, with nothing to approve or reject; any other merge starts no run.
+Step 20 applies from your machine.
