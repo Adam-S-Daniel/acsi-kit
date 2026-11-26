@@ -113,7 +113,7 @@ for s in "${SCRIPTS[@]}"; do
   assert "$s uses set -euo pipefail" grep -qx 'set -euo pipefail' "$B/$s"
   assert "$s --help prints its usage" bash -c '"$1" "$2" --help | grep -qF "$3"' _ bash "$B/$s" "$s ["
 done
-for p in lib/substitute.py lib/plan_sizing.py lib/content.py lib/fleet_fragment.py lib/coverage_fleet.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
+for p in lib/substitute.py lib/plan_sizing.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
          tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/check-evals-refs.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
@@ -1081,6 +1081,7 @@ assert "acsi-agentskills-private's lock is the registry's copy" bash -c 'cmp -s 
 # The starter's coverage list leaves skills-evals out (a name neither owner
 # has fails the daily Dependabot health check); evals-fleet adds it.
 cov_names() { python3 -I -c 'import sys, yaml; print(" ".join(yaml.safe_load(sys.stdin)["cron_coverage"]["fleet"]))'; }
+assert "lib/coverage_fleet.py parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/lib/coverage_fleet.py"
 assert_not "the starter's coverage list leaves skills-evals out" bash -c 'grep -qw skills-evals <<<"$1"' _ "$(on_main _agent-guidance repos.yml | cov_names)"
 assert "the starter's coverage list names the base repos" bash -c 'grep -qw wsl-automation <<<"$1"' _ "$(on_main _agent-guidance repos.yml | cov_names)"
 run bash "$B/regenerate.sh" --config "$CFGP" --check evals-fleet
