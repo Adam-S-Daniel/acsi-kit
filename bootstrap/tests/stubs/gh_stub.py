@@ -248,6 +248,33 @@ def api(args):
         if method == "PUT":
             r["fork"] = body
         return out(r["fork"])
+    # Dependabot alerts and security updates: a PUT turns one on, a DELETE
+    # off (no body either way). GitHub answers the alerts read with an empty
+    # 204 when on and 404 when off, and the security-updates read with JSON.
+    if rest in ("/vulnerability-alerts", "/automated-security-fixes"):
+        key = rest.strip("/")
+        if method in ("PUT", "DELETE"):
+            r[key] = method == "PUT"
+            save()
+            sys.exit(0)
+        if rest == "/vulnerability-alerts":
+            if r.get(key):
+                save()
+                sys.exit(0)
+            return err(404, "Not Found")
+        return out({"enabled": bool(r.get(key)), "paused": False})
+    m2 = re.fullmatch(r"/labels/([^/]+)", rest)
+    if m2:  # one label by name, as the settings engine reads and edits it
+        from urllib.parse import unquote
+        name = unquote(m2.group(1))
+        lab = next((l for l in r["labels"] if l["name"] == name), None)
+        if lab is None:
+            return err(404, "Not Found")
+        if method == "PATCH":
+            lab.update({k: v for k, v in (body or {}).items() if k in ("color", "description")})
+            if (body or {}).get("new_name"):
+                lab["name"] = body["new_name"]
+        return out(lab)
     if rest == "/labels":
         if method == "POST":
             r["labels"].append(body)
