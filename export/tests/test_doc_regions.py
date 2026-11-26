@@ -15,6 +15,7 @@ Run: python3 -m pytest KIT/export/tests -q
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -63,6 +64,7 @@ def kit(tmp_path, monkeypatch):
     monkeypatch.setattr(doc_regions, "REGIONS", {name: doc_regions.REGIONS[name]})
     # The test spec has one prompt, under the default anchor.
     monkeypatch.setattr(doc_regions, "ANCHORS", {})
+    monkeypatch.setattr(doc_regions, "COMPUTED", {})
     page, spec = doc_regions.REGIONS[name]
     (tmp_path / page).parent.mkdir(parents=True)
     (tmp_path / spec).parent.mkdir(parents=True)
@@ -170,6 +172,103 @@ def test_an_unclosed_region_is_an_error(kit):
     page = kit / "docs" / "routines.md"
     page.write_text(PAGE.replace("<!-- /generated:fleet-worker-prompt -->\n", ""), encoding="utf-8")
     assert doc_regions.main(["--check", "--root", str(kit)]) == 2
+
+
+# ── The computed region: what every session loads ───────────────────────────
+
+SKILL = "---\nname: {name}\ndescription: {description}\n---\n\n# Body\n\nNot counted.\n"
+COST_PAGE = """\
+# Machines
+
+<!-- generated:always-loaded by export/doc_regions.py; it counts the files, so run it with --write -->
+| stale |
+<!-- /generated:always-loaded -->
+
+Tail.
+"""
+
+
+@pytest.fixture
+def cost_kit(tmp_path, monkeypatch):
+    """A kit with only the computed region: a catalog, the files it names and the page."""
+    monkeypatch.setattr(doc_regions, "REGIONS", {})
+    files = {
+        doc_regions.BASE_MD: "# Core\n\n" + "x" * 1000 + "\n",
+        "library/guidance/safe/section.md": "s" * 300,
+        "library/guidance/habit/section.md": "h" * 200,
+        "library/guidance/opinion/section.md": "é" * 50,          # 100 bytes: bytes are counted, not characters
+        "starter/skills/core-one/SKILL.md": SKILL.format(name="core-one", description="d" * 92),
+        "library/skills/rec/SKILL.md": SKILL.format(name="rec", description="r" * 47),
+        "library/skills/opinion/SKILL.md": SKILL.format(name="opinion", description="o" * 13),
+        "docs/machine.md": COST_PAGE,
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+    items = [
+        {"id": "core-a", "kind": "guidance", "tier": "core", "source_link": doc_regions.BASE_MD},
+        {"id": "core-b", "kind": "guidance", "tier": "core", "source_link": doc_regions.BASE_MD},
+        {"id": "safe", "kind": "guidance", "tier": "recommended", "group": "safety", "source_link": "library/guidance/safe/section.md"},
+        {"id": "habit", "kind": "guidance", "tier": "recommended", "group": "habits", "source_link": "library/guidance/habit/section.md"},
+        {"id": "opinion", "kind": "guidance", "tier": "opinionated", "source_link": "library/guidance/opinion/section.md"},
+        {"id": "core-one", "kind": "skill", "tier": "core", "source_link": "starter/skills/core-one/SKILL.md"},
+        {"id": "rec", "kind": "skill", "tier": "recommended", "source_link": "library/skills/rec/SKILL.md"},
+        {"id": "opinion", "kind": "skill", "tier": "opinionated", "source_link": "library/skills/opinion/SKILL.md"},
+        {"id": "a-hook", "kind": "git-hook", "tier": "core", "source_link": "nowhere"},
+    ]
+    (tmp_path / "bootstrap").mkdir()
+    (tmp_path / doc_regions.CATALOG).write_text(json.dumps({"about": "", "items": items}), encoding="utf-8")
+    return tmp_path
+
+
+def test_the_table_counts_bytes_from_the_files_the_catalog_names(cost_kit):
+    assert doc_regions.always_loaded(cost_kit) == [
+        "| What | Items | Bytes | Loaded when |",
+        "|---|---|---|---|",
+        "| Core guidance (`agents-md/base.md` as shipped) | 2 | 1,009 | always |",   # the file once, not once per section
+        "| Recommended guidance, safety | 1 | 300 | your choice in step 1 |",
+        "| Recommended guidance, habits | 1 | 200 | your choice in step 1 |",
+        "| Opinionated guidance: `opinion` | 1 | 100 | your choice in step 1 |",
+        "| Core skills (name and description) | 1 | 100 | always |",                 # 8 + 92: the body is not counted
+        "| Recommended skills (name and description) | 1 | 50 | your choice in step 1 |",
+        "| Opinionated skills (name and description) | 1 | 20 | your choice in step 1 |",
+    ]
+
+
+def test_a_stale_table_fails_check_and_write_fixes_it(cost_kit, capsys):
+    assert doc_regions.main(["--check", "--root", str(cost_kit)]) == 1
+    assert "region 'always-loaded' in docs/machine.md is stale" in capsys.readouterr().out
+    assert doc_regions.main(["--write", "--root", str(cost_kit)]) == 0
+    page = (cost_kit / "docs/machine.md").read_text(encoding="utf-8")
+    assert "| stale |" not in page and "| Core skills (name and description) | 1 | 100 | always |" in page
+    assert page.endswith("Tail.\n")
+    assert doc_regions.main(["--check", "--root", str(cost_kit)]) == 0
+
+
+def test_the_table_follows_a_file_that_grows(cost_kit):
+    assert doc_regions.main(["--write", "--root", str(cost_kit)]) == 0
+    with open(cost_kit / "library/guidance/safe/section.md", "a", encoding="utf-8") as f:
+        f.write("more")
+    assert doc_regions.main(["--check", "--root", str(cost_kit)]) == 1
+
+
+@pytest.mark.parametrize("break_it, said", [
+    (lambda k: (k / "library/guidance/habit/section.md").unlink(), "does not exist"),
+    (lambda k: (k / "library/skills/rec/SKILL.md").write_text("# no frontmatter\n", encoding="utf-8"), "no frontmatter"),
+    (lambda k: (k / doc_regions.CATALOG).write_text("{", encoding="utf-8"), "cannot be read"),
+    (lambda k: (k / doc_regions.CATALOG).write_text(json.dumps({"items": [
+        {"id": "x", "kind": "guidance", "tier": "core", "source_link": doc_regions.BASE_MD}]}), encoding="utf-8"), "no item for the row"),
+])
+def test_a_table_the_tool_cannot_count_is_an_error(cost_kit, capsys, break_it, said):
+    break_it(cost_kit)
+    assert doc_regions.main(["--check", "--root", str(cost_kit)]) == 2
+    assert said in capsys.readouterr().err
+
+
+def test_the_real_table_counts_the_shipped_guidance_file():
+    # An independent count of the first row, so the table is not only compared with itself.
+    size = len((KIT / "starter/agent-guidance/agents-md/base.md").read_bytes())
+    assert any(line.startswith("| Core guidance") and f"| {size:,} |" in line for line in doc_regions.always_loaded(KIT))
 
 
 # ── The real pages ──────────────────────────────────────────────────────────
