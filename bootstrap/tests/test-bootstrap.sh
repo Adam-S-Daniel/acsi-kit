@@ -980,13 +980,16 @@ printf '%s\n' '# names' 'river[- ]quinn' 'example\.net' > "$T/private/denylist"
 # A pattern matching a public name from fleet.env is refused, by line number
 # and key, never printed, and nothing is written: the login (line 2), the
 # second owner's login alone (3), OWNER_NAME (4), an App's <prefix>-<app>
-# name (5), the login's snake form (6) and a pattern that matches anything (7).
-printf '%s\n' '# names' 'ACME-EXAMPLE' 'example-two' 'acme example$' 'example-guidance' 'acme_example' '.*' 'river[- ]quinn' > "$T/private/public-denylist"
+# name (5), the login's snake form (6), a pattern that matches anything (7),
+# the upper-snake form with case-insensitive matching turned off (8), and the
+# noreply address copy-starter.sh writes (9).
+printf '%s\n' '# names' 'ACME-EXAMPLE' 'example-two' 'acme example$' 'example-guidance' 'acme_example' '.*' '(?-i:ACME_EXAMPLE)' '\d+\+acme-example@users' 'river[- ]quinn' > "$T/private/public-denylist"
 n=$(log_lines "$GH_LOG")
 run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate --denylist "$T/private/public-denylist"; rc=$?
 assert_eq "a denylist that matches a public name from fleet.env is refused" "$rc" 1
-assert "it names each such line and the key it matched" has "$ERR" "line(s) 2 (APP_NAME_PREFIX, OWNER, OWNER_TWO, REVIEWER); 3 (OWNER_TWO); 4 (OWNER_NAME); 5 (APP_NAME_PREFIX); 6 (OWNER, OWNER_TWO, REVIEWER); 7 (APP_NAME_PREFIX, OWNER, OWNER_NAME, OWNER_TWO, REVIEWER) match"
-assert_not "it does not name the clean line" has "$ERR" "; 8 ("
+assert "it names each such line and the key it matched" has "$ERR" "line(s) 2 (APP_NAME_PREFIX, OWNER, OWNER (noreply address), OWNER_TWO, REVIEWER); 3 (OWNER_TWO); 4 (OWNER_NAME); 5 (APP_NAME_PREFIX); 6 (OWNER, OWNER_TWO, REVIEWER); 7 (APP_NAME_PREFIX, OWNER, OWNER (noreply address), OWNER_NAME, OWNER_TWO, REVIEWER); 8 (OWNER, OWNER_TWO, REVIEWER); 9 (OWNER (noreply address)) match"
+assert_not "it does not name the clean line" has "$ERR" "; 10 ("
+assert "a line that matches part of a name gets a hint to list the name whole" has "$ERR" "a line that matches only part of a name (a surname inside your login, say) is refused too"
 assert "it says what belongs in the list instead" has "$ERR" "never your GitHub login or the public handle in OWNER_NAME"
 assert_not "it prints no pattern" grep -qE 'example-two|example-guidance|acme_example|river' "$ERR" "$OUT"
 assert_eq "the refusal writes nothing" "$(since "$n")" 0
@@ -996,6 +999,9 @@ printf '%s\n' 'zz-reviewer' 'zz-apps-roster' > "$T/private/names-denylist"
 run bash "$B/set-secrets.sh" --config "$T/private/fleet-names.env" --only privacy --rotate --denylist "$T/private/names-denylist"; rc=$?
 assert_eq "a pattern matching REVIEWER or an App's name is refused" "$rc" 1
 assert "it names both keys" has "$ERR" "line(s) 1 (REVIEWER); 2 (APP_NAME_PREFIX)"
+printf '%s\n' 'zz-apps-roster' > "$T/private/whole-denylist"
+run bash "$B/set-secrets.sh" --config "$T/private/fleet-names.env" --only privacy --rotate --denylist "$T/private/whole-denylist"; rc=$?
+assert_not "a line that matches a whole name gets no part-of-a-name hint" has "$ERR" "matches only part of a name"
 printf 'ok\n(unclosed\n' > "$T/private/bad-denylist"
 mkdir -p "$T/inrepo" && git -C "$T/inrepo" init -q && cp "$T/private/denylist" "$T/inrepo/denylist"
 run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --denylist "$T/inrepo/denylist"; rc=$?

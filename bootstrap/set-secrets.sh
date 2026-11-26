@@ -102,7 +102,7 @@ get_denylist() {
   python3 -I - "$DENYLIST" "${names[@]}" <<'PY' || die "the denylist failed validation (see above)"
 import re, sys
 names = [a.split("\t", 1) for a in sys.argv[2:]]
-bad, public, n = [], [], 0
+bad, public, n, partial = [], [], 0, False
 for i, l in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
     l = l.strip()
     if not l or l.startswith("#"):
@@ -113,15 +113,20 @@ for i, l in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
     except re.error:
         bad.append(i)
         continue
-    keys = sorted({k for k, v in names if rx.search(v)})
-    if keys:
-        public.append(f"{i} ({', '.join(keys)})")
+    hits = [(k, v, m) for k, v in names for m in [rx.search(v)] if m]
+    if hits:
+        public.append(f"{i} ({', '.join(sorted({k for k, _, _ in hits}))})")
+        partial = partial or any(m.group(0) != v for _, v, m in hits)
 if bad:
     print("denylist: line(s) " + ", ".join(map(str, bad)) + " are not valid regular expressions", file=sys.stderr)
 if public:
     print("denylist: line(s) " + "; ".join(public) + " match a public name from fleet.env that the starter writes into dozens of files,"
           " so every privacy scan would fail on every pull request. List your real name, emails, hosts and private ids,"
           " never your GitHub login or the public handle in OWNER_NAME (docs/skills.md, \"The privacy check\")", file=sys.stderr)
+    if partial:
+        print("denylist: a line that matches only part of a name (a surname inside your login, say) is refused too. List the"
+              " name whole, such as first[ ._-]?last, rather than one part; word boundaries (\\bpart\\b) help only where"
+              " your login runs the parts together, since a - or _ in it is a boundary too", file=sys.stderr)
 if bad or public:
     sys.exit(1)
 if n == 0:
@@ -138,16 +143,25 @@ PY
 
 # public_names: "<fleet.env key><TAB><value>" for each public name the
 # starter writes into the adopter's files (copy-starter.sh, lib/substitute.py):
-# the logins as given and with - and . as _ (substitute.py's upper and snake
-# forms; the match ignores case), OWNER_NAME, APP_NAME_PREFIX and each App's
+# each login as given and in substitute.py's three forms (lower case; upper
+# case with - and . as _; lower case with them as _), so a pattern that turns
+# case-insensitive matching off with (?-i:...) is caught too; OWNER's noreply
+# address (<id>+<login>@users.noreply.github.com, the id read from GitHub as
+# copy-starter.sh reads it); OWNER_NAME, APP_NAME_PREFIX and each App's
 # <prefix>-<app> name. Defaults are applied by load_config.
 public_names() {
-  local key v e
+  local key v e low up uid
   for key in OWNER OWNER_TWO REVIEWER; do
     v=CFG_$key; v=${!v}
     [ -n "$v" ] || continue
-    printf '%s\t%s\n' "$key" "$v" "$key" "${v//[-.]/_}"
+    low=${v,,} up=${v^^}
+    printf '%s\t%s\n' "$key" "$v" "$key" "$low" "$key" "${up//[-.]/_}" "$key" "${low//[-.]/_}"
   done
+  if gh_read "users/$CFG_OWNER" && uid=$(printf '%s' "$GH_OUT" | jq -r '.id // empty') && [[ $uid =~ ^[1-9][0-9]{0,11}$ ]]; then
+    printf '%s\t%s\n' "OWNER (noreply address)" "$uid+$CFG_OWNER@users.noreply.github.com" "OWNER (noreply address)" "$uid+${CFG_OWNER,,}@users.noreply.github.com"
+  else
+    warn "could not read $CFG_OWNER's GitHub id (HTTP ${GH_HTTP:-unknown}), so the denylist was not checked against your noreply address"
+  fi
   printf '%s\t%s\n' OWNER_NAME "$CFG_OWNER_NAME" APP_NAME_PREFIX "$CFG_APP_NAME_PREFIX"
   for e in "${APPS[@]}"; do printf 'APP_NAME_PREFIX\t%s-%s\n' "$CFG_APP_NAME_PREFIX" "${e%%|*}"; done
 }
