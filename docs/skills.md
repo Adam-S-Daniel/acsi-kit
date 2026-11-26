@@ -137,12 +137,12 @@ branch name, and the pull request's title and body. The list is the
 repository secret `PRIVACY_DENYLIST`, never a file in a repo. The scan
 prints only the place and the pattern's number, never the match.
 
-Step 3 stores the secret, and it stays a required step: on the public repos
-this scan is the only guard against personal data. A missing secret does
-not block anything. The scan then checks nothing and only adds a warning,
-as it does on a fork's pull request, which never gets the secret. Nothing
-rescans the whole tree, so a pattern you add later checks only changes made
-after it. The `privacy-comment-alert` workflow scans issues and comments
+Step 3 stores the secret, and it stays a required step: on the base track's
+public repos this scan is the only guard against personal data. A missing
+secret does not block anything. The scan then checks nothing and only adds
+a warning, as it does on a fork's pull request, which never gets the
+secret. The scan never rereads the whole tree, so a pattern you add later
+checks only changes made after it. The `privacy-comment-alert` workflow scans issues and comments
 with the same secret and also only warns without it. `skills-evals`, on the
 evals track, is where the secret is enforced: its required `test` job scans
 every tracked file and fails closed without it, so step 35 stores it there
