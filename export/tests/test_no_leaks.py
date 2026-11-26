@@ -324,15 +324,17 @@ def _letters(regex: str) -> str:
     return "".join(a or b for a, b in re.findall(r"\[([A-Za-z])[A-Za-z]\]|([A-Za-z])", body))
 
 
-def test_leak_scan_and_substitution_cover_the_workstation_name_in_every_form():
+@pytest.mark.parametrize("label, to", [("workstation name", "workstation"),
+                                       ("old workstation name", "oldworkstation")])
+def test_leak_scan_and_substitution_cover_the_workstation_name_in_every_form(label, to):
     # The real rules, read from the manifest by their label.
-    rule = next(r for r in _COMMON["substitutions"] if r.get("name") == "workstation name")
-    leak = next(rx for name, rx in TOKENS if name == "workstation name")
+    rule = next(r for r in _COMMON["substitutions"] if r.get("name") == label)
+    leak = next(rx for name, rx in TOKENS if name == label)
     word = _letters(rule["regex"])
     assert len(word) >= 3 and _letters(leak.pattern).lower() == word.lower()
     subst = export.Substituter(export.compile_rules([rule]))
-    style = {word.upper(): "WORKSTATION", word.lower(): "workstation",
-             word[:1].upper() + word[1:].lower(): "Workstation"}
+    style = {word.upper(): to.upper(), word.lower(): to,
+             word[:1].upper() + word[1:].lower(): to.capitalize()}
     for text in _name_forms(word):
         assert leak.search(text), f"the leak scan misses form #{_name_forms(word).index(text)}"
         assert subst.rules[0].rx.search(text), f"the substitution misses form #{_name_forms(word).index(text)}"

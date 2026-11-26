@@ -4,7 +4,7 @@
     {
       "id": "0",
       "title": "Write fleet.env",
-      "run": "`cp bootstrap/fleet.env.example fleet.env`, fill in `OWNER`, `OWNER_TWO`, `PLAN` and `CLAUDE_PLAN`",
+      "run": "`cp bootstrap/fleet.env.example fleet.env`, fill in `OWNER`, `OWNER_TWO`, `PLAN`, `CLAUDE_PLAN` and `TIME_ZONE`",
       "kind": "manual",
       "part": "before you start",
       "track": "base",

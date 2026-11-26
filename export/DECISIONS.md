@@ -2947,6 +2947,87 @@ Tests: `python3 -B -m pytest export/tests -q -p no:cacheprovider`, `bash bootstr
 
 Reverse: re-pin each source to its "Before" sha, remove the `pasted-config-is-a-stub` entry from `SECTIONS` and the catalog and the `bump-branch-push` lines from `blank_content.py` and `machinery_tests.py`, restore the "three" to "two" in `docs/skills.md`, and re-run the full export. The `kit_repos.py` and `retargets.txt` fixes stay only if the sources still need them.
 
+## Starter suites each get their own Python environment (2026-11-25)
+
+`starter-suites` (and `starter/run-all-tests.sh`, and `export/run_suites.py` under it) start every tree's suite at once, and all of them shared one Python environment. `skills-evals`' setup (`scripts/dev_setup.sh`) pip-installs `markdown-it-py==4.2.0` while `agent-skills` and `repo-settings` pin `4.3.0`, so pip uninstalled and reinstalled the package while another suite's pytest workers imported it. That fails at random (`No module named markdown_it.rules_core.normalize`): [Actions run 45702656563](https://github.com/Adam-S-Daniel/acsi-kit/actions/runs/45702656563/job/139516488078), job 139516488078, on [PR #104](https://github.com/Adam-S-Daniel/acsi-kit/pull/104), and three local failures under load on 2026-11-25 that passed alone. Because `starter-suites` is a required check, it stranded re-sync pull requests.
+
+The fix is isolation, not ordering. A manifest's `suite:` block may say `venv: true`; `run_suites.py` then runs `python3 -m venv` under that suite's temporary directory and puts it first on `PATH` (with `VIRTUAL_ENV`) for that suite's setup and command only. The venv is deleted with the copy. Only `skills-evals` sets it, because it is the only setup that installs Python packages; the others probe the interpreter and keep the plain environment. CI's "Install suite dependencies" step still installs `agent-skills`' and `repo-settings`' requirements into the shared interpreter, serially, before any suite starts, so it does not race; its pins agree with each other. The `test` job's `markdown-it-py==4.2.0` runs alone in its own job, so it is no part of this race and is unchanged. `export/tests/test_run_suites.py` proves the isolation with fake suites.
+
+Reverse: remove `venv_env` and the `venv` branch in `run_one`, the `venv: true` line in `export/manifests/skills-evals.yml`, the new tests, and the README and comment lines that mention it.
+
+## The workstation name in every case (2026-11-25)
+
+The rule for the owner's workstation name was a case-sensitive, word-bounded regex, so it replaced the upper-case name in prose but let nine lowercase identifiers built on it through, in `skills-evals`' `scripts/automatic_spend.py` and `test/issues/test_issue_automatic_spend.py` (a function, a parameter and its uses, a test method and a test class). The owner's private scan caught them; the public `leak_scan` rule was case-sensitive too.
+
+Both rules now spell the name one letter class at a time (`[Xx][Yy]...`), so the kit's own text no longer holds it in any letter case (the owner chose to remove it going forward and leave git history alone), and neither has a word boundary, so both match in every letter case and inside identifiers. The substitution is a `regex` rule with `forms: true`, a new `export.py` form: its one-word `to` takes the matched text's case style, as the literal `forms` catch-all already did. That is one deterministic function of the matched text, so a definition and every caller, and code and its tests, get the same name and still parse:
+
+| Form in the source | Replacement |
+|---|---|
+| the name in capitals (prose, `NAME_X`, `X-NAME`) | `WORKSTATION` |
+| lowercase (a word, a parameter, `scan_<name>_tasks`, `<name>Tasks`, `<name>-x`) | `workstation` |
+| capitalized (`scan<Name>Tasks`, `<Name>Tasks`) and any other mixed case | `Workstation` |
+
+**Departure:** a longer unrelated word that holds the name is replaced inside too. That is intended for a machine name: the private scan matches it anywhere in any case, so leaving it would publish the name, and the sources at their pins hold no such word (only the identifiers above). A new one would show in a re-pin's `--check` diff, where a maintainer can read it. Paths are substituted by the same rules (step 4 of `export.py`); no tracked path holds the name, so nothing else changes. `export/tests/test_name_case_forms.py` covers every case style, a path, a definition and its callers (parsed with `ast`), and the longer-word decision with an invented stand-in name; `test_no_leaks.py` checks the real substitution and `leak_scan` rules against every form, with samples built at run time from the rules' own letter classes, so the test never spells the name either; it fails when the rules are put back in the old word-bounded, case-sensitive form.
+
+The older workstation name's two rules had the same word-bounded, case-sensitive form and spelled it too; they get the same letter-class, `forms` treatment, with the one-word replacement `OLDWORKSTATION` (`oldworkstation`, `Oldworkstation`) in place of `OLD-WORKSTATION`, because a hyphen inside a snake_case identifier would break the code. It appears in one source file, which the kit leaves out (X7), so no shipped byte changes.
+
+The source still uses the name in those identifiers at the `skills-evals` pin; renaming them there is a separate `skills-evals` pull request, and until the kit's pin moves past it, this rule is what keeps the shipped copy clean.
+
+Reverse: restore the word-bounded regex rule and the case-sensitive `leak_scan` entry, remove the `regex` + `forms` branch from `compile_rules`, delete the new test file and the two `test_no_leaks.py` tests, and re-run the export.
+
+## Kit-only blocks in the source (2026-11-25, Adam-S-Daniel/_agent-guidance#644)
+
+The source's fleet-worker spec (`docs/routines/fleet-worker.md`) gains a rule that lets the owner's fleet worker merge the kit's own re-sync pull requests (heads `resync/auto` and `resync-fix/*`), fenced by `<!-- kit-only:begin -->` and `<!-- kit-only:end -->` lines, and `repos.yml` gains a top-level `kit_resync` key (`repo`, `app_slug`) under a comment block. An adopter's fleet has no kit, so neither ships.
+
+- `export/patches/_agent-guidance/kit_only.py` cuts every marker-fenced region from the Markdown files under `docs/routines/` (markers and one blank line after the end marker included, so the paragraphs around it stay one blank line apart) and the `kit_resync` key with the comment block directly above it from `repos.yml`. It runs first among the patches, on the substituted tree, while the marker text is intact.
+- It landed before the source change, which is why it is a patch and not an `edits` entry (an edit's old text must match at the pin). With no markers and no key it changes nothing, so the starters are unchanged at the current pin. An unbalanced, nested or out-of-order marker stops the export, naming the file, instead of shipping half a block.
+- `export/tests/test_kit_only.py` covers the patch and holds the shipped fleet-worker spec to no marker, no `resync/auto` and no `resync-fix/`, and the shipped `repos.yml` to no `kit_resync`.
+
+Reverse: delete the patch, its manifest entry and its test file. The next re-pin then ships the owner's merge rule and key as exported.
+
+### The rule's decision record and test do not ship either (2026-11-26)
+
+The same source change (_agent-guidance#649) adds ADR 0051 (the owner's decision to let his fleet worker merge the kit's re-sync pull requests, told as the source fleet's story of the kit), its row in the ADR index, a "Widened by [0051]..." sentence in ADR 0041's status line, and a test in `test/test-prompt-audit-sweep.js` that asserts the block, the key, the ADR, the sentence and the row, with five `mutations` entries whose anchors sit inside the block; `test/run-tests.sh` expects one more test from that file. Exported with only the first part of this section, the shipped sweep test failed (`not ok 17 - fleet worker merges the kit's re-sync pull requests, named only in repos.yml (ADR 0051)`: the block it asserts was cut), so `starter-suites` would have held the first re-sync after #649 back.
+
+- **Choice: cut the ADR, not ship it as history.** The kit ships other source ADRs as history, but those describe rules an adopter's copy still carries. ADR 0051 describes only the rule the kit cuts, links to a block that is not in the shipped spec, and is about the kit itself; an adopter reading "the fleet worker merges the kit's re-sync pull requests" would look for a rule they do not have. Cutting it needs no framing edit and cannot leave a link to a missing block.
+- `kit_only.py` deletes the ADR, drops its index row and the 0041 sentence, then stops the export if any file in the shipped tree still names the ADR's file, so nothing dangles. It cuts the sweep test by its exact title (to its closing `});` line), drops the five `kit*` mutation lines (only an env var selects a mutation, and an anchor not in the shipped spec would fail if selected), stops the export if `kit-only:`, `kit_resync`, `ADR 0051` or a `kit*` key is left in that file, and lowers by one the count `test_prompt_audit_sweep()` in `test/run-tests.sh` states in its three places (stopping if it is not stated exactly once). It is a patch, not `edits` or an `exclude`: an exclude that matches nothing and an edit whose old text is absent both stop the export at today's pin.
+- Proof: a local source commit of the pin plus #649 only (never pushed): before, the export passed every guard but shipped the failing test (23 of 24); after, the exported starters equal today's byte for byte. At the real pins nothing changes. `export/tests/test_kit_only.py` covers both states on invented trees and holds the shipped tree to no ADR 0051, no reference to it and no kit test or mutation.
+
+Reverse: delete `cut_adr`, `cut_test` and `_count_down` and their calls, and the tests after "ADR 0051, its index row" in `test_kit_only.py`. The next re-pin then ships the ADR and a sweep test that fails in the kit.
+
+## The rules-consistency list names only the adopter's own repos (2026-11-25)
+
+`starter/skills-evals/evals/rules-consistency.yml` lists the public repos that skills-evals' daily `rules-consistency.yml` workflow shallow-clones with no token (three tries, then `::error::could not clone <repo>` and exit 1; the checker is never reached). The source's list holds `_agent-guidance`, `acsi-agentskills`, the kit's own repo and the owner's website. An adopter has no `acsi-kit` repo (it is not in `FLEET_REPOS`, `bootstrap/lib/common.sh`) and only an optional website, so the workflow failed every day.
+
+- The export drops the `acsi-kit` and website rows, leaving `_agent-guidance` and `acsi-agentskills`, both in `FLEET_REPOS` and neither in `ALWAYS_PRIVATE`. A conditional website row (from `SITE_REPO`) was not built: it needs a new substitution path in `copy-starter.sh` for one optional line, and an adopter with a site adds one `- repo:` row by hand, which the list's header now says. The checker itself needs nothing changed: it reads whatever clones it is given, and a removed row only means that repo is not checked.
+- The workflow cannot clone a private repo without a token, and the kit adds none. `_agent-guidance` is private when a paid-plan adopter sets `VISIBILITY_AGENT_GUIDANCE=private`; the list's header says to remove its row then. The clone failure message now says the repo must be public and exist, with the file to change, and `docs/workflows.md` says the same of the workflow's row.
+- `export/tests/test_rules_consistency_list.py` parses the shipped list and holds it to `FLEET_REPOS` (read from `common.sh`), never `ALWAYS_PRIVATE`, never `acsi-kit` or a site. The source's own test (`test_the_fleet_workflow_is_scheduled_read_only_and_names_no_repo`) asserts only that the list is non-empty and duplicate-free, so it passes unchanged.
+
+Reverse: delete the three manifest edits (and the `docs/workflows.md` one), the test file and this section, and re-run the export.
+
+## `skills-evals` re-pinned past its own identifier rename (2026-11-25)
+
+Only the `skills-evals` pin moves, from `ea84ca96c028` to `1492367482275c10c02c25d9ef1c9a16608a2def`, the merge of the source's own rename of the workstation-task identifiers (section "The workstation name in every case" above), so the source and the shipped copy now agree and the export's rule no longer has those identifiers to strip. The other sources stay at their pins (re-pin round 23 moves them).
+
+The 15 source commits between the pins need no new `edits` or patches: the export, `doc_regions.py --write` (every region current) and the tests passed as they stand. Besides the rename they add four eval fixtures (three for launching a top-level session, one security fixture with a seed under `library/guidance/security/`), a `.githooks/privacy-denylist.py` hook, recheck dates in the scope review, a "never switched off" note in the dashboard refresh task, and move the source's `markdown-it-py` pin from 4.2.0 to 4.3.0 in its workflows and `scripts/dev_setup.sh`. The kit's own `markdown-it-py==4.2.0` pins in `ci.yml`'s `test` job and `resync.yml` stay: they install the kit's export tests' environment, which runs no `skills-evals` code, and the `skills-evals` starter suite installs its own pins in its own virtual environment (`venv: true`), so nothing needs the versions to match. `doc_review.py` listed six pages against the changed files; none quotes a changed statement (the version, the dates or the fixture list), so no page changes.
+
+Reverse: set `source_sha` in `export/manifests/skills-evals.yml` back to `ea84ca96c028eff472397718785649f1ff81d032` and re-run the export.
+
+## The adopter's own time zone (2026-11-25)
+
+`_agent-guidance`'s `scripts/base-md-merge-window.yml` shipped the owner's `timezone: America/New_York` and a comment calling it the "Owner's rule", so every adopter silently inherited a Monday noon to 2 PM Eastern window. Both parsers (`base-md-merge-window.js`, and skills-evals' `guidance_merge_window.py`, which fetches the same file) already fail on a missing or invalid zone, so only the silent default was wrong.
+
+- `fleet.env` gets a key, `TIME_ZONE`, with no default. `lib/common.sh` checks its shape (`^[A-Za-z]+(/[A-Za-z0-9_+-]+)+$` or `UTC`) and that python3's `zoneinfo` loads it, whenever it is set, and says where to set it and how to find one's zone. It is not required by `load_config`: `status.sh`, `verify.sh` and every other script load the same config, and a setup that copied the starter before the key existed must not see its finished steps turn red. `copy-starter.sh` calls `require_time_zone` instead, the one script that writes it.
+- The export edits the shipped file to the neutral `timezone: UTC` (both parsers accept it), rewords the "Owner's rule" comment as the adopter's own setting, and drops the worked example naming the owner's zone. A placeholder was not used because `starter/agent-guidance`'s own suite runs against the tree as shipped. `bootstrap/lib/time_zone.py`, run by `copy-starter.sh` on the staged tree, replaces that one line from `TIME_ZONE` and fails unless it is there exactly once (a tree without the file, every other starter, is left alone).
+- `test/test-base-md-merge-window.js` asserted the file's exact bounds and used it for its New York date arithmetic. The export edits it to use its own New York bounds for the arithmetic and to assert only the weekday, the hours and that a zone is present, so the adopter's suite passes with their zone. skills-evals' tests use fixtures, not the file.
+- `export/tests/test_time_zone_shipped.py` fails when a file under `starter/` or `bootstrap/` names `America/New_York` outside an explicit allowlist of documentation, tests, error-message examples and the explorer's own zone constant (fixed in the source by another pull request; drop those entries when the kit re-pins past it).
+
+Review additions: `preflight.sh` WARNs (not FAILs) about an empty or missing `TIME_ZONE` with the same help text, because only `copy-starter.sh` needs it and a setup that copied the starter before the key existed must not fail preflight. On a machine whose python3 has no tz database (a minimal container, Git Bash, some macOS Pythons) a shape-valid zone is accepted with a warning to `pip install tzdata` (or the OS package), never refused: the check cannot be made there, `copy-starter.sh` only writes the name, and the adopter's own runners have their own data. A name the database does not know is still refused when a database is present. Empty values skip validation in `load_config` before `_valid_value`, so an empty `TIME_ZONE` loads everywhere; tests cover empty, absent and valid for `status.sh`, `verify.sh`, `preflight.sh` and `copy-starter.sh`, and the no-database case through the `ACSI_TEST_NO_TZDB=1` seam.
+
+An existing adopter sets `TIME_ZONE` in `fleet.env` and changes the one `timezone:` line of `scripts/base-md-merge-window.yml` in their `_agent-guidance` by pull request (`docs/before-you-start.md`).
+
+Reverse: remove the key, `require_time_zone`, `time_zone.py`, the four manifest edits, the guard test and this section, and re-run the export.
+
 ## Base-only track runs green (2026-11-25)
 
 The source's `_agent-guidance` assumes `skills-evals` exists. Three of its scheduled workflows fail every run for a setup that has only the five base repos, and no setting turns the failure off:
@@ -3022,39 +3103,3 @@ What each base starter workflow on `schedule`, `push` or `pull_request` does on 
 Left for a follow-up pull request, and red until it lands: `_agent-guidance`'s `repos.yml` lists `skills-evals` under `cron_coverage.fleet` and `skills_bootstrap.out_of_scope`, so on a base-only setup the daily `dependabot-config-health.yml` run fails (its script exits 1 on a `cron_coverage.fleet` name no owner listing returns), the drift report keeps one nudge issue open about a name it cannot find, and the fleet worker attaches a repository that does not exist; and `skills-lock-bump.yml` fails four times a day between steps 10 and 12, on the README-only registry. Left as they are (wrong, not red): On Windows, the optional waiting feed task fails each minute until `waiting-feed` exists and `WAITING_FEED_URL` is set (it is in step 22's text). `acsi-agentskills`' eval-protection gate checks out `_agent-guidance` at a commit of the source owner's repository (`ref:` in `ci.yml`), which an adopter's copy does not have, so once `EVALS_REPO` names a repository that step fails; no `regenerate.sh` task pins it yet.
 
 Reverse: drop these `edits` entries (the "review fix" blocks in `export/manifests/_agent-guidance.yml`, `agentskills.yml`, `repo-settings.yml`, `wsl-automation.yml`), the overlay's `none` branch and its tests, the `acsi-agentskills|EVALS_REPO` and `ci` registry entries, `installs_by_hand` and `by_hand`, the `GH_403_HINT`, the `fleet-worker` verify group (step 27 back to an `ask` check), steps 41 and 42 (restore step 24's Loop worker half), `check-evals-refs.py`, and re-run the export.
-
-## Starter suites each get their own Python environment (2026-11-25)
-
-`starter-suites` (and `starter/run-all-tests.sh`, and `export/run_suites.py` under it) start every tree's suite at once, and all of them shared one Python environment. `skills-evals`' setup (`scripts/dev_setup.sh`) pip-installs `markdown-it-py==4.2.0` while `agent-skills` and `repo-settings` pin `4.3.0`, so pip uninstalled and reinstalled the package while another suite's pytest workers imported it. That fails at random (`No module named markdown_it.rules_core.normalize`): [Actions run 45702656563](https://github.com/Adam-S-Daniel/acsi-kit/actions/runs/45702656563/job/139516488078), job 139516488078, on [PR #104](https://github.com/Adam-S-Daniel/acsi-kit/pull/104), and three local failures under load on 2026-11-25 that passed alone. Because `starter-suites` is a required check, it stranded re-sync pull requests.
-
-The fix is isolation, not ordering. A manifest's `suite:` block may say `venv: true`; `run_suites.py` then runs `python3 -m venv` under that suite's temporary directory and puts it first on `PATH` (with `VIRTUAL_ENV`) for that suite's setup and command only. The venv is deleted with the copy. Only `skills-evals` sets it, because it is the only setup that installs Python packages; the others probe the interpreter and keep the plain environment. CI's "Install suite dependencies" step still installs `agent-skills`' and `repo-settings`' requirements into the shared interpreter, serially, before any suite starts, so it does not race; its pins agree with each other. The `test` job's `markdown-it-py==4.2.0` runs alone in its own job, so it is no part of this race and is unchanged. `export/tests/test_run_suites.py` proves the isolation with fake suites.
-
-Reverse: remove `venv_env` and the `venv` branch in `run_one`, the `venv: true` line in `export/manifests/skills-evals.yml`, the new tests, and the README and comment lines that mention it.
-
-## The workstation name in every case (2026-11-25)
-
-The rule for the owner's workstation name was a case-sensitive, word-bounded regex, so it replaced the upper-case name in prose but let nine lowercase identifiers built on it through, in `skills-evals`' `scripts/automatic_spend.py` and `test/issues/test_issue_automatic_spend.py` (a function, a parameter and its uses, a test method and a test class). The owner's private scan caught them; the public `leak_scan` rule was case-sensitive too.
-
-Both rules now spell the name one letter class at a time (`[Xx][Yy]...`), so the kit's own text no longer holds it in any letter case (the owner chose to remove it going forward and leave git history alone), and neither has a word boundary, so both match in every letter case and inside identifiers. The substitution is a `regex` rule with `forms: true`, a new `export.py` form: its one-word `to` takes the matched text's case style, as the literal `forms` catch-all already did. That is one deterministic function of the matched text, so a definition and every caller, and code and its tests, get the same name and still parse:
-
-| Form in the source | Replacement |
-|---|---|
-| the name in capitals (prose, `NAME_X`, `X-NAME`) | `WORKSTATION` |
-| lowercase (a word, a parameter, `scan_<name>_tasks`, `<name>Tasks`, `<name>-x`) | `workstation` |
-| capitalized (`scan<Name>Tasks`, `<Name>Tasks`) and any other mixed case | `Workstation` |
-
-**Departure:** a longer unrelated word that holds the name is replaced inside too. That is intended for a machine name: the private scan matches it anywhere in any case, so leaving it would publish the name, and the sources at their pins hold no such word (only the identifiers above). A new one would show in a re-pin's `--check` diff, where a maintainer can read it. Paths are substituted by the same rules (step 4 of `export.py`); no tracked path holds the name, so nothing else changes. `export/tests/test_name_case_forms.py` covers every case style, a path, a definition and its callers (parsed with `ast`), and the longer-word decision with an invented stand-in name; `test_no_leaks.py` checks the real substitution and `leak_scan` rules against every form, with samples built at run time from the rules' own letter classes, so the test never spells the name either; it fails when the rules are put back in the old word-bounded, case-sensitive form.
-
-The source still uses the name in those identifiers at the `skills-evals` pin; renaming them there is a separate `skills-evals` pull request, and until the kit's pin moves past it, this rule is what keeps the shipped copy clean.
-
-Reverse: restore the word-bounded regex rule and the case-sensitive `leak_scan` entry, remove the `regex` + `forms` branch from `compile_rules`, delete the new test file and the two `test_no_leaks.py` tests, and re-run the export.
-
-## Kit-only blocks in the source (2026-11-25, Adam-S-Daniel/_agent-guidance#644)
-
-The source's fleet-worker spec (`docs/routines/fleet-worker.md`) gains a rule that lets the owner's fleet worker merge the kit's own re-sync pull requests (heads `resync/auto` and `resync-fix/*`), fenced by `<!-- kit-only:begin -->` and `<!-- kit-only:end -->` lines, and `repos.yml` gains a top-level `kit_resync` key (`repo`, `app_slug`) under a comment block. An adopter's fleet has no kit, so neither ships.
-
-- `export/patches/_agent-guidance/kit_only.py` cuts every marker-fenced region from the Markdown files under `docs/routines/` (markers and one blank line after the end marker included, so the paragraphs around it stay one blank line apart) and the `kit_resync` key with the comment block directly above it from `repos.yml`. It runs first among the patches, on the substituted tree, while the marker text is intact.
-- It landed before the source change, which is why it is a patch and not an `edits` entry (an edit's old text must match at the pin). With no markers and no key it changes nothing, so the starters are unchanged at the current pin. An unbalanced, nested or out-of-order marker stops the export, naming the file, instead of shipping half a block.
-- `export/tests/test_kit_only.py` covers the patch and holds the shipped fleet-worker spec to no marker, no `resync/auto` and no `resync-fix/`, and the shipped `repos.yml` to no `kit_resync`.
-
-Reverse: delete the patch, its manifest entry and its test file. The next re-pin then ships the owner's merge rule and key as exported.
