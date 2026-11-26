@@ -103,9 +103,23 @@ and lists any setup step that was done before and is not done under the
 newer kit, because its check now covers more, with the command to run again.
 It also lists new `fleet.env` keys; a key only a later script needs, such as
 `TIME_ZONE` (needed by `copy-starter.sh`), is named with the step that needs
-it and does not stop the update. Two steps changed recently for a setup that
-already ran them:
+it and does not stop the update. These steps changed recently for a setup
+that already ran them:
 
+- Step 2 (the repos): `create-repos.sh` now also creates a `ci` label, so
+  step 2 shows as not done until you run `bash bootstrap/create-repos.sh`
+  again (it skips what exists).
+- Steps 8 and 37 (the repository variables): run
+  `bash bootstrap/create-environments.sh` again. It sets
+  `LOOP_WORKER_EVERY_HOURS` to your plan's value (replacing one you set by
+  hand), adds `EVALS_REPO` to the `acsi-agentskills` registry, and writes
+  `none` to `FLEET_WORKER_FIRE_URL` and `LOOP_WORKER_FIRE_URL` if they are
+  not set (a URL you set is kept).
+- Steps 7 and 34 (installing the Apps): `gh` cannot read App installations,
+  so check each App's installation page, then mark the step yourself:
+  `bash bootstrap/status.sh --mark 7` (and `--mark 34`).
+- Step 27 (the fleet worker routine): done only when `_agent-guidance` has
+  both `FLEET_WORKER_FIRE_URL` (not `none`) and `FLEET_WORKER_FIRE_BEARER`.
 - Step 3 (the privacy denylist): `set-secrets.sh --only privacy` now stores
   it in four repos (the registry, `_agent-guidance`, `repo-settings`,
   `wsl-automation`), so a setup that stored it before shows step 3 as not
