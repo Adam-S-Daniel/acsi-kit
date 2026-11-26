@@ -226,3 +226,90 @@ def test_only_skills_evals_declares_a_venv():
     manifests = run_suites.export.load_manifests()
     with_venv = sorted(m["kit_name"] for m in manifests.values() if (m.get("suite") or {}).get("venv"))
     assert with_venv == ["skills-evals"]
+
+
+# ---- --owners: the copy gets the names and edits of an adopter's tree
+
+def _named_tree(tmp_path, monkeypatch, name="t"):
+    d = tmp_path / name
+    d.mkdir()
+    (d / "f.txt").write_text("example-adopter and example-adopter-two\n")
+    monkeypatch.setattr(run_suites.export, "STARTER", tmp_path)
+    return d
+
+
+@pytest.mark.parametrize("form, want", [
+    ("invented", "example-adopter and example-adopter-two"),
+    ("one", "acme-solo and acme-solo"),
+    ("two", "zeta-user and alpha-org"),
+])
+def test_each_owner_form_names_the_copy_and_its_commit(tmp_path, monkeypatch, form, want):
+    _named_tree(tmp_path, monkeypatch)
+    # The suite reads the file and the history: the committed tree is the
+    # staged one, so the substitution ran before the commit.
+    suite = {"git_init": True, "command": "cat f.txt; git show HEAD:f.txt"}
+    ok, _, log, _ = run_suites.run_one("t", suite, keep=False, owners=form)
+    assert ok
+    assert log.count(want + "\n") == 2, log
+
+
+def test_the_default_form_is_the_invented_one(tmp_path, monkeypatch):
+    _named_tree(tmp_path, monkeypatch)
+    ok, _, log, _ = run_suites.run_one("t", {"command": "cat f.txt"}, keep=False)
+    assert ok and "example-adopter and example-adopter-two" in log
+    assert run_suites.run_one.__defaults__[-1] == "invented"
+
+
+def test_a_form_that_cannot_be_staged_fails_without_running_the_suite(tmp_path, monkeypatch):
+    d = _named_tree(tmp_path, monkeypatch)
+    (d / "broken.yml").write_text("a: [example-adopter-two\n")
+    ok, summary, log, _ = run_suites.run_one("t", {"command": "echo SUITE RAN"}, keep=False, owners="one")
+    assert not ok
+    assert "one owner form could not be staged" in summary and "substitute.py exited" in summary
+    assert "SUITE RAN" not in log
+
+
+def test_the_second_form_drops_the_example_repos_of_the_trees_that_name_them(tmp_path, monkeypatch):
+    d = _named_tree(tmp_path, monkeypatch, "repo-settings")
+    (d / "repo-settings").mkdir()
+    (d / "repo-settings" / "fleet.yml").write_text(
+        "repos:\n  - name: example-adopter/real\n    manage: [\"all\"]\n"
+        "  - name: example-adopter/example-site-platform\n    manage: [\"labels\"]\n")
+    # three rows are expected, so a tree with one fails loudly
+    ok, summary, _, _ = run_suites.run_one("repo-settings", {"command": "true"}, keep=False, owners="two")
+    assert not ok and "expected 3" in summary
+    ok, _, _, _ = run_suites.run_one("repo-settings", {"command": "true"}, keep=False, owners="one")
+    assert ok   # the first form leaves the rows in
+
+
+def test_main_passes_the_form_through_and_names_it(tmp_path, monkeypatch, capsys):
+    seen = []
+
+    def fake_run_one(kit_name, suite, keep, known=None, owners="invented"):
+        seen.append((kit_name, owners, known))
+        return True, "fine (exit 0)", "", []
+
+    monkeypatch.setattr(run_suites, "run_one", fake_run_one)
+    monkeypatch.setattr(run_suites.export, "load_manifests",
+                        lambda: {"t": {"kit_name": "t", "suite": {"command": "true"}}})
+    assert run_suites.main(["--kit-name", "t", "--owners", "one"]) == 0
+    assert run_suites.main(["--kit-name", "t"]) == 0
+    assert [s[:2] for s in seen] == [("t", "one"), ("t", "invented")]
+    out = capsys.readouterr().out.splitlines()
+    assert out == ["PASS t (one): fine (exit 0)", "PASS t: fine (exit 0)"]
+
+
+def test_an_unknown_form_is_refused_by_the_parser(capsys):
+    with pytest.raises(SystemExit) as e:
+        run_suites.main(["--owners", "three"])
+    assert e.value.code == 2
+
+
+def test_known_failures_still_excuse_a_failure_in_a_substituted_form(tmp_path, monkeypatch):
+    _named_tree(tmp_path, monkeypatch)
+    known = {"FAIL: test_m.T.test_a": 1}
+    suite = {"command": ("printf 'FAIL: test_a (test_m.T.test_a)\\n----\\nFAILED (failures=1)\\n'; "
+                         "grep -q acme-solo f.txt; exit 1")}
+    ok, summary, log, notes = run_suites.run_one("t", suite, keep=False, known=known, owners="one")
+    assert ok and "1 known failure(s) excused" in summary
+    assert notes == ["known failure (excused): FAIL: test_m.T.test_a"]
