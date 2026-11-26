@@ -50,6 +50,12 @@
 # newer kit's checks no longer count as done (a check that now covers more,
 # such as a secret now needed in more repos), with the command to run again.
 #
+# add-content.sh's list of every file it put back goes to a log file outside
+# the kit (named in the output; only the per-tree counts are printed), and the
+# run ends with a short "Do this now" block: a key the copy step needs that
+# your fleet.env lacks (TIME_ZONE), each step the newer kit reopened, and each
+# existing repo that needs a pull request for the content, then "Next:".
+#
 # Internal: --after-update <sha> [--ids <list>] [--done-before <lines>] is how
 # the script continues in the new copy of itself after the fast-forward; do
 # not pass it yourself.
@@ -83,8 +89,9 @@ B=$KIT/bootstrap   # the kit's own scripts (this file may run from a temporary c
 
 # q <word>: the word quoted for pasting into a shell.
 q() { printf '%q' "$1"; }
-CONFIG_ARG=""
-[ "$CONFIG" = ./fleet.env ] || CONFIG_ARG=" --config $(q "$CONFIG")"
+CONFIG_ARG=$(config_arg)
+# TODO: the "Do this now" lines rest() prints before its "Next:" line.
+TODO=()
 # next_cmd: how to run the update again from where the kit is now.
 next_cmd() {
   if [ -f "$B/update-kit.sh" ]; then
@@ -118,7 +125,7 @@ need_node() {
   for t in node npm; do
     command -v "$t" >/dev/null 2>&1 && continue
     detect_os
-    die "$t is required to put your content choices back with add-content.sh ($IDS), and was not found on PATH. Install it: $(node_install_cmd "$t"). Then run this again; bash bootstrap/preflight.sh checks every tool. Nothing was changed."
+    die "$t is required to put your content choices back with add-content.sh ($IDS), and was not found on PATH. Install it: $(node_install_cmd "$t"). Then run this again; bash bootstrap/preflight.sh${CONFIG_ARG} checks every tool. Nothing was changed."
   done
 }
 # no_config_refusal <why>: no fleet.env at $CONFIG, yet there are choices to keep.
@@ -158,6 +165,37 @@ fi
 [ "$HAVE_IDS" = 0 ] || IDS=$PASSED_IDS
 need_node
 
+# copy_key_todo <key> <copy step>: a "Do this now" line for a key the newer
+# kit's copy-starter.sh needs, when this fleet.env leaves it empty.
+COPY_KEY_TODO=0
+copy_key_todo() {
+  local v="CFG_$1" help="bootstrap/fleet.env.example explains it"
+  [ -z "${!v:-}" ] || return 0
+  [ "$1" != TIME_ZONE ] || help=${_TIME_ZONE_HELP#set TIME_ZONE in fleet.env to }
+  COPY_KEY_TODO=1
+  TODO+=("Set $1 in $CONFIG ($help). Until it is set, copy-starter.sh${2:+ (step $2)} refuses and status.sh keeps step 0 open.")
+}
+
+# content_log: CONTENT_LOG, where add-content.sh's full output goes: a file
+# in the state folder (outside the kit), named for the kit's commit.
+content_log() {
+  local d; d=$(state_dir)
+  mkdir -p "$d" && chmod 700 "$d"
+  CONTENT_LOG=$d/update-kit-$(git -C "$KIT" rev-parse --short=12 HEAD).log
+}
+# content_report: add-content.sh's output without its one line per file (a
+# count and the log's path instead), and a "Do this now" line for each repo
+# that already exists, which the content reaches only through a pull request.
+content_report() {
+  local n repo tree
+  n=$(grep -cE '^  (add|change): ' "$CONTENT_LOG" || true)
+  grep -vE '^  (add|change): ' "$CONTENT_LOG" | sed 's/^/  /' || true
+  [ "$n" = 0 ] || log "  ($n file(s) added or changed in starter/; the list is in $CONTENT_LOG)"
+  while IFS=$'\t' read -r repo tree; do
+    TODO+=("Open a pull request on $repo (never a push to its default branch) that adds the starter/$tree files listed in $CONTENT_LOG, with your names as copy-starter.sh writes them.")
+  done < <(sed -nE 's|^([^ ]+) already exists, so this reached only starter/([^ ]+)\. Open a pull request on it$|\1\t\2|p' "$CONTENT_LOG")
+}
+
 # keys_of <fleet.env-like file>: its KEY names, sorted.
 keys_of() { sed -n 's/^[[:space:]]*\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$1" | sort -u; }
 
@@ -196,6 +234,7 @@ key_report() {
       log "  new, required: $k (set it in your fleet.env)"
     elif grep -qxF -- "$k" "$BOOT_WORK/keys.copy"; then
       log "  new, needed before the copy step${step:+ (step $step)}: $k (copy-starter.sh refuses until it is set in your fleet.env; this update does not need it)"
+      copy_key_todo "$k" "$step"
     else
       log "  new, optional: $k (empty or absent means the default)"
     fi
@@ -238,7 +277,7 @@ config_refusal() {
 # since a newer steps.json can renumber) that status.sh no longer counts done,
 # each with its command and, for status.sh's next step, status.sh's reason.
 reopened() {
-  local id title run next after n=0
+  local id title run next after why n=0
   printf '%s\n' "$DONE_BEFORE" > "$BOOT_WORK/done.before"
   log ""
   log "Checking which setup steps are still done under the newer kit (bootstrap/status.sh, read-only)..."
@@ -256,9 +295,23 @@ reopened() {
     run=$(jq -r --arg t "$title" '[.steps[] | select(.title == $t) | .run][0] // ""' "$B/steps.json")
     [ "$n" -gt 0 ] || log "Steps that were done before this update and are NOT done under the newer kit (its checks ask for more):"
     n=$((n + 1))
+    run=$(with_config_arg "$run")
     log "  step $id, $title: $run"
     # status.sh explains only its next step; the 4-space lines under "Not done yet:".
-    [ "$id" != "$next" ] || sed -n '/^  Not done yet:$/,$ { /^    /s/^    /    why: /p; }' "$BOOT_WORK/status.txt"
+    why=""
+    [ "$id" != "$next" ] || why=$(sed -n '/^  Not done yet:$/,$ { /^    /s/^    //p; }' "$BOOT_WORK/status.txt")
+    [ -z "$why" ] || sed 's/^/    why: /' <<<"$why"
+    # A config step's run text copies the example over your fleet.env, so its
+    # "Do this now" line is status.sh's reason instead; when that reason is a
+    # key the copy step needs, the key's own line (copy_key_todo) says it.
+    if [ "$(jq -r --arg t "$title" '[.steps[] | select(.title == $t) | .check.type][0]' "$B/steps.json")" = config ]; then
+      if [ "$COPY_KEY_TODO" = 0 ]; then
+        if [ -n "$why" ]; then why=$(paste -sd' ' <<<"$why"); else why="edit $CONFIG (bash bootstrap/status.sh${CONFIG_ARG} says why)"; fi
+        TODO+=("Step $id ($title) is not done under the newer kit: $why")
+      fi
+    else
+      TODO+=("Step $id ($title) is not done under the newer kit: $run")
+    fi
   done < "$BOOT_WORK/done.before"
   [ "$n" -gt 0 ] || log "Every setup step that was done before this update is still done."
 }
@@ -307,9 +360,12 @@ rest() {
     [ "$DRY_RUN" = 0 ] || args+=(--dry-run)
     [ "$DRY_RUN" = 1 ] || STAGE="the kit is updated, but your content choices ($IDS) are not all back in starter/"
     log "Putting your content choices back with add-content.sh ($IDS; npm ci can take a minute):"
-    if ! "$BASH" "$B/add-content.sh" "${args[@]}"; then
-      die "add-content.sh failed on your recorded choices ($IDS; its output is above), so they are NOT all in starter/. Fix what it says, then run: $(next_cmd)"
+    content_log
+    if ! "$BASH" "$B/add-content.sh" "${args[@]}" > "$CONTENT_LOG" 2>&1; then
+      content_report
+      die "add-content.sh failed on your recorded choices ($IDS; its output is above, all of it in $CONTENT_LOG), so they are NOT all in starter/. Fix what it says, then run: $(next_cmd)"
     fi
+    content_report
     STAGE="nothing was left half done"
   elif [ -z "$IDS" ] && [ "$CFG_OK" = 1 ]; then
     log "No recorded content choices yet; choose with: bash bootstrap/add-content.sh${CONFIG_ARG} --items <ids|recommended|none>"
@@ -320,11 +376,15 @@ rest() {
   if [ "$CFG_OK" = 1 ]; then
     log ""
     log "Repos you already filled from an older starter are NOT updated by this script."
-    log "bash bootstrap/copy-starter.sh --dry-run <starter-subdir> <owner/repo> shows what the newer"
+    log "bash bootstrap/copy-starter.sh${CONFIG_ARG} --dry-run <starter-subdir> <owner/repo> shows what the newer"
     log "starter would change there and lists files that differ on the default branch as REFUSED;"
     log "read those before any --force."
   fi
   log ""
+  if [ ${#TODO[@]} -gt 0 ]; then
+    log "Do this now:"
+    for i in "${!TODO[@]}"; do log "  $((i + 1)). ${TODO[$i]}"; done
+  fi
   # No finish(): its "nothing to change" would hide add-content.sh's writes.
   log "Next: bash bootstrap/status.sh${CONFIG_ARG}"
   exit 0
@@ -513,7 +573,7 @@ if [ ${#starter_paths[@]} -gt 0 ] && [ "$DISCARD" = 0 ]; then
       {
         printf 'ERROR: add-content.sh could not be re-run in a scratch copy, so whether starter/ holds only its files is unknown. Its last lines:\n'
         tail -n 15 "$BOOT_WORK/proof.out" | sed 's/^/  | /'
-        printf 'It installs npm packages from the npm registry: check the network and node/npm (bash bootstrap/preflight.sh), then run this again.\n'
+        printf 'It installs npm packages from the npm registry: check the network and node/npm (bash bootstrap/preflight.sh%s), then run this again.\n' "$CONFIG_ARG"
         printf 'If you have no edits of your own under starter/, --discard-starter-edits skips this check (it saves every starter/ change first). Nothing was changed.\n'
       } >&2
       exit 1

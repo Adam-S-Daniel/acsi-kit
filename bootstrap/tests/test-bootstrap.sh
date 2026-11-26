@@ -1296,6 +1296,19 @@ assert "the upstream file is there" has "$UK/starter/wsl-automation/UPSTREAM-TES
 assert "the optional item is back in starter/" test -f "$UK/$ITEM"
 assert "it reports the fast-forward" has "$OUT" "${h0:0:12} -> $(origin_head | cut -c1-12), 1 commit(s)"
 assert "it names the new key as optional" has "$OUT" "new, optional: NEW_KEY_FOR_TEST"
+# add-content.sh's line per file goes to a log the output names; the output
+# keeps the counts and ends with what to do now, then Next:.
+assert_not "it prints no line per file add-content.sh put back" grep -qE '^ *(add|change): [A-Za-z0-9_.-]+/' "$OUT"
+ULOG=$(sed -nE 's/^  \([0-9]+ file\(s\) added or changed in starter\/; the list is in (.*)\)$/\1/p' "$OUT" | head -n1)
+assert "it counts them and names the log" test -n "$ULOG"
+assert "the log lists every file" grep -qE '^  add: agent-skills/' "${ULOG:-/nonexistent}"
+assert "the log is outside the kit" bash -c 'case $1 in "$2"/*|"") exit 1 ;; esac' _ "$ULOG" "$UK"
+assert "it keeps add-content's per-tree counts" grep -qE '^  starter/[a-z-]+: add [0-9]+ file\(s\), change [0-9]+$' "$OUT"
+assert "it ends with a Do this now block" grep -qx 'Do this now:' "$OUT"
+assert "its first item is the TIME_ZONE this fleet.env lacks" grep -qE "^  1\. Set TIME_ZONE in $UK/fleet\.env \(your IANA time zone name, such as Europe/Berlin" "$OUT"
+assert "it names the existing repos that need a pull request for the content" grep -qE '^  [0-9]+\. Open a pull request on acme-example/[a-z_-]+ \(never a push' "$OUT"
+assert "the block comes after add-content's output" bash -c '[ "$(grep -n "^Do this now:$" "$1" | cut -d: -f1)" -gt "$(grep -n "file(s) added or changed in starter/" "$1" | cut -d: -f1)" ]' _ "$OUT"
+assert_eq "Next: is still the last line" "$(tail -n1 "$OUT")" "Next: bash bootstrap/status.sh --config $UK/fleet.env"
 COPY_STEP=$(jq -r '[.steps[] | select(.run | test("copy-starter[.]sh"))][0].id' "$K/bootstrap/steps.json")
 assert "it names TIME_ZONE as needed before the copy step, not as blocking the update" has "$OUT" "new, needed before the copy step (step $COPY_STEP): TIME_ZONE (copy-starter.sh refuses until it is set in your fleet.env; this update does not need it)"
 assert_not "TIME_ZONE is not called optional" has "$OUT" "new, optional: TIME_ZONE"
@@ -1534,6 +1547,7 @@ assert_eq "the README block updates a clone older than the script" "$rc" 0
 assert_eq "the old clone reached the upstream head" "$(git -C "$UP/k3" rev-parse HEAD)" "$(git -C "$O3" rev-parse HEAD)"
 assert "the item is back in the old clone" test -f "$UP/k3/$SEC"
 assert "it ends with status.sh and the config path" has "$OUT" "Next: bash bootstrap/status.sh --config"
+assert_not "the block's run prints no line per file either" grep -qE '^ *(add|change): [A-Za-z0-9_.-]+/' "$OUT"
 # A fetch that fails inside the script shows git's own lines and changes nothing.
 git -C "$UK" remote set-url origin "$UP/no-such-origin.git"; h1=$(git -C "$UK" rev-parse HEAD)
 uk "$UK" --config "$UK/fleet.env"; rc=$?
@@ -1560,7 +1574,8 @@ assert_eq "the update with a reopened step exits 0" "$rc" 0
 cp "$OUT" "$UP/update-after.txt"
 [ "$rc" = 0 ] || sed 's/^/    update-kit: /' "$ERR"
 assert "it says which steps reopened" has "$OUT" "Steps that were done before this update and are NOT done under the newer kit (its checks ask for more):"
-assert "it names step 3 and the command to run again" has "$OUT" "  step 3, Store the privacy denylist: \`bootstrap/set-secrets.sh --only privacy"
+assert "it names step 3 and the command to run again, with the config" has "$OUT" "  step 3, Store the privacy denylist: \`bootstrap/set-secrets.sh --config $CFGP --only privacy"
+assert "Do this now names step 3 too" has "$OUT" ". Step 3 (Store the privacy denylist) is not done under the newer kit: \`bootstrap/set-secrets.sh --config $CFGP --only privacy"
 run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/status.sh" --config "$CFGP"
 assert_not "after the update status.sh shows step 3 not done" grep -qE '^done +3 ' "$OUT"
 cp "$OUT" "$UP/status-after.txt"
@@ -1584,6 +1599,8 @@ run env ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/update-k
 assert_eq "the update that reopens step 0 exits 0" "$rc" 0
 assert "it names step 0" has "$OUT" "  step 0, Write fleet.env:"
 assert "it says why: TIME_ZONE, as status.sh and the key report do" has "$OUT" "    why: $UP/k5.env: TIME_ZONE is required: set TIME_ZONE in fleet.env"
+assert "Do this now says to set TIME_ZONE for step 0" has "$OUT" ". Step 0 (Write fleet.env) is not done under the newer kit: $UP/k5.env: TIME_ZONE is required: set TIME_ZONE in fleet.env"
+assert_not "and never to copy the example over fleet.env" grep -qE '^  [0-9]+\. .*cp bootstrap/fleet.env.example' "$OUT"
 # A downloaded copy (no .git) cannot be updated in place.
 mkdir -p "$UP/dl"; cp -R "$UK/bootstrap" "$UK/starter" "$UK/library" "$UP/dl/"
 uk "$UP/dl" --config "$UK/fleet.env"; rc=$?
