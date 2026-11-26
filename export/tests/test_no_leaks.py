@@ -308,6 +308,49 @@ def test_scanner_catches_the_possessive_file_name_form():
     assert scan_text(name, protector)[NAME_WORD] == 1
 
 
+def _name_forms(word: str) -> list[str]:
+    low, title, up = word.lower(), word[:1].upper() + word[1:].lower(), word.upper()
+    return [up, low, title, f"scan_{low}_tasks", f"{low}Tasks", f"scan{title}Tasks", f"{title}Tasks",
+            f"{low}-tasks", f"{up}_TASKS", f"scripts/{low}_tasks.py"]
+
+
+def _letters(regex: str) -> str:
+    """The word a rule's regex spells, one letter per `[Xx]` class or bare letter.
+
+    Built at run time from the rule itself, so this file never spells the
+    name; it reads an old word-bounded form too, so a revert fails on the
+    forms it misses, not here."""
+    body = regex.replace("(?i)", "").replace("\\b", "")
+    return "".join(a or b for a, b in re.findall(r"\[([A-Za-z])[A-Za-z]\]|([A-Za-z])", body))
+
+
+def test_leak_scan_and_substitution_cover_the_workstation_name_in_every_form():
+    # The real rules, read from the manifest by their label.
+    rule = next(r for r in _COMMON["substitutions"] if r.get("name") == "workstation name")
+    leak = next(rx for name, rx in TOKENS if name == "workstation name")
+    word = _letters(rule["regex"])
+    assert len(word) >= 3 and _letters(leak.pattern).lower() == word.lower()
+    subst = export.Substituter(export.compile_rules([rule]))
+    style = {word.upper(): "WORKSTATION", word.lower(): "workstation",
+             word[:1].upper() + word[1:].lower(): "Workstation"}
+    for text in _name_forms(word):
+        assert leak.search(text), f"the leak scan misses form #{_name_forms(word).index(text)}"
+        assert subst.rules[0].rx.search(text), f"the substitution misses form #{_name_forms(word).index(text)}"
+        out = subst.sub(text, text)
+        assert not leak.search(out)
+        for spelled, replaced in style.items():
+            if spelled in text:
+                assert text.replace(spelled, replaced) == out
+
+
+def test_scanner_flags_a_surviving_lowercase_stand_in(monkeypatch):
+    stand_in = "zephyr" + "box"  # invented
+    classes = "".join(f"[{c.upper()}{c}]" for c in stand_in)
+    monkeypatch.setattr(sys.modules[__name__], "TOKENS", [("stand-in", re.compile(classes))])
+    hits = scan_text(f"def scan_{stand_in}_tasks({stand_in}): {stand_in}Tasks {stand_in.upper()}\n", _protector())
+    assert hits["stand-in"] == 4
+
+
 def test_scanner_reads_the_whole_kit_including_paths(tmp_path):
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / f"{_platform()}.md").write_text("clean\n", encoding="utf-8")
