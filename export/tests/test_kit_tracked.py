@@ -23,6 +23,9 @@ import pytest
 
 KIT = Path(__file__).resolve().parents[2]
 JUNK_DIRS = {"__pycache__", ".pytest_cache", "node_modules", ".git"}
+# What an adopter's setup writes at the top of the clone (the root .gitignore
+# ignores both): never kit content.
+ADOPTER_FILES = {"fleet.env", "app-manifests"}
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
@@ -32,8 +35,11 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
 def disk_files(root: Path) -> set[str]:
     out = set()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        dirnames[:] = [d for d in dirnames if d not in JUNK_DIRS]
+        dirnames[:] = [d for d in dirnames if d not in JUNK_DIRS
+                       and not (Path(dirpath) == root and d in ADOPTER_FILES)]
         here = Path(dirpath)
+        if here == root:
+            filenames = [f for f in filenames if f not in ADOPTER_FILES]
         names = list(filenames) + [d for d in dirnames if (here / d).is_symlink()]
         for name in names:
             if name.endswith(".pyc"):
@@ -104,6 +110,17 @@ def _kit_is_its_own_clone() -> bool:
     """True in a clone of the kit's repo, whose root is the kit itself."""
     top = _git(KIT, "rev-parse", "--show-toplevel")
     return top.returncode == 0 and Path(top.stdout.decode().strip()).resolve() == KIT.resolve()
+
+
+def test_the_adopters_fleet_env_and_app_manifests_are_ignored():
+    """fleet.env and create-apps.sh's app-manifests/ sit in the clone during setup;
+    git must never offer them for a commit."""
+    if not _kit_is_its_own_clone():
+        pytest.skip("the kit is not its own git clone")
+    for path in ("fleet.env", "app-manifests/guidance-sync.html", "app-manifests/guidance-sync.manifest.json"):
+        assert _git(KIT, "check-ignore", "-q", path).returncode == 0, path
+    for path in ("bootstrap/fleet.env.example", "bootstrap/fleet.env", "docs/app-manifests/x.html"):   # anchored at the top
+        assert _git(KIT, "check-ignore", "-q", path).returncode == 1, path
 
 
 def test_the_kit_carries_its_license():
