@@ -2942,6 +2942,23 @@ The fix is isolation, not ordering. A manifest's `suite:` block may say `venv: t
 
 Reverse: remove `venv_env` and the `venv` branch in `run_one`, the `venv: true` line in `export/manifests/skills-evals.yml`, the new tests, and the README and comment lines that mention it.
 
+## The workstation name in every case (2026-11-25)
+
+The rule for the owner's workstation name was a case-sensitive, word-bounded regex, so it replaced the upper-case name in prose but let nine lowercase identifiers built on it through, in `skills-evals`' `scripts/automatic_spend.py` and `test/issues/test_issue_automatic_spend.py` (a function, a parameter and its uses, a test method and a test class). The owner's private scan caught them; the public `leak_scan` rule was case-sensitive too.
+
+Both rules now spell the name one letter class at a time (`[Xx][Yy]...`), so the kit's own text no longer holds it in any letter case (the owner chose to remove it going forward and leave git history alone), and neither has a word boundary, so both match in every letter case and inside identifiers. The substitution is a `regex` rule with `forms: true`, a new `export.py` form: its one-word `to` takes the matched text's case style, as the literal `forms` catch-all already did. That is one deterministic function of the matched text, so a definition and every caller, and code and its tests, get the same name and still parse:
+
+| Form in the source | Replacement |
+|---|---|
+| the name in capitals (prose, `NAME_X`, `X-NAME`) | `WORKSTATION` |
+| lowercase (a word, a parameter, `scan_<name>_tasks`, `<name>Tasks`, `<name>-x`) | `workstation` |
+| capitalized (`scan<Name>Tasks`, `<Name>Tasks`) and any other mixed case | `Workstation` |
+
+**Departure:** a longer unrelated word that holds the name is replaced inside too. That is intended for a machine name: the private scan matches it anywhere in any case, so leaving it would publish the name, and the sources at their pins hold no such word (only the identifiers above). A new one would show in a re-pin's `--check` diff, where a maintainer can read it. Paths are substituted by the same rules (step 4 of `export.py`); no tracked path holds the name, so nothing else changes. `export/tests/test_name_case_forms.py` covers every case style, a path, a definition and its callers (parsed with `ast`), and the longer-word decision with an invented stand-in name; `test_no_leaks.py` checks the real substitution and `leak_scan` rules against every form, with samples built at run time from the rules' own letter classes, so the test never spells the name either; it fails when the rules are put back in the old word-bounded, case-sensitive form.
+
+The source still uses the name in those identifiers at the `skills-evals` pin; renaming them there is a separate `skills-evals` pull request, and until the kit's pin moves past it, this rule is what keeps the shipped copy clean.
+
+Reverse: restore the word-bounded regex rule and the case-sensitive `leak_scan` entry, remove the `regex` + `forms` branch from `compile_rules`, delete the new test file and the two `test_no_leaks.py` tests, and re-run the export.
 ## The rules-consistency list names only the adopter's own repos (2026-11-25)
 
 `starter/skills-evals/evals/rules-consistency.yml` lists the public repos that skills-evals' daily `rules-consistency.yml` workflow shallow-clones with no token (three tries, then `::error::could not clone <repo>` and exit 1; the checker is never reached). The source's list holds `_agent-guidance`, `acsi-agentskills`, the kit's own repo and the owner's website. An adopter has no `acsi-kit` repo (it is not in `FLEET_REPOS`, `bootstrap/lib/common.sh`) and only an optional website, so the workflow failed every day.
