@@ -92,17 +92,24 @@ jobs:
         run: bash bootstrap/tests/test-bootstrap.sh
 
   # Every export's own test suite (starter/run-all-tests.sh), the gap that let
-  # about 250 skills-evals export defects through (issue #72). A required
-  # check, so: no `on.paths`, no matrix and no `concurrency` group. The first
-  # step decides whether this pull request or push changed `starter/`,
-  # `export/`, this workflow or the action lockfile its steps run from; every
-  # later step is gated on it, so an
-  # unrelated change still reports success.
-  starter-suites:
-    name: starter-suites
+  # about 250 skills-evals export defects through (issue #72). One leg per
+  # owner form (export/owner_forms.py), side by side, so the two adopter forms
+  # add no time to the wait: `invented` runs the six trees as exported, `one`
+  # and `two` the five base trees under an adopter's names. The required check
+  # is the `starter-suites` job below, which waits for every leg. No
+  # `on.paths` and no `concurrency` group here: the first step decides whether
+  # this pull request or push changed `starter/`, `export/`, this workflow or
+  # the action lockfile its steps run from; every later step is gated on it,
+  # so an unrelated change still reports success.
+  suites:
+    name: suites (${{ matrix.form }})
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        form: [invented, one, two]
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -211,9 +218,31 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         env:
           PYTHONDONTWRITEBYTECODE: "1"
+          RUN_ALL_FORMS: ${{ matrix.form }}
         run: |
           set -uo pipefail
           unshare --user --map-current-user --pid --fork --mount-proc -- bash starter/run-all-tests.sh
           rc=$?
           echo "run-all-tests.sh exited $rc"
           exit "$rc"
+
+  # The required context. It runs whatever the legs did (`if: always()`, so a
+  # failed or cancelled leg cannot leave it skipped, which would read as
+  # passing) and fails unless every leg concluded success.
+  starter-suites:
+    name: starter-suites
+    needs: [suites]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Every owner form's suites passed
+        env:
+          SUITES_RESULT: ${{ needs.suites.result }}
+        run: |
+          set -euo pipefail
+          if [ "$SUITES_RESULT" != success ]; then
+            echo "::error::the starter suites concluded '$SUITES_RESULT': open the failing suites leg"
+            exit 1
+          fi
+          echo "every owner form's starter suites passed"

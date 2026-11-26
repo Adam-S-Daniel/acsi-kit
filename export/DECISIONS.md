@@ -918,6 +918,75 @@ a YAML loader rejects. `bootstrap/tests/check-one-owner.py` substitutes
 every starter YAML file with one owner and loads each with a
 duplicate-key-rejecting loader; with the collapse turned off it fails.
 
+The kit's CI ran each starter's own suite only as exported, with the two
+invented owners, so a test that held for those two names and for nothing
+else shipped green. `export/run_suites.py --owners {invented,one,two}` now
+gives each copy an adopter's names first, the way `copy-starter.sh` does
+(`export/owner_forms.py`): `substitute.py`, `plan_sizing.py --plan pro`, then
+`repin.py`. `one` is `--owner acme-solo --owner-two ACME-Solo` (the case
+differs on purpose: logins compare case-insensitively). `two` is
+`--owner zeta-user --owner-two Alpha-Org`, which sorts the other way round
+from the invented pair, and it also does the documented "drop the example
+repos" step: the three `example-site-*` rows of `repo-settings/fleet.yml`,
+and those names in `repos.yml`'s `cron_coverage.fleet` and
+`skills_bootstrap.repos`. The rows are found by the YAML parser's node
+positions, with the comment lines above each, and the file must load to the
+original minus those rows, or the run fails. `starter/run-all-tests.sh` runs
+the five base trees in all three forms and `skills-evals` in the invented form
+only: the evals track is optional and its suite is the longest. A form passes
+on the same terms as before, so `starter/known-failures.txt` applies to every
+form and is never the place for a failure a form causes.
+
+What the three forms found, and how each is fixed:
+
+- **repo-settings tests.** The review-answer cases were pairs, the workflow's
+  `if:` was compared as one sorted string, and four tests pinned the shipped
+  `fleet.yml` (a count of eight, a count of six, the label-only set, the
+  per-owner split of `cms-label-repos`). The cases are built with
+  `itertools.product` over however many owners the test names, the conjunct
+  is compared as a set of disjuncts, and the fleet-pinned tests read the
+  label-only repos from the file (the engine's guard list must still match
+  them, and each must pass its rules). The `cms-label-repos` test keeps its
+  own list of the three example sites and cuts it to the rows the file still
+  has, so its expectation never comes from the engine it checks. Counts
+  became "at least one". These are `edits:` in `manifests/repo-settings.yml`, and two lines of
+  `patches/repo-settings/kit_config.py`, which already rewrote them.
+- **agent-guidance tests.** The on-hold provisioning test, the dependabot
+  shape test, the impact-report token test and the git-hooks count (six
+  includeIf entries, two owners times three URL forms) named two owners. They
+  read the owners from `sync.yml`, leave each owner's pattern out in turn, or
+  count per owner. Edits in `manifests/_agent-guidance.yml`.
+- **Duplicate pairs outside YAML.** In a one-owner tree, `substitute.py` now
+  also cuts an owner pair to one owner, in files that are not YAML or
+  Markdown, on lines that are not comments (`#`, `//`, `*`, `/*`), for exactly
+  these shapes on one line: a bracketed list of the two quoted owners with the
+  same suffix (`["example-adopter/*", "example-adopter-two/*"]`), a quoted
+  space-separated pair (`owners="a b"`), and `for x in a b; do`. Lists of
+  three, tuples and pairs over two lines are left as duplicates. This fixed
+  `install-agent-hooks.sh`, the JS owner lists in the tests and the hook's
+  own loop. `check-one-owner.py` only reads YAML, and its `--no-collapse`
+  proof is unchanged.
+- **Digest pins.** `scripts/cloud-env-setup.sh` pins the sha256 of the
+  bundled `fleet-memory.sh`, and agent-guidance's `docs/codex-cloud.md` pins
+  that of `.claude/hooks/fleet-memory.sh`. The hook names the owners, so
+  substitution changes its bytes and the tests that recompute the digest
+  fail for every adopter. `bootstrap/lib/repin.py` (a table of pin file,
+  pin shape and file it digests) recomputes them after `plan_sizing.py`, in
+  `copy-starter.sh` and in the test runner. It fails when a row's file or
+  pin is missing, and does nothing in a tree that has none of the pin files.
+  It leaves `fleet_pin_commit` alone: that is a commit of the owner's own
+  repository, which `regenerate.sh` pins.
+
+`steps.json` step 9 and `docs/generated-files.md` no longer tell the adopter
+to edit rows of `tests/test_repo_settings.py`: the tests read `fleet.yml`.
+
+In the kit's CI the three forms run as three legs of one `suites` job, side
+by side (`RUN_ALL_FORMS` picks a leg's form), so the two adopter forms add no
+time to a merge. The required context is still `starter-suites`: that job now
+only waits for the legs, runs under `if: always()` so it is never skipped, and
+fails unless every leg concluded success. `export/tests/test_run_suites.py`
+parses `ci.yml` and holds that shape.
+
 ### Smaller fixes
 
 - **Sentence case.** `export.py`'s `_at_sentence_start` capitalized "the

@@ -37,6 +37,25 @@ original's data gives. Text inside block scalars (`run: |`) is left to the
 pass. This step needs PyYAML; every other use is Python 3 standard library
 only.
 
+The same one-owner pass then drops a duplicated pair from the owner lists
+that code and tests spell out in other files (never YAML, never Markdown, and
+never a comment line, which starts with #, //, * or /*). It matches, on one
+line, exactly these shapes, for each of the three spellings (example-adopter,
+EXAMPLE_ADOPTER, example_adopter) and either order of the pair, and keeps one
+owner:
+  ["example-adopter", "example-adopter-two"]   a bracketed list of the two,
+                                               in matching single or double quotes,
+                                               each with the same suffix, if any
+                                               (["example-adopter/*", "example-adopter-two/*"])
+  "example-adopter example-adopter-two"        a quoted space-separated pair
+                                               (`owners="..."`, `SYNC_OWNERS="..."`)
+  for owner in example-adopter example-adopter-two; do
+                                               a shell loop over the pair
+Anything else (a list of three, a tuple, a pair split over two lines, a pair
+inside a longer word or string) is left for the substitution to make a
+duplicate, which every one of those readers tolerates or a manifest edit
+handles.
+
 Refuses, changing nothing, when the tree names the second owner and
 --owner-two is not given, or when a login or name is not plain. After the
 pass, any form of the invented owner left over is an error. Binary files
@@ -194,6 +213,54 @@ def collapse_yaml(text):
     return out
 
 
+PAIRS = (("example-adopter", "example-adopter-two"), ("EXAMPLE_ADOPTER", "EXAMPLE_ADOPTER_TWO"),
+         ("example_adopter", "example_adopter_two"))
+COMMENT_LINE = re.compile(r"\s*(?:#|//|\*|/\*)")
+
+
+def _pair_rules():
+    """[(regex, replacement function)] for each spelling and order of the three shapes."""
+    rules = []
+    for one, two in PAIRS:
+        for x, y in ((one, two), (two, one)):
+            rules.append((re.compile(r"\[\s*(?P<q>[\"'])" + re.escape(x) + r"(?P<s>[^\"'\\\s,\]]*)(?P=q)\s*,\s*(?P=q)"
+                                     + re.escape(y) + r"(?P=s)(?P=q)\s*\]"),
+                          lambda m, one=one: f"[{m['q']}{one}{m['s']}{m['q']}]"))
+            rules.append((re.compile(r"(?P<q>[\"'])" + re.escape(x) + " " + re.escape(y) + r"(?P=q)"),
+                          lambda m, one=one: f"{m['q']}{one}{m['q']}"))
+            rules.append((re.compile(r"(?P<for>\bfor\s+\w+\s+in\s+)" + re.escape(x) + " " + re.escape(y) + r"(?![\w-])"),
+                          lambda m, one=one: m["for"] + one))
+    return rules
+
+
+def collapse_lists(text):
+    """`text` with each owner pair of the shapes in the module docstring cut to one owner."""
+    rules = _pair_rules()
+    out = []
+    for line in text.splitlines(keepends=True):
+        if not COMMENT_LINE.match(line):
+            for rx, fn in rules:
+                line = rx.sub(fn, line)
+        out.append(line)
+    return "".join(out)
+
+
+def collapse_pairs(root):
+    for p in walk_files(root):
+        if p.endswith((".yml", ".yaml", ".md")):
+            continue
+        text = text_of(p)
+        if not text or not _names_two(text):
+            continue
+        new = collapse_lists(text)
+        if new != text:
+            mode = os.stat(p).st_mode
+            with open(p, "w", encoding="utf-8", newline="") as f:
+                f.write(new)
+            os.chmod(p, mode & 0o7777)
+            print(f"collapsed: {os.path.relpath(p, root)}")
+
+
 def collapse_two(root):
     try:
         import yaml  # noqa: F401
@@ -272,6 +339,7 @@ def main(argv=None):
 
     if a.owner_two and a.owner_two.lower() == a.owner.lower():
         collapse_two(a.root)
+        collapse_pairs(a.root)
 
     t = table(a.owner, a.owner_two, name, a.noreply)
     rx = re.compile("|".join(re.escape(k) for k in sorted(t, key=len, reverse=True)))
