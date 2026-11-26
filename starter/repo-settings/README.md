@@ -185,8 +185,11 @@ organization secrets. The adoption kit's `fleet.yml` declares no fan-out,
 and its plan jobs do not ask for Secrets: Read, because only your skills
 registry reads that secret and the kit's bootstrap stores it there. To fan
 it out, add `secrets: [{name: PRIVACY_DENYLIST}]` under `defaults` in
-`fleet.yml` and `permission-secrets: read` to the three read-only token
-steps in `.github/workflows/repo-settings.yml`, then follow these steps
+`fleet.yml`; in `.github/workflows/repo-settings.yml`, add
+`permission-secrets: read` to the three read-only token steps, the
+`PRIVACY_DENYLIST` secret to the two apply steps' `env`, and the
+`PRIVACY_DENYLIST_UPDATED_AT` variable to the workflow's `env`; then
+follow these steps
 ([ADR 0020](docs/decisions/0020-fan-the-privacy-denylist-out-as-a-secrets-surface.md),
 [#231](https://github.com/Adam-S-Daniel/repo-settings/issues/231)).
 

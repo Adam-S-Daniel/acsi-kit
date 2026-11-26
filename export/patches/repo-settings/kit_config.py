@@ -119,18 +119,22 @@ def _bypass_entries(actors: list | None) -> list[dict]:'''),
 ]
 
 WORKFLOW_EDITS = [
-    # The source has a top-level env block since repo-settings#232; the C12
-    # variables join it (a second `env:` key is invalid YAML).
-    ('''env:
+    # The source's top-level env block (repo-settings#232) holds only the
+    # fan-out's timestamp, which the kit does not wire (FANOUT_CUT below), so
+    # the block becomes the C12 App id variables.
+    ('''# When the source PRIVACY_DENYLIST was last stored (a timestamp, not a value;
+# scripts/set_privacy_denylist.py sets it). Every job that plans or applies the
+# `secrets` surface reads it to tell a stale copy from a current one. The VALUE
+# is passed only to the two apply steps below.
+env:
   PRIVACY_DENYLIST_UPDATED_AT: ${{ vars.PRIVACY_DENYLIST_UPDATED_AT }}
 
 jobs:''',
-     '''env:
-  PRIVACY_DENYLIST_UPDATED_AT: ${{ vars.PRIVACY_DENYLIST_UPDATED_AT }}
-  # Account-specific App ids that fleet.yml names as "${NAME}" (the adoption
-  # kit's DECISIONS C12): repository variables the kit's bootstrap sets. The
-  # engine refuses to render a ruleset whose id is unset, so a missing variable
-  # fails the plan instead of dropping a bypass.
+     '''# Account-specific App ids that fleet.yml names as "${NAME}" (the adoption
+# kit's DECISIONS C12): repository variables the kit's bootstrap sets. The
+# engine refuses to render a ruleset whose id is unset, so a missing variable
+# fails the plan instead of dropping a bypass.
+env:
   GUIDANCE_SYNC_APP_ID: ${{ vars.GUIDANCE_SYNC_APP_ID }}
   ROSTER_WRITER_APP_ID: ${{ vars.ROSTER_WRITER_APP_ID }}
 
@@ -142,12 +146,18 @@ jobs:'''),
 # acsi-agentskills reads that secret, and bootstrap/set-secrets.sh stores it
 # there, so the kit's fleet.yml declares no fan-out and its read-only plan
 # tokens do not ask for Secrets: read, which the kit's settings Apps are not
-# granted (bootstrap/create-apps.sh): asking for it would fail every plan.
+# granted (bootstrap/create-apps.sh): asking for it would fail every plan. The
+# workflow's fan-out wiring (the value and its timestamp) goes with it.
 # The engine's `secrets` surface ships, unused until an adopter declares it.
 FANOUT_CUT = ("  # why: the fleet's privacy denylist has to reach every repo's CI, and\n",
               "  # Prerequisite for the Dependabot unattended-merge path")
 SECRETS_READ = "          permission-secrets: read\n"
 SECRETS_READ_COUNT = 3
+# The two apply steps' copy of the value; no kit repo-settings secret holds it
+# (bootstrap/tests/check-refs.py requires each secret a workflow reads to be
+# one a bootstrap script stores there).
+FANOUT_VALUE = "          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}\n"
+FANOUT_VALUE_COUNT = 2
 
 FANOUT_TEST_EDITS = {
     "tests/test_repo_settings_workflow_token.py": [
@@ -353,7 +363,10 @@ def apply(root: Path, ctx) -> None:
     if text.count(SECRETS_READ) != SECRETS_READ_COUNT:
         raise SystemExit(f"kit_config: repo-settings.yml: expected {SECRETS_READ_COUNT} of {SECRETS_READ!r}, "
                          f"found {text.count(SECRETS_READ)}")
-    wf.write_text(text.replace(SECRETS_READ, ""), encoding="utf-8")
+    if text.count(FANOUT_VALUE) != FANOUT_VALUE_COUNT:
+        raise SystemExit(f"kit_config: repo-settings.yml: expected {FANOUT_VALUE_COUNT} of {FANOUT_VALUE!r}, "
+                         f"found {text.count(FANOUT_VALUE)}")
+    wf.write_text(text.replace(SECRETS_READ, "").replace(FANOUT_VALUE, ""), encoding="utf-8")
 
     for rel, pairs in (("scripts/repo_settings.py", ENGINE_EDITS),
                        ("scripts/set_privacy_denylist.py", SETTER_EDITS),
