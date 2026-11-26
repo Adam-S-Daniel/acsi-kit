@@ -127,7 +127,7 @@ test('sweep covers the declared fleet across both owners', () => {
   const body = prose(section(spec, 'Repos considered'));
   includes(body, ["`cron_coverage.fleet` key on `origin/main`", '`example-adopter` and `example-adopter-two`', 'Never guess the owner', 'never treated as clean', 'dedupe on `full_name`', 'one canonical name is one repo']);
   const fleet = YAML.parse(read('repos.yml')).cron_coverage.fleet;
-  assert.ok(Array.isArray(fleet) && fleet.includes('_agent-guidance') && fleet.length >= 6);  // the kit's repos (DECISIONS C11)
+  assert.ok(Array.isArray(fleet) && fleet.includes('_agent-guidance') && fleet.length >= 5);  // the kit's base repos (DECISIONS C11)
   const owners = Object.values(YAML.parse(read('.github/workflows/sync.yml')).jobs)
     .flatMap(job => job.steps).map(step => step.env?.SYNC_OWNERS).filter(Boolean);
   for (const owner of String(owners[0]).split(/[\s,]+/).filter(Boolean)) assert.ok(body.includes(`\`${owner}\``), `owner ${owner} not named`);

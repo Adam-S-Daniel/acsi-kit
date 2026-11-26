@@ -106,7 +106,7 @@ for s in "${SCRIPTS[@]}"; do
   assert "$s uses set -euo pipefail" grep -qx 'set -euo pipefail' "$B/$s"
   assert "$s --help prints its usage" bash -c '"$1" "$2" --help | grep -qF "$3"' _ bash "$B/$s" "$s ["
 done
-for p in lib/substitute.py lib/plan_sizing.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
+for p in lib/substitute.py lib/plan_sizing.py lib/content.py lib/fleet_fragment.py lib/coverage_fleet.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
          tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/check-evals-refs.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
@@ -1071,8 +1071,20 @@ for r in _agent-guidance repo-settings wsl-automation; do
   assert_eq "$r's lock names your registry" "$(on_main "$r" skills.lock | jq -r .registry)" acme-example/acsi-agentskills
 done
 assert "acsi-agentskills-private's lock is the registry's copy" bash -c 'cmp -s <(git --git-dir="$1" show main:skills.lock) <(git --git-dir="$2" show main:skills.lock)' _ "$T/remotes/$O/acsi-agentskills-private.git" "$T/remotes/$O/acsi-agentskills.git"
+# The starter's coverage list leaves skills-evals out (a name neither owner
+# has fails the daily Dependabot health check); evals-fleet adds it.
+cov_names() { python3 -I -c 'import sys, yaml; print(" ".join(yaml.safe_load(sys.stdin)["cron_coverage"]["fleet"]))'; }
+assert_not "the starter's coverage list leaves skills-evals out" bash -c 'grep -qw skills-evals <<<"$1"' _ "$(on_main _agent-guidance repos.yml | cov_names)"
+assert "the starter's coverage list names the base repos" bash -c 'grep -qw wsl-automation <<<"$1"' _ "$(on_main _agent-guidance repos.yml | cov_names)"
+run bash "$B/regenerate.sh" --config "$CFGP" --check evals-fleet
+assert "evals-fleet --check names the coverage list" has "$OUT" "NOT DONE: acme-example/_agent-guidance repos.yml cron_coverage.fleet does not name skills-evals"
+assert "evals-fleet --check counts both lists" has "$OUT" "evals-fleet: 2 item(s) not done"
 regen_and_merge evals-fleet
 assert_eq "regenerate evals-fleet exits 0" "$RC" 0
+assert_eq "evals-fleet appends skills-evals to the coverage list" "$(on_main _agent-guidance repos.yml | cov_names | tr ' ' '\n' | tail -n 1)" skills-evals
+assert_eq "the coverage pull request changes repos.yml alone, by one line" \
+  "$(git --git-dir="$T/remotes/$O/_agent-guidance.git" diff --numstat main~1 main | tr '\t' ' ')" "1 0 repos.yml"
+assert_eq "evals-fleet opens one pull request in each of the two repos" "$(jqs '[.prs[][] | select(.head == "regenerate/evals-fleet")] | length')" 2
 assert_eq "evals-fleet appends skills-evals to fleet.yml's repos" "$(on_main repo-settings repo-settings/fleet.yml | fleet_names | tr ' ' '\n' | tail -n 1)" acme-example/skills-evals
 assert_not "evals-fleet deletes the fragment" git --git-dir="$T/remotes/$O/repo-settings.git" cat-file -e main:repo-settings/fleet.evals.yml
 assert "the merged element is the fragment's" bash -c 'diff <(git --git-dir="$1" show starter/repo-settings:repo-settings/fleet.evals.yml | python3 -I -c "import sys, yaml; print(yaml.safe_load(sys.stdin)[\"repos\"])") <(git --git-dir="$1" show main:repo-settings/fleet.yml | python3 -I -c "import sys, yaml; print(yaml.safe_load(sys.stdin)[\"repos\"][-1:])")' _ "$T/remotes/$O/repo-settings.git"

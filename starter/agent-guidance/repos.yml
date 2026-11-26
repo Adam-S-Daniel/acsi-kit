@@ -12,9 +12,8 @@
 #   • FORKS. Discovery passes `--source` to `gh repo list`, which means
 #     non-forks only. Deliberate — an AGENTS.md pushed into a fork becomes a
 #     diff against the upstream project and rides along in any PR sent back to
-#     it. example-adopter/OctopusDeploy-Api and example-adopter/SonosAmpJuicePi are
-#     the current forks. To sync one, it would have to stop being a fork; there
-#     is no entry here that could include it.
+#     it. To sync a fork, it would have to stop being a fork; there is no
+#     entry here that could include it.
 #   • ARCHIVED repos. Discovery passes `--no-archived`. Also deliberate: an
 #     archived repo rejects pushes, so syncing one is a guaranteed failure, and
 #     nobody is opening agent sessions in it.
@@ -286,7 +285,9 @@ cron_coverage:
     - example-site-platform
     - example-site-b
     - repo-settings
-    - skills-evals
+    # skills-evals is not listed while you have no such repo: a name neither
+    # owner has fails dependabot-config-health.yml every day. The adoption
+    # kit's bootstrap/regenerate.sh evals-fleet adds it with the evals track.
     - wsl-automation
 
   # Deliberately NOT audited, and not expected to be checked out. Recorded so

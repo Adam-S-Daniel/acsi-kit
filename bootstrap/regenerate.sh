@@ -37,17 +37,24 @@
 #                  .github/workflows/actions.lock, proposing any change;
 #                  --check runs `gh actions-lock --verify`. Needs the gh
 #                  extension: gh extension install github/gh-actions-lock.
-#   evals-fleet    repo-settings: merges repo-settings/fleet.evals.yml (the
-#                  starter's skills-evals element) into repo-settings/fleet.yml
-#                  and deletes the fragment, with lib/fleet_fragment.py
-#                  (PyYAML: an element fleet.yml already declares is left as
-#                  it is). The evals track's (export/DECISIONS.md C13), so it
-#                  runs only once skills-evals exists; --check passes once
-#                  fleet.yml declares OWNER/skills-evals and no fragment is left.
+#   evals-fleet    declares skills-evals in the two lists the base leaves it
+#                  out of. repo-settings: merges repo-settings/fleet.evals.yml
+#                  (the starter's skills-evals element) into
+#                  repo-settings/fleet.yml and deletes the fragment, with
+#                  lib/fleet_fragment.py (PyYAML: an element fleet.yml already
+#                  declares is left as it is). _agent-guidance: appends
+#                  skills-evals to repos.yml cron_coverage.fleet with
+#                  lib/coverage_fleet.py (a list that names it is left as it
+#                  is); the starter's list leaves it out because a name
+#                  neither owner has fails the daily Dependabot health check.
+#                  The evals track's (export/DECISIONS.md C13), so it runs
+#                  only once skills-evals exists; --check passes once fleet.yml
+#                  declares OWNER/skills-evals with no fragment left and the
+#                  coverage list names skills-evals.
 #
 # skills-evals is the evals track's: the tasks leave it alone while it does
 # not exist (a base-only setup), and include it once it does; evals-fleet,
-# which edits repo-settings for it, is the evals track's too (regen_track). --track base
+# which edits repo-settings and _agent-guidance for it, is the evals track's too (regen_track). --track base
 # or --track evals limits a task to that track's repos (status.sh passes
 # each step's track to --check, so the base steps never look at
 # skills-evals); --track evals fails while skills-evals does not exist.
@@ -317,16 +324,37 @@ FRAG="repo-settings/fleet.evals.yml"
 edit_evals_fleet() {
   python3 -I -B "$HERE/lib/fleet_fragment.py" merge "$1" || die "could not merge $FRAG into repo-settings/fleet.yml (see above)"
 }
+COVERAGE="$HERE/lib/coverage_fleet.py"
+edit_coverage_fleet() {
+  python3 -I -B "$COVERAGE" add "$1/repos.yml" "$O/_agent-guidance repos.yml" "$EVALS_REPO" || exit 1
+}
 task_evals_fleet() {
+  local rc
   evals_repo_exists || die "$O/$EVALS_REPO does not exist (HTTP 404): the evals track creates it first (create-repos.sh $EVALS_REPO)"
+  # repo-settings: fleet.yml declares it, and the fragment is gone.
   need repo-settings repo-settings/fleet.yml
   if python3 -I -B "$HERE/lib/fleet_fragment.py" check "$CLONE" "$O" >"$BOOT_WORK/frag.out" 2>&1; then
-    current "$O/repo-settings repo-settings/fleet.yml declares $O/$EVALS_REPO"; return 0
+    current "$O/repo-settings repo-settings/fleet.yml declares $O/$EVALS_REPO"
+  elif [ "$CHECK" = 1 ]; then
+    sed -n 's/^NOT DONE: /&/p; s/^ERROR: /&/p' "$BOOT_WORK/frag.out"; NOT_DONE=$((NOT_DONE + 1))
+  else
+    propose repo-settings "Declare skills-evals in fleet.yml" \
+      "Moves skills-evals' element from $FRAG into repo-settings/fleet.yml and deletes the fragment, so the next settings apply protects skills-evals (the kit's export/DECISIONS.md C13). Merge it once the roster App's id is set as ROSTER_WRITER_APP_ID: fleet.yml then names it." \
+      edit_evals_fleet repo-settings/fleet.yml "$FRAG"
   fi
-  if [ "$CHECK" = 1 ]; then sed -n 's/^NOT DONE: /&/p; s/^ERROR: /&/p' "$BOOT_WORK/frag.out"; NOT_DONE=$((NOT_DONE + 1)); return 0; fi
-  propose repo-settings "Declare skills-evals in fleet.yml" \
-    "Moves skills-evals' element from $FRAG into repo-settings/fleet.yml and deletes the fragment, so the next settings apply protects skills-evals (the kit's export/DECISIONS.md C13). Merge it once the roster App's id is set as ROSTER_WRITER_APP_ID: fleet.yml then names it." \
-    edit_evals_fleet repo-settings/fleet.yml "$FRAG"
+  # _agent-guidance: the audits' list names it, now that the repo exists.
+  need _agent-guidance repos.yml
+  rc=0; python3 -I -B "$COVERAGE" check "$CLONE/repos.yml" "$O/_agent-guidance repos.yml" "$EVALS_REPO" >"$BOOT_WORK/cov.out" || rc=$?
+  case $rc in
+    0) current "$O/_agent-guidance repos.yml cron_coverage.fleet names $EVALS_REPO" ;;
+    1) if [ "$CHECK" = 1 ]; then cat "$BOOT_WORK/cov.out"; NOT_DONE=$((NOT_DONE + 1))
+       else
+         propose _agent-guidance "List skills-evals in cron_coverage.fleet" \
+           "Adds skills-evals to repos.yml cron_coverage.fleet, now that the repo exists, so the Dependabot health check, the fleet worker and the prompt-audit sweep cover it. The starter's list leaves it out: a name neither owner has fails the daily health check (the kit's export/DECISIONS.md, Pro plan values and small fixes)." \
+           edit_coverage_fleet repos.yml
+       fi ;;
+    *) exit 1 ;;
+  esac
 }
 
 [ "$CHECK" = 0 ] || [ "$DRY_RUN" = 0 ] || die "--check is read-only already; drop --dry-run"

@@ -14,9 +14,22 @@ file names is in `kit_repos` (manifests/_common.yml).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
+
+# The invented owners the substituted tree is written for (manifests/_common.yml, C2).
+OWNERS = ("example-adopter-two", "example-adopter")
+# The invented name of the retired registry (C1), which the comments keep as history.
+HISTORY = {"retired-agentskills"}
+
+
+def names_outside_kit(text: str, kit: set) -> list:
+    """Every `<owner>/<repo>` in the text, comments included, whose repo is
+    neither a kit repo nor the retired registry's invented name."""
+    owners = "|".join(re.escape(o) for o in OWNERS)
+    return sorted({m.group(1) for m in re.finditer(rf"\b(?:{owners})/([A-Za-z0-9._-]+)", text)} - kit - HISTORY)
 
 
 def _cut(text: str, start: str, end: str | None, where: str) -> str:
@@ -53,8 +66,23 @@ REPOS_YML_CUTS = [
 ]
 
 REPOS_YML_LINES = [
+    # The header's note on forks named two of the source owner's forks as
+    # "the current forks". An adopter has other forks or none: the rule stays,
+    # the names go.
+    ("#     it. example-adopter/OctopusDeploy-Api and example-adopter/SonosAmpJuicePi are\n"
+     "#     the current forks. To sync one, it would have to stop being a fork; there\n"
+     "#     is no entry here that could include it.\n",
+     "#     it. To sync a fork, it would have to stop being a fork; there is no\n"
+     "#     entry here that could include it.\n"),
     # cron_coverage.fleet
     ("    - ai-usage-dashboard\n    - claude-memory-map\n", ""),
+    # The base track has no skills-evals, and a name neither owner has fails
+    # dependabot-config-health.yml every day. The evals track adds it
+    # (bootstrap/regenerate.sh evals-fleet), so the list says where it goes.
+    ("    - skills-evals\n",
+     "    # skills-evals is not listed while you have no such repo: a name neither\n"
+     "    # owner has fails dependabot-config-health.yml every day. The adoption\n"
+     "    # kit's bootstrap/regenerate.sh evals-fleet adds it with the evals track.\n"),
     ("    - fastmail-actions\n", ""),
     ("    - rss-inator\n", ""),
     # The source owner's small public library (re-pin 2026-11-23), added to
@@ -111,11 +139,13 @@ ALLOWLIST_LINES = [
     ("example-adopter/ai-usage-dashboard AGENTS.md :: tested 2026-10-20\n", ""),
 ]
 
-# A test that pinned the list's size to the source fleet's.
+# A test that pinned the list's size to the source fleet's. Five is the base
+# track's fleet: the starter's list leaves `skills-evals` out (above) and step
+# 11 drops the three example repos.
 TEST_EDITS = [
     ("test/test-prompt-audit-sweep.js",
      "fleet.includes('_agent-guidance') && fleet.length >= 10);",
-     "fleet.includes('_agent-guidance') && fleet.length >= 6);  // the kit's repos (DECISIONS C11)"),
+     "fleet.includes('_agent-guidance') && fleet.length >= 5);  // the kit's base repos (DECISIONS C11)"),
 ]
 
 
@@ -159,3 +189,9 @@ def apply(root: Path, ctx) -> None:
     stray = sorted(set(named) - kit)
     if stray:
         raise SystemExit(f"kit_repos: repos.yml still names repos outside the kit: {stray}")
+    # The comments too: an owner-qualified name there (`<owner>/<repo>`, a
+    # lexical token) must be a kit repo, so a note about the source owner's
+    # other repos cannot ride along.
+    stray = names_outside_kit(text, kit)
+    if stray:
+        raise SystemExit(f"kit_repos: repos.yml's text still names repos outside the kit: {stray}")
