@@ -10,7 +10,10 @@ Run: python3 -m pytest KIT/export/tests -q
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -313,3 +316,53 @@ def test_known_failures_still_excuse_a_failure_in_a_substituted_form(tmp_path, m
     ok, summary, log, notes = run_suites.run_one("t", suite, keep=False, known=known, owners="one")
     assert ok and "1 known failure(s) excused" in summary
     assert notes == ["known failure (excused): FAIL: test_m.T.test_a"]
+
+
+# ---- starter/run-all-tests.sh: which runs it starts, and how it counts them
+
+TREES = ("agent-guidance", "repo-settings", "agent-skills", "agent-skills-private", "wsl-automation")
+
+
+def _run_all(tmp_path, fail_key=""):
+    """starter/run-all-tests.sh in a copy of the kit's layout, with a stand-in
+    python3 that passes every run but `fail_key` ("<tree>.<form>") and records
+    each run it was asked for."""
+    (tmp_path / "starter").mkdir()
+    shutil.copy(KIT / "starter" / "run-all-tests.sh", tmp_path / "starter" / "run-all-tests.sh")
+    manifests = tmp_path / "export" / "manifests"
+    manifests.mkdir(parents=True)
+    for tree in TREES + ("skills-evals",):
+        (manifests / f"{tree}.yml").write_text(f"kit_name: {tree}\n")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake = fake_bin / "python3"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        "tree= form=\n"
+        "while [ $# -gt 0 ]; do case $1 in --kit-name) tree=$2; shift;; --owners) form=$2; shift;; esac; shift; done\n"
+        'echo "$tree.$form" >> "$RUN_ALL_SEEN"\n'
+        'if [ "$tree.$form" = "$RUN_ALL_FAIL" ]; then echo "FAIL $tree ($form): 1 failed"; exit 1; fi\n'
+        'echo "PASS $tree ($form): 1 passed"\n')
+    fake.chmod(0o755)
+    seen = tmp_path / "seen"
+    seen.write_text("")
+    env = dict(os.environ, PATH=f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+               RUN_ALL_SEEN=str(seen), RUN_ALL_FAIL=fail_key, RUN_ALL_JOBS="3")
+    p = subprocess.run(["bash", str(tmp_path / "starter" / "run-all-tests.sh")],
+                       capture_output=True, text=True, env=env)
+    return p, sorted(seen.read_text().split())
+
+
+def test_run_all_starts_each_base_tree_in_three_forms_and_skills_evals_once(tmp_path):
+    p, seen = _run_all(tmp_path)
+    assert p.returncode == 0, p.stdout + p.stderr
+    want = sorted([f"{t}.{f}" for t in TREES for f in ("invented", "one", "two")] + ["skills-evals.invented"])
+    assert seen == want
+    assert p.stdout.splitlines()[-1].startswith("runs: 16 passed, 0 failed, 16 total")
+
+
+def test_run_all_fails_when_one_form_of_one_tree_fails(tmp_path):
+    p, _ = _run_all(tmp_path, fail_key="repo-settings.two")
+    assert p.returncode == 1
+    assert "FAIL repo-settings (two) (exit 1):" in p.stdout
+    assert p.stdout.splitlines()[-1].startswith("runs: 15 passed, 1 failed, 16 total")

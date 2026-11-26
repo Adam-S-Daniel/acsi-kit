@@ -64,10 +64,14 @@ report() { # tree form
     failed=$((failed + 1)); echo "FAIL $label (exit $rc):"; sed 's/^/    /' "$logs/$key.log"
   fi
 }
+# Every planned run is reported, tree by tree: one that left no exit code (it
+# was killed, or never started) counts as failed.
+declare -A planned=()
+for run in "${runs[@]}"; do planned["${run/ /.}"]=1; done
 total=0
 for t in "${base_trees[@]}" skills-evals; do
   for f in "${forms[@]}"; do
-    [ -e "$logs/$t.$f.rc" ] || continue
+    [ -n "${planned[$t.$f]:-}" ] || continue
     total=$((total + 1)); report "$t" "$f"
   done
 done
