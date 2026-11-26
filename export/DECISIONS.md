@@ -409,6 +409,19 @@ suite, ShellCheck over `ci.yml`'s list, and the ASCII check of every
   grace, `Persistent=true`). Neither ran on macOS: launchd output is checked
   by parsing the plists with `plistlib`, and bash 3.2 compatibility of the
   runner is by inspection only.
+- **Installer preflight** (wsl-automation#132): `install-schedule.sh` refuses
+  before writing anything when `flock`, `timeout`/`gtimeout`, a date that reads
+  `-d @0` (only for the jobs that need it: the waiting feed), or, for systemd,
+  a user bus (`systemctl --user show-environment`) is missing, and lists every
+  gap with its fix in one message. The lookups and the PATH setup live in
+  `scripts/unix/tool-path.sh`, sourced by both scripts so the installer cannot
+  disagree with the runner. A failed `launchctl bootstrap` removes that
+  job's plist and exits 1 (no pre-check: it cannot be probed without a
+  session). On macOS the waiting feed is skipped, because Claude Code's
+  documentation puts macOS credentials in the Keychain, not in
+  `~/.claude/.credentials.json`. The source's `publish-waiting-feed.sh`
+  `date -d` is fixed in the source repository, not here. Exercised only
+  through stubs (no macOS machine).
 - `NOTICE` names the source repository and commit.
 
 ## Export record: agentskills
@@ -2956,9 +2969,39 @@ Both rules now spell the name one letter class at a time (`[Xx][Yy]...`), so the
 
 **Departure:** a longer unrelated word that holds the name is replaced inside too. That is intended for a machine name: the private scan matches it anywhere in any case, so leaving it would publish the name, and the sources at their pins hold no such word (only the identifiers above). A new one would show in a re-pin's `--check` diff, where a maintainer can read it. Paths are substituted by the same rules (step 4 of `export.py`); no tracked path holds the name, so nothing else changes. `export/tests/test_name_case_forms.py` covers every case style, a path, a definition and its callers (parsed with `ast`), and the longer-word decision with an invented stand-in name; `test_no_leaks.py` checks the real substitution and `leak_scan` rules against every form, with samples built at run time from the rules' own letter classes, so the test never spells the name either; it fails when the rules are put back in the old word-bounded, case-sensitive form.
 
+The older workstation name's two rules had the same word-bounded, case-sensitive form and spelled it too; they get the same letter-class, `forms` treatment, with the one-word replacement `OLDWORKSTATION` (`oldworkstation`, `Oldworkstation`) in place of `OLD-WORKSTATION`, because a hyphen inside a snake_case identifier would break the code. It appears in one source file, which the kit leaves out (X7), so no shipped byte changes.
+
 The source still uses the name in those identifiers at the `skills-evals` pin; renaming them there is a separate `skills-evals` pull request, and until the kit's pin moves past it, this rule is what keeps the shipped copy clean.
 
 Reverse: restore the word-bounded regex rule and the case-sensitive `leak_scan` entry, remove the `regex` + `forms` branch from `compile_rules`, delete the new test file and the two `test_no_leaks.py` tests, and re-run the export.
+
+## Kit-only blocks in the source (2026-11-25, Adam-S-Daniel/_agent-guidance#644)
+
+The source's fleet-worker spec (`docs/routines/fleet-worker.md`) gains a rule that lets the owner's fleet worker merge the kit's own re-sync pull requests (heads `resync/auto` and `resync-fix/*`), fenced by `<!-- kit-only:begin -->` and `<!-- kit-only:end -->` lines, and `repos.yml` gains a top-level `kit_resync` key (`repo`, `app_slug`) under a comment block. An adopter's fleet has no kit, so neither ships.
+
+- `export/patches/_agent-guidance/kit_only.py` cuts every marker-fenced region from the Markdown files under `docs/routines/` (markers and one blank line after the end marker included, so the paragraphs around it stay one blank line apart) and the `kit_resync` key with the comment block directly above it from `repos.yml`. It runs first among the patches, on the substituted tree, while the marker text is intact.
+- It landed before the source change, which is why it is a patch and not an `edits` entry (an edit's old text must match at the pin). With no markers and no key it changes nothing, so the starters are unchanged at the current pin. An unbalanced, nested or out-of-order marker stops the export, naming the file, instead of shipping half a block.
+- `export/tests/test_kit_only.py` covers the patch and holds the shipped fleet-worker spec to no marker, no `resync/auto` and no `resync-fix/`, and the shipped `repos.yml` to no `kit_resync`.
+
+Reverse: delete the patch, its manifest entry and its test file. The next re-pin then ships the owner's merge rule and key as exported.
+
+## The rules-consistency list names only the adopter's own repos (2026-11-25)
+
+`starter/skills-evals/evals/rules-consistency.yml` lists the public repos that skills-evals' daily `rules-consistency.yml` workflow shallow-clones with no token (three tries, then `::error::could not clone <repo>` and exit 1; the checker is never reached). The source's list holds `_agent-guidance`, `acsi-agentskills`, the kit's own repo and the owner's website. An adopter has no `acsi-kit` repo (it is not in `FLEET_REPOS`, `bootstrap/lib/common.sh`) and only an optional website, so the workflow failed every day.
+
+- The export drops the `acsi-kit` and website rows, leaving `_agent-guidance` and `acsi-agentskills`, both in `FLEET_REPOS` and neither in `ALWAYS_PRIVATE`. A conditional website row (from `SITE_REPO`) was not built: it needs a new substitution path in `copy-starter.sh` for one optional line, and an adopter with a site adds one `- repo:` row by hand, which the list's header now says. The checker itself needs nothing changed: it reads whatever clones it is given, and a removed row only means that repo is not checked.
+- The workflow cannot clone a private repo without a token, and the kit adds none. `_agent-guidance` is private when a paid-plan adopter sets `VISIBILITY_AGENT_GUIDANCE=private`; the list's header says to remove its row then. The clone failure message now says the repo must be public and exist, with the file to change, and `docs/workflows.md` says the same of the workflow's row.
+- `export/tests/test_rules_consistency_list.py` parses the shipped list and holds it to `FLEET_REPOS` (read from `common.sh`), never `ALWAYS_PRIVATE`, never `acsi-kit` or a site. The source's own test (`test_the_fleet_workflow_is_scheduled_read_only_and_names_no_repo`) asserts only that the list is non-empty and duplicate-free, so it passes unchanged.
+
+Reverse: delete the three manifest edits (and the `docs/workflows.md` one), the test file and this section, and re-run the export.
+
+## `skills-evals` re-pinned past its own identifier rename (2026-11-25)
+
+Only the `skills-evals` pin moves, from `ea84ca96c028` to `1492367482275c10c02c25d9ef1c9a16608a2def`, the merge of the source's own rename of the workstation-task identifiers (section "The workstation name in every case" above), so the source and the shipped copy now agree and the export's rule no longer has those identifiers to strip. The other sources stay at their pins (re-pin round 23 moves them).
+
+The 15 source commits between the pins need no new `edits` or patches: the export, `doc_regions.py --write` (every region current) and the tests passed as they stand. Besides the rename they add four eval fixtures (three for launching a top-level session, one security fixture with a seed under `library/guidance/security/`), a `.githooks/privacy-denylist.py` hook, recheck dates in the scope review, a "never switched off" note in the dashboard refresh task, and move the source's `markdown-it-py` pin from 4.2.0 to 4.3.0 in its workflows and `scripts/dev_setup.sh`. The kit's own `markdown-it-py==4.2.0` pins in `ci.yml`'s `test` job and `resync.yml` stay: they install the kit's export tests' environment, which runs no `skills-evals` code, and the `skills-evals` starter suite installs its own pins in its own virtual environment (`venv: true`), so nothing needs the versions to match. `doc_review.py` listed six pages against the changed files; none quotes a changed statement (the version, the dates or the fixture list), so no page changes.
+
+Reverse: set `source_sha` in `export/manifests/skills-evals.yml` back to `ea84ca96c028eff472397718785649f1ff81d032` and re-run the export.
 
 ## The adopter's own time zone (2026-11-25)
 
