@@ -3,7 +3,8 @@
 
 Usage:
   python3 resync_holdback.py --sources DIR --owner OWNER [--summary FILE]
-                             [--tails FILE] [--manifests DIR] [--base-rev REV]
+                             [--tails FILE] [--held-heads FILE] [--manifests DIR]
+                             [--base-rev REV]
 
 Run it once resync.py has rewritten the manifests. The old pins are the
 manifests as committed at --base-rev (default HEAD). Each trial regenerates
@@ -23,7 +24,10 @@ Writes, when something is held back: a "Held back" section appended to
 --summary (names, pins and compare links, never a log), and the tail of each
 failing run to --tails, for a fixer that reads it. That log is deliberately
 kept out of the summary, the pull request and the issue: this repository is
-public, and a source's output may hold text that must not be copied. When
+public, and a source's output may hold text that must not be copied.
+--held-heads FILE gets a JSON object of each held source to the head it could
+not take (nothing is written when nothing is held), which
+export/resync_stale_fix.py compares with an open fix pull request's pins. When
 $GITHUB_OUTPUT is set it gets `held_back=<names>` and `all_held=true|false`.
 
 Exits 0 whenever the run completed, even if every source was held back; 2 on a
@@ -34,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -268,13 +273,17 @@ def tails_text(result: Result) -> str:
     return "".join(f"== {source} ==\n{result.held[source]}\n\n" for source in sorted(result.held))
 
 
-def write_reports(result: Result, owner: str, summary: Path | None, tails: Path | None, github_output: str | None):
+def write_reports(result: Result, owner: str, summary: Path | None, tails: Path | None, github_output: str | None,
+                  held_heads: Path | None = None):
     if result.held:
         if summary:
             with summary.open("a", encoding="utf-8") as fh:
                 fh.write(held_markdown(owner, result))
         if tails:
             tails.write_text(tails_text(result), encoding="utf-8")
+        if held_heads:
+            heads = {source: result.moved[source].new for source in sorted(result.held)}
+            held_heads.write_text(json.dumps(heads, indent=2) + "\n", encoding="utf-8")
     if github_output:
         with open(github_output, "a", encoding="utf-8") as fh:
             fh.write(f"held_back={' '.join(sorted(result.held))}\n")
@@ -302,6 +311,7 @@ def main(argv=None, runner=None, read_old=git_old_texts) -> int:
     ap.add_argument("--base-rev", default="HEAD", help="the git revision holding the old pins")
     ap.add_argument("--summary", type=Path, help="append the Held back section to this Markdown file")
     ap.add_argument("--tails", type=Path, help="write the failing output tails here (never into the summary)")
+    ap.add_argument("--held-heads", type=Path, help="write each held source's head sha here, as JSON (never a log)")
     ap.add_argument("--skip", nargs="*", default=["agentskills-private"])
     args = ap.parse_args(argv)
     if not resync.OWNER.fullmatch(args.owner):
@@ -318,7 +328,7 @@ def main(argv=None, runner=None, read_old=git_old_texts) -> int:
     except HoldbackError as exc:
         print(f"resync_holdback.py: {exc}", file=sys.stderr)
         return 1
-    write_reports(result, args.owner, args.summary, args.tails, os.environ.get("GITHUB_OUTPUT"))
+    write_reports(result, args.owner, args.summary, args.tails, os.environ.get("GITHUB_OUTPUT"), args.held_heads)
     for source in sorted(result.moved):
         state = "held back" if source in result.held else "moved"
         print(f"{source}: {state}")
