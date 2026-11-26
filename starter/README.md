@@ -37,9 +37,15 @@ report as `ERROR` instead of `FAIL`, so they aren't excused.
 The command runs each export's suite through `../export/run_suites.py`. That
 script copies the folder to a temporary directory, makes it a git repo where
 the suite reads its history, runs the repo's setup and test command in a PID
-namespace, and prints one PASS or FAIL line per folder. Each suite needs
+namespace, and prints one PASS or FAIL line per folder and form. The five
+base folders run three times: as exported (`--owners invented`), with one
+owner (`one`), and with two other owners and the example repos dropped
+(`two`), the way `copy-starter.sh` leaves an adopter's tree; `skills-evals`
+runs as exported only. Each suite needs
 what its repo's CI installs, and the manifest's `suite.needs` lists it.
-The suites start at the same time, so a suite whose setup installs Python
+`RUN_ALL_FORMS=one` (or any of the three, separated by spaces) runs only
+those forms, which is how the kit's CI runs one form per job.
+Up to six runs start at the same time (`RUN_ALL_JOBS`), so a suite whose setup installs Python
 packages (`skills-evals`) runs in its own virtual environment, created under
 its temporary directory and deleted with it. Its pins, which differ from
 `agent-skills`' and `repo-settings`', never replace a package another suite

@@ -140,12 +140,17 @@ test('owner-only provisioning discovers workflow owners and reads back every lab
   includes(code(), ['.jobs[].steps[].env.SYNC_OWNERS', '--source --no-archived', '--limit 1000']);
   const result = provision();
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.calls.filter(call => call[0] === 'repo').map(call => call[2]), ['example-adopter', 'example-adopter-two']);
+  // One listing per owner the workflows' SYNC_OWNERS name, in their order, and (the fake lists one
+  // repo per owner) one write for each: a one-owner fleet has one of each.
+  const owners = [...new Set(Object.values(YAML.parse(read('.github/workflows/sync.yml')).jobs)
+    .flatMap(job => job.steps).map(step => step.env?.SYNC_OWNERS).filter(Boolean).flatMap(value => value.split(/\s+/)))];
+  assert.ok(owners.length >= 1);
+  assert.deepEqual(result.calls.filter(call => call[0] === 'repo').map(call => call[2]), owners);
   const writes = result.calls.filter(call => call[0] === 'label');
-  assert.equal(writes.length, 2);
+  assert.equal(writes.length, owners.length);
   for (const call of writes) assert.deepEqual(call.slice(1), ['create', 'on-hold', '-R', call[4], '--color', 'BFBFBF', '--description', 'Owner paused this: agents must not work on it until the owner removes the label', '--force']);
   assert.equal(result.calls.filter(call => call[0] === 'api').length, writes.length);
-  assert.ok(result.calls.slice(0, 2).every(call => call[0] === 'repo'));
+  assert.ok(result.calls.slice(0, owners.length).every(call => call[0] === 'repo'));
 });
 
 for (const scenario of ['enumeration-failure', 'saturated', 'bad-readback']) {
