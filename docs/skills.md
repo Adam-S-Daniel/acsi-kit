@@ -137,9 +137,11 @@ branch name, and the pull request's title and body. The list is the
 repository secret `PRIVACY_DENYLIST`, never a file in a repo. The scan
 prints only the place and the pattern's number, never the match.
 
-Step 3 stores the secret, and it stays a required step: on the base track's
-public repos this scan is the only guard against personal data. A missing
-secret does not block anything. The scan then checks nothing and only adds
+Step 3 stores the secret, and it stays a required step: on the base track
+this scan is the only check in CI that reads the list on every pull request.
+On your machine, the pre-push `privacy` check and the write-marker hook read
+a local copy ([guidance](guidance.md)). A missing secret does not block
+anything. The scan then checks nothing and only adds
 a warning, as it does on a fork's pull request, which never gets the
 secret. The scan never rereads the whole tree, so a pattern you add later
 checks only changes made after it. The `privacy-comment-alert` workflow scans issues and comments
@@ -183,10 +185,14 @@ bash bootstrap/set-secrets.sh --only privacy --denylist ~/private/denylist
 ```
 
 The script refuses a path inside a git work tree, checks that every line
-compiles, and sends the file to `gh` on stdin. To run the same scan on a
-branch before you push it, run
-`PRIVACY_DENYLIST_FILE=<path> bash .githooks/agent-checks ci origin/main HEAD`
-in any of your clones; it runs the other CI checks too. Everything in the public repos uses invented
+compiles, and sends the file to `gh` on stdin. To scan a branch before you
+push it, run
+`PRIVACY_DENYLIST_FILE=<path> bash .githooks/agent-checks ci "$(git rev-parse origin/main)" HEAD`
+in any of your clones. Give the base as a commit id: the scan reads the
+lines the range adds only from a hex base, and from any other it reads only
+the last commit's. It scans the range's added lines and its commit messages
+and identities, and runs the other CI checks too; the branch name and the
+pull request's title and body are scanned only in CI. Everything in the public repos uses invented
 data: `example.com`, made-up names, and `<user>` placeholders.
 
 ## The private registry and lessons

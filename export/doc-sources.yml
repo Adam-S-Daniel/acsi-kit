@@ -155,6 +155,7 @@ pages:
     - starter/agent-skills/.github/workflows/plugin-runtime-review.yml
     - starter/agent-skills/docs/decisions/0016-open-plugin-folders-and-gate-runtime-changes-on-owner-approval.md
     - starter/agent-guidance/repos.yml
+    - starter/agent-guidance/templates/agent-checks/agent-checks
 
   docs/skills.md:
     - starter/agent-skills/README.md
@@ -162,6 +163,9 @@ pages:
     - starter/agent-skills/.claude-plugin/marketplace.json
     - starter/agent-skills/scripts/plugin_layout.json
     - starter/agent-skills/.githooks/privacy-denylist.py
+    - starter/agent-guidance/templates/agent-checks/agent-checks
+    - starter/agent-skills/.github/workflows/agent-checks.yml
+    - starter/skills-evals/.github/workflows/ci.yml
     - starter/agent-skills/scripts/generate_skills_lock.py
     - starter/agent-skills/docs/skill-impact.md
     - starter/agent-skills/templates/skill/**

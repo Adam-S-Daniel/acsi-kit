@@ -14,7 +14,9 @@
 #
 # PRIVACY_DENYLIST feeds the privacy scan in the agent-checks CI job of
 # acsi-agentskills, _agent-guidance, repo-settings and wsl-automation, the
-# only guard against personal data on the base track's public repos. The scan only warns
+# only check in CI that reads the list on their pull requests (on your
+# machine the pre-push hook and the write-marker hook read a local copy).
+# The scan only warns
 # where the secret is missing, so nothing fails without it; set it before
 # the first starter pull request anyway, so the scan reads every starter
 # file the pull requests add. skills-evals' required `test` job scans

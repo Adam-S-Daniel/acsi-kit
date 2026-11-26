@@ -70,8 +70,9 @@ actually publish:
 
 Each repo's `agent-checks` also runs the privacy scan with the
 `PRIVACY_DENYLIST` secret (step 3) and only warns where the secret is
-missing. `skills-evals`' `test` is the one required check that fails closed
-without it ([the privacy check](skills.md#the-privacy-check)).
+missing. `acsi-agentskills-private`'s passes no secret, so there it always
+only warns. `skills-evals`' `test` is the one required check that fails
+closed without it ([the privacy check](skills.md#the-privacy-check)).
 
 `skills-evals` also gets the `eval-scaffold` label, a ruleset on
 `roster/proposal` that only the `roster` App and a repo admin can push to,
