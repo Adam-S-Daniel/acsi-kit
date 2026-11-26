@@ -23,6 +23,7 @@ A cloud reader with Contents: read on this repo reads the newest
 lessons/
   records/<YYYY-MM-DD>.jsonl                   one lesson record per line, appended by each day's run
   proposals/<YYYY-MM-DD>/<subject>__<kind>.json one proposal per file: that day's full snapshot
+  proposals/<YYYY-MM-DD>/DIGEST.md              the same day as readable cards: start here
 ```
 
 Each day's proposal directory is rewritten whole from every record so far, so
@@ -36,7 +37,7 @@ One JSON object per file. This is the primary sink: issues are optional.
 |---|---|---|
 | `schema_version` | int | `1` |
 | `id` | string | 12 hex chars, a hash of `subject` and `kind`; stable across days |
-| `subject` | string | `skill:<skill basename>`, `guidance:<section id>` (an `id` in `_agent-guidance` `agents-md/eval-coverage.yml`), `memory`, or `none` |
+| `subject` | string | `skill:<skill basename>`, `guidance:<section id>` (an `id` in `_agent-guidance` `agents-md/eval-coverage.yml`), `memory`, `none` (never on a `new-skill`), or for `new-skill` a cluster subject: `tool-<tool>[-<command word>]` or `red-ci-<repo>` |
 | `kind` | string | `agent-check`, `skill-edit`, `new-skill`, `guidance-edit`, `memory-note` or `fixture-candidate` |
 | `evidence_count` | int | records clustered into this proposal |
 | `first_seen`, `last_seen` | string | `YYYY-MM-DD` of the oldest and newest record |
@@ -46,7 +47,7 @@ One JSON object per file. This is the primary sink: issues are optional.
 
 The file name is `<subject>__<kind>.json` with `:` and any other character
 outside `[A-Za-z0-9_.-]` replaced by `-`, e.g.
-`skill-writing-adrs__fixture-candidate.json`.
+`skill-writing-adrs__fixture-candidate.json`. `DIGEST.md` is not a proposal; readers of proposals ignore it.
 
 ### How a kind is chosen
 
@@ -65,7 +66,8 @@ missing, a naming rule, a string that must not appear in a diff) becomes
 | `rule` | memory or none | `memory-note` |
 | any failure signal | skill or guidance | `fixture-candidate` (a concrete case an eval fixture can reproduce; the loop then improves the subject because the fixture shows headroom) |
 | any failure signal | memory | `memory-note` |
-| any failure signal | none | `new-skill` once seen in 3 or more sessions, else nothing |
+| `repeated-tool-failure` or `red-ci-after-push` | none | `new-skill` under its cluster subject (`tool-<tool>[-<command word>]`, or `red-ci-<repo>` when the repo is a real one) once that cluster spans 3 or more sessions, else nothing |
+| any other failure signal | none | nothing (the record stays a record) |
 
 Failure signals: `correction`, `redirection`, `interrupted`,
 `repeated-tool-failure`, `red-ci-after-push`, `abandoned`. `--classify` lets

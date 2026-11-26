@@ -150,6 +150,9 @@ neither ever fails a check for a missing secret. `set-secrets.sh` stores it
 in `acsi-agentskills`, `_agent-guidance`, `repo-settings` and
 `wsl-automation`, and in `skills-evals` once that repo exists. For another repo, run
 `gh secret set PRIVACY_DENYLIST --repo <you>/<repo> < <file>`.
+`acsi-agentskills-private` is the exception: the repo is private and no
+script stores the secret there, so its `agent-checks.yml` does not pass it
+to the scan, which only warns there.
 
 Write the list to a file outside every repo, with one regular expression per
 line, and store it before the `acsi-agentskills` starter pull request. Each

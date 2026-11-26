@@ -6,7 +6,7 @@
 repo: agentskills-private
 kit_name: agent-skills-private
 source: adam-agentskills-private
-source_sha: c5b1bc9dfaaec3651ad9cb35f8d04192a126319b
+source_sha: f5bda1091249b0d2d68699e6de8106d13c793c7e
 # The sync-delivered files come from the exported _agent-guidance, and the
 # lock pins the exported public registry.
 after: [_agent-guidance, agentskills]
@@ -23,8 +23,6 @@ exclude:
 include:
   - .claude-plugin/marketplace.json
   - .claude/hooks/agent-checks-guard.sh
-  - .claude/hooks/fleet-guidance.md
-  - .claude/hooks/fleet-memory.sh
   - .claude/hooks/skills-bootstrap.sh
   - .claude/settings.json
   - .gitattributes
@@ -69,22 +67,93 @@ edits:
       not the owner.
   - path: .claude-plugin/marketplace.json
     stage: output
-    old: '"description": "the owner''s personal skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code.",'
+    old: '"description": "the owner''s personal skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code. In Claude Code it also records, once per session, whether the full fleet guidance loaded.",'
     new: '"description": "Private skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code.",'
-    why: C10. Describes the bundle, not the owner.
+    why: >-
+      C10. Describes the bundle, not the owner, and without the sentence about
+      a hook the kit leaves out (DECISIONS "Re-pin of the private registry,
+      2026-11-26").
   - path: plugins/acsi-private-anything-anywhere/.claude-plugin/plugin.json
     stage: output
     old: |
-      "description": "the owner's personal skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code.",
-        "author": { "name": "the owner" }
+      "description": "the owner's personal skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code. In Claude Code it also records, once per session, whether the full fleet guidance loaded.",
+        "author": { "name": "the owner" },
+        "hooks": "./hooks/claude-code.json"
     new: |
       "description": "Private skills that run anywhere: claude.ai (web, iOS, Chrome, Desktop) and Claude Code.",
         "author": { "name": "<your name>" }
-    why: The same description as the marketplace entry, and the `<your name>` placeholder.
+    why: >-
+      The same description as the marketplace entry, the `<your name>`
+      placeholder, and no `hooks` key: the bundle's hooks serve only the
+      source owner, so the include list leaves hooks/ out (DECISIONS "Re-pin
+      of the private registry, 2026-11-26").
 
+  - path: .github/workflows/agent-checks.yml
+    stage: output
+    old: |2
+              env:
+                PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
+                BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+    new: |2
+              env:
+                BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+    why: >-
+      kit departure: no script stores PRIVACY_DENYLIST in this repo
+      (set-secrets.sh's OTHER_VALUES), and bootstrap/tests/check-refs.py
+      fails on a secret a workflow reads that nothing sets. Without the
+      secret the runner skips the scan with a warning, as before this re-pin.
+      Storing it here is a later bootstrap change (DECISIONS "Re-pin of the
+      private registry, 2026-11-26").
+  - path: README.md
+    stage: output
+    old: |
+      ## Install — Codex, and what `setup.sh` does now
+
+      Codex installs these plugins from the same marketplace: register the catalog
+      with `codex plugin marketplace add example-adopter/acsi-agentskills-private`,
+      then install the bundle from it.
+
+      `setup.sh` **no longer links skills anywhere**. It used to link every private
+      skill into `~/.agents/skills/`, `~/.agent/skills/`, `~/.gemini/skills/`,
+      `~/.gemini/antigravity/skills/` and `~/.cursor/skills/`. The public registry
+      retired that
+      ([acsi-agentskills ADR 0017](https://github.com/example-adopter/acsi-agentskills/blob/main/docs/decisions/0017-harness-aware-plugin-hooks-because-codex-loads-them-too.md)),
+      and the same reasons hold here: with Codex installing the plugins, a link
+      would load every skill a second time.
+
+      Run it once **in each environment** (Windows Git Bash *and* WSL) to remove the
+      links an earlier version made:
+    new: |
+      ## Install — Codex, and `setup.sh`
+
+      Codex installs these plugins from the same marketplace: register the catalog
+      with `codex plugin marketplace add example-adopter/acsi-agentskills-private`,
+      then install the bundle from it.
+
+      `setup.sh` links no skill into another tool's folder (`~/.agents/skills/`,
+      `~/.agent/skills/`, `~/.gemini/skills/`, `~/.gemini/antigravity/skills/`,
+      `~/.cursor/skills/`): with Codex installing the plugins, a link would load
+      every skill a second time, as the public registry's
+      [ADR 0017](https://github.com/example-adopter/acsi-agentskills/blob/main/docs/decisions/0017-harness-aware-plugin-hooks-because-codex-loads-them-too.md)
+      explains. It only removes such links, which an older version of the script
+      made, so a new setup has nothing for it to do. To run it anyway, once
+      **in each environment** (Windows Git Bash *and* WSL):
+    why: >-
+      kit departure: the source's text narrates the owner's own history (what
+      setup.sh used to do); an adopter starts with none of it, so the starter
+      says what the script does now and that a new setup can skip it.
 # overlay/agentskills-private/ adds NOTICE and .gitignore (the source has
 # no .gitignore; the kit's bootstrap test wants every starter tree to ignore
 # what copy-starter.sh skips).
+
+patches:
+  - file: owner_only.py
+    why: >-
+      DECISIONS "Re-pin of the private registry (2026-11-26)". The source's
+      agent-checks.yml runs an eval-protection gate against the owner's
+      commits, its actions.lock lists workflows the include list leaves out,
+      and its AGENTS.md and README.md describe parts the kit does not ship;
+      this cuts each, checking its shape.
 
 regenerate:
   - copy_from_kit: {repo: _agent-guidance, from: .github/fleet-contributor-rules.md, to: .github/fleet-contributor-rules.md}
@@ -92,16 +161,19 @@ regenerate:
       The sync delivers _agent-guidance's contributor rules here byte for
       byte, and that repo's copy is rebuilt from the kit's base.md; the
       source copy holds the owner's sections the kit leaves out (acsi-kit#72).
-  - copy_from_kit: {repo: _agent-guidance, from: agents-md/base.md, to: .claude/hooks/fleet-guidance.md}
-    why: The sync delivers _agent-guidance's base.md here byte for byte; it carries that repo's X9 blanking.
   - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/agent-checks, to: .githooks/agent-checks}
     why: The sync delivers the agent-checks runner from _agent-guidance's templates; X9 ships it with no checks.
   - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/dated-phrasing-allowlist.txt, to: .githooks/dated-phrasing-allowlist.txt}
     why: The sync delivers the dated-phrasing allowlist from _agent-guidance's templates; it carries that repo's C11 trim.
   - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/agent-checks-guard.sh, to: .claude/hooks/agent-checks-guard.sh}
     why: The sync delivers the guard (byte-identical in the sources).
-  - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/fleet-memory.sh, to: .claude/hooks/fleet-memory.sh}
-    why: The sync delivers the fleet-memory hook (byte-identical in the sources).
+  - copy_from_kit: {repo: _agent-guidance, from: templates/agent-checks/privacy-denylist.py, to: .githooks/privacy-denylist.py}
+    why: >-
+      The sync delivers the privacy scanner the agent-checks runner calls; a
+      copy from the kit's own template keeps it identical to every other
+      starter's.
+  - copy_from_kit: {repo: _agent-guidance, from: templates/privacy-comment-alert/privacy-comment-scan.py, to: .githooks/privacy-comment-scan.py}
+    why: The sync delivers the comment scanner beside it, from the kit's own template for the same reason.
   - copy_from_kit: {repo: _agent-guidance, from: .claude/hooks/skills-bootstrap.sh, to: .claude/hooks/skills-bootstrap.sh}
     why: Byte-identical in the sources; _agent-guidance's repos.yml pins its sha256.
   - copy_from_kit: {repo: agentskills, from: skills.lock, to: skills.lock}
