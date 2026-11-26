@@ -4,8 +4,9 @@
 # Read-only, and only about THIS machine: whether the tools the other scripts
 # call are installed (and new enough; tar for the README's update block),
 # whether gh is signed in as OWNER with the scopes a push of workflow files
-# needs and git pushes with gh's credential (gh auth setup-git), and whether
-# the kit sits where the scripts want it. It installs nothing, makes no write call to GitHub and
+# needs, whether git has a credential helper for https pushes (a FAIL without
+# one; a WARN when it is not gh's, gh auth setup-git), and whether the kit
+# sits where the scripts want it. It installs nothing, makes no write call to GitHub and
 # writes nothing outside its own temp dir. Run it before step 2.
 #
 # Prints one line per check, PASS, FAIL, WARN or SKIP, and under every FAIL
@@ -166,10 +167,15 @@ check_gh() {
     helpers=$({ git config --get-all credential.https://github.com.helper; git config --get-all credential.helper; } 2>/dev/null || true)
     if [[ $helpers == *"auth git-credential"* ]]; then
       pass "git pushes over https with gh's credential"
+    elif [ -z "${helpers//[[:space:]]/}" ]; then
+      # Every push needs a helper: the scripts push with GIT_TERMINAL_PROMPT=0,
+      # so without one git cannot ask for a password and the push fails.
+      fail "git has no credential helper for https pushes, which every script that pushes needs (copy-starter.sh from step 4, regenerate.sh)"
+      fix "gh auth setup-git"
     else
-      # Every push needs it: the scripts push with GIT_TERMINAL_PROMPT=0, so
-      # without a helper git cannot ask for a password and the push fails.
-      fail "git is not set up to use gh's credential for https pushes, which every script that pushes needs (copy-starter.sh from step 4, regenerate.sh)"
+      # Another helper (osxkeychain, Git Credential Manager) can push, but as
+      # whatever account it holds, which may not be the one gh is signed in as.
+      warn_ "git pushes with another credential helper, not gh's, so a push goes as whatever account that helper holds; gh's pushes as the account gh is signed in as (OWNER)"
       fix "gh auth setup-git"
     fi
   fi

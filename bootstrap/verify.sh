@@ -268,7 +268,7 @@ installs_by_hand() {
   for id in $ids; do grep -qxF -- "$id" <<<"$done_ids" || missing+="$id "; done
   repos=$(install_repos "$installed" "$TRACK")
   if [ -n "$ids" ] && [ -z "$missing" ]; then
-    pass "$app App's installation on $repos: confirmed by you (status.sh --mark $(paste -sd' ' <<<"$ids")); gh's sign-in cannot read installations (HTTP 403)"
+    pass "$app App's installation on $repos: confirmed by you (status.sh --mark $(paste -sd' ' - <<<"$ids")); gh's sign-in cannot read installations (HTTP 403)"
   else
     fail "$app App's installation: gh's sign-in cannot read it (HTTP 403: GET user/installations takes a GitHub App user token). Check it by hand at https://github.com/settings/installations: ${CFG_APP_NAME_PREFIX}-$app must have access to $repos. Then: bash bootstrap/status.sh$(config_arg) --mark ${missing% }"
   fi
@@ -396,7 +396,7 @@ fi
 sub_check() { # description cmd...
   local out="$BOOT_WORK/sub.out" d=$1; shift
   if "$@" >"$out" 2>&1; then pass "$d"
-  else fail "$d:"; sed -n 's/^\(NOT DONE\|ERROR\|MISSING\|WARNING\): /    &/p' "$out" | head -n 20; fi
+  else fail "$d:"; sed -nE 's/^(NOT DONE|ERROR|MISSING|WARNING): /    &/p' "$out" | head -n 20; fi
 }
 if sel settings off; then
   while IFS= read -r o; do

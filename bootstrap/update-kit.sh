@@ -92,6 +92,12 @@ q() { printf '%q' "$1"; }
 CONFIG_ARG=$(config_arg)
 # TODO: the "Do this now" lines rest() prints before its "Next:" line.
 TODO=()
+# abs_config_arg: " --config <absolute path>" for a command run from another
+# folder (a fresh clone), when the config exists; fleet.env stays where it is.
+abs_config_arg() {
+  [ -f "$CONFIG" ] || { printf '%s' "$CONFIG_ARG"; return 0; }
+  printf ' --config %q' "$(cd "$(dirname "$CONFIG")" && pwd -P)/$(basename "$CONFIG")"
+}
 # next_cmd: how to run the update again from where the kit is now.
 next_cmd() {
   if [ -f "$B/update-kit.sh" ]; then
@@ -177,23 +183,43 @@ copy_key_todo() {
 }
 
 # content_log: CONTENT_LOG, where add-content.sh's full output goes: a file
-# in the state folder (outside the kit), named for the kit's commit.
+# in the state folder (outside the kit), named for the kit's commit. A dry run
+# writes nothing there: its output goes to the scratch folder, and is not named.
 content_log() {
-  local d; d=$(state_dir)
+  local d
+  if [ "$DRY_RUN" = 1 ]; then CONTENT_LOG=$BOOT_WORK/add-content.log; return 0; fi
+  d=$(state_dir)
   mkdir -p "$d" && chmod 700 "$d"
   CONTENT_LOG=$d/update-kit-$(git -C "$KIT" rev-parse --short=12 HEAD).log
 }
 # content_report: add-content.sh's output without its one line per file (a
 # count and the log's path instead), and a "Do this now" line for each repo
 # that already exists, which the content reaches only through a pull request.
+# The lines add-content.sh prints when a repo already exists: the first names
+# the repo and tree, and the next three are its advice, which points at the
+# per-file lines above it. Here those lines are in the log, so the advice is
+# left out and the "Do this now" line names the log instead.
+EXISTS_RE='^([^ ]+) already exists, so this reached only starter/([^ ]+)\. Open a pull request on it$'
 content_report() {
-  local n repo tree
+  local n line advice=0
   n=$(grep -cE '^  (add|change): ' "$CONTENT_LOG" || true)
-  grep -vE '^  (add|change): ' "$CONTENT_LOG" | sed 's/^/  /' || true
-  [ "$n" = 0 ] || log "  ($n file(s) added or changed in starter/; the list is in $CONTENT_LOG)"
-  while IFS=$'\t' read -r repo tree; do
-    TODO+=("Open a pull request on $repo (never a push to its default branch) that adds the starter/$tree files listed in $CONTENT_LOG, with your names as copy-starter.sh writes them.")
-  done < <(sed -nE 's|^([^ ]+) already exists, so this reached only starter/([^ ]+)\. Open a pull request on it$|\1\t\2|p' "$CONTENT_LOG")
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ $line =~ $EXISTS_RE ]]; then
+      advice=3
+      if [ "$DRY_RUN" = 1 ]; then
+        TODO+=("Open a pull request on ${BASH_REMATCH[1]} (never a push to its default branch) with the starter/${BASH_REMATCH[2]} files the run without --dry-run adds or changes, with your names as copy-starter.sh writes them.")
+      else
+        TODO+=("Open a pull request on ${BASH_REMATCH[1]} (never a push to its default branch) that adds the starter/${BASH_REMATCH[2]} files listed in $CONTENT_LOG, with your names as copy-starter.sh writes them.")
+      fi
+      [ "${BASH_REMATCH[2]}" != agent-skills ] || TODO[${#TODO[@]}-1]+=" When it merges, run bash bootstrap/regenerate.sh$(config_arg) skills-locks."
+      continue
+    fi
+    if [ "$advice" -gt 0 ]; then advice=$((advice - 1)); continue; fi
+    [[ $line =~ ^\ \ (add|change):\  ]] || printf '  %s\n' "$line"
+  done < "$CONTENT_LOG"
+  if [ "$n" = 0 ]; then :
+  elif [ "$DRY_RUN" = 1 ]; then log "  ($n file(s) would be added or changed in starter/)"
+  else log "  ($n file(s) added or changed in starter/; the list is in $CONTENT_LOG)"; fi
 }
 
 # keys_of <fleet.env-like file>: its KEY names, sorted.
@@ -306,7 +332,7 @@ reopened() {
     # key the copy step needs, the key's own line (copy_key_todo) says it.
     if [ "$(jq -r --arg t "$title" '[.steps[] | select(.title == $t) | .check.type][0]' "$B/steps.json")" = config ]; then
       if [ "$COPY_KEY_TODO" = 0 ]; then
-        if [ -n "$why" ]; then why=$(paste -sd' ' <<<"$why"); else why="edit $CONFIG (bash bootstrap/status.sh${CONFIG_ARG} says why)"; fi
+        if [ -n "$why" ]; then why=$(paste -sd' ' - <<<"$why"); else why="edit $CONFIG (bash bootstrap/status.sh${CONFIG_ARG} says why)"; fi
         TODO+=("Step $id ($title) is not done under the newer kit: $why")
       fi
     else
@@ -396,9 +422,8 @@ top=$(git -C "$KIT" rev-parse --show-toplevel 2>/dev/null) || top=""
 if [ -z "$top" ] || [ "$(cd "$top" && pwd -P)" != "$kit_real" ]; then
   {
     printf 'ERROR: %s is not a git clone of the kit (a downloaded copy, or a folder inside another repository), so it cannot be updated in place.\n' "$KIT"
-    printf 'Instead: clone the kit fresh beside it, copy your fleet.env into the new clone, and run\n'
-    printf '  bash bootstrap/add-content.sh --items <ids>\n'
-    printf 'there again.\n'
+    printf 'Instead: clone the kit fresh beside it, and in the new clone run\n'
+    printf '  bash bootstrap/add-content.sh%s --items <ids>\n' "$(abs_config_arg)"
     if [ -n "$IDS" ]; then printf 'Your recorded content choices: %s\n' "$IDS"; fi
   } >&2
   exit 1
