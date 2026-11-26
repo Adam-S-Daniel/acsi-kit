@@ -363,6 +363,142 @@ edits:
       printf 'PASS: %s assertions\n' "$passed"
     why: 'kit departure: base-only track. Covers the none branch and the example''s value.'
 
+  # ---- Base-only track, follow-up (DECISIONS "The waiting feed skips cleanly
+  # without a feed repository (2026-11-26)"): WAITING_FEED_URL=none.
+  - path: config/settings.env.example
+    stage: output
+    old: |
+      # Used by the 'Claude Waiting Feed Publish' task (scripts/publish-waiting-feed.sh):
+      # the feed repository it pushes feed.json to.
+      WAITING_FEED_URL=https://github.com/example-adopter/waiting-feed.git
+    new: |
+      # Used by the 'Claude Waiting Feed Publish' task (scripts/publish-waiting-feed.sh):
+      # the feed repository it pushes feed.json to, or none while you have no
+      # feed repository (the kit's base track): the task, which Windows runs every
+      # minute, then logs that it skipped and exits 0.
+      # To use the feed, create the private repository
+      # (bash bootstrap/create-repos.sh --with-optional) and set your own:
+      # WAITING_FEED_URL=https://github.com/example-adopter/waiting-feed.git
+      WAITING_FEED_URL=none
+    why: 'kit departure: base-only track. On Windows register-tasks.ps1 always registers the every-minute feed task, which exited 2 each minute until the adopter created a repository the base does not need; none turns it off, like SKILLS_EVALS_URL.'
+  - path: scripts/publish-waiting-feed.sh
+    old: |
+      # and config/settings.env.example); when it is missing the run logs a line naming
+      # it and exits 2.
+    new: |
+      # and config/settings.env.example); when it is missing the run logs a line naming
+      # it and exits 2. WAITING_FEED_URL=none (no feed repository, the kit's base
+      # track) logs one skip line and exits 0 before anything else is read or run.
+    why: 'kit departure: base-only track. Documents the none value.'
+  - path: scripts/publish-waiting-feed.sh
+    old: |
+      readonly feed_branch=persistent/waiting-feed
+
+    new: |
+      readonly feed_branch=persistent/waiting-feed
+
+      timestamp=$(wsl_automation_epoch_format "$now" %Y-%m-%dT%H:%M:%SZ)
+
+      log_line() {
+          mkdir -p -- "$(dirname -- "$log_file")"
+          printf '%s exit=%s %s\n' "$timestamp" "$2" "$1" >>"$log_file"
+          # A long outage logs every minute; keep only the most recent lines.
+          if (($(wc -l <"$log_file") > log_max_lines)); then
+              tail -n "$((log_max_lines / 2))" -- "$log_file" >"$log_file.tmp" && mv -f -- "$log_file.tmp" "$log_file"
+          fi
+      }
+
+      if ! wsl_automation_require_setting WAITING_FEED_URL; then
+          line='waiting feed: setting WAITING_FEED_URL is missing or invalid; set it to none if you have no feed repository'
+          printf '%s\n' "$line"
+          log_line "$line" 2
+          exit 2
+      fi
+      # WAITING_FEED_URL=none (a setup with no feed repository, the kit's base
+      # track) turns the job off before the credentials, the lock or the network
+      # are touched, so the every-minute task stays green.
+      if [[ $WAITING_FEED_URL == none ]]; then
+          line='waiting feed: skipped: WAITING_FEED_URL is none, so there is no feed repository to publish to'
+          printf '%s\n' "$line"
+          log_line "$line" 0
+          exit 0
+      fi
+
+    why: 'kit departure: base-only track. The setting is resolved, and none handled, before the macOS note, the dependency and lock checks, so a skipped run reads no credentials and makes no network call; log_line and the timestamp move up with it.'
+  - path: scripts/publish-waiting-feed.sh
+    old: |
+      timestamp=$(wsl_automation_epoch_format "$now" %Y-%m-%dT%H:%M:%SZ)
+
+      log_line() {
+          mkdir -p -- "$(dirname -- "$log_file")"
+          printf '%s exit=%s %s\n' "$timestamp" "$2" "$1" >>"$log_file"
+          # A long outage logs every minute; keep only the most recent lines.
+          if (($(wc -l <"$log_file") > log_max_lines)); then
+              tail -n "$((log_max_lines / 2))" -- "$log_file" >"$log_file.tmp" && mv -f -- "$log_file.tmp" "$log_file"
+          fi
+      }
+
+      if ! wsl_automation_require_setting WAITING_FEED_URL; then
+          line='waiting feed: setting WAITING_FEED_URL is missing or invalid'
+          printf '%s\n' "$line"
+          log_line "$line" 2
+          exit 2
+      fi
+      feed_url=$WAITING_FEED_URL
+    new: |
+      feed_url=$WAITING_FEED_URL
+    why: 'kit departure: base-only track. Moved up, see the edit before this one.'
+  - path: tests/publish-waiting-feed.test.sh
+    stage: output
+    old: |
+      assert_match "$(tail -n 1 "$WAITING_FEED_LOG")" ' exit=2 waiting feed: setting WAITING_FEED_URL is missing or invalid$' 'the failure is logged with exit 2 and names the key'
+    new: |
+      assert_match "$(tail -n 1 "$WAITING_FEED_LOG")" ' exit=2 waiting feed: setting WAITING_FEED_URL is missing or invalid; set it to none if you have no feed repository$' 'the failure is logged with exit 2, names the key and offers none'
+    why: 'kit departure: base-only track. The unset message now says to set none when there is no feed repository.'
+  - path: tests/publish-waiting-feed.test.sh
+    stage: output
+    old: |
+      printf 'PASS: %s assertions\n' "$passed"
+    new: |
+      # --- WAITING_FEED_URL=none turns the feed off (the kit's base track) -------
+      # It exits 0 and logs one line before the credentials, the lock, curl or git
+      # are touched: the curl stub records every call, the credentials are absent
+      # and the clone directory must not appear.
+      reset_calls
+      rm -f -- "$WAITING_FEED_LOG"
+      none_credentials="$test_root/none-absent.json"
+      rc=0
+      out=$(WAITING_FEED_URL=none WAITING_FEED_CREDENTIALS="$none_credentials" WAITING_FEED_DIR="$test_root/clone-none" bash "$script" 2>&1) || rc=$?
+      assert_eq "$rc" 0 'WAITING_FEED_URL=none exits 0'
+      assert_eq "$out" 'waiting feed: skipped: WAITING_FEED_URL is none, so there is no feed repository to publish to' 'WAITING_FEED_URL=none says it skipped'
+      assert_eq "$(log_count)" 1 'WAITING_FEED_URL=none logs one line'
+      assert_match "$(tail -n 1 "$WAITING_FEED_LOG")" ' exit=0 waiting feed: skipped: WAITING_FEED_URL is none' 'the skip is logged with exit 0'
+      assert_eq "$(call_count)" 0 'WAITING_FEED_URL=none makes no API call'
+      [[ ! -e $test_root/clone-none ]] || fail 'WAITING_FEED_URL=none must not reach the clone'
+      # none from the settings file, with the variable unset, skips the same way.
+      printf 'WAITING_FEED_URL=none\n' >"$test_root/settings-none.env"
+      rc=0
+      out=$(env -u WAITING_FEED_URL WSL_AUTOMATION_SETTINGS="$test_root/settings-none.env" WAITING_FEED_DIR="$test_root/clone-none" bash "$script" 2>&1) || rc=$?
+      assert_eq "$rc" 0 'WAITING_FEED_URL=none from the settings file exits 0'
+      assert_match "$out" '^waiting feed: skipped: WAITING_FEED_URL is none' 'the settings file value skips too'
+      assert_match "$(grep '^WAITING_FEED_URL=' "$repository_root/config/settings.env.example")" '^WAITING_FEED_URL=none$' 'the settings example starts with the feed off'
+      # A real URL still proceeds to the clone (see the first run above).
+      reset_calls
+      rc=0
+      out=$(WAITING_FEED_DIR="$test_root/clone-url" bash "$script" --dry-run 2>&1) || rc=$?
+      assert_eq "$rc" 0 'a real WAITING_FEED_URL still runs'
+      assert_match "$out" 'published=dry-run' 'a real WAITING_FEED_URL reaches the collection step'
+      [[ -d $test_root/clone-url/.git ]] || fail 'a real WAITING_FEED_URL must reach the clone'
+
+      printf 'PASS: %s assertions\n' "$passed"
+    why: 'kit departure: base-only track. Covers none (argument and settings file), the unset failure is covered by the source test above, and a URL proceeding.'
+
+  - path: README.md
+    stage: output
+    old: "| `WAITING_FEED_URL` | Waiting feed (the feed repository it pushes to) |\n"
+    new: "| `WAITING_FEED_URL` | Waiting feed (the feed repository it pushes to; `none` while you have no feed repository: the job logs that it skipped and exits 0) |\n"
+    why: 'kit departure: base-only track. Documents the none value in the settings table.'
+
 patches:
   - file: tasks_installer.py
     why: >-

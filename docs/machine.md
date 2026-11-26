@@ -52,9 +52,9 @@ marker the hook does nothing on a durable machine
 
 - **Windows:** `register-tasks.ps1` registers every task. The ones that do
   work on the base are the ccstatusline config sync, the WSL memory log, the
-  Docker watchdog and memory curation. The session miner and the usage
-  census log that they skipped and exit 0. The waiting feed fails each
-  minute until you create `waiting-feed` and set `WAITING_FEED_URL`
+  Docker watchdog and memory curation. The session miner, the usage census
+  and the waiting feed (`WAITING_FEED_URL=none`) log that they skipped and
+  exit 0. To use the feed, create `waiting-feed` and set `WAITING_FEED_URL`
   (optional).
 - **Linux and macOS:** nothing. `scripts/unix/install-schedule.sh` schedules
   the usage census and the session miner, which serve evals, and the
@@ -70,7 +70,7 @@ login:
 | session miner | daily at 07:17 | turns your transcripts into short, redacted lesson records on `acsi-agentskills-private`'s `persistent/lessons` |
 | usage census | daily at 12:37 | publishes which models and skills you ran each week to `skills-evals`' `persistent/eval-results`; the roster picks eval models from it and the planner improves the most used skills first |
 | memory curation | weekly, Monday at 13:47 (Windows with WSL only) | curates the memory notes of both homes, WSL's and the Windows profile's ([routines](routines.md#memory-curation)) |
-| waiting feed | every minute | publishes the sessions waiting on you to a private `waiting-feed` repo. Optional on Linux and macOS; on Windows the task is always registered, and exits 2 each minute until `WAITING_FEED_URL` is set |
+| waiting feed | every minute | publishes the sessions waiting on you to a private `waiting-feed` repo. Optional on Linux and macOS; on Windows the task is always registered, and skips (logs one line, exits 0) while `WAITING_FEED_URL=none`, which the settings example ships |
 
 On Windows, `register-tasks.ps1` also registers three housekeeping tasks: a
 ccstatusline config sync and a WSL memory log, both every 5 minutes, and a
@@ -109,6 +109,9 @@ register the jobs, copy the repo's `config/settings.env.example` to
 `SKILLS_EVALS_URL=none`: the usage census and the session miner run code
 from `skills-evals`, so without it they log that they skipped and exit 0.
 When you add evals, set it to your `skills-evals` URL (quick start step 42).
+It ships `WAITING_FEED_URL=none` the same way: with no `waiting-feed`
+repository the every-minute feed task logs that it skipped and exits 0.
+Unset, it exits 2 naming the key.
 Check `LESSONS_CLONE` (session miner),
 `WAITING_FEED_URL` (waiting feed), `AGENT_GUIDANCE_URL` (memory curation),
 and `CODEX_CLOUD_GUIDANCE_REPOSITORY` (Codex Cloud sync, as `owner/name`).
@@ -136,7 +139,8 @@ until you set `FILE_ISSUES=on`, so read a sample of its records first. The
 README's "Session miner task" has every setting.
 
 **The waiting feed** needs its own private repo:
-`bash bootstrap/create-repos.sh --with-optional` creates `waiting-feed`.
+`bash bootstrap/create-repos.sh --with-optional` creates `waiting-feed`; then
+set `WAITING_FEED_URL` in `settings.env` to its clone URL (replacing `none`).
 
 ## Cloud environments
 

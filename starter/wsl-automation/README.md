@@ -173,7 +173,7 @@ its placeholder values with yours.
 | --- | --- |
 | `SKILLS_EVALS_URL` | Usage census and Session miner (the skills-evals repository to clone; the census also dispatches its `explorer-data.yml`) |
 | `AGENT_GUIDANCE_URL` | Memory curation (the `_agent-guidance` repository to clone) |
-| `WAITING_FEED_URL` | Waiting feed (the feed repository it pushes to) |
+| `WAITING_FEED_URL` | Waiting feed (the feed repository it pushes to; `none` while you have no feed repository: the job logs that it skipped and exits 0) |
 | `LESSONS_CLONE` | Session miner (the private registry clone that receives lesson records) |
 | `CODEX_CLOUD_GUIDANCE_REPOSITORY` | Codex Cloud environment sync (the guidance repository as `owner/name`) |
 | `WSL_AUTOMATION_AGENT_OWNER_ROOTS` | Agent workspace trust scripts and git hook, off Windows only (`:`-separated clone folders; see [Pre-trusting workspaces](#pre-trusting-workspaces-for-claude-code-and-codex)); read by PowerShell, not by the Bash tasks |

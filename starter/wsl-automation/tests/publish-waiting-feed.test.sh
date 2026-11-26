@@ -498,7 +498,7 @@ out=$(env -u WAITING_FEED_URL WAITING_FEED_DIR="$test_root/clone-missing" bash "
 assert_eq "$rc" 2 'a missing WAITING_FEED_URL exits 2'
 assert_match "$out" 'WAITING_FEED_URL is not set; set it in ~/.config/wsl-automation/settings.env' 'the error names the key and where to set it'
 assert_match "$out" 'waiting feed: setting WAITING_FEED_URL is missing or invalid' 'the failure is reported on stdout'
-assert_match "$(tail -n 1 "$WAITING_FEED_LOG")" ' exit=2 waiting feed: setting WAITING_FEED_URL is missing or invalid$' 'the failure is logged with exit 2 and names the key'
+assert_match "$(tail -n 1 "$WAITING_FEED_LOG")" ' exit=2 waiting feed: setting WAITING_FEED_URL is missing or invalid; set it to none if you have no feed repository$' 'the failure is logged with exit 2, names the key and offers none'
 [[ $(tail -n 1 "$WAITING_FEED_LOG") != *"$test_root"* ]] || fail 'the log line must not hold a path'
 pass
 [[ ! -e $test_root/clone-missing ]] || fail 'a missing WAITING_FEED_URL must not reach the clone'
@@ -545,5 +545,35 @@ assert_eq "$rc" 0 'macOS with the credentials file still runs'
 rc=0
 out=$(WAITING_FEED_CREDENTIALS="$test_root/absent.json" WAITING_FEED_LOG="$test_root/linux.log" bash "$script" --dry-run 2>&1) || rc=$?
 assert_match "$out" 'ok=false' 'Linux without the file still reports the failure through the feed'
+
+# --- WAITING_FEED_URL=none turns the feed off (the kit's base track) -------
+# It exits 0 and logs one line before the credentials, the lock, curl or git
+# are touched: the curl stub records every call, the credentials are absent
+# and the clone directory must not appear.
+reset_calls
+rm -f -- "$WAITING_FEED_LOG"
+none_credentials="$test_root/none-absent.json"
+rc=0
+out=$(WAITING_FEED_URL=none WAITING_FEED_CREDENTIALS="$none_credentials" WAITING_FEED_DIR="$test_root/clone-none" bash "$script" 2>&1) || rc=$?
+assert_eq "$rc" 0 'WAITING_FEED_URL=none exits 0'
+assert_eq "$out" 'waiting feed: skipped: WAITING_FEED_URL is none, so there is no feed repository to publish to' 'WAITING_FEED_URL=none says it skipped'
+assert_eq "$(log_count)" 1 'WAITING_FEED_URL=none logs one line'
+assert_match "$(tail -n 1 "$WAITING_FEED_LOG")" ' exit=0 waiting feed: skipped: WAITING_FEED_URL is none' 'the skip is logged with exit 0'
+assert_eq "$(call_count)" 0 'WAITING_FEED_URL=none makes no API call'
+[[ ! -e $test_root/clone-none ]] || fail 'WAITING_FEED_URL=none must not reach the clone'
+# none from the settings file, with the variable unset, skips the same way.
+printf 'WAITING_FEED_URL=none\n' >"$test_root/settings-none.env"
+rc=0
+out=$(env -u WAITING_FEED_URL WSL_AUTOMATION_SETTINGS="$test_root/settings-none.env" WAITING_FEED_DIR="$test_root/clone-none" bash "$script" 2>&1) || rc=$?
+assert_eq "$rc" 0 'WAITING_FEED_URL=none from the settings file exits 0'
+assert_match "$out" '^waiting feed: skipped: WAITING_FEED_URL is none' 'the settings file value skips too'
+assert_match "$(grep '^WAITING_FEED_URL=' "$repository_root/config/settings.env.example")" '^WAITING_FEED_URL=none$' 'the settings example starts with the feed off'
+# A real URL still proceeds to the clone (see the first run above).
+reset_calls
+rc=0
+out=$(WAITING_FEED_DIR="$test_root/clone-url" bash "$script" --dry-run 2>&1) || rc=$?
+assert_eq "$rc" 0 'a real WAITING_FEED_URL still runs'
+assert_match "$out" 'published=dry-run' 'a real WAITING_FEED_URL reaches the collection step'
+[[ -d $test_root/clone-url/.git ]] || fail 'a real WAITING_FEED_URL must reach the clone'
 
 printf 'PASS: %s assertions\n' "$passed"
