@@ -235,9 +235,10 @@ config_refusal() {
 }
 
 # reopened: the steps done before the update (DONE_BEFORE, matched by title,
-# since a newer steps.json can renumber) that status.sh no longer counts done.
+# since a newer steps.json can renumber) that status.sh no longer counts done,
+# each with its command and, for status.sh's next step, status.sh's reason.
 reopened() {
-  local id title run n=0
+  local id title run next n=0
   printf '%s\n' "$DONE_BEFORE" > "$BOOT_WORK/done.before"
   log ""
   log "Checking which setup steps are still done under the newer kit (bootstrap/status.sh, read-only)..."
@@ -245,15 +246,18 @@ reopened() {
     log "(status.sh failed, so steps that the newer kit's checks reopen are not listed: run bash bootstrap/status.sh${CONFIG_ARG})"
     return 0
   fi
+  next=$(sed -nE 's/^Next: ([^ ]+) .*/\1/p' "$BOOT_WORK/status.txt" | head -n1)
   while IFS=$'\t' read -r _ title; do
     [ -n "$title" ] || continue
     cut -f2- "$BOOT_WORK/done.after" | grep -qxF -- "$title" && continue
     id=$(jq -r --arg t "$title" '[.steps[] | select(.title == $t) | .id][0] // ""' "$B/steps.json")
     [ -n "$id" ] || continue   # the newer kit dropped or renamed that step
     run=$(jq -r --arg t "$title" '[.steps[] | select(.title == $t) | .run][0] // ""' "$B/steps.json")
-    [ "$n" -gt 0 ] || log "Steps that were done before this update and are NOT done under the newer kit (its check for them now covers more; run them again):"
+    [ "$n" -gt 0 ] || log "Steps that were done before this update and are NOT done under the newer kit (its checks ask for more):"
     n=$((n + 1))
     log "  step $id, $title: $run"
+    # status.sh explains only its next step; the 4-space lines under "Not done yet:".
+    [ "$id" != "$next" ] || sed -n '/^  Not done yet:$/,$ { /^    /s/^    /    why: /p; }' "$BOOT_WORK/status.txt"
   done < "$BOOT_WORK/done.before"
   [ "$n" -gt 0 ] || log "Every setup step that was done before this update is still done."
 }

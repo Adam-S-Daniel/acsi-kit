@@ -1475,11 +1475,26 @@ assert "under the old kit step 3 is done" grep -qE '^done +3 ' "$OUT"
 run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/update-kit.sh" --config "$CFGP"; rc=$?
 assert_eq "the update with a reopened step exits 0" "$rc" 0
 [ "$rc" = 0 ] || sed 's/^/    update-kit: /' "$ERR"
-assert "it says which steps reopened" has "$OUT" "Steps that were done before this update and are NOT done under the newer kit"
+assert "it says which steps reopened" has "$OUT" "Steps that were done before this update and are NOT done under the newer kit (its checks ask for more):"
 assert "it names step 3 and the command to run again" has "$OUT" "  step 3, Store the privacy denylist: \`bootstrap/set-secrets.sh --only privacy"
 run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/status.sh" --config "$CFGP"
 assert_not "after the update status.sh shows step 3 not done" grep -qE '^done +3 ' "$OUT"
 cp "$UP/stub-state.saved" "$GH_STUB_STATE"
+# Since step 0 asks for TIME_ZONE while a copy step is not done, an update
+# reopens step 0 for a setup without it; the report says why, as status.sh does.
+O5="$UP/o5"; mkdir -p "$O5"; cp -R "$K/bootstrap" "$K/starter" "$K/library" "$O5/"
+sed -i 's/^if \[ "\$CONFIG_OK" = 1 \] && \[ -z "\$CFG_TIME_ZONE" \]; then$/if false; then/' "$O5/bootstrap/status.sh"
+assert_not "the old kit's status.sh has no TIME_ZONE rule" cmp -s "$K/bootstrap/status.sh" "$O5/bootstrap/status.sh"
+ugit -C "$O5" init -q -b main && ugit -C "$O5" add -A && ugit -C "$O5" commit -qm "step 0 without the TIME_ZONE rule"
+ugit clone -q "$O5" "$UP/k5"
+cp "$K/bootstrap/status.sh" "$O5/bootstrap/status.sh" && ugit -C "$O5" commit -qam "step 0 asks for TIME_ZONE"
+new_config "$UP/k5.env" free zz-fresh-owner; sed -i '/^TIME_ZONE=/d' "$UP/k5.env"
+run env ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/status.sh" --config "$UP/k5.env"
+assert "under the old kit step 0 is done without TIME_ZONE" grep -qE '^done +0 ' "$OUT"
+run env ADOPT_STATE_FILE="$UP/state5/adopt.json" bash "$UP/k5/bootstrap/update-kit.sh" --config "$UP/k5.env"; rc=$?
+assert_eq "the update that reopens step 0 exits 0" "$rc" 0
+assert "it names step 0" has "$OUT" "  step 0, Write fleet.env:"
+assert "it says why: TIME_ZONE, as status.sh and the key report do" has "$OUT" "    why: $UP/k5.env: TIME_ZONE is required: set TIME_ZONE in fleet.env"
 # A downloaded copy (no .git) cannot be updated in place.
 mkdir -p "$UP/dl"; cp -R "$UK/bootstrap" "$UK/starter" "$UK/library" "$UP/dl/"
 uk "$UP/dl" --config "$UK/fleet.env"; rc=$?
