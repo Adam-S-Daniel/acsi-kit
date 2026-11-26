@@ -118,7 +118,9 @@ The prompt-audit sweep's fire values live on `_agent-guidance`, where
 `prompt-audit-fire.yml` fires the sweep for each trigger issue the changelog
 watcher files ([routines](../docs/routines.md#prompt-audit-sweep)). If they
 are unset, the workflow comments on the issue that the fire isn't
-configured, and you start the sweep by hand.
+configured, and you start the sweep by hand. `verify.sh --only prompt-audit`
+(step 28's check) reports either one missing, and a URL that is not a fire
+URL.
 
 - `PROMPT_AUDIT_SWEEP_FIRE_URL`: a repository variable on
   `<you>/_agent-guidance`, the sweep routine's fire URL
@@ -140,7 +142,9 @@ scheduled run then skips the fire with a "not set up yet" notice (a setup
 before step 27). Step 27 replaces `none` with the routine's URL; from then
 on an empty URL (a deleted variable), a missing bearer or a failed fire fails
 the run. `verify.sh --only fleet-worker` (step 27's check) reports a URL
-that is unset or still `none`, and a missing bearer.
+that is unset, still `none`, or not a fire URL (the routine's
+`https://claude.ai/code/routines/trig_...` page is the usual wrong paste),
+and a missing bearer.
 
 - `FLEET_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
   the fleet worker routine's fire URL. Set it like

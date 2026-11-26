@@ -180,7 +180,13 @@ off", is the one list, with the reasons.
   (`/adopt-evals`, step 41) creates it. `create-environments.sh` has set
   `EVALS_REPO` to `none`, so the workflow skips the Loop worker's fire and
   stays green. The step's check is `verify` (`verify.sh --only
-  fleet-worker`): done once both values are set on `_agent-guidance`.
+  fleet-worker`): done once both values are set on `_agent-guidance` and the
+  URL is the fire URL the routine's API trigger shows
+  (`https://api.anthropic.com/v1/claude_code/routines/trig_<id>/fire`), not
+  the routine's `https://claude.ai/code/routines/trig_...` page.
+- **Step 28** (the prompt-audit sweep) is checked the same way
+  (`verify.sh --only prompt-audit`), on `PROMPT_AUDIT_SWEEP_FIRE_URL` and
+  `PROMPT_AUDIT_SWEEP_FIRE_BEARER`: it is a `verify` step, never marked.
 - **Step 17** (the Codex Cloud pin) is optional: status.sh labels it
   `optional` and never makes it the next step. Ask whether the user runs
   Codex. If not, skip it; if so, run it like any other script step.

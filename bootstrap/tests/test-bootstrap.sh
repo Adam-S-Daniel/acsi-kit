@@ -1639,12 +1639,42 @@ assert_eq "verify --only fleet-worker fails before step 27" "$rc" 1
 assert "create-environments.sh left the URL none, and verify says step 27 sets it" has "$OUT" "FAIL: acme-example/_agent-guidance variable FLEET_WORKER_FIRE_URL is still none: step 27 creates the Fleet worker routine and sets its fire URL"
 assert_eq "create-environments.sh wrote the Loop worker's URL as none too" "$(jqs "$AG.LOOP_WORKER_FIRE_URL")" none
 assert "it names the missing bearer secret" has "$OUT" "FAIL: acme-example/_agent-guidance has secret FLEET_WORKER_FIRE_BEARER"
-printf 'https://api.example.com/fire' | gh variable set FLEET_WORKER_FIRE_URL --repo "$O/_agent-guidance" >/dev/null 2>&1
+# The URL must be the fire URL fleet-worker-fire.yml posts to; its value is never printed.
+FLEET_URL=https://api.anthropic.com/v1/claude_code/routines/trig_EXAMPLEFleetWorker01/fire
+setvar() { printf '%s' "$2" | gh variable set "$1" --repo "$O/_agent-guidance" >/dev/null 2>&1; }
+setvar FLEET_WORKER_FIRE_URL "$FLEET_URL"
 run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
 assert_eq "the URL alone is not enough" "$rc" 1
+assert "a fire URL passes its own check" has "$OUT" "PASS: acme-example/_agent-guidance variable FLEET_WORKER_FIRE_URL is a routine fire URL"
 printf 'fleet-bearer-placeholder' | gh secret set FLEET_WORKER_FIRE_BEARER --repo "$O/_agent-guidance" >/dev/null 2>&1
 run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
 assert_eq "verify --only fleet-worker passes once both are set" "$rc" 0
+setvar FLEET_WORKER_FIRE_URL https://api.example.com/fire
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "a URL that is not a routine fire URL fails step 27" "$rc" 1
+assert "it says which URL to copy" has "$OUT" "FAIL: acme-example/_agent-guidance variable FLEET_WORKER_FIRE_URL is not a routine fire URL: copy the URL the Fleet worker routine's API trigger shows, https://api.anthropic.com/v1/claude_code/routines/trig_<id>/fire"
+setvar FLEET_WORKER_FIRE_URL https://claude.ai/code/routines/trig_EXAMPLEPageUrl01
+run bash "$B/verify.sh" --config "$CFGP" --track base --only fleet-worker; rc=$?
+assert_eq "the routine's page URL fails step 27" "$rc" 1
+assert "it says that is the routine's page" has "$OUT" "is not a routine fire URL (it is the routine's page on claude.ai): copy the URL"
+assert_not "no URL value is printed" grep -qE 'api\.example\.com|trig_EXAMPLE' "$OUT" "$ERR"
+setvar FLEET_WORKER_FIRE_URL "$FLEET_URL"
+# Step 28, the prompt-audit sweep, is checked the same way (it was an ask step).
+run bash "$B/verify.sh" --config "$CFGP" --track base --only prompt-audit; rc=$?
+assert_eq "verify --only prompt-audit fails before step 28" "$rc" 1
+assert "it says step 28 sets the URL" has "$OUT" "FAIL: acme-example/_agent-guidance variable PROMPT_AUDIT_SWEEP_FIRE_URL is not set (step 28 sets it to the prompt-audit sweep routine's fire URL)"
+assert "it names the missing bearer" has "$OUT" "FAIL: acme-example/_agent-guidance has secret PROMPT_AUDIT_SWEEP_FIRE_BEARER"
+run bash "$B/status.sh" --config "$CFGP" --mark 28; rc=$?
+assert_eq "status refuses to mark step 28, which it checks itself" "$rc" 1
+setvar PROMPT_AUDIT_SWEEP_FIRE_URL https://claude.ai/code/routines/trig_EXAMPLEPageUrl01
+printf 'sweep-bearer-placeholder' | gh secret set PROMPT_AUDIT_SWEEP_FIRE_BEARER --repo "$O/_agent-guidance" >/dev/null 2>&1
+run bash "$B/verify.sh" --config "$CFGP" --track base --only prompt-audit; rc=$?
+assert_eq "the sweep routine's page URL fails step 28" "$rc" 1
+assert "it says which URL to copy" has "$OUT" "variable PROMPT_AUDIT_SWEEP_FIRE_URL is not a routine fire URL (it is the routine's page on claude.ai): copy the URL the prompt-audit sweep routine's API trigger shows"
+setvar PROMPT_AUDIT_SWEEP_FIRE_URL https://api.anthropic.com/v1/claude_code/routines/trig_EXAMPLESweep01/fire
+run bash "$B/verify.sh" --config "$CFGP" --track base --only prompt-audit; rc=$?
+assert_eq "verify --only prompt-audit passes with a fire URL and the bearer" "$rc" 0
+assert_not "no URL value is printed" grep -qE 'trig_EXAMPLE' "$OUT" "$ERR"
 run bash "$B/verify.sh" --config "$CFGP"; rc=$?
 assert_eq "verify passes once everything is in place" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'

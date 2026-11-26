@@ -398,7 +398,7 @@ group_tracks() {
   local g=$1 e r n src grp app installed out=""
   case $g in
     repos|labels|settings) out="base evals" ;;
-    fleet-worker) out=base ;;
+    fleet-worker|prompt-audit) out=base ;;
     branches) out=$(repo_track "$EVAL_RESULTS_REPO") ;;
     environments) for e in "${ENVIRONMENTS[@]}"; do out+=" $(repo_track "${e%%|*}")"; done ;;
     variables|federation)
@@ -678,7 +678,7 @@ value_group() { case $1 in PRIVACY_DENYLIST) echo privacy ;; *) echo routine-fir
 # skips that fire as not set up yet) until steps 27 and 41 set the routines'
 # fire URLs. A value the adopter set is never overwritten, so verify.sh's
 # variables group checks only that it is set (step 27's fleet-worker group
-# checks the Fleet worker's URL is no longer none).
+# checks the Fleet worker's URL is a routine fire URL).
 REPO_VARIABLES=(
   "repo-settings|GUIDANCE_SYNC_APP_ID|cfg:GUIDANCE_SYNC_APP_ID|variables"
   "repo-settings|ROSTER_WRITER_APP_ID|cfg:ROSTER_WRITER_APP_ID|variables"
