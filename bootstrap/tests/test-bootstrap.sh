@@ -756,6 +756,11 @@ run bash "$B/copy-starter.sh" --config "$CFGP" --dry-run starter/repo-settings "
 assert_eq "copy-starter dry run exits 0" "$rc" 0
 assert_eq "copy-starter dry run pushes nothing" "$(git --git-dir="$T/remotes/$O/repo-settings.git" for-each-ref | wc -l)" "$before"
 assert_eq "copy-starter dry run opens nothing" "$(since "$n")" 0
+# Before any starter is merged no repo has its actions.lock: step 18's check
+# is not done yet (it once passed vacuously from step 2 on).
+run bash "$B/regenerate.sh" --config "$CFGP" --check actions-lock; rc=$?
+assert_eq "actions-lock --check is not done before the starters are merged" "$rc" 1
+assert "it says which lock is missing and why" has "$OUT" "acme-example/repo-settings has no .github/workflows/actions.lock yet (merge its starter pull request first)"
 for r in "${FLEET[@]}"; do
   t=$(tree_of "$r")
   run bash "$B/copy-starter.sh" --config "$CFGP" "starter/$t" "$O/$r"; rc=$?

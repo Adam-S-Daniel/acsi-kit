@@ -293,7 +293,14 @@ task_actions_lock() {
   for r in "${FLEET_REPOS[@]}"; do
     in_task "$r" || continue
     clone "$r"
-    [ -f "$CLONE/$LOCK" ] || { log "skip: $O/$r has no $LOCK"; continue; }
+    if [ ! -f "$CLONE/$LOCK" ]; then
+      # The kit's tree ships one, so the repo will too once its starter pull
+      # request is merged: until then the task is not done, not vacuously done.
+      if [ "$CHECK" = 1 ] && [ -f "$HERE/../starter/$(kit_tree "$r")/$LOCK" ]; then
+        notdone "$O/$r has no $LOCK yet (merge its starter pull request first)"
+      else log "skip: $O/$r has no $LOCK"; fi
+      continue
+    fi
     if [ "$CHECK" = 1 ]; then
       if (cd "$CLONE" && "$GH" actions-lock --verify >/dev/null 2>&1); then current "$O/$r $LOCK verifies"
       else notdone "$O/$r $LOCK (gh actions-lock --verify reports findings)"; fi
