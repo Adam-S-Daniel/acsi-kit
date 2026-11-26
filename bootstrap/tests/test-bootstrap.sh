@@ -284,7 +284,9 @@ for v in empty absent valid; do
   assert_not "preflight does not FAIL on TIME_ZONE $v" grep -q '^FAIL' "$OUT"
   run env ADOPT_STATE_FILE="$T/tz-state-$v.json" bash "$B/status.sh" --config "$T/tz-$v.env"; rc=$?
   assert_eq "status.sh exits 0 with TIME_ZONE $v" "$rc" 0
-  assert_not "status.sh's step 0 is not undone by TIME_ZONE $v" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
+  if [ "$v" = valid ]; then
+    assert_not "status.sh's step 0 is not undone by TIME_ZONE $v" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
+  fi
   run bash "$B/verify.sh" --config "$T/tz-$v.env" --only repos
   assert_not "verify.sh does not stop on TIME_ZONE $v" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
   run bash "$B/copy-starter.sh" --config "$T/tz-$v.env" --dry-run starter/agent-guidance acme-example/_agent-guidance; rc=$?
@@ -295,6 +297,34 @@ for v in empty absent valid; do
     assert "its message says what to set and how to find it" has "$ERR" "timedatectl show -p Timezone --value"
   fi
 done
+# status.sh's step 0 asks for TIME_ZONE only while a copy step (4, 10, 12, 13) is
+# not done: copy-starter.sh would refuse there. gh sees two states of the
+# adopter's repos: none, and every base copy step's files on the default branch.
+echo '{}' > "$T/tz-gh-none.json"
+jq -n --slurpfile s "$B/steps.json" '{repos: ([$s[0].steps[] | select(.track == "base" and (.run | contains("copy-starter.sh")) and .check.type == "files") | .check.files[]]
+  | group_by(.repo) | map({key: ("acme-example/" + .[0].repo), value: {full_name: ("acme-example/" + .[0].repo), name: .[0].repo, visibility: "public", private: false,
+      default_branch: "main", has_commits: true, files: (map({key: .path, value: true}) | from_entries)}}) | from_entries)}' > "$T/tz-gh-copied.json"
+tz_status() { # <tz variant> <gh state: none|copied>
+  run env -u GH_STUB_GIT_REMOTES GH_STUB_STATE="$T/tz-gh-$2.json" ADOPT_STATE_FILE="$T/tz-state2-$1-$2.json" bash "$B/status.sh" --config "$T/tz-$1.env" --track base; rc=$?
+  assert_eq "status.sh exits 0 with TIME_ZONE $1 and copies $2" "$rc" 0
+}
+for v in empty absent; do
+  tz_status "$v" none
+  assert "copies not done, TIME_ZONE $v: step 0 is not done" grep -qE '^next +0 ' "$OUT"
+  assert "it is the next step" grep -q '^Next: 0 ' "$OUT"
+  assert "it names TIME_ZONE and how to find it" has "$OUT" "TIME_ZONE is required: set TIME_ZONE in fleet.env to your IANA time zone name"
+  assert "it says which step refuses" has "$OUT" "the copy steps (4 10 12 13) run copy-starter.sh, which refuses without it"
+  tz_status "$v" copied
+  assert "every copy step done, TIME_ZONE $v: the copy steps read done" bash -c 'for i in 4 10 12 13; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
+  assert "every copy step done, TIME_ZONE $v: step 0 stays done" grep -qE '^done +0 ' "$OUT"
+  assert_not "and it says nothing about TIME_ZONE" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
+done
+tz_status valid none
+assert "TIME_ZONE set, copies not done: step 0 is done" grep -qE '^done +0 ' "$OUT"
+assert_not "and it says nothing about TIME_ZONE" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
+# The one message: copy-starter.sh prints the same text.
+run bash "$B/copy-starter.sh" --config "$T/tz-empty.env" --dry-run starter/agent-guidance acme-example/_agent-guidance
+assert "copy-starter.sh says the same help text" has "$ERR" "TIME_ZONE is required: set TIME_ZONE in fleet.env to your IANA time zone name"
 pf -- --config "$T/tz-empty.env"
 assert "preflight WARNs about an empty TIME_ZONE with the help text" grep -q '^WARN: .*has no TIME_ZONE' "$OUT"
 assert "and prints the fix line" grep -q 'fix: set TIME_ZONE in fleet.env' "$OUT"
