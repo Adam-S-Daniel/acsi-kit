@@ -128,7 +128,16 @@ Docker Desktop WSL integration watchdog. It registers a Codex Cloud
 environment sync too, which stays disabled unless you pass
 `-EnableCodexTasks`.
 
-**On Windows** (WSL), from the clone, once per machine:
+**Where the clone is.** `install-machine.sh` (step 21) clones
+`wsl-automation` into `REPOS_DIR` beside the other two (default
+`~/repos/wsl-automation`): that is the clone to copy the settings example
+from, and the one Linux and macOS schedule from. On Windows the tasks run
+from a Windows checkout instead (the Bash tasks reach it through its `/mnt`
+path, as the repo's README says), so clone it once on the Windows side, in
+PowerShell 7, with the line `install-machine.sh` prints under WSL:
+`git clone https://github.com/<you>/wsl-automation.git $HOME\repos\wsl-automation`.
+
+**On Windows** (WSL), from that Windows checkout, once per machine:
 
 1. Install PowerShell 7.6 or newer from the MSI, not the Microsoft Store
    (`winget install --id Microsoft.PowerShell --scope machine`).
@@ -198,9 +207,24 @@ A claude.ai cloud environment (https://claude.ai/code, the environment
 menu) sets the network access and a setup script for every session started
 in it. Create one for your fleet work and give it:
 
-- **Network access:** "Custom", with the domains in `_agent-guidance`'s
-  [`docs/reference/network-allowlist-claude-environments.txt`](../starter/agent-guidance/docs/reference/network-allowlist-claude-environments.txt).
-  Its header says how to change it.
+- **Network access:** **Limited**, with **Allow package managers** checked
+  (a new environment starts that way), and the domains in `_agent-guidance`'s
+  [`docs/reference/network-allowlist-claude-environments.txt`](../starter/agent-guidance/docs/reference/network-allowlist-claude-environments.txt)
+  in **Allowed domains**. Anthropic's [cloud environments
+  page](https://code.claude.com/docs/en/cloud-environments) says: "While
+  **Allow package managers** is checked, sessions in this environment reach
+  the default allowlist as well as the domains you list." Keep it checked:
+  the setup script below downloads the guidance installer from
+  `raw.githubusercontent.com` and may install packages with `apt-get`, and
+  that default allowlist holds both (the file lists
+  `raw.githubusercontent.com` as well, so the download keeps working if the
+  box is ever cleared). An environment saved earlier as "Custom" opens as
+  **Limited** with its list and that box as you set them, by the same page.
+  The file names none of your own hosts: add your website's, if a session
+  needs them, and record every change in its sidecar,
+  `network-allowlist-claude-environments.CHANGELOG.md`, as
+  `docs/reference/network-allowlists.md` there says. A line is a bare
+  domain, with no room for a comment.
 - **Setup script:** the one in `acsi-agentskills`'
   [`docs/multi-repo-delivery.md`](../starter/agent-skills/docs/multi-repo-delivery.md),
   "The wiring (cloud only)", with its project directory set to the one your

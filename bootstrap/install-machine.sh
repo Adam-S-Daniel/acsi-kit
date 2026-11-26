@@ -5,10 +5,16 @@
 # the owner's are, by running the exported repos' own installers. It writes
 # nothing of its own:
 #
-#   1. clones OWNER/acsi-agentskills and OWNER/_agent-guidance into REPOS_DIR
-#      (default ~/repos) when they are not there; an existing clone must have
-#      origin at OWNER/<repo>, and is fast-forwarded when it is clean and on
-#      its default branch (otherwise it is used as it is, with a warning);
+#   1. clones OWNER/acsi-agentskills, OWNER/_agent-guidance and
+#      OWNER/wsl-automation into REPOS_DIR (default ~/repos) when they are not
+#      there; an existing clone must have origin at OWNER/<repo>, and is
+#      fast-forwarded when it is clean and on its default branch (otherwise
+#      it is used as it is, with a warning). wsl-automation is cloned last,
+#      after the installers, and a clone it cannot make or use is a warning
+#      that names step 22, never a failure: it is the one step 22 reads
+#      (config/settings.env.example) and, on Linux or macOS, schedules from;
+#      under WSL the Windows tasks run from a Windows checkout instead, and
+#      the script prints the command that makes it;
 #   2. `bash acsi-agentskills/setup.sh --owner-machine`: converges
 #      ~/.claude/settings.json (your marketplaces acsi-agentskills and
 #      acsi-agentskills-private, the plugins enabled, syncClaudeAiSkills false,
@@ -27,8 +33,9 @@
 # Each installer is idempotent, so a second run changes nothing. --dry-run
 # makes the clones' reads and prints the commands, running none of them.
 # Merge the acsi-agentskills and _agent-guidance starter pull requests first: the
-# installers come from their default branches. The wsl-automation scheduled
-# jobs are a separate step (the quick start's "Schedule the machine jobs").
+# installers come from their default branches (and wsl-automation's, step 13).
+# The wsl-automation scheduled jobs are a separate step (the quick start's
+# "Schedule the machine jobs").
 # Needs: git, bash, python3; claude for the plugins to load.
 
 set -euo pipefail
@@ -118,4 +125,24 @@ if [ "$WITH_CODEX" = 1 ]; then
   fi
 fi
 [ "$DRY_RUN" = 1 ] || log "Start a new Claude Code session: it installs the enabled plugins from your marketplaces."
+# wsl-automation last, and never fatal: none of the installers above needs it,
+# so a clone of it that cannot be made or used (another origin, a folder of
+# that name, a branch without the settings example) is step 22's to fix, not
+# a reason this step fails. ensure_clone dies, so it runs in a subshell; the
+# subshell hands back its write and skip counts (a dry run's planned clone),
+# and whatever it said on stderr (a clone used as it is) is shown either way.
+if (ensure_clone wsl-automation config/settings.env.example; printf '%s %s\n' "$WRITES" "$SKIPS" > "$BOOT_WORK/wa.counts") 2>"$BOOT_WORK/wa.err"; then
+  read -r WRITES SKIPS < "$BOOT_WORK/wa.counts"
+  cat "$BOOT_WORK/wa.err" >&2
+  log "Step 22 (Schedule the machine jobs) works in $DIR/wsl-automation: copy its config/settings.env.example to ~/.config/wsl-automation/settings.env."
+else
+  grep -v '^ERROR: ' "$BOOT_WORK/wa.err" >&2 || true
+  warn "no usable wsl-automation clone in $DIR ($(sed -n 's/^ERROR: //p' "$BOOT_WORK/wa.err" | head -n 1)); this step is done without it, and step 22 needs one: fix that, then run this again or clone it yourself"
+fi
+detect_os
+if [ "$IS_WSL" = 1 ]; then
+  log "On Windows the scheduled tasks run from a Windows checkout of wsl-automation, not this one. In PowerShell 7:"
+  log "  git clone $GIT_BASE/$O/wsl-automation.git \$HOME\\repos\\wsl-automation"
+  log "  then, in an elevated PowerShell 7 in that folder, .\\scripts\\register-tasks.ps1 (step 22)."
+fi
 finish

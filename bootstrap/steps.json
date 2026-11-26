@@ -102,8 +102,8 @@
     },
     {
       "id": "6",
-      "title": "Create the three base GitHub Apps",
-      "run": "`bootstrap/create-apps.sh guidance-sync settings-admin settings-read` (GitHub's App manifest flow, once per App, in the browser)",
+      "title": "Create the base GitHub Apps (three; two on PLAN=free)",
+      "run": "`bootstrap/create-apps.sh guidance-sync settings-admin settings-read` (GitHub's App manifest flow, once per App, in the browser). On `PLAN=free` it creates two: it skips `settings-admin`, whose key would live in an environment a private repo has only on a paid plan, so you apply `fleet.yml` from your machine (step 20)",
       "kind": "browser",
       "part": "settings",
       "track": "base",
@@ -192,13 +192,16 @@
     {
       "id": "11",
       "title": "Drop the example repos from repos.yml",
-      "run": "In a pull request on `<you>/_agent-guidance`, remove the `example-site-*` names from `repos.yml` `cron_coverage.fleet` and `skills_bootstrap.repos` (unless you have those repos)",
+      "run": "In a pull request on `<you>/_agent-guidance`, remove the `example-site-*` names from `repos.yml` `cron_coverage.fleet` and `skills_bootstrap.repos` (unless you have those repos), and `skills-evals` too if an older kit's copy lists it before you have that repo. This step's check is that both lists name only repos one of your owners has",
       "kind": "manual",
       "part": "guidance",
       "track": "base",
       "link": "docs/generated-files.md#example-repos-in-fleetyml",
       "check": {
-        "type": "ask"
+        "type": "verify",
+        "groups": [
+          "repos-yml"
+        ]
       },
       "minutes": 10
     },
@@ -357,7 +360,7 @@
     {
       "id": "22",
       "title": "Schedule the machine jobs",
-      "run": "First, in the distro (or on Linux or macOS), copy your wsl-automation clone's `config/settings.env.example` to `~/.config/wsl-automation/settings.env` (every job reads it) and check its repositories, `LESSONS_CLONE` and `WSL_AUTOMATION_AGENT_OWNER_ROOTS` (the folder that holds your clones). It ships `SKILLS_EVALS_URL=none` and `WAITING_FEED_URL=none`: the session miner and the usage census run code from skills-evals, and the waiting feed pushes to a feed repository the base does not create, so on the base they log that they skipped and exit 0 (step 42 turns the first two on; set `WAITING_FEED_URL` when you create `waiting-feed`). Windows: `./scripts/register-tasks.ps1` in an elevated PowerShell 7, in your wsl-automation clone; on the base the jobs that do work are the ccstatusline config sync, the WSL memory log, the Docker watchdog and memory curation, and the optional waiting feed skips each minute until you create `waiting-feed` and set `WAITING_FEED_URL`. Linux or macOS: nothing to schedule on the base (`scripts/unix/install-schedule.sh` schedules only the usage census and the session miner, which serve evals, and the optional waiting feed), so mark this step done, or run `bash scripts/unix/install-schedule.sh <systemd|launchd|cron> --jobs waiting-feed` if you use the waiting feed",
+      "run": "First, in the distro (or on Linux or macOS), copy `config/settings.env.example` from the wsl-automation clone `install-machine.sh` made beside the others in `REPOS_DIR` (step 21; default `~/repos/wsl-automation`) to `~/.config/wsl-automation/settings.env` (every job reads it) and check its repositories, `LESSONS_CLONE` and `WSL_AUTOMATION_AGENT_OWNER_ROOTS` (the folder that holds your clones). It ships `SKILLS_EVALS_URL=none` and `WAITING_FEED_URL=none`: the session miner and the usage census run code from skills-evals, and the waiting feed pushes to a feed repository the base does not create, so on the base they log that they skipped and exit 0 (step 42 turns the first two on; set `WAITING_FEED_URL` when you create `waiting-feed`). Windows: the tasks run from a Windows checkout of wsl-automation, so clone it there with the `git clone` line `install-machine.sh` printed under WSL (for example into `$HOME\\repos\\wsl-automation`), then run `./scripts/register-tasks.ps1` in an elevated PowerShell 7 in that folder; on the base the jobs that do work are the ccstatusline config sync, the WSL memory log, the Docker watchdog and memory curation, and the optional waiting feed skips each minute until you create `waiting-feed` and set `WAITING_FEED_URL`. Linux or macOS: nothing to schedule on the base (the `REPOS_DIR` clone's `scripts/unix/install-schedule.sh` schedules only the usage census and the session miner, which serve evals, and the optional waiting feed), so mark this step done, or run `bash scripts/unix/install-schedule.sh <systemd|launchd|cron> --jobs waiting-feed` if you use the waiting feed",
       "kind": "machine",
       "part": "machine",
       "track": "base",
@@ -370,7 +373,7 @@
     {
       "id": "23",
       "title": "Set up your cloud environments",
-      "run": "At https://claude.ai/code, give each cloud environment the setup script from acsi-agentskills' `docs/multi-repo-delivery.md` and the network allowlist from _agent-guidance's `docs/reference/network-allowlist-claude-environments.txt`",
+      "run": "At https://claude.ai/code, give each cloud environment the setup script from acsi-agentskills' `docs/multi-repo-delivery.md`, and network access **Limited** with **Allow package managers** checked and _agent-guidance's `docs/reference/network-allowlist-claude-environments.txt` as its allowed domains",
       "kind": "browser",
       "part": "machine",
       "track": "base",

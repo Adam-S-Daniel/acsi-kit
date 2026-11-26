@@ -41,6 +41,12 @@
 #                   and its FLEET_WORKER_FIRE_BEARER secret is set (by name)
 #   prompt-audit    the same for the prompt-audit sweep (step 28):
 #                   PROMPT_AUDIT_SWEEP_FIRE_URL and PROMPT_AUDIT_SWEEP_FIRE_BEARER
+#   repos-yml       every name in _agent-guidance's repos.yml cron_coverage.fleet
+#                   and skills_bootstrap.repos is a repo one of the owners has
+#                   (step 11: the starter lists the example repos, and an
+#                   _agent-guidance from an older kit may list skills-evals on a
+#                   setup that has none; a name neither owner has fails
+#                   dependabot-config-health.yml every day). Parsed with PyYAML
 #   settings        repo-settings' engine reports no drift from fleet.yml
 #                   (apply-settings.sh --check, which clones repo-settings)
 #   regen:<task>    a regenerate.sh task is done on your default branches
@@ -60,7 +66,7 @@
 # passes each step's own track.
 #
 # Without --only: repos, labels, branches, environments, variables, every App, its
-# installation, every values group, fleet-worker and prompt-audit (the fast ones; settings and regen:* clone repos, so
+# installation, every values group, fleet-worker, prompt-audit and repos-yml (the fast ones; settings and regen:* clone repos, so
 # name them, and federation is optional, so name it too), and content once
 # add-content.sh has recorded your choices. Secret and variable values are never read or printed; the
 # variables group compares a value to fleet.env's without printing either.
@@ -95,12 +101,12 @@ if [ -n "$ONLY" ]; then
   IFS=',' read -r -a only_list <<<"$ONLY"
   for g in "${only_list[@]}"; do
     case $g in
-      repos|labels|branches|environments|variables|federation|settings|content|fleet-worker|prompt-audit) ;;
+      repos|labels|branches|environments|variables|federation|settings|content|fleet-worker|prompt-audit|repos-yml) ;;
       apps:*) app_known "${g#apps:}" || die "unknown App in --only: ${g#apps:}" ;;
       installs:*) app_known "${g#installs:}" || die "unknown App in --only: ${g#installs:}" ;;
       values:*) group_known "${g#values:}" || die "unknown values group in --only: ${g#values:}" ;;
       regen:*) task_known "${g#regen:}" || die "unknown regenerate task in --only: ${g#regen:}" ;;
-      *) die "unknown group in --only: $g (repos, labels, branches, environments, variables, federation, apps:<app>, installs:<app>, values:<group>, settings, fleet-worker, prompt-audit, regen:<task>, content)" ;;
+      *) die "unknown group in --only: $g (repos, labels, branches, environments, variables, federation, apps:<app>, installs:<app>, values:<group>, settings, fleet-worker, prompt-audit, repos-yml, regen:<task>, content)" ;;
     esac
     SEL[$g]=1
   done
@@ -260,7 +266,7 @@ installs_by_hand() {
   local done_ids=""
   if [ -f "${STATE:-}" ]; then done_ids=$(jq -r '.done[]?' "$STATE" 2>/dev/null || true); fi
   for id in $ids; do grep -qxF -- "$id" <<<"$done_ids" || missing+="$id "; done
-  if [ "$installed" = fleet ]; then repos=$(track_repos "$TRACK" | sed "s|^|$O/|" | paste -sd, - | sed 's/,/, /g'); else repos=""; for id in $installed; do repos+="${repos:+, }$O/$id"; done; fi
+  repos=$(install_repos "$installed" "$TRACK")
   if [ -n "$ids" ] && [ -z "$missing" ]; then
     pass "$app App's installation on $repos: confirmed by you (status.sh --mark $(paste -sd' ' - <<<"$ids")); gh's sign-in cannot read installations (HTTP 403)"
   else
@@ -343,6 +349,58 @@ if { sel fleet-worker || sel prompt-audit; } && tracked base && [ "${EXISTS[_age
     ! sel fleet-worker || fire_values FLEET_WORKER_FIRE_URL FLEET_WORKER_FIRE_BEARER 27 "Fleet worker"
     ! sel prompt-audit || fire_values PROMPT_AUDIT_SWEEP_FIRE_URL PROMPT_AUDIT_SWEEP_FIRE_BEARER 28 "prompt-audit sweep"
   else fail "$O/_agent-guidance variables readable (HTTP $GH_HTTP)"; fi
+fi
+
+# _agent-guidance's repos.yml (step 11): the repos the audits expect and the
+# hook goes to must exist under one of the owners.
+if sel repos-yml && tracked base && [ "${EXISTS[_agent-guidance]:-0}" = 1 ]; then
+  if ! gh_read "repos/$O/_agent-guidance/contents/repos.yml"; then
+    fail "$O/_agent-guidance repos.yml readable on the default branch (HTTP $GH_HTTP; merge its starter pull request)"
+  elif ! printf '%s' "$GH_OUT" | jq -r '.content // "" | gsub("\n"; "") | @base64d' > "$BOOT_WORK/repos.yml" \
+      || ! python3 -I - "$BOOT_WORK/repos.yml" > "$BOOT_WORK/repos-yml.names" 2>"$BOOT_WORK/repos-yml.err" <<'PY'
+import re, sys, yaml
+try:
+    doc = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+except yaml.YAMLError as e:
+    sys.exit(f"is not valid YAML ({type(e).__name__})")
+for key, sub in (("cron_coverage", "fleet"), ("skills_bootstrap", "repos")):
+    section = doc.get(key) if isinstance(doc, dict) else None
+    names = section.get(sub, []) if isinstance(section, dict) else None
+    names = [] if names is None else names        # `repos:` with every name removed
+    if not isinstance(names, list) or not all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,100}", n)
+                                              and n not in (".", "..") for n in names):
+        sys.exit(f"{key}.{sub} is not a list of repo names")
+    for n in names:
+        print(f"{key}.{sub}\t{n}")
+PY
+  then
+    fail "$O/_agent-guidance repos.yml: $(tail -n 1 "$BOOT_WORK/repos-yml.err" 2>/dev/null || true)$([ -s "$BOOT_WORK/repos-yml.err" ] || echo "could not be read as text")"
+  else
+    missing=0
+    # HAS_REPO[name]: 1 when an owner has it, 404 when every owner answered
+    # 404, else the first other status (a 403, a rate limit, a 5xx), which
+    # is "could not check", never "neither owner has".
+    declare -A HAS_REPO
+    while IFS=$'\t' read -r list n; do
+      if [ -z "${HAS_REPO[$n]+set}" ]; then
+        HAS_REPO[$n]=404
+        while IFS= read -r o; do
+          if gh_read "repos/$o/$n"; then HAS_REPO[$n]=1; break; fi
+          [ "$GH_HTTP" = 404 ] || [ "${HAS_REPO[$n]}" != 404 ] || HAS_REPO[$n]=$GH_HTTP
+        done < <(owners)
+      fi
+      [ "${HAS_REPO[$n]}" != 1 ] || continue
+      missing=1
+      if [ "${HAS_REPO[$n]}" != 404 ]; then
+        fail "$O/_agent-guidance repos.yml $list names $n, which could not be checked (HTTP ${HAS_REPO[$n]}); run this again"
+      elif [ "$n" = "$EVALS_REPO" ]; then
+        fail "$O/_agent-guidance repos.yml $list names $n, which neither owner has, or gh cannot see (HTTP 404): remove that line in a pull request (the evals track's regenerate.sh evals-fleet adds it back once $n exists)"
+      else
+        fail "$O/_agent-guidance repos.yml $list names $n, which neither owner has, or gh cannot see (HTTP 404): remove it in a pull request (step 11)"
+      fi
+    done < "$BOOT_WORK/repos-yml.names"
+    [ "$missing" = 1 ] || pass "$O/_agent-guidance repos.yml names only repos you have (cron_coverage.fleet, skills_bootstrap.repos)"
+  fi
 fi
 
 sub_check() { # description cmd...

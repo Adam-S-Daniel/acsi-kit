@@ -1,7 +1,13 @@
-# Test-run junk only. Every other file in the kit is content, and
-# export/tests/test_kit_tracked.py fails if a rule here drops one.
+# Test-run junk, and the two things an adopter's setup writes into the clone.
+# Every other file in the kit is content, and export/tests/test_kit_tracked.py
+# fails if a rule here drops one.
 __pycache__/
 *.pyc
 .pytest_cache/
 node_modules/
 .DS_Store
+# The adopter's own: fleet.env (step 0) and the App manifests create-apps.sh
+# writes (step 6). Neither holds a secret, but both name the adopter's Apps
+# and account, and neither belongs in a commit.
+/fleet.env
+/app-manifests/

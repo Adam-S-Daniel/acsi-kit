@@ -114,6 +114,45 @@ def test_a_marker_under_the_last_element_is_replaced_too():
     assert cf.add(text, "two") == "cron_coverage:\n  fleet:\n    - one\n    - two\n  out_of_scope: []\n"
 
 
+@pytest.mark.parametrize("next_comment", ["  # the next key's comment\n", "# a top-level comment\n"])
+def test_the_next_keys_comment_right_under_the_marker_stays(next_comment):
+    # The marker sits right under the last element, and the next key's comment
+    # follows with no blank line: that comment is the next key's, at a lesser
+    # indent than the list, and must survive the add.
+    text = ("cron_coverage:\n  fleet:\n    - one\n    # two is not listed while it does not\n"
+            "    # exist yet.\n" + next_comment + "  out_of_scope: []\n")
+    want = "cron_coverage:\n  fleet:\n    - one\n    - two\n" + next_comment + "  out_of_scope: []\n"
+    assert cf.add(text, "two") == want
+
+
+def test_a_marker_wrapped_after_a_period_is_replaced_whole():
+    # The starter's marker has a sentence end mid-line ("every day."); wrapped
+    # so a line ends there, the rest of the marker must still go with it.
+    text = ("cron_coverage:\n  fleet:\n    - one\n    # two is not listed while you have no such repo: a name\n"
+            "    # neither owner has fails the health check every day.\n"
+            "    # The kit's regenerate.sh puts it here, with the evals track.\n"
+            "  # the next key's comment\n  out_of_scope: []\n")
+    want = "cron_coverage:\n  fleet:\n    - one\n    - two\n  # the next key's comment\n  out_of_scope: []\n"
+    assert cf.add(text, "two") == want
+
+
+def test_a_compact_list_keeps_the_next_keys_comment_at_the_same_indent():
+    # `- one` at the key's own indent: the next key's comment is as deep as the
+    # marker, and only the marker's closing period tells them apart.
+    text = ("cron_coverage:\n  fleet:\n  - one\n  # two is not listed while it does not exist.\n"
+            "  # the next key's comment\n  out_of_scope: []\n")
+    want = "cron_coverage:\n  fleet:\n  - one\n  - two\n  # the next key's comment\n  out_of_scope: []\n"
+    assert cf.add(text, "two") == want
+
+
+def test_a_marker_indented_less_than_the_dash_is_still_replaced():
+    text = ("cron_coverage:\n  fleet:\n    - one\n  # two is not listed while it does not exist.\n"
+            "  out_of_scope: []\n")
+    want = "cron_coverage:\n  fleet:\n    - one\n    - two\n  out_of_scope: []\n"
+    assert cf.add(text, "two") == want
+    assert "is not listed" not in cf.add(text, "two")
+
+
 @pytest.mark.parametrize("text, said", [
     ("cron_coverage:\n  fleet: [one, two]\n", "no cron_coverage.fleet block list"),
     ("cron_coverage:\n  fleet: []\n", "no cron_coverage.fleet block list"),

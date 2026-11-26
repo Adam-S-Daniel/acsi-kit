@@ -146,6 +146,13 @@ pins, and both ship as placeholders that fail closed:
 script's own test with the new pins and proposes the change. `--check`
 reports each pin on its own line. Skip the step if you do not use Codex.
 
+`_agent-guidance`'s `docs/codex-cloud.md` shows the same guidance pin in a
+block you paste into a Codex Cloud environment by hand. No task edits it: its
+`fleet_pin_commit` ships as forty zeros, which fail closed, and its
+`fleet_pin_sha256` already matches your installer. Before you paste the
+block, set the commit to your `_agent-guidance`'s main commit
+(`git rev-parse origin/main`), as its comment says.
+
 ## The action lockfiles
 
 Every repo pins its actions through `.github/workflows/actions.lock`, with
@@ -168,10 +175,19 @@ action, under the kit owner's name: from `agent-checks.yml` in
 `_agent-guidance`, `repo-settings` and `acsi-agentskills-private`, and from
 `ci.yml` in `acsi-agentskills`, `wsl-automation` and `skills-evals`. That
 name stays as it is. It is a public action meant to be used directly, as you
-use GitHub's own checkout action, so you don't copy or fork it. The export
+use GitHub's own checkout action, so you don't need to copy or fork it. The export
 keeps the name on purpose (rule C5 in
 [`export/manifests/_common.yml`](../export/manifests/_common.yml)), and
 `copy-starter.sh` replaces only the invented owners, so it never touches it.
+
+So your CI runs a public action from the kit owner's account, the
+`verify-actions-lock` linked above, at the tag each workflow names, and each
+repo's `actions.lock` locks that tag to one commit, which the runner runs
+even if the tag later moves. If you would rather run your own copy anyway,
+fork it, change every `uses: Adam-S-Daniel/verify-actions-lock@<tag>` line
+(the workflows above, and `ci.yml` in `_agent-guidance`) to your fork and a
+tag of it, then run `gh actions-lock --no-narrow` in each repo and merge
+those pull requests.
 
 ## Example repos in fleet.yml
 
@@ -194,7 +210,11 @@ list names a repo neither owner has, which is also why the example names
 have to go. When you add evals, `bootstrap/regenerate.sh evals-fleet` (step
 40) adds `skills-evals` to the list in a pull request. If your
 `_agent-guidance` came from an older copy of the kit and still lists
-`skills-evals` without having the repo, remove that line.
+`skills-evals` without having the repo, remove that line. Step 11's check,
+`bash bootstrap/verify.sh --only repos-yml`, reads both lists on your
+default branch and names each repo neither owner has, the example repos and
+such a `skills-evals` line alike, so the step reads done only once they are
+gone.
 
 The invented example repos appear in live config only in those places, in
 `acsi-agentskills`' federated marketplace entry ([the

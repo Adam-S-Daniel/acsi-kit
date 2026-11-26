@@ -18,7 +18,8 @@ exits GH_STUB_ACTIONS_LOCK_VERIFY (default 0).
 
 Knobs: GH_STUB_DRIFT=1 makes a ruleset read-back drop its last rule.
 GH_STUB_ENV_LIST_STATUS=<code> makes every environment secret/variable list
-fail with that HTTP status.
+fail with that HTTP status. GH_STUB_REPO_STATUS=<owner>/<repo>=<code> makes a
+read of that one repo answer that status.
 GH_STUB_GIT_REMOTES=<dir> answers a contents read from the bare repo
 <dir>/<owner>/<repo>.git's default branch, so a test's merge is what GitHub sees.
 GH_STUB_FAKE_PEM and GH_STUB_CLIENT_SECRET are what a manifest conversion
@@ -137,6 +138,10 @@ def api(args):
     if m:
         u = m.group(1)
         return out({"login": u, "id": 5000 + sum(map(ord, u)), "type": "User"})
+
+    knob = os.environ.get("GH_STUB_REPO_STATUS", "")
+    if knob and method == "GET" and path == "repos/" + knob.rsplit("=", 1)[0]:
+        return err(int(knob.rsplit("=", 1)[1]), "Server Error")
 
     # Real GitHub answers 403 to gh's own (OAuth) sign-in here: the endpoint
     # takes a GitHub App user token. GH_STUB_APP_USER_TOKEN=1 stands for one.

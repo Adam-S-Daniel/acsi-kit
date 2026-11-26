@@ -604,3 +604,26 @@ the `.txt` exactly (same set of 36 entries).
   only this one bucket is needed, and a wildcard would open every bucket in
   S3 to every session in the environment. Not yet probed from inside the
   environment.
+
+---
+
+## The adoption kit's starter list
+
+**Environment:** yours (the kit's docs/machine.md, "Cloud environments")
+**Change:** the kit ships this list without the hosts only the source owner
+reaches, and with one the setup script needs:
+
+```
+- acsi-usage-sink-2026-11.s3.us-east-1.amazonaws.com
+- *.example-site-a, example-site-a, *.example-site-b, example-site-b
++ raw.githubusercontent.com
+```
+
+- The usage-sink bucket and the two sites are the source owner's; the
+  entries above that add them describe the source owner's environment.
+- **`raw.githubusercontent.com`**: acsi-agentskills'
+  `scripts/cloud-env-setup.sh` downloads the guidance installer from it.
+  Anthropic's default allowlist holds it too; it is listed so the setup
+  keeps working with **Allow package managers** cleared.
+- Add your own website's hosts (as a `*.` and apex pair) if a routine or
+  session needs them, with an entry here.

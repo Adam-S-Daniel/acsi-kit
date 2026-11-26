@@ -152,12 +152,13 @@ env_flag() { [ "$1" = - ] || printf -- '--env %s ' "$1"; }
 
 install_hint() { # slug installed
   log "Install it: https://github.com/apps/$1/installations/new"
+  # The same list verify.sh names at step 7 (lib/common.sh install_repos):
+  # the kit's repos on this setup's tracks, never fleet.yml's, which still
+  # names the example repos at this step.
+  log "  Pick: Only select repositories: $(install_repos "$2" "$([ "$EVALS_HERE" = 1 ] && echo all || echo base)")"
   if [ "$2" = fleet ]; then
-    log "  Pick: Only select repositories: every repo fleet.yml in repo-settings lists for $O"
-    log "  (the kit repos you created, plus each consumer in _agent-guidance's repos.yml)."
-    [ "$TWO_OWNERS" = 0 ] || log "  Then sign in as $CFG_OWNER_TWO and install it there too, on that owner's fleet repos."
-  else
-    log "  Pick: Only select repositories: $2"
+    log "  Add a repo of your own here when you add it to fleet.yml or repos.yml later."
+    [ "$TWO_OWNERS" = 0 ] || log "  Then sign in as $CFG_OWNER_TWO and install it there too, on the repos of $CFG_OWNER_TWO's you want in the fleet: the kit creates none there, so they are your choice (not the example repos fleet.yml lists until step 9)."
   fi
 }
 

@@ -60,12 +60,14 @@ download, digest check or commit lookup stops setup (the `--codex-cloud` mode
 fails closed rather than launching without the guidance):
 
 ```bash
-# The pin is these two variables and nothing else. To bump it, fetch first,
-# then take this repository's current main commit and that file's digest:
+# The pin is these two variables and nothing else. The starter ships the
+# commit as forty zeros, which fails closed: before you paste this block,
+# and to bump it later, fetch first, then take this repository's current
+# main commit and that file's digest:
 #   git rev-parse origin/main
 #   git show origin/main:.claude/hooks/fleet-memory.sh | sha256sum
 # Then re-paste this block into every environment's setup AND maintenance script.
-fleet_pin_commit=0ef732fdbd825e35ad6bd853855fe158b61ada2b
+fleet_pin_commit=0000000000000000000000000000000000000000
 fleet_pin_sha256=2a51a5dc7a097ca68bd72c3399f283eb54f89727ed52a353eaba179b2a79588d
 fleet_guidance_install() (
   # Every step exits on failure explicitly: a caller's `||` (as below) turns

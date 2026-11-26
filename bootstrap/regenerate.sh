@@ -27,8 +27,8 @@
 #                  source owner's _agent-guidance become your _agent-guidance
 #                  default branch's commit (all but one: the recipe in
 #                  _agent-guidance's own docs/codex-cloud.md, which a Codex
-#                  user pastes by hand, keeps the source's commit; its comment
-#                  says how to bump it). In scheduled-run-health.yml (repo-settings,
+#                  user pastes by hand, ships forty zeros, which fail closed;
+#                  its comment says what to put there). In scheduled-run-health.yml (repo-settings,
 #                  skills-evals, acsi-agentskills, wsl-automation) the
 #                  forty-zero placeholder: a cross-repo reusable workflow takes
 #                  a full sha. In the base repos' copies it also turns the

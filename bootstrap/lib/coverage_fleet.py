@@ -52,11 +52,15 @@ def _fleet_node(text):
             return None
         return next((v for k, v in node.value if isinstance(k, yaml.ScalarNode) and k.value == key), None)
 
-    fleet = child(child(root, "cron_coverage"), "fleet")
+    coverage = child(root, "cron_coverage")
+    fleet = child(coverage, "fleet")
     if not isinstance(fleet, yaml.SequenceNode) or fleet.flow_style or not fleet.value:
         raise ShapeError("has no cron_coverage.fleet block list with at least one name")
     if not all(isinstance(v, yaml.ScalarNode) and NAME.fullmatch(v.value) for v in fleet.value):
         raise ShapeError("has a cron_coverage.fleet element that is not a plain repo name")
+    # The column of the `fleet:` key, which _marker needs to tell a comment
+    # inside the list from one that belongs to what follows it.
+    fleet.key_column = next(k for k, v in coverage.value if v is fleet).start_mark.column
     return fleet
 
 
@@ -65,18 +69,34 @@ def names(text):
     return [v.value for v in _fleet_node(text).value]
 
 
+def _indent(line):
+    return len(line) - len(line.lstrip(" "))
+
+
 def _marker(lines, fleet, name):
     """(first, last) line indexes of the comment that holds `name`'s place in
     the list, or None. The starter writes it where the source lists the repo:
-    a run of comment lines among the elements (or right under the last) whose first begins
-    "# <name> is not listed while ..."."""
+    a run of comment lines among the elements, or among the comments right
+    under the last one at any indent, whose first begins "# <name> is not
+    listed while ...". It runs on over the comment lines that follow it at
+    least as deep as its first line, so a comment after it that is indented
+    less (the next key's, with no blank line before it) is never taken, and
+    how the marker's own text is wrapped does not matter.
+
+    Only where the marker sits no deeper than the `fleet:` key itself (a
+    compact list, or a marker moved left of the `-`) can the next key's
+    comment be exactly as deep as the marker. There, and only there, the
+    marker also ends at the line that ends with a period."""
     first, last = fleet.value[0].start_mark.line, fleet.value[-1].start_mark.line
     while last + 1 < len(lines) and lines[last + 1].strip().startswith("#"):
-        last += 1                       # comments right under the last element belong to the list too
+        last += 1                       # comments right under the last element may hold the marker
     for n in range(first, last + 1):
         if lines[n].strip().startswith(f"# {name} {MARKER}"):
+            at_key = _indent(lines[n]) <= fleet.key_column
             end = n
-            while end + 1 <= last and lines[end + 1].strip().startswith("#"):
+            while (end + 1 <= last and lines[end + 1].strip().startswith("#")
+                   and _indent(lines[end + 1]) >= _indent(lines[n])
+                   and not (at_key and lines[end].rstrip().endswith("."))):
                 end += 1
             return n, end
     return None

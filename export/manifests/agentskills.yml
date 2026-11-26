@@ -430,6 +430,18 @@ edits:
       like its image (ubuntu) blocked every pull request body that named the
       ubuntu-latest runner.
 
+  # ---- Third pass: GitHub's pull_request_target date (DECISIONS "An adopter's own cloud allowlist, zone and Codex pin")
+  - path: AGENTS.md
+    stage: output
+    old: |
+      It runs only on `pull_request_target`, which GitHub blocks by default on public
+      repos from 2026-11-02. An Actions event policy declared in repo-settings'
+    new: |
+      It runs only on `pull_request_target`, which GitHub blocks by default on public
+      repos from 2026-12-02. An Actions event policy declared in repo-settings'
+    why: >-
+      kit departure: the date. GitHub moved the default block to 2026-12-02: "Starting December 2, 2026, GitHub Actions will block `pull_request_target` events by default in all public repositories" and "Enforcement was previously scheduled for November 2, 2026." (https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2). Source follow-up proposed.
+
 patches:
   - file: library_skills.py
     why: >-

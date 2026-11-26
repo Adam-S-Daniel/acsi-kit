@@ -117,10 +117,17 @@ off", is the one list, with the reasons.
      check afterward.
    - **A step that opens pull requests** (`copy-starter.sh`,
      `regenerate.sh <task>`): after the run, give each pull request's URL
-     and say what to review, above all `.github/workflows/`. The user
-     merges. `docs/settings-and-apps.md`, "Merging the starter pull
-     requests", lists the check failures to expect before step 20; anything
-     else is a finding to look into, not to wave through.
+     and review only what differs from what the kit ships, never whole
+     files. A `regenerate.sh` pull request is its own small diff. For a
+     starter pull request, compare its branch with the kit's
+     `starter/<tree>` (`git diff --no-index --stat`, then the changed
+     lines), which should show only your names, time zone, plan sizes and
+     pins. Never read the workflow files whole: the base starters hold over
+     400 KB of them, and reading them can use up a Pro plan's 5-hour
+     window. Tell the user that this is how you reviewed it, and what
+     changed. The user merges. `docs/settings-and-apps.md`, "Merging the
+     starter pull requests", lists the check failures to expect before
+     step 20; anything else is a finding to look into, not to wave through.
    - **browser**: give the exact page and what to do there (the `Run:` line
      and the docs section; `docs/routines.md` has every routine's settings
      and prompt word for word, with `<you>` to replace). Wait for the user.

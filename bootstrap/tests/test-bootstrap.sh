@@ -932,6 +932,11 @@ assert_eq "eval-improve's client id is a secret (its gates check both exist)" "$
 assert_eq "skills-evals holds the roster and registry-read client ids as variables" \
   "$(jqs '.values["acme-example/skills-evals||variable"] | keys | join(",")')" REGISTRY_READ_APP_CLIENT_ID,ROSTER_APP_CLIENT_ID
 assert "it prints each install link" has "$OUT" "https://github.com/apps/acme-example-app-1/installations/new"
+# The repos to pick: the kit's (here both tracks, since skills-evals exists),
+# the list verify.sh names at step 7, never fleet.yml's example repos.
+assert "it names the repos to pick for a fleet-wide App" has "$OUT" "Pick: Only select repositories: acme-example/_agent-guidance, acme-example/repo-settings, acme-example/acsi-agentskills, acme-example/acsi-agentskills-private, acme-example/skills-evals, acme-example/wsl-automation"
+assert "and an App's own repos" has "$OUT" "Pick: Only select repositories: acme-example/acsi-agentskills, acme-example/_agent-guidance"
+assert_not "it never sends the adopter to fleet.yml's list" grep -qE 'every repo fleet.yml|example-site' "$OUT"
 assert_not "no client id, key or secret was passed in argv" grep -qE "Iv23liExample|$PEM_MARK|$CS_MARK" "$GH_LOG"
 n=$(log_lines "$GH_LOG")
 run bash "$B/create-apps.sh" --config "$CFGP" --out "$T/manifests" </dev/null; rc=$?
@@ -1360,6 +1365,11 @@ rm -f "$UP"/state/update-kit-*.log
 uk "$UK" --config "$UK/fleet.env" --dry-run; rc=$?
 assert_eq "a dry run on a current kit exits 0" "$rc" 0
 assert_not "a dry run writes no log into the state folder" bash -c 'ls "$1"/update-kit-*.log' _ "$UP/state"
+mkdir -p "$UP/badnpm-dry"; printf '#!/bin/sh\necho "npm-stub: registry unreachable" >&2\nexit 1\n' > "$UP/badnpm-dry/npm"; chmod +x "$UP/badnpm-dry/npm"
+run env PATH="$UP/badnpm-dry:$PATH" ADOPT_STATE_FILE="$UP/state/adopt.json" "$BASH" "$UK/bootstrap/update-kit.sh" --config "$UK/fleet.env" --dry-run; rc=$?
+assert_eq "a dry run whose add-content.sh fails exits 1" "$rc" 1
+assert "it says the dry run failed" has "$ERR" "add-content.sh --dry-run failed on your recorded choices"
+assert_not "and names no log, which the dry run does not keep" has "$ERR" "all of it in"
 # Hand edits inside starter/ are not add-content's, so they are refused.
 bump "upstream again"
 assert "the hand-edited file is tracked" git -C "$UK" ls-files --error-unmatch starter/repo-settings/README.md
@@ -1730,6 +1740,73 @@ setvar PROMPT_AUDIT_SWEEP_FIRE_URL https://api.anthropic.com/v1/claude_code/rout
 run bash "$B/verify.sh" --config "$CFGP" --track base --only prompt-audit; rc=$?
 assert_eq "verify --only prompt-audit passes with a fire URL and the bearer" "$rc" 0
 assert_not "no URL value is printed" grep -qE 'trig_EXAMPLE' "$OUT" "$ERR"
+# Step 11 is checked against repos.yml on _agent-guidance's default branch:
+# both lists still name the starter's example repos, which neither owner has.
+run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "verify --only repos-yml fails while repos.yml names the example repos" "$rc" 1
+for l in cron_coverage.fleet skills_bootstrap.repos; do
+  assert "it names $l's example repo" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml $l names example-site-a, which neither owner has, or gh cannot see (HTTP 404): remove it in a pull request (step 11)"
+done
+run bash "$B/status.sh" --config "$CFGP" --mark 11; rc=$?
+assert_eq "status refuses to mark step 11, which it checks itself" "$rc" 1
+# Step 11 as its pull request does it: the example names out of both lists.
+drop_from_repos_yml() { # <name pattern> ...: drop matching list lines from repos.yml on _agent-guidance's main
+  local w="$T/tmp/step11"
+  rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/_agent-guidance.git" "$w"
+  python3 -I - "$w/repos.yml" "$@" <<'PY'
+import re, sys, yaml
+path, pats = sys.argv[1], sys.argv[2:]
+text = open(path, encoding="utf-8").read()
+keep = [l for l in text.splitlines(True) if not any(re.fullmatch(r"\s+- " + p + r"\s*", l) for p in pats)]
+new = "".join(keep)
+for key, sub in (("cron_coverage", "fleet"), ("skills_bootstrap", "repos")):
+    names = yaml.safe_load(new)[key][sub]
+    assert not any(re.fullmatch(p, n) for p in pats for n in names), (key, names)
+open(path, "w", encoding="utf-8").write(new)
+PY
+  git -C "$w" commit -qam "drop repos neither owner has from repos.yml" && git -C "$w" push -q origin HEAD:main; rm -rf "$w"
+}
+drop_from_repos_yml 'example-site-[a-z]+'
+run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "verify --only repos-yml passes once both lists name only repos you have" "$rc" 0
+assert "it says so" has "$OUT" "PASS: acme-example/_agent-guidance repos.yml names only repos you have"
+# A read that is not a 404 (a 5xx, a rate limit) is "could not be checked", never "neither owner has".
+run env GH_STUB_REPO_STATUS=acme-example/wsl-automation=502 bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "a repo read that fails with 502 fails step 11's check" "$rc" 1
+assert "it says the name could not be checked, with the status" has "$OUT" "names wsl-automation, which could not be checked (HTTP 502); run this again"
+assert_not "and never that neither owner has it" has "$OUT" "wsl-automation, which neither owner has"
+# A list emptied to `repos:` is an empty list; a name that is not a repo name never reaches an API path.
+ag_main=$(git --git-dir="$T/remotes/$O/_agent-guidance.git" rev-parse main)
+ag_edit() { # <python, given repos.yml's path>: commit that edit to _agent-guidance's main; fails when nothing was pushed
+  local w="$T/tmp/ag-edit" rc=0
+  rm -rf "$w"; git clone -q "$BOOTSTRAP_GIT_BASE/$O/_agent-guidance.git" "$w"
+  python3 -I -c "$1" "$w/repos.yml" && git -C "$w" commit -qam "test edit" && git -C "$w" push -q origin HEAD:main || rc=1
+  rm -rf "$w"; return "$rc"
+}
+ag_repos_yml() { git --git-dir="$T/remotes/$O/_agent-guidance.git" show main:repos.yml; }
+# Every element line of skills_bootstrap.repos goes, found by the parser's
+# position (comment lines sit between the key and its elements).
+ag_edit '
+import sys, yaml
+p = sys.argv[1]; t = open(p).read()
+root = yaml.compose(t)
+key = lambda n, k: next(v for kn, v in n.value if kn.value == k)
+lines = {e.start_mark.line for e in key(key(root, "skills_bootstrap"), "repos").value}
+open(p, "w").write("".join(l for i, l in enumerate(t.splitlines(True)) if i not in lines))'
+assert "the test emptied skills_bootstrap.repos on _agent-guidance's main (a null list)" python3 -I -c '
+import sys, yaml
+doc = yaml.safe_load(sys.stdin)
+sys.exit(0 if doc["skills_bootstrap"]["repos"] is None and doc["cron_coverage"]["fleet"] else 1)' < <(ag_repos_yml)
+run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+assert_eq "an emptied skills_bootstrap.repos passes" "$rc" 0
+git --git-dir="$T/remotes/$O/_agent-guidance.git" update-ref refs/heads/main "$ag_main"
+for bad in ../wsl-automation .. .; do
+  assert "the test wrote $bad into skills_bootstrap.repos" ag_edit "import sys; p = sys.argv[1]; t = open(p).read(); t = t.replace('    - wsl-automation\\n', '    - \"$bad\"\\n', 1); open(p, 'w').write(t)"
+  run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
+  assert_eq "a name that is not a repo name ($bad) fails" "$rc" 1
+  assert "it says the list is not one of repo names ($bad)" has "$OUT" "repos.yml: skills_bootstrap.repos is not a list of repo names"
+  git --git-dir="$T/remotes/$O/_agent-guidance.git" update-ref refs/heads/main "$ag_main"
+done
 run bash "$B/verify.sh" --config "$CFGP"; rc=$?
 assert_eq "verify passes once everything is in place" "$rc" 0
 [ "$rc" = 0 ] || grep -E '^FAIL' "$OUT" | sed 's/^/    verify: /'
@@ -1818,7 +1895,7 @@ rm -rf "$fw"
 # Before any regenerate step: status.sh shows step 14's reasons, the indented
 # NOT DONE lines verify.sh prints under its FAIL, not a FAIL line ending in a colon.
 SR="$T/state-regen/adopt.json"; mkdir -p "$T/state-regen"; cp "$CHOICES" "$T/state-regen/adopt.content-choices.json"
-run env ADOPT_STATE_FILE="$SR" bash "$B/status.sh" --config "$CFGP" --track base --mark 9 --mark 11
+run env ADOPT_STATE_FILE="$SR" bash "$B/status.sh" --config "$CFGP" --track base --mark 9
 assert "step 14 is next before skills-locks runs" grep -q '^Next: 14 ' "$OUT"
 grep -q '^Next: 14 ' "$OUT" || sed 's/^/    status: /' "$OUT"
 assert "status.sh names step 14's failing check" grep -qx '    FAIL: regenerate.sh skills-locks is done on the base track:' "$OUT"
@@ -2098,8 +2175,8 @@ assert_eq "verify regen:<task> passes for a done task" "$rc" 0
 
 # ======================================================== status.sh (part 2)
 # The steps no script can see are answered with --mark.
-for i in 9 11; do bash "$B/status.sh" --config "$CFGP" --mark "$i" >/dev/null 2>&1; done
-assert_eq "the marks are kept in the state file" "$(jq -c .done "$ADOPT_STATE_FILE")" '["9","11"]'
+bash "$B/status.sh" --config "$CFGP" --mark 9 >/dev/null 2>&1
+assert_eq "the marks are kept in the state file" "$(jq -c .done "$ADOPT_STATE_FILE")" '["9"]'
 run bash "$B/status.sh" --config "$CFGP"; rc=$?
 assert "the regenerate steps read as done after their merges" bash -c 'for i in 14 15 16 17 18; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
 assert "step 20, the settings apply, is next" grep -q '^Next: 20 ' "$OUT"
@@ -2180,7 +2257,7 @@ assert "the engine reads the committed fleet.yml, not a copy" grep -qE '^apply -
 : > "$FAKE_ENGINE_LOG"
 run bash "$B/apply-settings.sh" --config "$CFGF"; rc=$?
 assert_eq "apply-settings exits 0 when the read-back shows no drift" "$rc" 0
-assert_eq "it applies, then reads back" "$(cut -d' ' -f1 "$FAKE_ENGINE_LOG" | paste -sd' ')" "apply diff"
+assert_eq "it applies, then reads back" "$(cut -d' ' -f1 "$FAKE_ENGINE_LOG" | paste -sd' ' -)" "apply diff"
 assert "the apply skips the platform's label-only repos, as the fleet workflow does" grep -q '^apply .* --owner acme-fake --cms-label-only skip | 111 222$' "$FAKE_ENGINE_LOG"
 : > "$FAKE_ENGINE_LOG"
 run env FAKE_DIFF_RC=1 bash "$B/apply-settings.sh" --config "$CFGF"; rc=$?
@@ -2272,17 +2349,41 @@ fake_installer register-codex-hook.sh > "$w/scripts/register-codex-hook.sh"
 printf '#!/usr/bin/env bash\n' > "$w/.claude/hooks/memory-home.sh"
 git init -q "$w" && git -C "$w" add -A && git -C "$w" commit -qm fake
 git init -q --bare "$T/remotes/$F/_agent-guidance.git" && git -C "$w" push -q "$T/remotes/$F/_agent-guidance.git" HEAD:main; rm -rf "$w"
+w="$T/tmp/fake-wa"; mkdir -p "$w/config"; printf 'SKILLS_EVALS_URL=none\n' > "$w/config/settings.env.example"
+git init -q "$w" && git -C "$w" add -A && git -C "$w" commit -qm fake
+git init -q --bare "$T/remotes/$F/wsl-automation.git" && git -C "$w" push -q "$T/remotes/$F/wsl-automation.git" HEAD:main; rm -rf "$w"
 RD="$T/home/repos"
 run bash "$B/install-machine.sh" --config "$CFGF" --dry-run; rc=$?
 assert_eq "install-machine dry run exits 0" "$rc" 0
 assert_eq "the dry run runs no installer" "$(log_lines "$INSTALL_LOG")" 0
 assert_not "the dry run clones nothing into REPOS_DIR" test -e "$RD"
 assert "the dry run names the final hook path" has "$OUT" "--hook $RD/_agent-guidance/.claude/hooks/memory-home.sh"
+assert "the dry run counts three clones and three installers, wsl-automation's clone included" has "$OUT" "Dry run: 6 change(s) would be made"
 run bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
 assert_eq "install-machine exits 0" "$rc" 0
 assert_eq "it runs the repos' own installers, in order, with their arguments" "$(cat "$INSTALL_LOG")" \
   "$(printf '%s\n' "setup.sh --owner-machine" "install-agent-hooks.sh " "register-memory-home-hook.sh --hook $RD/_agent-guidance/.claude/hooks/memory-home.sh")"
 assert "it cloned acsi-agentskills into REPOS_DIR" test -f "$RD/acsi-agentskills/setup.sh"
+# Step 22 reads wsl-automation's settings example: the clone sits beside the others.
+assert "it cloned wsl-automation into REPOS_DIR, where step 22 reads it" test -f "$RD/wsl-automation/config/settings.env.example"
+assert "it says step 22 works in that clone" has "$OUT" "Step 22 (Schedule the machine jobs) works in $RD/wsl-automation: copy its config/settings.env.example"
+run env PREFLIGHT_WSL=1 bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
+assert_eq "install-machine under WSL exits 0" "$rc" 0
+assert "under WSL it gives the Windows checkout's clone command" has "$OUT" "  git clone $BOOTSTRAP_GIT_BASE/$F/wsl-automation.git \$HOME\\repos\\wsl-automation"
+assert "and where register-tasks.ps1 runs" has "$OUT" '.\scripts\register-tasks.ps1 (step 22)'
+run env PREFLIGHT_WSL=0 bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
+assert_not "off WSL it names no Windows checkout" has "$OUT" "Windows checkout"
+echo mine > "$RD/wsl-automation/local-note.txt"
+run bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
+assert_eq "a wsl-automation clone with local changes does not fail step 21" "$rc" 0
+assert "and its warning that it was used as it is reaches the user" has "$ERR" "$RD/wsl-automation has local changes or is not on main; using it as it is"
+rm "$RD/wsl-automation/local-note.txt"
+mv "$RD/wsl-automation" "$T/tmp/wa-clone"; mkdir -p "$RD/wsl-automation"; : > "$INSTALL_LOG"
+run bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
+assert_eq "a wsl-automation folder that is not a clone does not fail step 21" "$rc" 0
+assert_eq "and every installer still runs" "$(log_lines "$INSTALL_LOG")" 3
+assert "a warning names the folder's problem and step 22" grep -qE "WARNING: no usable wsl-automation clone in $RD \(.*is not a git clone\).*step 22 needs one" "$ERR"
+rmdir "$RD/wsl-automation"; mv "$T/tmp/wa-clone" "$RD/wsl-automation"
 : > "$INSTALL_LOG"
 run bash "$B/install-machine.sh" --config "$CFGF" --with-codex; rc=$?
 assert_eq "a second install-machine run exits 0" "$rc" 0
@@ -2369,6 +2470,14 @@ run bash "$B/verify.sh" --config "$CFGB" --only variables
 assert "verify --track all fails EVALS_REPO naming skills-evals when it does not exist" has "$OUT" "FAIL: acme-example/_agent-guidance variable EVALS_REPO should be none"
 run bash "$B/create-environments.sh" --config "$CFGB"; rc=$?
 assert_eq "EVALS_REPO is none again" "$(jqs "$AG.EVALS_REPO")" none
+# evals-fleet put skills-evals in repos.yml's cron_coverage.fleet, and the repo
+# is gone: an _agent-guidance like an older kit's, on a base-only setup. Step 11
+# reports it (the daily Dependabot health check would fail on that name) and
+# says how it comes back.
+run bash "$B/verify.sh" --config "$CFGB" --track base --only repos-yml; rc=$?
+assert_eq "a base-only setup whose repos.yml lists skills-evals fails step 11" "$rc" 1
+assert "it names the line and how it comes back" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml cron_coverage.fleet names skills-evals, which neither owner has, or gh cannot see (HTTP 404): remove that line in a pull request (the evals track's regenerate.sh evals-fleet adds it back once skills-evals exists)"
+drop_from_repos_yml skills-evals
 read -r -a asks <<<"$(jq -r '[.steps[] | select(.track == "base" and .check.type == "ask" and .check.record == null) | "--mark", .id] | join(" ")' "$B/steps.json")"
 run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" "${asks[@]}"; rc=$?
 assert_eq "the base ask steps are marked" "$rc" 0
@@ -2431,6 +2540,18 @@ run bash "$B/regenerate.sh" --config "$CFGB" --check --track evals run-health-sh
 assert_eq "regenerate --check --track evals fails without skills-evals" "$rc" 1
 run bash "$B/apply-settings.sh" --config "$CFGB" --check --track evals; rc=$?
 assert_eq "apply-settings --check --track evals fails without skills-evals" "$rc" 1
+# create-apps.sh on PLAN=free with no skills-evals (step 6 for a Free base
+# adopter): settings-admin is skipped, and a fleet-wide App goes on the five
+# base repos, never fleet.yml's example repos or skills-evals.
+CFGBF="$T/fleet-base-free.env"
+sed -e 's/^PLAN=.*/PLAN=free/' -e '/^GUIDANCE_SYNC_APP_ID=/d' -e '/^SETTINGS_ADMIN_APP_ID=/d' "$CFGB" > "$CFGBF"
+printf 'codefree1
+' | run bash "$B/create-apps.sh" --config "$CFGBF" --out "$T/manifests-free" guidance-sync settings-admin; rc=$?
+assert_eq "create-apps on a Free base-only setup exits 0" "$rc" 0
+assert "it skips settings-admin on PLAN=free" has "$OUT" "skip: settings-admin: its key would be in environment fleet-apply of the private repo repo-settings, and PLAN=free has none there."
+assert "it names the five base repos to pick" has "$OUT" "Pick: Only select repositories: acme-example/_agent-guidance, acme-example/repo-settings, acme-example/acsi-agentskills, acme-example/acsi-agentskills-private, acme-example/wsl-automation"
+assert_not "and no skills-evals" grep -q 'Pick: .*skills-evals' "$OUT"
+assert "the second owner picks their own repos" has "$OUT" "on the repos of acme-example-two's you want in the fleet"
 
 # ======================================================== the checkers, and that each can fail
 for c in check-refs.py check-branch-prefixes.py check-one-owner.py; do

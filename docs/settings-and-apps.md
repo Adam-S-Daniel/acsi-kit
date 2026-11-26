@@ -78,8 +78,11 @@ and a workflow token that can approve pull requests, which is the only
 exception to the default above. It and `_agent-guidance` also get a
 deletion-only ruleset on `persistent/**`.
 
-**`pull_request_target`.** From 2026-11-02, GitHub blocks that event on public
-repos by default unless an Actions policy allows it. `fleet.yml` allows it
+**`pull_request_target`.** From 2026-12-02 (moved from 2026-11-02, by
+GitHub's
+[changelog](https://github.blog/changelog/2026-11-02-pull_request_target-blocked-by-default-december-2)),
+GitHub blocks that event on public repos by default unless an Actions
+policy allows it. `fleet.yml` allows it
 for a single workflow,
 `acsi-agentskills`' `.github/workflows/plugin-runtime-review.yml`, which
 publishes the required `plugin-runtime-approval` check, and the engine
@@ -171,7 +174,8 @@ nightly drift report, the skills-lock bumper, and the Dependabot sweep.
 secret because its gates check that both values exist before minting a
 token. App names are `<APP_NAME_PREFIX>-<app>`.
 
-The base needs only the three fleet-wide Apps, created in step 6.
+The base needs only the three fleet-wide Apps, created in step 6 (two on
+`PLAN=free`, where `create-apps.sh` skips `settings-admin`: see below).
 `eval-improve`, `roster`, and `registry-read` serve only evals and keep
 their credentials in `skills-evals`. `/adopt-evals` creates and installs
 them in steps 33 and 34, once `skills-evals` exists, and `create-apps.sh`
@@ -185,9 +189,11 @@ prints for a missing key.
 
 Installing happens in the browser. Open each
 `https://github.com/apps/<slug>/installations/new` link `create-apps.sh`
-printed, choose "Only select repositories", and pick the repos listed in the
-table. For the three fleet-wide Apps, that means the kit repos you created
-and every consumer in `_agent-guidance`'s `repos.yml`. Once the evals track
+printed, choose "Only select repositories", and pick the repos it names
+under the link. For the fleet-wide Apps, that is the five base repos the kit
+created, the same list `verify.sh` names for step 7 (not the repos
+`fleet.yml` lists, which still include the example repos until step 9). Add
+a repo of your own when you list it in `fleet.yml` or `repos.yml`. Once the evals track
 creates `skills-evals`, add it to their installations (step 34). With a
 second owner, the three are public Apps, so sign in as that owner and
 install them there too. `bash bootstrap/verify.sh --only installs:<app>`
@@ -300,5 +306,12 @@ variable and are skipped. The weekly `plan` job doesn't need it: it runs with
 the read App and reports drift. You apply from your machine with
 `bash bootstrap/apply-settings.sh`.
 
-Until step 20, `repo-settings.yml`'s apply job waits for your approval on
-each merge to `repo-settings`. Reject those deployments until then.
+On `PLAN=paid`, until step 20, `repo-settings.yml`'s apply job waits for
+your approval on each merge to `repo-settings`. Reject those deployments
+until then. On `PLAN=free` nothing waits for you: `repo-settings` has no
+`fleet-apply` environment. A merge that changes one of the files
+`repo-settings.yml` watches on a push (`repo-settings/fleet.yml`,
+`scripts/repo_settings.py`, the workflow itself, `requirements.txt`) starts
+a run that shows both apply jobs as skipped and the `plan` job's drift
+report, with nothing to approve or reject; any other merge starts no run.
+Step 20 applies from your machine.
