@@ -21,9 +21,13 @@
 # once the repo exists (step 35: run --only privacy again); while
 # skills-evals does not exist, its entry is skipped with one line. It is a file OUTSIDE every
 # repo, one regular expression per line, matched in any letter case (your real
-# names, emails, hosts, account ids); blank lines and lines that start with #
-# are skipped. The script refuses a path inside a git work tree and never
-# prints a pattern. docs/skills.md, "The privacy check", says what the check
+# name, emails, hosts and private ids); blank lines and lines that start with #
+# are skipped. The script refuses a path inside a git work tree, and a pattern
+# that matches a public name the starter writes into its files (fleet.env's
+# OWNER, OWNER_TWO, OWNER_NAME, REVIEWER and APP_NAME_PREFIX, the logins'
+# upper and snake forms, and the Apps' <prefix>-<app> names): every scan that
+# reads the list would then fail on every pull request. It never prints a
+# pattern, only line numbers. docs/skills.md, "The privacy check", says what the check
 # reads and shows a sample file.
 #
 # The bearer and the trigger id come from the eval runner routine's API
@@ -82,7 +86,7 @@ get_trigger() {
 get_denylist() {
   [ "$HAVE_DENYLIST" = 1 ] && return 0
   if [ -z "$DENYLIST" ]; then
-    printf 'The privacy denylist is a text file with one regular expression per line (your real names, emails, hosts, account ids), kept outside every repo; docs/skills.md, "The privacy check", has a sample.\nPath to your privacy denylist file: ' >&2
+    printf 'The privacy denylist is a text file with one regular expression per line (your real name, emails, hosts and private ids; never your GitHub login or the public handle in OWNER_NAME), kept outside every repo; docs/skills.md, "The privacy check", has a sample.\nPath to your privacy denylist file: ' >&2
     IFS= read -r DENYLIST || die "no path given"
   fi
   DENYLIST=${DENYLIST/#\~/$HOME}
@@ -91,22 +95,34 @@ get_denylist() {
   if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     die "the denylist is inside a git work tree; keep it outside every repo"
   fi
-  # Each pattern must compile, and there must be at least one. Report line
-  # numbers only, never a pattern.
-  python3 -I - "$DENYLIST" <<'PY' || die "the denylist failed validation (see above)"
+  # Each pattern must compile, there must be at least one, and none may match
+  # a public name the starter writes (public_names). Report line numbers and
+  # key names only, never a pattern.
+  local names; mapfile -t names < <(public_names)
+  python3 -I - "$DENYLIST" "${names[@]}" <<'PY' || die "the denylist failed validation (see above)"
 import re, sys
-bad, n = [], 0
+names = [a.split("\t", 1) for a in sys.argv[2:]]
+bad, public, n = [], [], 0
 for i, l in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
     l = l.strip()
     if not l or l.startswith("#"):
         continue
     n += 1
     try:
-        re.compile(l, re.I)
+        rx = re.compile(l, re.I)
     except re.error:
         bad.append(i)
+        continue
+    keys = sorted({k for k, v in names if rx.search(v)})
+    if keys:
+        public.append(f"{i} ({', '.join(keys)})")
 if bad:
     print("denylist: line(s) " + ", ".join(map(str, bad)) + " are not valid regular expressions", file=sys.stderr)
+if public:
+    print("denylist: line(s) " + "; ".join(public) + " match a public name from fleet.env that the starter writes into dozens of files,"
+          " so every privacy scan would fail on every pull request. List your real name, emails, hosts and private ids,"
+          " never your GitHub login or the public handle in OWNER_NAME (docs/skills.md, \"The privacy check\")", file=sys.stderr)
+if bad or public:
     sys.exit(1)
 if n == 0:
     print("denylist: no patterns (it wants one regular expression per line; docs/skills.md, \"The privacy check\"); the privacy check would fail closed", file=sys.stderr)
@@ -118,6 +134,22 @@ PY
     warn "the denylist is readable by other users; consider chmod 600"
   fi
   HAVE_DENYLIST=1
+}
+
+# public_names: "<fleet.env key><TAB><value>" for each public name the
+# starter writes into the adopter's files (copy-starter.sh, lib/substitute.py):
+# the logins as given and with - and . as _ (substitute.py's upper and snake
+# forms; the match ignores case), OWNER_NAME, APP_NAME_PREFIX and each App's
+# <prefix>-<app> name. Defaults are applied by load_config.
+public_names() {
+  local key v e
+  for key in OWNER OWNER_TWO REVIEWER; do
+    v=CFG_$key; v=${!v}
+    [ -n "$v" ] || continue
+    printf '%s\t%s\n' "$key" "$v" "$key" "${v//[-.]/_}"
+  done
+  printf '%s\t%s\n' OWNER_NAME "$CFG_OWNER_NAME" APP_NAME_PREFIX "$CFG_APP_NAME_PREFIX"
+  for e in "${APPS[@]}"; do printf 'APP_NAME_PREFIX\t%s-%s\n' "$CFG_APP_NAME_PREFIX" "${e%%|*}"; done
 }
 
 set_one() { # repo env kind name
