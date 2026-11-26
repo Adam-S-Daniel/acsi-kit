@@ -1740,7 +1740,7 @@ assert_not "no URL value is printed" grep -qE 'trig_EXAMPLE' "$OUT" "$ERR"
 run bash "$B/verify.sh" --config "$CFGP" --track base --only repos-yml; rc=$?
 assert_eq "verify --only repos-yml fails while repos.yml names the example repos" "$rc" 1
 for l in cron_coverage.fleet skills_bootstrap.repos; do
-  assert "it names $l's example repo" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml $l names example-site-a, which neither owner has: remove it in a pull request (step 11)"
+  assert "it names $l's example repo" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml $l names example-site-a, which neither owner has, or gh cannot see (HTTP 404): remove it in a pull request (step 11)"
 done
 run bash "$B/status.sh" --config "$CFGP" --mark 11; rc=$?
 assert_eq "status refuses to mark step 11, which it checks itself" "$rc" 1
@@ -2449,7 +2449,7 @@ assert_eq "EVALS_REPO is none again" "$(jqs "$AG.EVALS_REPO")" none
 # says how it comes back.
 run bash "$B/verify.sh" --config "$CFGB" --track base --only repos-yml; rc=$?
 assert_eq "a base-only setup whose repos.yml lists skills-evals fails step 11" "$rc" 1
-assert "it names the line and how it comes back" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml cron_coverage.fleet names skills-evals, which neither owner has: remove that line in a pull request (the evals track's regenerate.sh evals-fleet adds it back once skills-evals exists)"
+assert "it names the line and how it comes back" has "$OUT" "FAIL: acme-example/_agent-guidance repos.yml cron_coverage.fleet names skills-evals, which neither owner has, or gh cannot see (HTTP 404): remove that line in a pull request (the evals track's regenerate.sh evals-fleet adds it back once skills-evals exists)"
 drop_from_repos_yml skills-evals
 read -r -a asks <<<"$(jq -r '[.steps[] | select(.track == "base" and .check.type == "ask" and .check.record == null) | "--mark", .id] | join(" ")' "$B/steps.json")"
 run env ADOPT_STATE_FILE="$SB" bash "$B/status.sh" --config "$CFGB" "${asks[@]}"; rc=$?
