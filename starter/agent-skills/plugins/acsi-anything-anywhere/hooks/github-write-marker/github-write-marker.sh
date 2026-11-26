@@ -250,12 +250,13 @@ def block_denylist(field, what):
 GENERIC_USERS = {"root", "runner", "user", "ubuntu", "agent", "codex", "node",
                  "vscode", "dev", "admin", "administrator", "codespace",
                  "gitpod", "git", "nobody"}
-# Hostnames that are ordinary words or stock image names, as agent-checks'
-# local_generic_hosts: a body naming "ubuntu-latest" is not a leak.
+# Hostnames that are ordinary words or stock image names (agent-checks'
+# local_generic_hosts), so a body saying "ubuntu-latest" or "the build" on a
+# machine named that way is not a leak.
 GENERIC_HOSTS = {"ubuntu", "debian", "fedora", "centos", "alpine", "arch",
                  "raspberrypi", "build", "main", "master", "dev", "devbox",
-                 "server", "desktop", "laptop", "workstation", "runner",
-                 "home", "test"}
+                 "server", "desktop", "laptop", "workstation", "runner", "home",
+                 "test"}
 
 
 def denylist_patterns():

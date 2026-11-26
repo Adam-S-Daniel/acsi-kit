@@ -6,7 +6,7 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: 43ab95bcc760de42364594b3c49ec8ed11f75abc
+source_sha: aca2f1a2d5d779149d0fe3461a4233745685a752
 
 exclude:
   - path: docs/reference/adopt-the-whole-system.md
@@ -422,33 +422,6 @@ edits:
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).
 
-  # ---- Re-pin round 23: the write-marker hook skips stock hostnames, as the runner does
-  - path: .claude/hooks/github-write-marker.sh
-    old: |2
-                       "gitpod", "git", "nobody"}
-    new: |2
-                       "gitpod", "git", "nobody"}
-      # Hostnames that are ordinary words or stock image names, as agent-checks'
-      # local_generic_hosts: a body naming "ubuntu-latest" is not a leak.
-      GENERIC_HOSTS = {"ubuntu", "debian", "fedora", "centos", "alpine", "arch",
-                       "raspberrypi", "build", "main", "master", "dev", "devbox",
-                       "server", "desktop", "laptop", "workstation", "runner",
-                       "home", "test"}
-    why: >-
-      Re-pin round 23. The hook's header says it follows agent-checks'
-      local-identity rules, where generic names are not checked, and the
-      runner skips stock hostnames (local_generic_hosts), but the hook had no
-      such list: with no denylist, a machine named like its image (ubuntu)
-      blocked every pull request body naming the ubuntu-latest runner. The
-      list is the runner's, word for word. The regression test is in
-      agentskills.yml (test_a_stock_hostname_is_not_treated_as_an_identity).
-  - path: .claude/hooks/github-write-marker.sh
-    old: |2
-          if ("\n" not in host and len(host) >= 4 and lower != "localhost"
-    new: |2
-          if ("\n" not in host and len(host) >= 4 and lower != "localhost"
-                  and lower not in GENERIC_HOSTS
-    why: Re-pin round 23. The check that uses GENERIC_HOSTS (above).
 
 patches:
   - file: kit_only.py

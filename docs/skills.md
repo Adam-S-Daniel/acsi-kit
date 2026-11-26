@@ -143,7 +143,8 @@ With it, each repo's `agent-checks` job also scans a pull request's added lines,
 branch name, title and body, and the `privacy-comment-alert` workflow scans
 issues and comments. Without it, both scan nothing and only add a warning;
 neither ever fails a check for a missing secret. `set-secrets.sh` stores it
-in `acsi-agentskills` and `_agent-guidance`. For another repo, run
+in `acsi-agentskills`, `_agent-guidance`, `repo-settings` and
+`wsl-automation`. For another repo, run
 `gh secret set PRIVACY_DENYLIST --repo <you>/<repo> < <file>`.
 
 Write the list to a file outside every repo, with one regular expression per
