@@ -218,8 +218,11 @@ this page" means every routine and scheduled task in [routines](routines.md).
   rejected until the window resets, which is the safe failure. With them on,
   it keeps running and bills the overage
   ([routines](https://code.claude.com/docs/en/routines), read 2026-11-25).
-- **Schedule and leave off.** Schedule the changelog watcher weekly (`3 1 * * 1`),
-  and keep the memory curation task on Sonnet. Leave the optional dashboard
+- **Schedule and leave off.** Schedule the changelog watcher weekly (`3 1 * * 1`).
+  For memory curation, set the project's **Threads** model to Sonnet
+  (**Project settings > General**): the project task runs on that setting,
+  which is Opus in a new project, not on a model picked on the task
+  ([memory curation](routines.md#memory-curation)). Leave the optional dashboard
   refresh off. [Article lift](routines.md#article-lift) is off by default:
   `create-environments.sh` sets `ARTICLE_WATCH_FEED_URL` to `none`, so each
   hourly run is skipped with a notice. Leave it that way.
@@ -320,8 +323,9 @@ shipped schedules, counting each job as at least one minute (estimated
 2026-11-25, not measured). On Free, only private repos count against the 2,000
 included minutes a month. Those are `repo-settings` (two daily workflows and
 one weekly, about 65 minutes a month from schedules, and 120 to 200 with pull
-requests) and `acsi-agentskills-private` (no scheduled workflow), so Free has
-ample room. Standard-runner minutes in public repos are free. On a paid plan,
+requests) and `acsi-agentskills-private` (the daily Dependabot sweep that
+`_agent-guidance`'s sync delivers to every repo, about 30 minutes a month), so
+Free has ample room. Standard-runner minutes in public repos are free. On a paid plan,
 think before you make a repo private. `skills-evals`' schedules alone come to
 roughly 4,500 to 4,700 minutes a month (two workflows run every 30 minutes and
 one hourly), more than GitHub Pro's 3,000. `_agent-guidance` comes to roughly

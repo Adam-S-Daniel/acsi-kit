@@ -13,7 +13,8 @@ tooling and proposes the result as a pull request on `regenerate/<task>`.
 tasks are `skills-locks`, `hook-pin`, `run-health-sha`, `codex-pin`,
 `actions-lock`, and, for evals, `evals-fleet`, which merges
 `fleet.evals.yml` into `fleet.yml` ([the first
-apply](settings-and-apps.md#the-first-apply)). Run these steps after you
+apply](settings-and-apps.md#the-first-apply)) and adds `skills-evals` to
+`_agent-guidance`'s coverage list. Run these steps after you
 merge the starter pull requests and before the first settings apply.
 
 This table shows every item in `REGENERATE.md` and the quick start step that
@@ -127,6 +128,13 @@ change. `skills-evals` joins once it exists, when step 38 runs it again.
 `--check` runs `gh actions-lock --verify`. Review an `actions.lock` diff as
 you would a sha pin.
 
+Each repo's `agent-checks` workflow checks its lockfile with the
+[`verify-actions-lock`](https://github.com/Adam-S-Daniel/verify-actions-lock)
+action, under the kit owner's name. That name stays as it is: it is a public
+action meant to be used directly, as you use GitHub's own checkout action,
+so you don't copy or fork it, and `copy-starter.sh` leaves its owner name
+alone on purpose.
+
 ## Example repos in fleet.yml
 
 The owner's fleet includes a site platform and two sites. So
@@ -139,6 +147,14 @@ request on each repo before the first apply. `apply-settings.sh` refuses
 while `fleet.yml` names a repo that doesn't exist, and a missing
 `cron_coverage.fleet` repo is an error for the coverage check. Add your own
 consumers the same way later.
+
+`cron_coverage.fleet` doesn't list `skills-evals`. The base track has no
+such repo, and `dependabot-config-health.yml` fails every day while that
+list names a repo neither owner has, which is also why the example names
+have to go. When you add evals, `bootstrap/regenerate.sh evals-fleet` (step
+40) adds `skills-evals` to the list in a pull request. If your
+`_agent-guidance` came from an older copy of the kit and still lists
+`skills-evals` without having the repo, remove that line.
 
 The invented example repos appear in live config only in those places, in
 `acsi-agentskills`' federated marketplace entry ([the

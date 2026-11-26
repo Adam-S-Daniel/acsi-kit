@@ -306,7 +306,8 @@
           "regen:codex-pin"
         ]
       },
-      "minutes": 5
+      "minutes": 5,
+      "optional": true
     },
     {
       "id": "18",
@@ -382,7 +383,7 @@
     {
       "id": "27",
       "title": "Create the fleet worker routine",
-      "run": "At https://claude.ai/code/routines, one task (the Fleet worker, maintenance role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it. The Loop worker serves the eval loop, so the evals track creates it (step 41)",
+      "run": "At https://claude.ai/code/routines, one task (the Fleet worker, maintenance role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set FLEET_WORKER_FIRE_URL and FLEET_WORKER_FIRE_BEARER on _agent-guidance, whose fleet-worker-fire.yml fires it (the token is shown once; bootstrap/README.md has the commands). Pick the model its table in docs/routines.md names (Sonnet on Pro) and never leave the selector on Default, which is Opus on Pro; remove the connectors it does not need. The Loop worker serves the eval loop, so the evals track creates it (step 41)",
       "kind": "browser",
       "part": "routines",
       "track": "base",
@@ -395,7 +396,7 @@
     {
       "id": "28",
       "title": "Create the prompt-audit sweep routine",
-      "run": "At https://claude.ai/code/routines: API trigger only; store its fire URL and bearer on _agent-guidance as PROMPT_AUDIT_SWEEP_FIRE_URL (variable) and PROMPT_AUDIT_SWEEP_FIRE_BEARER (secret)",
+      "run": "At https://claude.ai/code/routines: API trigger only; store its fire URL and bearer on _agent-guidance as PROMPT_AUDIT_SWEEP_FIRE_URL (variable) and PROMPT_AUDIT_SWEEP_FIRE_BEARER (secret); the token is shown once, and bootstrap/README.md has the commands. Pick the model its table in docs/routines.md names (Sonnet on Pro) and never leave the selector on Default, which is Opus on Pro; remove the connectors it does not need",
       "kind": "browser",
       "part": "routines",
       "track": "base",
@@ -408,7 +409,7 @@
     {
       "id": "29",
       "title": "Create the agent changelog watcher routine",
-      "run": "At https://claude.ai/code/routines: daily at 01:03 UTC, in an environment of its own with no variables",
+      "run": "At https://claude.ai/code/routines: daily at 01:03 UTC (on Pro, weekly: `3 1 * * 1`), in an environment of its own with no variables. Pick the model its table in docs/routines.md names (Sonnet on Pro) and never leave the selector on Default, which is Opus on Pro; remove the connectors it does not need",
       "kind": "browser",
       "part": "routines",
       "track": "base",
@@ -421,7 +422,7 @@
     {
       "id": "30",
       "title": "Schedule memory curation",
-      "run": "A weekly task from a claude.ai project thread, and the same on each durable machine (docs/routines.md has both prompts)",
+      "run": "A weekly task from a claude.ai project thread, and the same on each durable machine (docs/routines.md has both prompts). Set the project's Threads model to Sonnet (Project settings > General > Threads): the project task runs on it. If your account has no Projects yet (a public beta, rolling out gradually), the machine task alone covers it, and the step is done",
       "kind": "browser",
       "part": "routines",
       "track": "base",
@@ -524,7 +525,7 @@
     {
       "id": "41",
       "title": "Create the Loop worker routine",
-      "run": "At https://claude.ai/code/routines, one task (the Loop worker, loop role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set LOOP_WORKER_FIRE_URL and LOOP_WORKER_FIRE_BEARER on _agent-guidance (create-environments.sh already set LOOP_WORKER_EVERY_HOURS from CLAUDE_PLAN). fleet-worker-fire.yml skips its fire while EVALS_REPO is none and fires it once the next step flips EVALS_REPO to skills-evals, so this comes first",
+      "run": "At https://claude.ai/code/routines, one task (the Loop worker, loop role): an API trigger only (no schedule), the GitHub connector, its prompt in docs/routines.md; set LOOP_WORKER_FIRE_URL and LOOP_WORKER_FIRE_BEARER on _agent-guidance (create-environments.sh already set LOOP_WORKER_EVERY_HOURS from CLAUDE_PLAN). fleet-worker-fire.yml skips its fire while EVALS_REPO is none and fires it once the next step flips EVALS_REPO to skills-evals, so this comes first. Pick the model its table in docs/routines.md names (Sonnet on Pro) and never leave the selector on Default, which is Opus on Pro; remove the connectors it does not need",
       "kind": "browser",
       "part": "routines",
       "track": "evals",
@@ -571,7 +572,7 @@
     {
       "id": "40",
       "title": "Declare skills-evals in fleet.yml",
-      "run": "`bootstrap/regenerate.sh evals-fleet`, then merge the pull request it opens in `repo-settings` (it moves `skills-evals`' element from `repo-settings/fleet.evals.yml` into `repo-settings/fleet.yml`)",
+      "run": "`bootstrap/regenerate.sh evals-fleet`, then merge the pull requests it opens: in `repo-settings` it moves `skills-evals`' element from `repo-settings/fleet.evals.yml` into `repo-settings/fleet.yml`, and in `_agent-guidance` it adds `skills-evals` to `repos.yml` `cron_coverage.fleet`",
       "kind": "script",
       "part": "evals",
       "track": "evals",
@@ -616,7 +617,7 @@
     {
       "id": "24",
       "title": "Create the eval runner routine",
-      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id for the next step",
+      "run": "At https://claude.ai/code/routines: an API-triggered routine with the prompt in skills-evals' `docs/routine/eval-runner-prompt.md`; keep the bearer it shows once and its `trig_...` id for the next step. Pick the model its table in docs/routines.md names (Sonnet on Pro) and never leave the selector on Default, which is Opus on Pro; remove the connectors it does not need",
       "kind": "browser",
       "part": "routines",
       "track": "evals",

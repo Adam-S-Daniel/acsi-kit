@@ -117,8 +117,9 @@ cadence in `FLEET_WORKER_EVERY_HOURS`, which `create-environments.sh` sets
 from `CLAUDE_PLAN`: weekly (168) on Pro, every 12 hours on Max 5x, every 3
 hours on Ultra ([routines](../docs/routines.md#fleet-worker)). The workflow
 has no default for either value below, so if one is unset, each scheduled
-run fails and names it (until step 27 sets them, the one expected failure:
-docs/settings-and-apps.md, "Merging the starter pull requests").
+run fails and names it (until step 27 sets them: one of the expected
+failures listed in docs/settings-and-apps.md, "Merging the starter pull
+requests").
 
 - `FLEET_WORKER_FIRE_URL`: a repository variable on `<you>/_agent-guidance`,
   the fleet worker routine's fire URL. Set it like

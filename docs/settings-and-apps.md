@@ -263,14 +263,28 @@ sets `REPO_SETTINGS_READ_APP_CLIENT_ID` (step 6), and the scheduled runs that
 read `skills-evals` print a notice while `EVALS_REPO` is `none`
 ([routines](routines.md#fleet-worker)).
 
-One scheduled run is expected to fail until a later step, and nothing else
-is:
+These scheduled runs are expected to fail until a later step, and nothing
+else is. GitHub emails you about each failed run, so finish the step named
+and the emails stop:
 
 - `_agent-guidance`'s `fleet-worker-fire.yml`, Fleet worker leg, on its slot
   (weekly on Pro, Tuesday 00:20 UTC): it fails naming `FLEET_WORKER_FIRE_URL`
   and `FLEET_WORKER_FIRE_BEARER` until step 27 creates the routine and sets
   them. The routine needs the cloud environment of step 23, which needs the
   repos of steps 10 and 12, so the step cannot move earlier.
+- `_agent-guidance`'s `skills-lock-bump.yml` (every six hours): it reads
+  your `acsi-agentskills`, so it fails from the step 10 merge until that
+  repo's starter is merged (step 12) and the locks and the hook pin are
+  yours (steps 14 and 15). It clears after steps 12 to 15.
+- `_agent-guidance`'s `dependabot-config-health.yml` (daily): it fails while
+  `repos.yml`'s `cron_coverage.fleet` names a repo neither owner has. The
+  starter lists the three `example-site-*` repos, and step 11 removes them.
+  It doesn't list `skills-evals`; step 40 adds that name once the evals
+  track has created the repo.
+- `repo-settings`' `repo-settings.yml` plan (each push to `main`, and
+  Mondays at 07:00 UTC): between step 6, which gives it the read App, and
+  steps 8 and 9, it fails while `GUIDANCE_SYNC_APP_ID` is unset or
+  `fleet.yml` still names the example repos.
 
 Any other failure is real, so read it before you merge.
 

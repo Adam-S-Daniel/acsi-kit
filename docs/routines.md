@@ -16,6 +16,23 @@ limited to the allowlist in `_agent-guidance`'s
 you like, such as `Fleet allowlist`. "Your `_agent-guidance`" means
 `<you>/_agent-guidance`.
 
+Four things hold for every routine below:
+
+- **Model.** Pick the model each table names in the task's model selector.
+  Never leave it on **Default**: that is your account's default model, which
+  is Opus on Pro and weighs more per token than Sonnet ([which
+  plan](before-you-start.md#on-pro-what-to-set-and-what-to-leave-off)).
+- **Connectors.** A new routine includes every connector your account has
+  connected, and a run can write through any of them. Remove each one the
+  table doesn't name.
+- **Environment name.** The specs in `_agent-guidance` call the owner's
+  environment `My Whitelist`. Any name works: use the environment you
+  created for the allowlist wherever a spec says that.
+- **API token.** An API trigger shows its token once, when you create it.
+  Copy it then, and store it with the commands in the [bootstrap
+  README](../bootstrap/README.md#variables-and-secrets-set-by-hand). If you
+  lose it, generate a new one and store that.
+
 After saving each routine, press **Run now** once and read the session it
 starts before you leave it on a schedule.
 
@@ -142,7 +159,9 @@ approves anything and never touches an `on-hold` issue or pull request.
 | Setting | Value |
 |---|---|
 | Trigger | API trigger only (and **Run now**); no schedule |
+| Connector | the GitHub connector |
 | Repos | the spec's "Repos considered", plus `_agent-guidance` |
+| Model | Sonnet, set on the task |
 | Notifications | push on |
 | Spec | `_agent-guidance` [`docs/routines/prompt-audit-sweep.md`](../starter/agent-guidance/docs/routines/prompt-audit-sweep.md) |
 
@@ -174,6 +193,7 @@ the sweep for it, which keeps the bearer out of every routine's environment.
 | Connector | the GitHub connector |
 | Environment | its own (for example, `Changelog watcher`): the allowlist plus `api.anthropic.com`, with no variables. Every session in an environment can read its variables, so the sweep's fire bearer is an Actions secret instead. |
 | Repos | the spec's "Repos considered" plus `_agent-guidance`, and no others. Every attached repo's `skills.lock` feeds the session's skills install, and a stale lock from one extra repo once kept nine skills from installing. It reads `openai/codex` and `anthropics/claude-code` from github.com without attaching them |
+| Model | Sonnet, set on the task |
 | Notifications | off |
 | Spec | `_agent-guidance` [`docs/reference/agent-changelog-routine.md`](../starter/agent-guidance/docs/reference/agent-changelog-routine.md) |
 
@@ -197,6 +217,24 @@ that starts the sweep. The spec's issue steps use
 Two tasks share one spec,
 [`docs/routines/memory-curation.md`](../starter/agent-guidance/docs/routines/memory-curation.md)
 in `_agent-guidance`:
+
+| Setting | Value |
+|---|---|
+| Schedule | weekly: the project task on Monday at 14:00 UTC, the machine task once a week on each durable machine |
+| Model | Sonnet for both. The project task runs on the project's **Threads** model, not on a model picked on the task, so set that to Sonnet in **Project settings > General**. On a machine, `wsl-automation`'s job names Sonnet itself; a desktop app task or your own `claude -p` line needs it picked (`--model sonnet`) |
+| Notifications | push on (the project task) |
+| Spec | `_agent-guidance` [`docs/routines/memory-curation.md`](../starter/agent-guidance/docs/routines/memory-curation.md) |
+
+A new project runs Opus for its threads until you change that setting
+([Projects](https://code.claude.com/docs/en/claude-projects), read
+2026-11-25), which is why the spec says the project task runs on Opus
+whatever its own page shows. With **Threads** set to Sonnet it runs on
+Sonnet.
+
+Projects are a public beta that is rolling out gradually on Pro, Max, and
+Ultra (the same page). If your account has no Projects yet, there is no
+project memory to curate: create the machine task only, and come back for
+the project task when Projects reach your account.
 
 - **Project task:** create it from a thread in a claude.ai project, weekly
   on Monday at 14:00 UTC, with a fresh session per fire and push

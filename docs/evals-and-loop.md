@@ -59,12 +59,17 @@ scripts as the base, which include the repo once it exists:
    `bootstrap/regenerate.sh actions-lock` again, for `skills-evals`' copies
    (step 38).
 7. `bootstrap/regenerate.sh evals-fleet`, then merge what it opens in
-   `repo-settings` (step 40). The starter's `fleet.yml` declares only the
+   `repo-settings` and `_agent-guidance` (step 40). The starter's `fleet.yml` declares only the
    base repos. The `skills-evals` element waits in
    `repo-settings/fleet.evals.yml`, which nothing applies. The task parses
    both files, appends that element to `fleet.yml`'s `repos:` list (leaving
    it alone if `fleet.yml` already declares it), and deletes the fragment,
-   so a second run opens nothing.
+   so a second run opens nothing. The same task opens a second pull
+   request, in `_agent-guidance`: it adds `skills-evals` to `repos.yml`
+   `cron_coverage.fleet`, the list of repos the Dependabot health check,
+   the fleet worker and the prompt-audit sweep cover. The starter's list
+   leaves the name out, because that health check fails on a repo neither
+   owner has.
 8. `bootstrap/apply-settings.sh` again, which now protects `skills-evals`
    too (step 39).
 
