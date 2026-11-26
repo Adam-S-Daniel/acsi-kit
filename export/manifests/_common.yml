@@ -94,14 +94,14 @@ substitutions:
   - {name: C10 first name, regex: '(?<![\w-])Adam(?![\w-])', to: 'the owner', sentence_case: true}
   # C1: the bare `adam` bundle label (and names built on it) becomes `acsi`.
   - {name: C1 bare adam label, regex: '(?<![\w-])adam(?![a-z_])', to: 'acsi'}
-  # Machine names and the owner's drive letter. The workstation name is
+  # Machine names and the owner's drive letter. Both workstation names are
   # spelled one letter class at a time, so the kit's own text never holds
-  # it, and takes `forms`: it is replaced in every letter case and inside
+  # them, and take `forms`: each is replaced in every letter case and inside
   # identifiers (scan_<name>_tasks, <name>Tasks, scan<Name>Tasks), in the
   # matched case style, so a definition and its callers stay consistent
   # (DECISIONS, "The workstation name in every case").
   - {name: workstation name, regex: '[Bb][Oo][Xx][Yy]', to: WORKSTATION, forms: true}
-  - {name: old workstation name, regex: '\bZENDA\b', to: 'OLD-WORKSTATION'}
+  - {name: old workstation name, regex: '[Zz][Ee][Nn][Dd][Aa]', to: OLDWORKSTATION, forms: true}
   - {name: owner's clone drive, regex: 'D:(?=\\+repos)', to: '<drive>:'}
   # C7: claude.ai account object ids.
   - name: C7 claude.ai trigger, environment and session ids
@@ -140,7 +140,7 @@ leak_scan:
   - {name: superoutrigger, regex: '(?i)superoutrigger'}
   - {name: adamdaniel, regex: '(?i)adamdaniel'}
   - {name: workstation name, regex: '[Bb][Oo][Xx][Yy]'}
-  - {name: ZENDA, regex: 'ZENDA'}
+  - {name: old workstation name, regex: '[Zz][Ee][Nn][Dd][Aa]'}
   - {name: 'D:\repos', regex: 'D:\\+repos'}
   - {name: claude.ai id, regex: '\b(?:trig|env|session|cse)_(?!EXAMPLE|FIXTURE)[A-Za-z0-9]{16,}'}
   - name: claude.ai artifact, project or chat id
