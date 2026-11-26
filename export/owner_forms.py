@@ -41,8 +41,8 @@ BOOTSTRAP_LIB = KIT / "bootstrap" / "lib"
 
 # form -> (owner, owner-two, name, noreply). `invented` is not staged.
 FORMS = {
-    "one": ("acme-solo", "ACME-Solo", "Acme Solo", "123456+acme-solo@users.noreply.github.com"),
-    "two": ("zeta-user", "Alpha-Org", "Zeta User", "654321+zeta-user@users.noreply.github.com"),
+    "one": ("acme-solo", "ACME-Solo", "Acme Solo", "0+acme-solo@users.noreply.github.com"),
+    "two": ("zeta-user", "Alpha-Org", "Zeta User", "0+zeta-user@users.noreply.github.com"),
 }
 CHOICES = ("invented", "one", "two")
 
