@@ -7,7 +7,9 @@ Run: python3 -m pytest KIT/export/tests -q
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -226,17 +228,20 @@ def test_one_step_regenerates_with_the_holdback_and_keeps_the_denylist_guard():
     # Old pins are fetched too, and the script is the only thing that runs the tests.
     assert "export/fetch_sources.py" in run and "--also-pins-at HEAD" in run
     assert "export/resync_holdback.py" in run and "--tails" in run
+    assert '--held-heads "$RUNNER_TEMP/held-heads.json"' in run
     assert "pytest" not in run and "npm" not in run
     # The tails file is never printed or uploaded.
     assert "cat " not in run and not any("upload-artifact" in str(s.get("uses", "")) for s in job["steps"])
 
 
-def test_all_held_means_no_pull_request():
+def test_all_held_means_no_pull_request_but_the_app_is_still_wanted():
     _, job = _job()
-    for name in ("Check for the App",):
-        assert "steps.holdback.outputs.all_held != 'true'" in _step(job, name)["if"]
-    for name in ("Mint the App token", "Push resync/auto and open or update the pull request"):
-        assert _step(job, name)["if"].startswith("steps.app.outputs.configured")
+    # The App closes a stale fix pull request even when everything is held back.
+    assert "if" not in _step(job, "Check for the App")
+    assert _step(job, "Mint the App token")["if"] == "steps.app.outputs.configured == 'true'"
+    push = _step(job, "Push resync/auto and open or update the pull request")["if"]
+    assert push.startswith("steps.app.outputs.configured == 'true'")
+    assert "steps.holdback.outputs.all_held != 'true'" in push and "steps.resync.outputs.changed == 'true'" in push
 
 
 def test_a_held_back_source_opens_the_issue_without_failing_the_job():
@@ -268,10 +273,17 @@ def test_a_held_back_source_fires_the_fix_routine_at_most_once_a_day():
     assert env["ISSUE_NUMBER"] == "${{ steps.heldissue.outputs.number }}"
     run = fire["run"]
     assert "variable RESYNC_FIXER_FIRE_URL" in run and "secret RESYNC_FIXER_FIRE_BEARER" in run
-    # Skips while a fix pull request is open, and after today's marker.
-    assert 'startswith("resync-fix/")' in run and "isCrossRepository | not" in run
+    # Today's marker is checked before any pull request is listed or closed.
     assert 'select(.user.login == "github-actions[bot]")' in run
     assert "resync-fixer-fired $(date -u +%F)" in run and "grep -qF --" in run
+    assert run.index("grep -qF --") < run.index("gh pr list") < run.index("gh pr close")
+    # Only this repository's own fix branches count; a stale one is closed with
+    # the App's token, and the job's permissions stay read-only for pull requests.
+    assert 'startswith("resync-fix/")' in run and "isCrossRepository | not" in run
+    assert env["APP_TOKEN"] == "${{ steps.token.outputs.token }}"
+    assert 'GH_TOKEN="$APP_TOKEN" gh pr close' in run and "python3 export/resync_stale_fix.py" in run
+    assert "<sub>🤖 Written by the daily re-sync on behalf of @%s</sub>" in run
+    assert job["permissions"]["pull-requests"] == "read"
     # The bearer goes on stdin, the request from a file; neither is printed.
     assert "--config -" in run and '--data-binary "@$request"' in run
     assert 'echo "$FIRE_BEARER' not in run and 'cat "$request' not in run
@@ -390,10 +402,152 @@ def test_a_run_with_nothing_to_move_closes_a_stale_resync_pull_request():
     assert names.index(push) < names.index(close["name"])
     assert "steps.resync.outputs.changed == 'true'" in _step(job, push)["if"]
     # The App steps also run when nothing changed.
-    assert _step(job, "Check for the App")["if"] == "steps.holdback.outputs.all_held != 'true'"
+    assert "if" not in _step(job, "Check for the App")
 
 
 def test_the_fix_routine_leaves_the_pull_request_to_the_workflow():
     guide = (EXPORT_DIR / "FIX-ROUTINE.md").read_text(encoding="utf-8")
     assert "resync-fix-pr.yml" in guide
     assert "Do not open a pull request" in guide
+
+
+# ── The fire step, run for real against a stub gh ───────────────────────────
+
+HEAD_OLD, HEAD_NEW = "a" * 40, "1" * 40
+PR_HEAD = "f" * 40
+
+STUB_GH = """#!/usr/bin/env bash
+# Logs every call; answers from files under $STUB. A --jq filter is applied by real jq.
+{ printf 'CALL gh token=%s' "${GH_TOKEN:-}"; printf ' [%s]' "$@"; printf '\\n'; } >> "$STUB/log"
+jq_expr=""; prev=""
+for a in "$@"; do [ "$prev" = --jq ] && jq_expr=$a; prev=$a; done
+case "$1 $2" in
+  "pr list") src="$STUB/pr-list.json" ;;
+  "pr close"|"issue comment") exit 0 ;;
+  "api -H") sha=${4##*ref=}; name=${4%%\\?*}; name=${name##*/}
+            [ -f "$STUB/head-$sha/$name" ] || { echo '{"message":"SECRET-BODY"}'; exit 1; }
+            cat "$STUB/head-$sha/$name"; exit 0 ;;
+  "api repos/"*) src="$STUB/comments.json" ;;
+  *) echo "unexpected gh call" >&2; exit 9 ;;
+esac
+jq -r "$jq_expr" "$src"
+"""
+
+
+def _fire_env(tmp_path, *, pull_requests, comments=(), app_token="app-token-value", fetch_ok=True):
+    """A sandbox with stubs on PATH; returns (env, cwd, stub dir)."""
+    stub = tmp_path / "stub"
+    bin_dir = tmp_path / "bin"
+    work = tmp_path / "work"
+    temp = tmp_path / "runner"
+    for d in (stub, bin_dir, work / "export" / "manifests", temp):
+        d.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "gh").write_text(STUB_GH, encoding="utf-8")
+    (bin_dir / "curl").write_text('#!/usr/bin/env bash\necho "curl $*" >> "$STUB/log"\ncat > /dev/null\nprintf 200\n', encoding="utf-8")
+    (bin_dir / "date").write_text("#!/usr/bin/env bash\necho 2026-11-25\n", encoding="utf-8")
+    for f in bin_dir.iterdir():
+        f.chmod(0o755)
+    for script in ("resync_stale_fix.py", "resync.py"):
+        (work / "export" / script).symlink_to(EXPORT_DIR / script)
+    for name, repo, sha in (("one.yml", "src-one", HEAD_NEW), ("two.yml", "src-two", "b" * 40)):
+        text = f"repo: {name[:-4]}\nsource: {repo}\nsource_sha: {sha}\n"
+        (work / "export" / "manifests" / name).write_text(text, encoding="utf-8")
+    (work / "export" / "manifests" / "_common.yml").write_text("protect: []\n", encoding="utf-8")
+    (temp / "resync-summary.md").write_text("summary\n", encoding="utf-8")
+    (temp / "held-heads.json").write_text(f'{{"src-one": "{HEAD_NEW}"}}', encoding="utf-8")
+    (stub / "log").write_text("", encoding="utf-8")
+    import json
+    (stub / "pr-list.json").write_text(json.dumps(pull_requests), encoding="utf-8")
+    (stub / "comments.json").write_text(json.dumps(
+        [{"user": {"login": "github-actions[bot]"}, "body": c} for c in comments]), encoding="utf-8")
+    if fetch_ok:
+        # The PR head's copies: src-one still at the old head, src-two current.
+        head = stub / f"head-{PR_HEAD}"
+        head.mkdir()
+        (head / "one.yml").write_text(f"repo: one\nsource: src-one\nsource_sha: {HEAD_OLD}\n", encoding="utf-8")
+        (head / "two.yml").write_text(f"repo: two\nsource: src-two\nsource_sha: {'b' * 40}\n", encoding="utf-8")
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "STUB": str(stub), "RUNNER_TEMP": str(temp),
+        "GITHUB_REPOSITORY": "example-owner/kit", "GH_TOKEN": "job-token", "APP_TOKEN": app_token,
+        "FIRE_URL": "https://example.com/fire", "FIRE_BEARER": "bearer", "OWNER": "example-owner",
+        "ISSUE_NUMBER": "7", "HELD_BACK": "src-one", "RUN_URL": "https://example.com/run/1",
+    }
+    return env, work, stub
+
+
+def _fix_pr(number=5, head=PR_HEAD):
+    return {"number": number, "headRefName": f"resync-fix/2026-11-2{number}", "headRefOid": head, "isCrossRepository": False}
+
+
+def _run_fire(env, cwd):
+    _, job = _job()
+    script = _step(job, "Fire the fix routine")["run"]
+    return subprocess.run(["bash", "-c", script], cwd=cwd, env=env, capture_output=True, text=True, timeout=60)
+
+
+def _log(stub):
+    return (stub / "log").read_text(encoding="utf-8")
+
+
+def _calls(stub, *words):
+    """The logged gh calls (a comment spans lines) that start with these words."""
+    records = _log(stub).split("CALL ")
+    return [r for r in records if r.startswith("gh token=") and r.split(" ", 2)[2].startswith(" ".join(f"[{w}]" for w in words))]
+
+
+def test_fire_step_closes_a_stale_fix_pull_request_with_the_app_token_then_fires(tmp_path):
+    env, cwd, stub = _fire_env(tmp_path, pull_requests=[_fix_pr()])
+    done = _run_fire(env, cwd)
+    assert done.returncode == 0, done.stderr
+    log = _log(stub)
+    closes = _calls(stub, "pr", "close")
+    assert len(closes) == 1 and closes[0].startswith("gh token=app-token-value [pr] [close] [5]")
+    assert "src-one" in closes[0] and "started the fix routine again" in closes[0]
+    assert "<sub>🤖 Written by the daily re-sync on behalf of @example-owner</sub>" in closes[0]
+    assert log.count("curl ") == 1 and log.index("[pr] [close]") < log.index("curl ")
+    marker = _calls(stub, "issue", "comment")
+    assert len(marker) == 1 and "<!-- resync-fixer-fired 2026-11-25 -->" in marker[0]
+    assert "SECRET-BODY" not in done.stdout + done.stderr
+
+
+def test_fire_step_with_no_open_fix_pull_request_just_fires(tmp_path):
+    env, cwd, stub = _fire_env(tmp_path, pull_requests=[])
+    assert _run_fire(env, cwd).returncode == 0
+    log = _log(stub)
+    assert "[pr] [close]" not in log and log.count("curl ") == 1
+
+
+def test_fire_step_leaves_a_fresh_fix_pull_request_alone(tmp_path):
+    env, cwd, stub = _fire_env(tmp_path, pull_requests=[_fix_pr()])
+    (stub / f"head-{PR_HEAD}" / "one.yml").write_text(
+        f"repo: one\nsource: src-one\nsource_sha: {HEAD_NEW}\n", encoding="utf-8")
+    done = _run_fire(env, cwd)
+    assert done.returncode == 0 and "still follows the held sources' heads" in done.stdout
+    log = _log(stub)
+    assert "[pr] [close]" not in log and "curl " not in log
+
+
+def test_fire_step_does_nothing_when_todays_marker_is_present_even_with_a_stale_pull_request(tmp_path):
+    env, cwd, stub = _fire_env(tmp_path, pull_requests=[_fix_pr()],
+                               comments=["Started. <!-- resync-fixer-fired 2026-11-25 -->"])
+    done = _run_fire(env, cwd)
+    assert done.returncode == 0 and "already started today" in done.stdout
+    log = _log(stub)
+    assert "[pr] [close]" not in log and "curl " not in log and "[pr] [list]" not in log
+
+
+def test_fire_step_with_a_stale_pull_request_and_no_app_closes_and_fires_nothing(tmp_path):
+    env, cwd, stub = _fire_env(tmp_path, pull_requests=[_fix_pr()], app_token="")
+    done = _run_fire(env, cwd)
+    assert done.returncode == 0 and "no App to close it" in done.stdout
+    log = _log(stub)
+    assert "[pr] [close]" not in log and "curl " not in log
+
+
+def test_fire_step_fails_on_an_unreadable_pull_request_copy_without_printing_a_body(tmp_path):
+    env, cwd, stub = _fire_env(tmp_path, pull_requests=[_fix_pr()], fetch_ok=False)
+    done = _run_fire(env, cwd)
+    assert done.returncode == 1 and "::error::" in done.stdout
+    assert "SECRET-BODY" not in done.stdout + done.stderr
+    log = _log(stub)
+    assert "[pr] [close]" not in log and "curl " not in log

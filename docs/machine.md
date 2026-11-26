@@ -80,6 +80,10 @@ environment sync too, which stays disabled unless you pass
 `bash scripts/unix/install-schedule.sh <systemd|launchd|cron>`. Add
 `--jobs usage-census,session-miner,waiting-feed` to choose jobs, or
 `--print` to change nothing. macOS needs `brew install flock coreutils`.
+The installer checks the tools (and, for systemd, a user bus) first and, if
+any is missing, lists them all with the fix and writes nothing. The waiting
+feed is Linux and WSL only (macOS keeps Claude Code's login in the Keychain),
+so the installer skips it on a Mac.
 systemd needs `loginctl enable-linger "$USER"` so jobs keep running while
 you are logged out.
 
