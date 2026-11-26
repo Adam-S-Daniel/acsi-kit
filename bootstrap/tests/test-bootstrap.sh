@@ -1528,11 +1528,17 @@ run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/status.s
 assert "under the old kit step 3 is done" grep -qE '^done +3 ' "$OUT"
 run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/update-kit.sh" --config "$CFGP"; rc=$?
 assert_eq "the update with a reopened step exits 0" "$rc" 0
+cp "$OUT" "$UP/update-after.txt"
 [ "$rc" = 0 ] || sed 's/^/    update-kit: /' "$ERR"
 assert "it says which steps reopened" has "$OUT" "Steps that were done before this update and are NOT done under the newer kit (its checks ask for more):"
 assert "it names step 3 and the command to run again" has "$OUT" "  step 3, Store the privacy denylist: \`bootstrap/set-secrets.sh --only privacy"
 run env ADOPT_STATE_FILE="$UP/state4/adopt.json" bash "$UP/k4/bootstrap/status.sh" --config "$CFGP"
 assert_not "after the update status.sh shows step 3 not done" grep -qE '^done +3 ' "$OUT"
+cp "$OUT" "$UP/status-after.txt"
+OPT_STEP=$(sed -nE 's/^optional +([^ ]+) .*/\1/p' "$UP/status-after.txt" | head -n1)
+assert "status.sh lists an optional step that is not done (step 17 or another)" test -n "$OPT_STEP"
+assert_not "an optional step that is not done is never called reopened" grep -q "  step $OPT_STEP, " "$UP/update-after.txt"
+assert_eq "only step 3 is called reopened" "$(grep -c '^  step [0-9]*, ' "$UP/update-after.txt")" 1
 cp "$UP/stub-state.saved" "$GH_STUB_STATE"
 # Since step 0 asks for TIME_ZONE while a copy step is not done, an update
 # reopens step 0 for a setup without it; the report says why, as status.sh does.
