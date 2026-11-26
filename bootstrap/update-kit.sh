@@ -68,18 +68,32 @@ require_tools git tar python3 jq
 CONFIG_ARG=""
 [ "$CONFIG" = ./fleet.env ] || CONFIG_ARG=" --config $CONFIG"
 
+# read_choices: IDS from the record at $CHOICES (none when it lists nothing).
+read_choices() {
+  [ -f "$CHOICES" ] || return 0
+  jq -e '.installed | type == "array" and all(type == "string")' "$CHOICES" >/dev/null 2>&1 \
+    || die "your content choices record $CHOICES is not {\"installed\": [<id>, ...]}; fix it (or delete it and run add-content.sh again), then run this again. Nothing was changed."
+  IDS=$(jq -r '.installed | join(",")' "$CHOICES")
+  [ -n "$IDS" ] || IDS=none
+}
+# need_node: add-content.sh puts the choices back, and it needs node and npm.
+need_node() {
+  local t
+  [ -n "$IDS" ] || return 0
+  for t in node npm; do
+    command -v "$t" >/dev/null 2>&1 && continue
+    detect_os
+    die "$t is required to put your content choices back with add-content.sh ($IDS), and was not found on PATH. Install it: $(node_install_cmd "$t"). Then run this again; bash bootstrap/preflight.sh checks every tool. Nothing was changed."
+  done
+}
+
 # ------------------------------------------------------------------ config
 CFG_OK=0 CHOICES="" IDS="" CFG_ERR=""
 if [ -f "$CONFIG" ]; then
   if CHOICES=$( { load_config "$CONFIG" && choices_file && printf '%s' "$CHOICES"; } 2>"$BOOT_WORK/cfg.err" ); then
     load_config "$CONFIG"
     CFG_OK=1
-    if [ -f "$CHOICES" ]; then
-      jq -e '.installed | type == "array" and all(type == "string")' "$CHOICES" >/dev/null 2>&1 \
-        || die "your content choices record $CHOICES is not {\"installed\": [<id>, ...]}; fix it (or delete it and run add-content.sh again), then run this again. Nothing was changed."
-      IDS=$(jq -r '.installed | join(",")' "$CHOICES")
-      [ -n "$IDS" ] || IDS=none
-    fi
+    read_choices
   else
     CHOICES=""
     CFG_ERR=$(sed -n 's/^ERROR: //p' "$BOOT_WORK/cfg.err" | head -n1)
@@ -88,14 +102,7 @@ if [ -f "$CONFIG" ]; then
 fi
 # The old copy's choices, proven before the fast-forward, win over a re-read.
 [ "$HAVE_IDS" = 0 ] || IDS=$PASSED_IDS
-if [ -n "$IDS" ]; then
-  # add-content.sh puts the choices back, and it needs node and npm.
-  for t in node npm; do
-    command -v "$t" >/dev/null 2>&1 && continue
-    detect_os
-    die "$t is required to put your content choices back with add-content.sh ($IDS), and was not found on PATH. Install it: $(node_install_cmd "$t"). Then run this again; bash bootstrap/preflight.sh checks every tool. Nothing was changed."
-  done
-fi
+need_node
 
 # keys_of <fleet.env-like file>: its KEY names, sorted.
 keys_of() { sed -n 's/^[[:space:]]*\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$1" | sort -u; }
@@ -330,6 +337,25 @@ if [ -f "$CONFIG" ] && ! "$BASH" -c '. "$1/bootstrap/lib/common.sh"; load_config
   key_report "$old" "$nk/bootstrap/fleet.env.example" "$BOOT_WORK/keys.required"
   config_refusal before
 fi
+# A key only the newer kit knows (a new required one, set ahead of the
+# update) fails the current loader: find the record through the newer one.
+if [ "$CFG_OK" = 0 ] && [ -f "$CONFIG" ]; then
+  CHOICES=$("$BASH" -c '. "$1/bootstrap/lib/common.sh"; load_config "$2"; choices_file; printf "%s" "$CHOICES"' _ "$nk" "$CONFIG" 2>/dev/null) || CHOICES=""
+  [ -z "$CHOICES" ] || read_choices
+  need_node
+fi
+# The proof below runs the CURRENT add-content.sh, whose loader refuses keys
+# it does not know yet: hand it fleet.env without them.
+proof_cfg=$BOOT_WORK/proof.env
+known=" ${CONFIG_KEYS[*]} "
+: > "$proof_cfg"
+if [ -f "$CONFIG" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    k=$(printf '%s' "$line" | sed -n 's/^[[:space:]]*\([A-Z][A-Z0-9_]*\)=.*/\1/p')
+    [ -n "$k" ] && [[ $known != *" $k "* ]] && continue
+    printf '%s\n' "$line" >> "$proof_cfg"
+  done < "$CONFIG"
+fi
 git -C "$KIT" diff --name-only -z --diff-filter=A "$old" "$new" > "$BOOT_WORK/added.z"
 collide=()
 while IFS= read -r -d '' p; do
@@ -353,7 +379,7 @@ if [ ${#starter_paths[@]} -gt 0 ] && [ "$DISCARD" = 0 ]; then
     git -C "$KIT" archive HEAD bootstrap starter library | tar -x -C "$tmp"
     mkdir -p "$BOOT_WORK/state"
     if ! ADOPT_STATE_FILE="$BOOT_WORK/state/proof.json" GH=/nonexistent \
-        "$BASH" "$tmp/bootstrap/add-content.sh" --config "$CONFIG" --items "$IDS" >"$BOOT_WORK/proof.out" 2>&1; then
+        "$BASH" "$tmp/bootstrap/add-content.sh" --config "$proof_cfg" --items "$IDS" >"$BOOT_WORK/proof.out" 2>&1; then
       {
         printf 'ERROR: add-content.sh could not be re-run in a scratch copy, so whether starter/ holds only its files is unknown. Its last lines:\n'
         tail -n 15 "$BOOT_WORK/proof.out" | sed 's/^/  | /'
@@ -405,7 +431,7 @@ for rel in sorted(set(a) | set(b)):
       printf 'Save them outside the clone first (a patch of the changes plus a tar of the new files):\n'
       printf '  mkdir ~/kit-starter-backup && cd %q &&\n' "$KIT"
       printf '  git diff --binary HEAD -- starter > ~/kit-starter-backup/starter-edits.patch &&\n'
-      printf '  git ls-files --others -- starter | tar -cf ~/kit-starter-backup/starter-new-files.tar -T -\n'
+      printf '  git ls-files -z --others --exclude-standard -- starter | tar --null -cf ~/kit-starter-backup/starter-new-files.tar -T -\n'
       printf 'Starter edits belong in a pull request on your own repo after copy-starter.sh, not in the kit.\n'
       printf 'Then discard them: run this again with --discard-starter-edits. Nothing was changed.\n'
     } >&2
