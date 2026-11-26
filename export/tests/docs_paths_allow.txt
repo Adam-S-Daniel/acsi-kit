@@ -11,7 +11,6 @@ docs/evals-and-loop.md: improve-cost/  # lane directory on its claude/ branch
 docs/evals-and-loop.md: draft-skill/  # lane directory on the claude/draft-skill-* branch
 docs/evals-and-loop.md: spend/  # lane directory on the claude/spend-* branch
 docs/evals-and-loop.md: spend/weekly.json  # file the spend lane commits on its branch
-docs/generated-files.md: Adam-S-Daniel/verify-actions-lock  # a public GitHub action (owner/name), not a kit path
 docs/guidance.md: drift-report.md  # written to the persistent/drift-report branch at run time
 docs/guidance.md: .env  # example of a committed secret file the scan flags, not a kit file
 docs/quick-start.md: latest.json  # public document written to persistent/eval-results at run time
