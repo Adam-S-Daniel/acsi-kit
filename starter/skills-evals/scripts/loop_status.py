@@ -50,6 +50,11 @@ number, computed by their code, never recomputed here:
     Its per-task rows need the scheduled tasks' fire ledger, which only the
     daily dashboard refresh holds, so they are listed only when the
     forecast's input carries them.
+    Each measured rate is averaged over a basis window (evals/forecast.yml,
+    the owner 2026-11-26: "Keep-up and eval capacity are too jumpy"): `collect`
+    runs the forecast once per `basis_window_choices` entry, the `forecast`
+    block is the default `basis_window_days`, and `forecast.by_window` holds
+    every choice's figures, keyed by days, so the static page can switch.
 
 Usage:
   python3 scripts/loop_status.py status --results-tree <checkout> [--forecast f.json]
@@ -226,6 +231,8 @@ def _calculation(doc: dict, inputs: dict, scenario: dict, mid: float) -> dict:
         "weekly_cap_points": steps.get("weekly_cap_points"),
         "loop_jobs_points": inputs.get("loop_jobs_points_per_week"),
         "after_loop_jobs_points": steps.get("after_loop_jobs_points"),
+        "improve_points": steps.get("improve_points"),
+        "after_improve_points": steps.get("after_improve_points"),
         "capacity_points": _points(capacity, mid),
         "capacity_basis": steps.get("account_stop_basis"),
         "account_stop_points": steps.get("account_stop_points"),
@@ -273,8 +280,11 @@ def forecast_block(doc) -> dict | None:
     tasks = [{"task": t.get("task"), "in_loop": t.get("in_loop"), "model": t.get("model"),
               "fires_per_week": t.get("fires_per_week"), "points_per_week": t.get("points_per_week")}
              for t in inputs.get("scheduled_tasks") or [] if isinstance(t, dict)]
+    basis = inputs.get("basis_window") if isinstance(inputs.get("basis_window"), dict) else {}
     return {
         "as_of": doc.get("as_of"),
+        "basis_window_days": basis.get("days"),
+        "basis_meter_days": basis.get("meter_days_covered"),
         "open_subjects": len(doc.get("subjects") or []),
         "backlog_points": doc.get("backlog_points_central"),
         "catch_up_weeks": {k: weeks(f"weeks_{k}") for k in ("central", "fast", "slow")},
@@ -283,12 +293,28 @@ def forecast_block(doc) -> dict | None:
         "capacity_points_per_week": capacity / mid if mid else None,
         "eval_cap_points_per_week": inputs.get("weekly_cap_points"),
         "loop_jobs_points_per_week": inputs.get("loop_jobs_points_per_week"),
+        "improve_points_per_week": (inputs.get("improve") or {}).get("points_per_week")
+        if isinstance(inputs.get("improve"), dict) else None,
         "non_eval_points_per_week": (inputs.get("assumptions") or {}).get("non_eval_points_per_week"),
         "pace_hold_modeled": bool((inputs.get("assumptions") or {}).get("pace_hold")),
         "pace_replay": replay,
         "calculation": calculation,
         "tasks": tasks,
     }
+
+
+def forecast_section(doc) -> dict | None:
+    """The status document's `forecast`: the default window's block plus
+    `by_window`, {days: block} for every window `run_forecast` computed (a
+    document from before the basis window has none)."""
+    block = forecast_block(doc)
+    if block is None:
+        return None
+    windows = doc.get("by_window") if isinstance(doc.get("by_window"), dict) else {}
+    block["by_window"] = {str(days): found for days, sub in sorted(
+        windows.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 0)
+        if (found := forecast_block(sub)) is not None}
+    return block
 
 
 def estimated_spend(tree: Path, limits: dict, now: datetime, since: datetime,
@@ -327,7 +353,7 @@ def status(tree: Path, limits: dict, now: datetime, state: dict | None,
                     "stop_pct": points(session_limit),
                     "hold": bool(state and state.get("session_hold"))},
         "guard": None, "pace": None, "guard_pace": None, "loop": None,
-        "forecast": forecast_block(forecast_doc), "forecast_error": forecast_error,
+        "forecast": forecast_section(forecast_doc), "forecast_error": forecast_error,
     }
     if state is None:
         doc["guard"] = {"ok": False, "verdict": "error", "why": error or "the guard could not run",
@@ -444,7 +470,14 @@ def loop_jobs_input(tree: Path, out: Path) -> Path | None:
 
 
 def run_forecast(work: Path, tree: Path, meter_history: Path | None, now: datetime) -> Path:
+    """forecast_catch_up.py once per basis window in evals/forecast.yml,
+    written as one document: the default window's, with every window's
+    under `by_window` (keyed by days)."""
     import forecast_catch_up  # noqa: PLC0415 - only collect needs it (and PyYAML)
+    try:
+        basis = forecast_catch_up.load_basis(forecast_catch_up.REPO_ROOT / "evals")
+    except forecast_catch_up.BasisError as exc:
+        raise RuntimeError(str(exc)) from exc
     gates = fetch_gates(work)
     guidance = work / "agent-guidance"
     shallow(guidance, GUIDANCE_REPO, "main", timedelta(0), now)
@@ -457,18 +490,22 @@ def run_forecast(work: Path, tree: Path, meter_history: Path | None, now: dateti
         argv += ["--automatic-spend", str(jobs)]
     if meter_history and meter_history.is_file():
         argv += ["--meter-history", str(meter_history)]
-    # Its summary lines go to stderr: stdout carries only the status document.
-    try:
-        with contextlib.redirect_stdout(sys.stderr):
-            code = forecast_catch_up.main(argv)
-    except SystemExit as exc:
-        code = exc.code
-    if code not in (0, None) or not tmp.is_file():
-        raise RuntimeError("forecast_catch_up.py failed")
-    doc = json.loads(tmp.read_text(encoding="utf-8"))
-    doc["as_of"] = iso(now)
+    windows = {}
+    for days in basis["choices"]:
+        # Its summary lines go to stderr: stdout carries only the status document.
+        try:
+            with contextlib.redirect_stdout(sys.stderr):
+                code = forecast_catch_up.main(argv + ["--basis-days", str(days)])
+        except SystemExit as exc:
+            code = exc.code
+        if code not in (0, None) or not tmp.is_file():
+            raise RuntimeError(f"forecast_catch_up.py failed for the {days}-day basis window")
+        windows[str(days)] = json.loads(tmp.read_text(encoding="utf-8"))
+        windows[str(days)]["as_of"] = iso(now)
+        tmp.unlink()
+    doc = dict(windows[str(basis["days"])])
+    doc["by_window"] = windows
     out.write_text(json.dumps(doc), encoding="utf-8")
-    tmp.unlink()
     return out
 
 
