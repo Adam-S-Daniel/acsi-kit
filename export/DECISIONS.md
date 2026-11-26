@@ -946,8 +946,10 @@ What the three forms found, and how each is fixed:
   `itertools.product` over however many owners the test names, the conjunct
   is compared as a set of disjuncts, and the fleet-pinned tests read the
   label-only repos from the file (the engine's guard list must still match
-  them, and each must pass its rules). Counts became "at least one". These
-  are `edits:` in `manifests/repo-settings.yml`, and two lines of
+  them, and each must pass its rules). The `cms-label-repos` test keeps its
+  own list of the three example sites and cuts it to the rows the file still
+  has, so its expectation never comes from the engine it checks. Counts
+  became "at least one". These are `edits:` in `manifests/repo-settings.yml`, and two lines of
   `patches/repo-settings/kit_config.py`, which already rewrote them.
 - **agent-guidance tests.** The on-hold provisioning test, the dependabot
   shape test, the impact-report token test and the git-hooks count (six
