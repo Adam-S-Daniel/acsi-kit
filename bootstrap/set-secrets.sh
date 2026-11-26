@@ -8,6 +8,7 @@
 #   _agent-guidance   (repository)  secret   PRIVACY_DENYLIST          group privacy
 #   repo-settings     (repository)  secret   PRIVACY_DENYLIST          group privacy
 #   wsl-automation    (repository)  secret   PRIVACY_DENYLIST          group privacy
+#   skills-evals      (repository)  secret   PRIVACY_DENYLIST          group privacy
 #   skills-evals      routine-fire  secret   EVAL_ROUTINE_FIRE_BEARER  group routine-fire
 #   skills-evals      routine-fire  variable ROUTINE_TRIGGER_ID        group routine-fire
 #
@@ -15,7 +16,10 @@
 # (scripts/check_privacy_denylist.py), which fails closed without it, so set
 # it before the acsi-agentskills starter pull request. The agent-checks CI
 # scan in _agent-guidance, repo-settings and wsl-automation reads it too, and
-# only warns where it is missing. It is a file OUTSIDE every
+# only warns where it is missing. skills-evals' required `test` job scans
+# with it and fails closed without it, so the evals track stores it there
+# once the repo exists (step 35: run --only privacy again); while
+# skills-evals does not exist, its entry is skipped with one line. It is a file OUTSIDE every
 # repo, one regular expression per line, matched in any letter case (your real
 # names, emails, hosts, account ids); blank lines and lines that start with #
 # are skipped. The script refuses a path inside a git work tree and never
@@ -144,9 +148,19 @@ set_one() { # repo env kind name
 }
 
 log "Owner $O, plan $CFG_PLAN$([ "$DRY_RUN" = 1 ] && echo ', DRY RUN')"
+EVALS_STATE=""   # unknown until an evals-track entry asks
 for entry in "${OTHER_VALUES[@]}"; do
   IFS='|' read -r repo env kind name _src <<<"$entry"
   [ -z "$ONLY" ] || [ "$ONLY" = "$(value_group "$name")" ] || continue
+  if [ "$(repo_track "$repo")" = evals ]; then
+    if [ -z "$EVALS_STATE" ]; then
+      if evals_repo_exists; then EVALS_STATE=yes; else EVALS_STATE=no; fi
+    fi
+    if [ "$EVALS_STATE" = no ]; then
+      log "skip: $O/$repo $kind $name: $repo does not exist yet (the evals track creates it; run this again then)"
+      continue
+    fi
+  fi
   set_one "$repo" "$env" "$kind" "$name"
 done
 BEARER="" TRIGGER=""

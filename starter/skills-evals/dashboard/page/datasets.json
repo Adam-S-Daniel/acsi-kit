@@ -106,7 +106,7 @@
   "title": "Half-built and broken features, summary"
  },
  "merged_prs": {
-  "description": "The improvement loop's pull requests among the 30 most recently updated merged ones in the same four repos (head branch rule in skills-evals evals/loop-activity.json). Reads GitHub pull request search, then each PR's head branch.",
+  "description": "The improvement loop's pull requests among the 30 most recently updated merged ones in the same three repos (head branch rule in skills-evals evals/loop-activity.json). Reads GitHub pull request search, then each PR's head branch.",
   "source": {
    "args": {
     "fields": [
@@ -119,7 +119,7 @@
     ],
     "order": "desc",
     "perPage": 30,
-    "query": "is:merged repo:example-adopter/skills-evals repo:example-adopter/_agent-guidance repo:example-adopter/acsi-agentskills repo:example-adopter/claude-memory-map",
+    "query": "is:merged repo:example-adopter/skills-evals repo:example-adopter/_agent-guidance repo:example-adopter/acsi-agentskills",
     "sort": "updated"
    },
    "connector": "github-mcp",
@@ -129,7 +129,7 @@
   "title": "Recently merged PRs"
  },
  "open_issues": {
-  "description": "The improvement loop's open issues in skills-evals, _agent-guidance, acsi-agentskills and claude-memory-map (title and label rule in skills-evals evals/loop-activity.json). Reads GitHub issue lists, one call per repo.",
+  "description": "The improvement loop's open issues in skills-evals, _agent-guidance and acsi-agentskills (title and label rule in skills-evals evals/loop-activity.json). Reads GitHub issue lists, one call per repo.",
   "source": {
    "args": {
     "fields": [
@@ -151,7 +151,7 @@
   "title": "Open issues"
  },
  "open_prs": {
-  "description": "The improvement loop's open pull requests in skills-evals, _agent-guidance, acsi-agentskills and claude-memory-map (head branch rule in skills-evals evals/loop-activity.json). Reads GitHub pull request search, then each PR's head branch, check runs and commit statuses.",
+  "description": "The improvement loop's open pull requests in skills-evals, _agent-guidance and acsi-agentskills (head branch rule in skills-evals evals/loop-activity.json). Reads GitHub pull request search, then each PR's head branch, check runs and commit statuses.",
   "source": {
    "args": {
     "fields": [
@@ -168,7 +168,7 @@
      "user"
     ],
     "perPage": 100,
-    "query": "is:open repo:example-adopter/skills-evals repo:example-adopter/_agent-guidance repo:example-adopter/acsi-agentskills repo:example-adopter/claude-memory-map"
+    "query": "is:open repo:example-adopter/skills-evals repo:example-adopter/_agent-guidance repo:example-adopter/acsi-agentskills"
    },
    "connector": "github-mcp",
    "kind": "query",

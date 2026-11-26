@@ -561,6 +561,7 @@ OTHER_VALUES=(
   "_agent-guidance|-|secret|PRIVACY_DENYLIST|file"
   "repo-settings|-|secret|PRIVACY_DENYLIST|file"
   "wsl-automation|-|secret|PRIVACY_DENYLIST|file"
+  "skills-evals|-|secret|PRIVACY_DENYLIST|file"
   "skills-evals|routine-fire|secret|EVAL_ROUTINE_FIRE_BEARER|prompt"
   "skills-evals|routine-fire|variable|ROUTINE_TRIGGER_ID|prompt"
 )

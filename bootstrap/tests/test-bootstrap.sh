@@ -201,6 +201,14 @@ printf 'timezone: UTC\ntimezone: UTC\n' > "$T/tz/scripts/base-md-merge-window.ym
 run python3 -I "$B/lib/time_zone.py" "$T/tz" --zone Asia/Tokyo; rc=$?
 assert_eq "time_zone.py fails when the line is there twice" "$rc" 1
 mkdir -p "$T/tz2"; assert "time_zone.py leaves a tree without the file alone" python3 -I "$B/lib/time_zone.py" "$T/tz2" --zone Asia/Tokyo
+# skills-evals' explorer/display.json: its one "time_zone": "UTC", exactly once.
+mkdir -p "$T/tz3/explorer"; cp "$B/../starter/skills-evals/explorer/display.json" "$T/tz3/explorer/"
+assert_eq "the shipped display.json has the neutral zone" "$(jq -r .time_zone "$T/tz3/explorer/display.json")" UTC
+assert "time_zone.py writes the zone into display.json" python3 -I "$B/lib/time_zone.py" "$T/tz3" --zone Asia/Tokyo
+assert_eq "display.json now has the zone" "$(jq -r .time_zone "$T/tz3/explorer/display.json")" Asia/Tokyo
+assert_eq "display.json keeps its repos" "$(jq -c .issue_repos "$T/tz3/explorer/display.json")" "$(jq -c .issue_repos "$B/../starter/skills-evals/explorer/display.json")"
+run python3 -I "$B/lib/time_zone.py" "$T/tz3" --zone Asia/Tokyo; rc=$?
+assert_eq "time_zone.py fails when display.json has no UTC entry" "$rc" 1
 for plan in pro max5x ultra max20x; do
   assert_eq "fleet_worker_hours $plan" "$(bash -c '. "$1"; fleet_worker_hours "$2"' _ "$B/lib/common.sh" "$plan")" \
     "$(case $plan in pro) echo 168;; max5x) echo 12;; ultra|max20x) echo 3;; esac)"
@@ -640,6 +648,10 @@ assert "the base Apps would still be made" has "$OUT" "DRY-RUN: write $T/manifes
 run bash "$B/create-apps.sh" --config "$CFG" --dry-run --out "$T/manifests-base" roster; rc=$?
 assert_eq "naming an evals App without skills-evals is refused" "$rc" 1
 assert "the refusal says to create skills-evals first" has "$ERR" "the evals track creates it first (create-repos.sh skills-evals)"
+# Before skills-evals exists, the privacy group skips it with one line.
+run bash "$B/set-secrets.sh" --config "$CFG" --dry-run --only privacy; rc=$?
+assert_eq "set-secrets --only privacy exits 0 before skills-evals exists" "$rc" 0
+assert_eq "it skips skills-evals with one line" "$(grep -c '^skip: acme-example/skills-evals secret PRIVACY_DENYLIST: skills-evals does not exist yet' "$OUT")" 1
 # The evals track's first step creates it by name.
 n=$(log_lines "$GH_LOG")
 run bash "$B/create-repos.sh" --config "$CFG" skills-evals; rc=$?
@@ -971,7 +983,19 @@ assert_eq "PRIVACY_DENYLIST is a repository secret in _agent-guidance, for its a
 for r in repo-settings wsl-automation; do
   assert_eq "PRIVACY_DENYLIST is a repository secret in $r, for its agent-checks CI scan" "$(jqs ".values[\"acme-example/$r||secret\"].PRIVACY_DENYLIST")" "$(sha256sum < "$T/private/denylist" | cut -d' ' -f1)"
 done
-assert "set-secrets counts the writes" has "$OUT" "Done: 4 change(s)"
+assert_eq "PRIVACY_DENYLIST is a repository secret in skills-evals, whose required test job scans with it" "$(jqs '.values["acme-example/skills-evals||secret"].PRIVACY_DENYLIST')" "$(sha256sum < "$T/private/denylist" | cut -d' ' -f1)"
+assert "set-secrets counts the writes" has "$OUT" "Done: 5 change(s)"
+# values:privacy on each track: base checks the four base repos and never
+# skills-evals (so adding evals cannot undo step 3); evals checks skills-evals.
+run bash "$B/verify.sh" --config "$CFGP" --only values:privacy --track base; rc=$?
+assert_eq "verify values:privacy on the base track passes" "$rc" 0
+assert_eq "it checks four repos" "$(grep -c '^PASS: .*PRIVACY_DENYLIST' "$OUT")" 4
+assert_not "and not skills-evals" grep -q 'skills-evals.*PRIVACY_DENYLIST' "$OUT"
+run bash "$B/verify.sh" --config "$CFGP" --only values:privacy --track evals; rc=$?
+assert_eq "verify values:privacy on the evals track passes" "$rc" 0
+assert_eq "it checks skills-evals only" "$(grep '^PASS: .*PRIVACY_DENYLIST' "$OUT" | grep -c 'skills-evals') $(grep -c '^PASS: .*PRIVACY_DENYLIST' "$OUT")" "1 1"
+run bash "$B/verify.sh" --config "$CFGP" --only values:privacy; rc=$?
+assert_eq "verify values:privacy on both tracks checks five repos" "$(grep -c '^PASS: .*PRIVACY_DENYLIST' "$OUT")" 5
 chmod 600 "$T/private/denylist"
 run bash "$B/set-secrets.sh" --config "$CFGP" --only privacy --rotate --denylist "$T/private/denylist"; rc=$?
 assert_eq "set-secrets privacy --rotate exits 0" "$rc" 0
@@ -1033,9 +1057,19 @@ assert_eq "copy-starter dry run opens nothing" "$(since "$n")" 0
 run bash "$B/regenerate.sh" --config "$CFGP" --check actions-lock; rc=$?
 assert_eq "actions-lock --check is not done before the starters are merged" "$rc" 1
 assert "it says which lock is missing and why" has "$OUT" "acme-example/repo-settings has no .github/workflows/actions.lock yet (merge its starter pull request first)"
+# Stand-ins for node and npm: the skills-evals copy rebuilds the explorer pages
+# for TIME_ZONE (copy-starter.sh 2c), which needs the network for npm ci.
+mkdir -p "$T/fakenode"
+printf '#!/usr/bin/env bash\nprintf "npm %%s\\n" "$*" >> "%s"\nmkdir -p node_modules\n' "$T/node.log" > "$T/fakenode/npm"
+printf '#!/usr/bin/env bash\nprintf "node %%s\\n" "$*" >> "%s"\n' "$T/node.log" > "$T/fakenode/node"
+chmod +x "$T/fakenode/npm" "$T/fakenode/node"
 for r in "${FLEET[@]}"; do
   t=$(tree_of "$r")
-  run bash "$B/copy-starter.sh" --config "$CFGP" "starter/$t" "$O/$r"; rc=$?
+  if [ "$r" = skills-evals ]; then
+    run env PATH="$T/fakenode:$PATH" bash "$B/copy-starter.sh" --config "$CFGP" "starter/$t" "$O/$r"; rc=$?
+  else
+    run bash "$B/copy-starter.sh" --config "$CFGP" "starter/$t" "$O/$r"; rc=$?
+  fi
   assert_eq "copy-starter $t exits 0" "$rc" 0
   [ "$rc" = 0 ] || { printf '  copy-starter %s stderr (last 20 lines):\n' "$t"; tail -n 20 "$ERR" | sed 's/^/    /'; }
   g="$T/remotes/$O/$r.git"
@@ -1046,6 +1080,9 @@ for r in "${FLEET[@]}"; do
   assert_not "no invented owner is left in $t's paths" bash -c 'git --git-dir="$1" ls-tree -r --name-only "$2" | grep -qiE "example[-_]adopter"' _ "$g" "starter/$t"
   assert "the README create-repos.sh wrote was replaced" bash -c '! git --git-dir="$1" show "$2:README.md" | grep -qF "generated by bootstrap/create-repos.sh"' _ "$g" "starter/$t"
 done
+assert "copy-starter wrote TIME_ZONE into the explorer's display.json" bash -c 'git --git-dir="$1" show starter/skills-evals:explorer/display.json | grep -qF "\"time_zone\": \"Europe/Berlin\""' _ "$T/remotes/$O/skills-evals.git"
+assert_eq "copy-starter rebuilt the explorer pages for it, and checked them" "$(cat "$T/node.log" 2>/dev/null)" "$(printf 'npm ci --ignore-scripts --no-audit --no-fund --silent\nnode build.js\nnode build.js --check')"
+assert_not "the rebuild's node_modules is not pushed" bash -c 'git --git-dir="$1" ls-tree -r --name-only starter/skills-evals | grep -q node_modules' _ "$T/remotes/$O/skills-evals.git"
 assert "copy-starter wrote TIME_ZONE into the merge window" bash -c 'git --git-dir="$1" show starter/agent-guidance:scripts/base-md-merge-window.yml | grep -qx "timezone: Europe/Berlin"' _ "$T/remotes/$O/_agent-guidance.git"
 assert_eq "six starter pull requests are open" "$(jqs '[.prs[][] | select(.head | startswith("starter/"))] | length')" 6
 assert "your owner replaced the invented one in fleet.evals.yml" bash -c 'git --git-dir="$1" show starter/repo-settings:repo-settings/fleet.evals.yml | grep -q "name: acme-example/skills-evals"' _ "$T/remotes/$O/repo-settings.git"

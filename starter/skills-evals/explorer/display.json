@@ -1,0 +1,8 @@
+{
+ "time_zone": "UTC",
+ "issue_repos": [
+  "example-adopter/skills-evals",
+  "example-adopter/_agent-guidance",
+  "example-adopter/acsi-agentskills"
+ ]
+}

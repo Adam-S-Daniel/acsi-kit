@@ -438,7 +438,7 @@
     {
       "id": "35",
       "title": "Create skills-evals",
-      "run": "`bootstrap/create-repos.sh skills-evals` (with its labels and its `persistent/eval-results` branch)",
+      "run": "`bootstrap/create-repos.sh skills-evals` (with its labels and its `persistent/eval-results` branch), then `bootstrap/set-secrets.sh --only privacy --denylist <the same file as step 3>` again: it stores `PRIVACY_DENYLIST` in `skills-evals`, whose required `test` job fails closed without it, and leaves the base repos' copies alone",
       "kind": "script",
       "part": "evals",
       "track": "evals",
@@ -448,7 +448,8 @@
         "groups": [
           "repos",
           "labels",
-          "branches"
+          "branches",
+          "values:privacy"
         ]
       },
       "minutes": 5
