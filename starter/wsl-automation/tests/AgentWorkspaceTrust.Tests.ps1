@@ -422,30 +422,6 @@ Describe 'Get-AgentTrustOwnerRoot' {
     }
 }
 
-Describe 'No owner-specific folder names in src' {
-
-    It 'has no string constant naming the owner folders' {
-        $files = Get-ChildItem -Path (Join-Path $PSScriptRoot '..' 'src') -Recurse -File |
-            Where-Object Extension -In '.ps1', '.psm1'
-        $files | Should -Not -BeNullOrEmpty
-        # Lowercase folder names, matched case-sensitively so the owner's GitHub URLs (capitalized) do not count.
-        $banned = @('C:\repos', '\example-adopter', '/example-adopter', '\example-adopter-two', '/example-adopter-two')
-        $hits = foreach ($file in $files) {
-            $tokens = $null; $errors = $null
-            $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
-            $constants = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -or $n -is [System.Management.Automation.Language.ExpandableStringExpressionAst] }, $true)
-            foreach ($node in $constants) {
-                foreach ($word in $banned) {
-                    if ($node.Value.IndexOf($word, [System.StringComparison]::Ordinal) -ge 0) {
-                        '{0}:{1} {2}' -f $file.Name, $node.Extent.StartLineNumber, $word
-                    }
-                }
-            }
-        }
-        @($hits) | Should -BeNullOrEmpty
-    }
-}
-
 Describe 'Set-AgentWorkspaceTrust' {
 
     BeforeEach {

@@ -137,8 +137,9 @@ hosts, and account ids. The list is the repository secret
 `file:line` and the pattern's number, never the match, and it fails closed
 without the secret, including on a fork's pull request.
 
-The same secret is optional everywhere else. With it, each repo's
-`agent-checks` job also scans a pull request's added lines, commit messages,
+In `acsi-agentskills` the secret is required: that job is set up in step 3
+and fails closed without it. For the other two scans below it is optional.
+With it, each repo's `agent-checks` job also scans a pull request's added lines, commit messages,
 branch name, title and body, and the `privacy-comment-alert` workflow scans
 issues and comments. Without it, both scan nothing and only add a warning;
 neither ever fails a check for a missing secret. `set-secrets.sh` stores it

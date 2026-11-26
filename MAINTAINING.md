@@ -21,6 +21,12 @@ Before you merge that pull request:
   `export/doc-sources.yml`). Update each listed page, or say in the pull
   request why it needs no change.
 
+The kit's CI runs no Windows Pester. When a re-pin changes a shipped
+`.ps1` file or a Pester test, run them by hand on Windows: copy
+`starter/wsl-automation` to a Windows folder, run `git init` there (the
+line-endings test reads `git ls-files`), then run
+`Invoke-Pester -Path .\tests`. It should report 0 failed.
+
 When you add a page under `docs/`, add its sources to that map. Coverage
 findings, meaning a routine spec or scheduled workflow that no page names,
 only warn in `export/tests/test_doc_review.py`. Once `not_documented` is
