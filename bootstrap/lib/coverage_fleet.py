@@ -65,18 +65,27 @@ def names(text):
     return [v.value for v in _fleet_node(text).value]
 
 
+def _indent(line):
+    return len(line) - len(line.lstrip(" "))
+
+
 def _marker(lines, fleet, name):
     """(first, last) line indexes of the comment that holds `name`'s place in
     the list, or None. The starter writes it where the source lists the repo:
     a run of comment lines among the elements (or right under the last) whose first begins
-    "# <name> is not listed while ..."."""
+    "# <name> is not listed while ...". A comment indented less than the
+    elements' `-` is not the list's: it belongs to what follows (the next
+    key's comment, with no blank line before it), and is never taken."""
     first, last = fleet.value[0].start_mark.line, fleet.value[-1].start_mark.line
-    while last + 1 < len(lines) and lines[last + 1].strip().startswith("#"):
+    dash = _indent(lines[last])
+    while (last + 1 < len(lines) and lines[last + 1].strip().startswith("#")
+           and _indent(lines[last + 1]) >= dash):
         last += 1                       # comments right under the last element belong to the list too
     for n in range(first, last + 1):
         if lines[n].strip().startswith(f"# {name} {MARKER}"):
             end = n
-            while end + 1 <= last and lines[end + 1].strip().startswith("#"):
+            while (end + 1 <= last and lines[end + 1].strip().startswith("#")
+                   and _indent(lines[end + 1]) >= _indent(lines[n])):
                 end += 1
             return n, end
     return None

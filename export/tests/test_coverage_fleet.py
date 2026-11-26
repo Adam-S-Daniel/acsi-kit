@@ -114,6 +114,17 @@ def test_a_marker_under_the_last_element_is_replaced_too():
     assert cf.add(text, "two") == "cron_coverage:\n  fleet:\n    - one\n    - two\n  out_of_scope: []\n"
 
 
+@pytest.mark.parametrize("next_comment", ["  # the next key's comment\n", "# a top-level comment\n"])
+def test_the_next_keys_comment_right_under_the_marker_stays(next_comment):
+    # The marker sits right under the last element, and the next key's comment
+    # follows with no blank line: that comment is the next key's, at a lesser
+    # indent than the list, and must survive the add.
+    text = ("cron_coverage:\n  fleet:\n    - one\n    # two is not listed while it does not exist.\n"
+            "    # continued.\n" + next_comment + "  out_of_scope: []\n")
+    want = "cron_coverage:\n  fleet:\n    - one\n    - two\n" + next_comment + "  out_of_scope: []\n"
+    assert cf.add(text, "two") == want
+
+
 @pytest.mark.parametrize("text, said", [
     ("cron_coverage:\n  fleet: [one, two]\n", "no cron_coverage.fleet block list"),
     ("cron_coverage:\n  fleet: []\n", "no cron_coverage.fleet block list"),
