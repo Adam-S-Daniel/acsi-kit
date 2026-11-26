@@ -2330,7 +2330,12 @@ assert "under WSL it gives the Windows checkout's clone command" has "$OUT" "  g
 assert "and where register-tasks.ps1 runs" has "$OUT" '.\scripts\register-tasks.ps1 (step 22)'
 run env PREFLIGHT_WSL=0 bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
 assert_not "off WSL it names no Windows checkout" has "$OUT" "Windows checkout"
-: > "$INSTALL_LOG"
+mv "$RD/wsl-automation" "$T/tmp/wa-clone"; mkdir -p "$RD/wsl-automation"; : > "$INSTALL_LOG"
+run bash "$B/install-machine.sh" --config "$CFGF"; rc=$?
+assert_eq "a wsl-automation folder that is not a clone does not fail step 21" "$rc" 0
+assert_eq "and every installer still runs" "$(log_lines "$INSTALL_LOG")" 3
+assert "a warning names the folder's problem and step 22" grep -qE "WARNING: no usable wsl-automation clone in $RD \(.*is not a git clone\).*step 22 needs one" "$ERR"
+rmdir "$RD/wsl-automation"; mv "$T/tmp/wa-clone" "$RD/wsl-automation"
 : > "$INSTALL_LOG"
 run bash "$B/install-machine.sh" --config "$CFGF" --with-codex; rc=$?
 assert_eq "a second install-machine run exits 0" "$rc" 0
