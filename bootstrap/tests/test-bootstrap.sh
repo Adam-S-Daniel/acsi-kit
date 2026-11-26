@@ -20,6 +20,13 @@ set -uo pipefail
 export PYTHONDONTWRITEBYTECODE=1   # no __pycache__ in a tree that copy-starter.sh may copy
 B=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 K=$(cd "$B/.." && pwd)
+# The add-content cases copy bootstrap/, starter/ and library/ with cp -R and
+# write optional content into the copy. cp -R keeps a symlink a symlink, so a
+# kit folder that is one (a scratch tree linked into a checkout) would send
+# those writes into the tree it points at.
+for d in bootstrap starter library; do
+  [ ! -L "$K/$d" ] || { printf 'ERROR: %s is a symlink: run the suite from a checkout or a full copy of the kit, or its add-content cases write through the link\n' "$K/$d" >&2; exit 2; }
+done
 T=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-test.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 PASSES=0 FAILS=0
