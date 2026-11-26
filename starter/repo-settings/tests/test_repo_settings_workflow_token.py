@@ -32,6 +32,7 @@ They fail closed: a job `if:` they cannot place is treated as able to run on
 pull_request.
 """
 
+import itertools
 import json
 import os
 import re
@@ -607,7 +608,7 @@ class EvaluatorTests(unittest.TestCase):
 # What apply-auto may have answered per owner, in REVIEW_OUTPUTS order: `false`
 # (nothing left), `true` (something left, or the lane is not set up), or
 # nothing at all (the leg died first, or the job was skipped).
-REVIEW_CASES = [(a, b) for a in ("false", "true", "") for b in ("false", "true", "")]
+REVIEW_CASES = list(itertools.product(("false", "true", ""), repeat=len(REVIEW_OUTPUTS)))
 
 
 def apply_scenarios():
@@ -700,7 +701,7 @@ class ApplyConditionTests(unittest.TestCase):
             if not auto_should_run(sc):
                 continue
             with self.subTest(**sc):
-                expected = sc["review"] != ("false", "false")
+                expected = any(answer != "false" for answer in sc["review"])
                 self.assertEqual(apply_runs(self.apply, sc), expected)
                 asked += expected
         self.assertGreater(asked, 0)
@@ -709,7 +710,18 @@ class ApplyConditionTests(unittest.TestCase):
         jobs = load_workflow(WORKFLOW)["jobs"]
         auto = top_level_conjuncts(jobs[AUTO_JOB]["if"])
         reviewed = top_level_conjuncts(self.apply["if"])
-        self.assertEqual(sorted(reviewed), sorted(auto + [REVIEW_CONJUNCT]))
+        # The review answer is one parenthesized conjunct of per-owner
+        # disjuncts. Compare its disjuncts as a set: the workflow lists the
+        # owners in its own order (sorted() differs from it for owner names
+        # that sort the other way round), and a one-owner fleet repeats the
+        # one owner's disjunct. Everything else must equal the unreviewed
+        # job's conjuncts.
+        answer = [c for c in reviewed if c not in auto]
+        self.assertEqual(len(answer), 1, reviewed)
+        self.assertEqual(sorted(c for c in reviewed if c != answer[0]), sorted(auto))
+        self.assertTrue(answer[0].startswith("(") and answer[0].endswith(")"), answer[0])
+        self.assertEqual(set(top_level_disjuncts(answer[0][1:-1])),
+                         set(top_level_disjuncts(REVIEW_CONJUNCT[1:-1])))
 
     def test_schedule_asks_for_approval_only_on_drift_or_a_failed_plan(self):
         base = {"event": "schedule", "client_id": "x", "dry_run": None,

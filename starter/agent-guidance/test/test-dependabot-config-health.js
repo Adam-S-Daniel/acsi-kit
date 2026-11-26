@@ -1205,11 +1205,16 @@ test("shapeGaps: a bare github-actions entry reports all three missing pieces, l
   ]);
 });
 
-test("shapeGaps: own-not-excluded needs BOTH owners", () => {
-  const one = "    cooldown:\n      default-days: 7\n      exclude: [\"example-adopter/*\"]\n" +
-    "    groups:\n      actions:\n        patterns: [\"*\"]\n      sec:\n        applies-to: security-updates\n";
-  const raw = cfg(entry("github-actions", "/", one));
-  assert.deepEqual(shapeGaps(raw), ["github-actions@/:own-not-excluded"]);
+test("shapeGaps: own-not-excluded needs EVERY owner", () => {
+  // Leave each owner's pattern out in turn: two owners give two cases, a one-owner fleet one.
+  const own = [...new Set(JSON.parse(OWN_EXCL.slice(OWN_EXCL.indexOf("["))))];
+  assert.ok(own.length >= 1);
+  for (const missing of own) {
+    const one = "    cooldown:\n      default-days: 7\n      exclude: " + JSON.stringify(own.filter((p) => p !== missing)) + "\n" +
+      "    groups:\n      actions:\n        patterns: [\"*\"]\n      sec:\n        applies-to: security-updates\n";
+    const raw = cfg(entry("github-actions", "/", one));
+    assert.deepEqual(shapeGaps(raw), ["github-actions@/:own-not-excluded"], missing);
+  }
 });
 
 test("shapeGaps: only a security group is no-version-group; only a version group is no-security-group", () => {
