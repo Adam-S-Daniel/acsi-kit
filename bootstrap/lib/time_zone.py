@@ -11,6 +11,7 @@ once or the zone is not one python3's tz database loads. A tree without the
 file (every other starter) is left alone. Standard library only.
 """
 import argparse
+import os
 import re
 import sys
 import zoneinfo
@@ -29,9 +30,19 @@ def apply_zone(text: str, zone: str) -> str:
     if not SHAPE.fullmatch(zone):
         raise ZoneError(f"TIME_ZONE {zone!r} is not an IANA zone name such as Europe/Berlin")
     try:
-        zoneinfo.ZoneInfo(zone)
+        zoneinfo.ZoneInfo("UTC")
+        nodb = os.environ.get("ACSI_TEST_NO_TZDB") == "1"   # a seam for bootstrap/tests only
     except Exception:
-        raise ZoneError(f"TIME_ZONE {zone!r} is not a zone this machine's tz database knows") from None
+        nodb = True
+    if nodb:
+        print(f"WARNING: this machine's python3 has no time zone database, so {zone} was checked "
+              "for shape only; install one with 'pip install tzdata' for that python3 "
+              "(or your OS's tzdata package)", file=sys.stderr)
+    else:
+        try:
+            zoneinfo.ZoneInfo(zone)
+        except Exception:
+            raise ZoneError(f"TIME_ZONE {zone!r} is not a zone this machine's tz database knows") from None
     n = len(LINE.findall(text))
     if n != 1:
         raise ZoneError(f"{WINDOW_REL} has {n} lines reading 'timezone: UTC', not exactly one; "

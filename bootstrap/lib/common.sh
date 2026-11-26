@@ -134,14 +134,36 @@ CONFIG_KEYS=(
   SITE_REPO
 )
 
-# time_zone_loads <name>: python3's zoneinfo knows the zone (python3 is required
-# by the kit). Fails with no output when it does not.
-time_zone_loads() {
-  command -v python3 >/dev/null 2>&1 || return 0
-  python3 -I -c 'import sys, zoneinfo; zoneinfo.ZoneInfo(sys.argv[1])' "$1" >/dev/null 2>&1
+# time_zone_state <name>: prints ok (python3's zoneinfo loads it), unknown (the
+# machine has a tz database and does not know the name) or nodb (this python3
+# has no tz database at all: a minimal container, Git Bash, some macOS
+# Pythons). Without python3 it prints ok. ACSI_TEST_NO_TZDB=1 makes the
+# database look absent (a seam for bootstrap/tests only).
+time_zone_state() {
+  command -v python3 >/dev/null 2>&1 || { echo ok; return 0; }
+  python3 -I -c '
+import os, sys, zoneinfo
+try:
+    if os.environ.get("ACSI_TEST_NO_TZDB") == "1":
+        raise zoneinfo.ZoneInfoNotFoundError("UTC")
+    zoneinfo.ZoneInfo("UTC")
+except Exception:
+    print("nodb"); sys.exit(0)
+try:
+    zoneinfo.ZoneInfo(sys.argv[1]); print("ok")
+except Exception:
+    print("unknown")
+' "$1" 2>/dev/null || echo ok
 }
+# time_zone_loads <name>: a valid zone, or a shape-valid one on a machine with
+# no tz database (the check cannot be made there; the consumers read their own
+# data, so the loader accepts it and preflight.sh and copy-starter.sh warn).
+time_zone_loads() { [ "$(time_zone_state "$1")" != unknown ]; }
 
 _TIME_ZONE_HELP="set TIME_ZONE in fleet.env to your IANA time zone name, such as Europe/Berlin or America/Chicago. Find yours with: timedatectl show -p Timezone --value (Linux), readlink /etc/localtime (macOS; the name after zoneinfo/), or the list at https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
+
+# TIME_ZONE_NODB_HELP: said where a zone is accepted on shape alone.
+_TIME_ZONE_NODB_HELP="this machine's python3 has no time zone database, so TIME_ZONE could not be checked against it: install one with 'pip install tzdata' for that python3 (or your OS's tzdata package), then run again"
 
 # require_time_zone: the scripts that write the merge window call this after
 # load_config. TIME_ZONE has no default and is not required by load_config, so

@@ -226,6 +226,51 @@ pf() { # [env VAR=value ...] -- args to preflight.sh: runs it on PFBIN with a pi
   cat "$OUT" "$ERR" >> "$T/pf-all.out"
   return $rc
 }
+# TIME_ZONE left empty (a copy of the new fleet.env.example), absent, or valid.
+sed -e 's/^OWNER=.*/OWNER=acme-example/' -e 's/^OWNER_TWO=.*/OWNER_TWO=acme-example/' -e 's/^PLAN=.*/PLAN=free/' \
+  -e 's/^CLAUDE_PLAN=.*/CLAUDE_PLAN=pro/' -e "s|^REPOS_DIR=.*|REPOS_DIR=$T/home/repos|" "$B/fleet.env.example" > "$T/tz-empty.env"
+assert_eq "the example's TIME_ZONE is empty in this copy" "$(grep -c '^TIME_ZONE=$' "$T/tz-empty.env")" 1
+grep -v '^TIME_ZONE=' "$T/tz-empty.env" > "$T/tz-absent.env"
+sed 's/^TIME_ZONE=.*/TIME_ZONE=Europe\/Berlin/' "$T/tz-empty.env" > "$T/tz-valid.env"
+for v in empty absent valid; do
+  pf -- --config "$T/tz-$v.env"; rc=$?
+  assert_eq "preflight exits 0 with TIME_ZONE $v" "$rc" 0
+  assert_not "preflight does not FAIL on TIME_ZONE $v" grep -q '^FAIL' "$OUT"
+  run env ADOPT_STATE_FILE="$T/tz-state-$v.json" bash "$B/status.sh" --config "$T/tz-$v.env"; rc=$?
+  assert_eq "status.sh exits 0 with TIME_ZONE $v" "$rc" 0
+  assert_not "status.sh's step 0 is not undone by TIME_ZONE $v" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
+  run bash "$B/verify.sh" --config "$T/tz-$v.env" --only repos
+  assert_not "verify.sh does not stop on TIME_ZONE $v" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
+  run bash "$B/copy-starter.sh" --config "$T/tz-$v.env" --dry-run starter/agent-guidance acme-example/_agent-guidance; rc=$?
+  if [ "$v" = valid ]; then
+    assert_not "copy-starter does not refuse on TIME_ZONE $v" grep -q 'TIME_ZONE' "$ERR"
+  else
+    assert_eq "copy-starter refuses with TIME_ZONE $v" "$rc" 1
+    assert "its message says what to set and how to find it" has "$ERR" "timedatectl show -p Timezone --value"
+  fi
+done
+pf -- --config "$T/tz-empty.env"
+assert "preflight WARNs about an empty TIME_ZONE with the help text" grep -q '^WARN: .*has no TIME_ZONE' "$OUT"
+assert "and prints the fix line" grep -q 'fix: set TIME_ZONE in fleet.env' "$OUT"
+pf -- --config "$T/tz-valid.env"
+assert "preflight PASSes a valid TIME_ZONE" grep -q '^PASS: TIME_ZONE Europe/Berlin' "$OUT"
+# No tz database in python3: shape-valid is accepted with a warning; an unknown zone on a machine WITH one is refused.
+pf ACSI_TEST_NO_TZDB=1 -- --config "$T/tz-valid.env"; rc=$?
+assert_eq "preflight exits 0 on a machine with no tz database" "$rc" 0
+assert "it WARNs and says to install tzdata" grep -q '^WARN: TIME_ZONE Europe/Berlin could not be checked.*pip install tzdata' "$OUT"
+sed 's/^TIME_ZONE=.*/TIME_ZONE=Mars\/Olympus/' "$T/tz-empty.env" > "$T/tz-mars.env"
+pf ACSI_TEST_NO_TZDB=1 -- --config "$T/tz-mars.env"; rc=$?
+assert_eq "a shape-valid but unknown zone is accepted when there is no database to check" "$rc" 0
+pf -- --config "$T/tz-mars.env"; rc=$?
+assert_eq "the same zone is refused when the database is there" "$rc" 1
+sed 's/^TIME_ZONE=.*/TIME_ZONE=Europe/' "$T/tz-empty.env" > "$T/tz-shape.env"
+pf ACSI_TEST_NO_TZDB=1 -- --config "$T/tz-shape.env"; rc=$?
+assert_eq "a malformed zone is refused even with no database" "$rc" 1
+mkdir -p "$T/tzn/scripts"; printf 'timezone: UTC\n' > "$T/tzn/scripts/base-md-merge-window.yml"
+run env ACSI_TEST_NO_TZDB=1 python3 -I "$B/lib/time_zone.py" "$T/tzn" --zone Europe/Berlin; rc=$?
+assert_eq "time_zone.py writes a shape-valid zone with no database" "$rc" 0
+assert "and warns that it was checked for shape only" has "$ERR" "checked for shape only"
+assert_eq "the file holds the zone" "$(grep -c '^timezone: Europe/Berlin$' "$T/tzn/scripts/base-md-merge-window.yml")" 1
 pf -- --config "$PFCFG"; rc=$?
 assert_eq "preflight exits 0 when everything is in place" "$rc" 0
 assert "preflight's summary says 0 failed" grep -qE ' 0 failed,' "$OUT"
