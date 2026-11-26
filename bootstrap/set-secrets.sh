@@ -5,12 +5,17 @@
 # credentials (create-apps.sh stores those). OTHER_VALUES in lib/common.sh:
 #
 #   acsi-agentskills  (repository)  secret   PRIVACY_DENYLIST          group privacy
+#   _agent-guidance   (repository)  secret   PRIVACY_DENYLIST          group privacy
+#   repo-settings     (repository)  secret   PRIVACY_DENYLIST          group privacy
+#   wsl-automation    (repository)  secret   PRIVACY_DENYLIST          group privacy
 #   skills-evals      routine-fire  secret   EVAL_ROUTINE_FIRE_BEARER  group routine-fire
 #   skills-evals      routine-fire  variable ROUTINE_TRIGGER_ID        group routine-fire
 #
 # PRIVACY_DENYLIST feeds acsi-agentskills' required `privacy` check
 # (scripts/check_privacy_denylist.py), which fails closed without it, so set
-# it before the acsi-agentskills starter pull request. It is a file OUTSIDE every
+# it before the acsi-agentskills starter pull request. The agent-checks CI
+# scan in _agent-guidance, repo-settings and wsl-automation reads it too, and
+# only warns where it is missing. It is a file OUTSIDE every
 # repo, one regular expression per line (your real names, emails, hosts,
 # account ids); the script refuses a path inside a git work tree and never
 # prints a pattern.

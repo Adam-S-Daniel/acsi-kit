@@ -672,7 +672,7 @@ class RunLogTests(LaneTestCase):
         self.assertIn("agent-checks: .env: looks like a secret", out.stderr)
         [entry] = self.entries()
         self.assertEqual(entry["event"], "pre-push")
-        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell"], declared_lessons()))
+        self.assertEqual(entry["checks"], expected_checks(["privacy", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], ["secret-file"])
 
     def test_repo_local_check_is_logged(self):
@@ -937,7 +937,7 @@ class CheckIdTests(unittest.TestCase):
 
     def test_core_check_ids(self):
         ids = {ident for ident, _ in problem_calls(canonical_runner(RUNNER))}
-        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)
+        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity", "privacy"}, ids)
 
     def test_lesson_arms_and_lesson_checks_agree(self):
         for arm in (None, PATH_ARM):

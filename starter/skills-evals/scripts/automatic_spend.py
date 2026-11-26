@@ -13,7 +13,7 @@ never from a hand count:
   * GitHub workflows: `--workflows-root`, a directory of
     `<repo>/.github/workflows/*.yml` checkouts (every repo in _agent-guidance
     repos.yml `cron_coverage.fleet`, both owners);
-  * WORKSTATION tasks: `--wsl-automation`, a wsl-automation checkout: the task names
+  * workstation tasks: `--wsl-automation`, a wsl-automation checkout: the task names
     and times in scripts/register-tasks.ps1, and whether the task's script
     runs `claude -p`.
 
@@ -227,7 +227,7 @@ def scan_workflows(root: Path) -> list:
 
 
 def scan_workstation_tasks(checkout: Path) -> list:
-    """WORKSTATION scheduled tasks from register-tasks.ps1's parameter defaults:
+    """Workstation scheduled tasks from register-tasks.ps1's parameter defaults:
     `$<Key>TaskName = '<name>'` with `$<Key>Time` (daily, or weekly when the
     parameter help says so) or `$<Key>IntervalMinutes`."""
     ps1 = (checkout / "scripts" / "register-tasks.ps1").read_text(encoding="utf-8")
@@ -325,7 +325,7 @@ def _weekly(rate, per_fire):
 
 
 def breakdown(config: dict, triggers: dict, fires: list, workflows: list,
-              workstation: list, now: datetime, window_days: int,
+              workstation_tasks: list, now: datetime, window_days: int,
               legacy_usd_per_point=None, scale=1) -> dict:
     """The breakdown document. `legacy_usd_per_point` prices a fire with no
     token counts (evals/budget.yml); without it such a fire has no points.
@@ -402,10 +402,10 @@ def breakdown(config: dict, triggers: dict, fires: list, workflows: list,
                      "usd_per_fire": None, "usd_per_week": usd,
                      "points_per_fire": None, "points_per_week": usd})
 
-    for b in workstation:
+    for b in workstation_tasks:
         lane = "meter" if b["runs_claude"] else "actions_only"
         cat = categorize(b["name"], cats)
-        jobs.append({"kind": "WORKSTATION task", "id": b["name"], "name": b["name"], "category": cat,
+        jobs.append({"kind": "workstation task", "id": b["name"], "name": b["name"], "category": cat,
                      "in_loop": loop_membership(b["name"], cat, config), "lane": lane,
                      "fires_per_week": b["fires_per_week"], "rate_source": "register-tasks.ps1",
                      "usd_per_fire": None, "local_only": lane == "actions_only",

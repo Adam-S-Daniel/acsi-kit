@@ -110,6 +110,25 @@ check("fleet worker, EVALS_REPO unset: still fires", rc == 0 and any(c.startswit
 rc, out, calls, _ = run_step(fire, {**FIRE_ENV, "EVALS_REPO": "none"}, event_name="workflow_dispatch")
 check("fleet worker, EVALS_REPO=none: still fires", rc == 0 and any(c.startswith("curl ") for c in calls) and NOTICE not in out)
 
+# A worker's fire URL of none is "not set up yet" (exit 0, a notice naming the
+# step that sets it, nothing called), on its slot or by hand; an empty URL (a
+# variable deleted after setup) and a missing bearer keep the real failures.
+for role, env, step in (("fleet", FIRE_ENV, 27), ("loop", {**FIRE_ENV, **LOOP, "EVALS_REPO": "acme/skills-evals"}, 41)):
+    var = "FLEET_WORKER_FIRE_URL" if role == "fleet" else "LOOP_WORKER_FIRE_URL"
+    note = f"::notice::not set up yet: variable {var} is none"
+    # (The loop's scheduled case needs a cron line in the event; the starter's
+    # own test-fleet-worker-fire.js runs it on one.)
+    for ev in (("schedule", "workflow_dispatch") if role == "fleet" else ("workflow_dispatch",)):
+        rc, out, calls, _ = run_step(fire, {**env, "FIRE_URL": "none", "FLEET_BEARER": "", "LOOP_BEARER": ""}, event_name=ev)
+        check(f"{role} worker, URL none ({ev}): exits 0 with the not-set-up notice naming step {step}",
+              rc == 0 and note in out and f"Step {step} of the kit" in out)
+        check(f"{role} worker, URL none ({ev}): calls nothing", calls == [])
+    rc, out, calls, _ = run_step(fire, {**env, "FIRE_URL": ""}, event_name="workflow_dispatch")
+    check(f"{role} worker, URL empty (deleted): still fails naming it", rc == 1 and f"variable {var}" in out and note not in out)
+rc, out, calls, _ = run_step(fire, {**FIRE_ENV, "FLEET_BEARER": ""}, event_name="workflow_dispatch")
+check("fleet worker, URL set and bearer missing: exits 1 naming the secret",
+      rc == 1 and "secret FLEET_WORKER_FIRE_BEARER" in out and calls == [])
+
 # ---- article-watch.yml
 aw_doc = load("article-watch.yml")
 aw = step_of(aw_doc, "watch", "Fire the routine")
@@ -232,10 +251,27 @@ for s in plan:
 check("repo-settings plan: read App check env is the client id variable",
       ra.get("env") == {"READ_APP_CLIENT_ID": "${{ vars.REPO_SETTINGS_READ_APP_CLIENT_ID }}"})
 rc, out, calls, gh_out = run_step(ra, {"READ_APP_CLIENT_ID": ""})
-check("repo-settings plan, read App unset: exits 0, ready=false, a not-set-up notice naming the variable",
+check("repo-settings plan, read App unset on schedule: exits 0, ready=false, a not-set-up notice naming the variable",
       rc == 0 and gh_out.strip() == "ready=false" and "REPO_SETTINGS_READ_APP_CLIENT_ID" in out and "not set up yet" in out)
+for ev in ("push", "workflow_dispatch"):
+    rc, out, calls, gh_out = run_step(ra, {"READ_APP_CLIENT_ID": ""}, event_name=ev)
+    check(f"repo-settings plan, read App unset on {ev}: ready=true, so the mint fails as in the source",
+          rc == 0 and gh_out.strip() == "ready=true" and "not set up yet" not in out)
 rc, out, calls, gh_out = run_step(ra, {"READ_APP_CLIENT_ID": "Iv1.placeholder"})
 check("repo-settings plan, read App set: ready=true", rc == 0 and gh_out.strip() == "ready=true")
+
+# drift-report.yml and dependabot-config-health.yml name a missing App
+# installation (step 7 may be the adopter's answer) and how to undo the mark.
+for wf, job, level in (("drift-report.yml", "report", "::warning::"), ("dependabot-config-health.yml", "sweep", "::error::")):
+    st = step_of(load(wf), job, "Name a missing App installation")
+    base_env = {"GH_TOKEN_EXAMPLE_ADOPTER": "", "GH_TOKEN_EXAMPLE_ADOPTER_TWO": "", "SYNC_OWNERS": "example-adopter"}
+    check(f"{wf}: the installation step's env keys are the ones this test supplies", set(st["env"]) == set(base_env))
+    rc, out, calls, _ = run_step(st, base_env)
+    check(f"{wf}: a missing token names the App, the settings page and status.sh --unmark 7",
+          rc == 0 and level + "No installation token for example-adopter" in out
+          and "https://github.com/settings/installations" in out and "status.sh --unmark 7" in out and calls == [])
+    rc, out, calls, _ = run_step(st, {**base_env, "GH_TOKEN_EXAMPLE_ADOPTER": "token-canary"})
+    check(f"{wf}: with a token it says nothing and never prints it", rc == 0 and out.strip() == "")
 
 print(f"{passed} assertions passed, {failed} failed")
 sys.exit(1 if failed else 0)

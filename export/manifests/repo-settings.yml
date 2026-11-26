@@ -8,7 +8,7 @@
 repo: repo-settings
 kit_name: repo-settings
 source: repo-settings
-source_sha: 4eeed17191dd6093d78dc42608d2014b0b4bdf85
+source_sha: b63c70a5e0e92527176074273bb02f2eb5e9d66a
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror)
 # are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -64,27 +64,42 @@ edits:
               id: token_example_adopter
               uses: actions/create-github-app-token@v3.3.0
     new: |2
-            # Not set up yet: until create-apps.sh has made the settings-read App
-            # and set its client id, there is nothing to plan with. A notice says
-            # so and the plan reports no drift, so no apply runs; once the
-            # variable is set, a missing key or installation fails the mint.
+            # Not set up yet, on the weekly schedule only: until create-apps.sh
+            # has made the settings-read App and set its client id, a scheduled
+            # plan has nothing to plan with, so a notice says so and it reports
+            # no drift. A push or a dispatch still mints, and fails at the mint
+            # without the App: a settings change must never read as "nothing to
+            # apply".
             - name: Is the read App set up yet?
               id: read_app
               env:
                 READ_APP_CLIENT_ID: ${{ vars.REPO_SETTINGS_READ_APP_CLIENT_ID }}
               run: |
-                if [[ -n "$READ_APP_CLIENT_ID" ]]; then
-                  echo "ready=true" >> "$GITHUB_OUTPUT"
-                else
-                  echo "::notice::not set up yet: variable REPO_SETTINGS_READ_APP_CLIENT_ID is not set, so nothing was planned. bootstrap/create-apps.sh sets it when it creates the settings-read App."
+                if [[ -z "$READ_APP_CLIENT_ID" && "$GITHUB_EVENT_NAME" == schedule ]]; then
+                  echo "::notice::not set up yet: variable REPO_SETTINGS_READ_APP_CLIENT_ID is not set, so the weekly plan planned nothing. bootstrap/create-apps.sh sets it when it creates the settings-read App (quick start step 6)."
                   echo "ready=false" >> "$GITHUB_OUTPUT"
+                else
+                  echo "ready=true" >> "$GITHUB_OUTPUT"
                 fi
 
             - name: Mint read-only GitHub App token for example-adopter
               id: token_example_adopter
               if: steps.read_app.outputs.ready == 'true'
               uses: actions/create-github-app-token@v3.3.0
-    why: 'kit departure: base-only track. The plan minted from the settings-read App with no gate, so it was red from the starter merge (step 4) until create-apps.sh set the App up, and every Monday in between. Unlike the source, an unset client id now reads as not set up (a notice, no drift), not as a failure; a set one still fails on a bad key.'
+    why: 'kit departure: base-only track. The weekly plan minted from the settings-read App with no gate, so it was red every Monday from the starter merge (step 4) until create-apps.sh set the App up. Only the schedule skips with a notice; a push or dispatch keeps the source''s failure at the mint, so a deleted variable cannot make a settings change read as no drift.'
+  - path: .github/workflows/repo-settings.yml
+    stage: output
+    old: |2
+        # Not gated on the read App's variable, on purpose: a plan that skipped
+        # would read as "nothing to apply" on push. A missing App fails the mint and
+        # turns the plan red instead.
+    new: |2
+        # Not gated on the read App's variable on push or dispatch, on purpose: a
+        # plan that skipped would read as "nothing to apply". A missing App fails
+        # the mint and turns the plan red instead. The kit's one exception is the
+        # weekly schedule before the App exists (step "Is the read App set up
+        # yet?" below): it skips with a notice, since nothing could be applied.
+    why: 'kit departure: base-only track. The comment follows the schedule-only gate below.'
   - path: .github/workflows/repo-settings.yml
     stage: output
     old: |2
@@ -148,6 +163,54 @@ edits:
       name each path copy-starter.sh skips (__pycache__/, *.pyc,
       .pytest_cache/, node_modules/, .DS_Store); the lines already present
       are not repeated.
+
+  # ---- Re-pin round 23: the privacy denylist fan-out is opt-in in the kit
+  - path: README.md
+    old: |2
+         creates and edits labels), **Secrets: Read & write** (the `secrets` surface
+         stores the fanned-out `PRIVACY_DENYLIST`; see "Secrets fan-out" below),
+         **Metadata: Read-only**. No webhook. The
+    new: |2
+         creates and edits labels), **Metadata: Read-only**, and **Secrets: Read &
+         write** only if you declare a `secrets` fan-out ("Secrets fan-out" below).
+         No webhook. The
+    why: >-
+      Re-pin round 23. The kit's fleet.yml declares no `secrets` fan-out and
+      bootstrap/create-apps.sh grants the settings Apps no Secrets
+      permission, so the README asks for it only when an adopter declares one.
+  - path: README.md
+    old: |2
+         Administration: Read, Actions: Read, Issues: Read, Secrets: Read and
+         Metadata: Read,
+    new: |2
+         Administration: Read, Actions: Read, Issues: Read and Metadata: Read
+         (and Secrets: Read if you declare a `secrets` fan-out),
+    why: Re-pin round 23. The read-only App's permissions, as the kit's bootstrap creates it.
+  - path: README.md
+    old: |
+      The `secrets` surface copies the fleet's privacy denylist into every repo as
+      the Actions secret `PRIVACY_DENYLIST`, because a personal account has no
+      organization secrets
+    new: |
+      The `secrets` surface can copy a privacy denylist into every repo as the
+      Actions secret `PRIVACY_DENYLIST`, because a personal account has no
+      organization secrets. The adoption kit's `fleet.yml` declares no fan-out,
+      and its plan jobs do not ask for Secrets: Read, because only your skills
+      registry reads that secret and the kit's bootstrap stores it there. To fan
+      it out, add `secrets: [{name: PRIVACY_DENYLIST}]` under `defaults` in
+      `fleet.yml`; in `.github/workflows/repo-settings.yml`, add
+      `permission-secrets: read` to the three read-only token steps, the
+      `PRIVACY_DENYLIST` secret to the two apply steps' `env`, and the
+      `PRIVACY_DENYLIST_UPDATED_AT` variable to the workflow's `env`; then
+      follow these steps
+    why: >-
+      Re-pin round 23. The source fans its denylist out to every repo; in the
+      kit only the skills registry reads it, so the fan-out ships off and this
+      says how to turn it on.
+  - path: README.md
+    old: "   python3 scripts/set_privacy_denylist.py --file ~/.config/privacy-denylist.txt\n"
+    new: "   python3 scripts/set_privacy_denylist.py --repo <owner>/repo-settings --file ~/.config/privacy-denylist.txt\n"
+    why: Re-pin round 23. The kit's setter has no default repo (the source's names its owner's), so --repo is required.
 
 patches:
   - file: kit_config.py

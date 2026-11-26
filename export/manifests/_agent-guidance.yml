@@ -6,7 +6,7 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: ff0a37a67c037a7c6dee612f8d32d1f7400f8dc5
+source_sha: aca2f1a2d5d779149d0fe3461a4233745685a752
 
 exclude:
   - path: docs/reference/adopt-the-whole-system.md
@@ -37,6 +37,12 @@ imports:
     sha: e0d772c22312cc6585d0b4f70de8bc22d0f18368
     path: scripts/audit-scheduled-runs.js
     why: C4. The reusable's audit step runs this script; the source fetches it from the platform repo, which is not in the kit.
+
+# Re-pin round 23: the privacy tests' invented account name. The kit's leak
+# scan allows only its own placeholder users in a home path (_common.yml), so
+# the fixture takes one of those, the same in every test that uses it.
+substitutions:
+  - {name: privacy fixture user, literal: exampleuser, to: fixtureuser}
 
 edits:
   # ---- C4: the reusable reads its scripts from this repo
@@ -412,6 +418,46 @@ edits:
     old: all nine system entries
     new: all six system entries
     why: The hook writes 6 includeIf entries for the kit's two owners.
+  # ---- TIME_ZONE: the shipped window file carries a neutral zone
+  - path: scripts/base-md-merge-window.yml
+    old: "# Owner's rule (2026-11-13): Monday noon to 2 PM US Eastern.\ntimezone: America/New_York\n"
+    new: |
+      # Your window: Monday noon to 2 PM in your own time zone. bootstrap/copy-starter.sh
+      # writes the timezone line below from TIME_ZONE in your fleet.env when it copies
+      # this file; the weekday and the hours are yours to change here.
+      timezone: UTC
+    why: >-
+      TIME_ZONE. The source ships the owner's zone, which every adopter would
+      inherit unasked. The kit ships the neutral UTC, which both parsers
+      accept, and copy-starter.sh replaces that one line from TIME_ZONE.
+  - path: scripts/base-md-merge-window.yml
+    old: "with the clocks: America/New_York 12:00 is 17:00 UTC in\n#             winter (EST) and 16:00 UTC in summer (EDT)."
+    new: "with the clocks: in a zone that is five hours behind UTC in\n#             winter, 12:00 is 17:00 UTC, and 16:00 UTC in summer."
+    why: TIME_ZONE. The comment's worked example named the owner's zone; the shipped tree names no one's zone.
+  - path: test/test-base-md-merge-window.js
+    old: |
+      const WINDOW = mod.loadWindow();
+    new: |
+      // The shipped file's zone is the adopter's own (TIME_ZONE), so the tests
+      // below pin the Monday noon to 2 PM Eastern bounds their dates assume.
+      const WINDOW = { timezone: "America/New_York", weekday: 1, start: "12:00", end: "14:00" };
+    why: >-
+      TIME_ZONE. These tests' UTC instants assume US Eastern; the shipped file
+      is UTC until copy-starter.sh writes the adopter's zone, so the tests use
+      their own bounds, not the file's.
+  - path: test/test-base-md-merge-window.js
+    old: |
+      test("the shipped bounds are Monday noon to 2 PM US Eastern", () => {
+        assert.deepEqual(WINDOW, { timezone: "America/New_York", weekday: 1, start: "12:00", end: "14:00" });
+    new: |
+      test("the shipped bounds are Monday noon to 2 PM in the configured zone", () => {
+        const shipped = mod.loadWindow();
+        assert.equal(typeof shipped.timezone, "string");
+        assert.deepEqual({ ...shipped, timezone: null }, { timezone: null, weekday: 1, start: "12:00", end: "14:00" });
+    why: >-
+      TIME_ZONE. The file's zone differs per adopter: the test holds the
+      weekday and hours and that a zone is present, not which one.
+
 
   # ---- Base-only track (DECISIONS "Base-only track runs green"): EVALS_REPO and
   # ARTICLE_WATCH_FEED_URL turn the eval-dependent and optional workflows off.
@@ -678,11 +724,11 @@ edits:
           else
               fail "fleet worker fire workflow: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=18, fail=0)
     new: |-
-      "$pass_n" == "20" && "$fail_n" == "0" ]]; then
-              pass "fleet worker fire workflow: 20 passed"
+      "$pass_n" == "21" && "$fail_n" == "0" ]]; then
+              pass "fleet worker fire workflow: 21 passed"
           else
-              fail "fleet worker fire workflow: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=20, fail=0)
-    why: 'kit departure: base-only track; source follow-up proposed. Two tests added.'
+              fail "fleet worker fire workflow: exit $rc, pass=${pass_n:-?}, fail=${fail_n:-?} (need rc=0, pass=21, fail=0)
+    why: 'kit departure: base-only track; source follow-up proposed. Three tests added.'
   - path: test/test-impact-report.js
     stage: output
     old: |2
@@ -809,15 +855,134 @@ edits:
                   --explorer "$d/explorer.json"
     why: 'kit departure: base-only track; source follow-up proposed. Without skills-evals the explorer can never be fetched, so a pull request that touched a guidance section failed closed; with EVALS_REPO none the gate runs with --no-evidence (nothing is protected) and says so, and otherwise reads the explorer from the repository EVALS_REPO names.'
 
+  # ---- Base-only track, review fix: a worker's fire URL before its step.
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |
+      #   Unset or empty fails the Loop worker's fire naming it. The pace hold below
+      #   reads the repository it names. The Fleet worker ignores it.
+    new: |
+      #   Unset or empty fails the Loop worker's fire naming it. The pace hold below
+      #   reads the repository it names. The Fleet worker ignores it.
+      # * A fire URL of `none` means that task is not set up yet: its fire exits 0
+      #   with a notice naming the variable and the kit step that sets it, after
+      #   the cadence check. bootstrap/create-environments.sh writes `none` only
+      #   while the variable is not set at all, and the step that creates the
+      #   routine overwrites it. An empty URL (never set, or deleted) still fails.
+    why: 'kit departure: base-only track. The Fleet worker leg failed on its slot from the _agent-guidance merge (step 10) until step 27 set its URL (its routine needs step 23 first), and the Loop worker leg could fail the same way between an EVALS_REPO flip and step 41.'
+  - path: .github/workflows/fleet-worker-fire.yml
+    stage: output
+    old: |2
+                missing=()
+                [[ -n "$FIRE_URL" ]] || missing+=("variable $URL_VAR")
+    new: |2
+                if [[ "$FIRE_URL" == none ]]; then
+                  if [[ "$WORKER" == fleet ]]; then setup_step=27; else setup_step=41; fi
+                  echo "::notice::not set up yet: variable $URL_VAR is none, so the $WORKER worker was not fired. Step $setup_step of the kit's quick start creates its routine and sets $URL_VAR and $BEARER_VAR."
+                  exit 0
+                fi
+                missing=()
+                [[ -n "$FIRE_URL" ]] || missing+=("variable $URL_VAR")
+    why: 'kit departure: base-only track. An explicit none (written by create-environments.sh until the routine exists) skips the fire with a notice; the source has no such value. Empty still fails naming the variable, so a URL deleted after setup stays red.'
+  - path: test/test-fleet-worker-fire.js
+    stage: output
+    old: test('a failed fire fails the run with the status code only', () => {
+    new: |-
+      test('a fire URL of none is not set up yet for either worker: exit 0, a notice naming the step, nothing fired', () => {
+        for (const [role, extra, name, step] of [['fleet', {}, 'FLEET_WORKER_FIRE_URL', 27],
+          ['loop', { line: '20 6,18 * * *' }, 'LOOP_WORKER_FIRE_URL', 41]]) {
+          for (const bearer of [undefined, '']) {
+            const over = { role, url: 'none', ...extra, ...(bearer === undefined ? {} : { bearer }) };
+            const { result, curl, git } = runFire(over);
+            assert.equal(result.status, 0, JSON.stringify(over) + result.stdout + result.stderr);
+            assert.equal(curl.length, 0);
+            assert.equal(git.length, 0, 'nothing is cloned');
+            assert.ok(result.stdout.includes(`::notice::not set up yet: variable ${name} is none`), result.stdout);
+            assert.ok(result.stdout.includes(`Step ${step} of the kit`), result.stdout);
+          }
+        }
+      });
+
+      test('a failed fire fails the run with the status code only', () => {
+    why: 'kit departure: base-only track. Covers the none branch for both workers; the empty-URL failure stays covered by the source''s own test.'
+
+  # ---- Base-only track, review fix: step 7 is the adopter's answer when gh
+  # cannot read installations, so a missing install must be named where it bites.
+  - path: .github/workflows/drift-report.yml
+    stage: output
+    old: |2
+            - name: Generate drift report
+    new: |2
+            # The kit: quick start step 7 (the App installations) can be marked done
+            # by hand, so a missing installation is named here, with what to do.
+            - name: Name a missing App installation
+              env:
+                GH_TOKEN_EXAMPLE_ADOPTER: ${{ steps.token_example_adopter.outputs.token }}
+                GH_TOKEN_EXAMPLE_ADOPTER_TWO: ${{ steps.token_example_adopter_two.outputs.token }}
+                SYNC_OWNERS: "example-adopter example-adopter-two"
+              run: |
+                for owner in $SYNC_OWNERS; do
+                  key="GH_TOKEN_$(tr 'a-z-' 'A-Z_' <<<"$owner")"
+                  if [[ -z "${!key:-}" ]]; then
+                    echo "::warning::No installation token for $owner, so this report reads only its public repos: is the guidance-sync App installed there? Check https://github.com/settings/installations. If the kit's quick start step 7 was marked done by hand, run bash bootstrap/status.sh --unmark 7 and install it."
+                  fi
+                done
+
+            - name: Generate drift report
+    why: 'kit departure: base-only track. Step 7 can now be marked by hand (gh''s sign-in cannot read installations), so the runs that mint from the App name a missing installation and how to undo the mark.'
+  - path: .github/workflows/dependabot-config-health.yml
+    stage: output
+    old: |2
+            # NO plain GH_TOKEN / github.token fallback: the default token cannot
+    new: |2
+            # The kit: quick start step 7 (the App installations) can be marked done
+            # by hand, so a missing installation is named here, with what to do.
+            - name: Name a missing App installation
+              env:
+                GH_TOKEN_EXAMPLE_ADOPTER: ${{ steps.token_example_adopter.outputs.token }}
+                GH_TOKEN_EXAMPLE_ADOPTER_TWO: ${{ steps.token_example_adopter_two.outputs.token }}
+                SYNC_OWNERS: "example-adopter example-adopter-two"
+              run: |
+                for owner in $SYNC_OWNERS; do
+                  key="GH_TOKEN_$(tr 'a-z-' 'A-Z_' <<<"$owner")"
+                  if [[ -z "${!key:-}" ]]; then
+                    echo "::error::No installation token for $owner: is the guidance-sync App installed there? Check https://github.com/settings/installations. If the kit's quick start step 7 was marked done by hand, run bash bootstrap/status.sh --unmark 7 and install it."
+                  fi
+                done
+
+            # NO plain GH_TOKEN / github.token fallback: the default token cannot
+    why: 'kit departure: base-only track. Step 7 can now be marked by hand, so a missing installation is named with how to undo the mark; the sweep still fails on its own (--require-owner-tokens).'
+
+
 # DECISIONS X9: the content starts with one real item of each kind and a
 # template (see the patch's docstring).
+  - path: test/test-base-md-merge-window.js
+    old: |
+      function run(args) {
+        const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+    new: |
+      // The CLI tests run against the New York bounds, not the shipped file's zone.
+      const NY_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "bmw-ny-"));
+      const NY_FILE = path.join(NY_DIR, "window.yml");
+      fs.writeFileSync(NY_FILE, 'timezone: America/New_York\nweekday: 1\nstart: "12:00"\nend: "14:00"\n');
+      process.on("exit", () => fs.rmSync(NY_DIR, { recursive: true, force: true }));
+
+      function run(args) {
+        const argv = args.includes("--window") ? args : [...args, "--window", NY_FILE];
+        const r = spawnSync(process.execPath, [SCRIPT, ...argv], { encoding: "utf8" });
+    why: >-
+      TIME_ZONE. The CLI tests' instants assume US Eastern and ran against the
+      shipped file; they now pass their own bounds file unless a test names one.
+
 
 patches:
   - file: kit_only.py
     why: >-
       C11 and "Kit-only blocks" (DECISIONS). The source's fleet-worker spec may carry a kit-only block (the
       owner's worker may merge the kit's re-sync pull requests) and repos.yml
-      a `kit_resync` key; an adopter's fleet has no kit, so both are cut. It
+      a `kit_resync` key; an adopter's fleet has no kit, so both are cut, with
+      the rule's ADR (0051), its index row, the sentence in 0041 that points at
+      it, and the sweep test that asserts them (the expected count follows). It
       landed before the source change and is tolerant of its absence.
   - file: blank_content.py
     why: >-
@@ -890,7 +1055,6 @@ regenerate:
       test_codex_cloud_recipe holds it to the working-tree hook; the kit's hook
       differs from the source's (C2 folds the first owner), so the pin follows
       the kit's copy. The pinned commit is the source's: REGENERATE.md.
-
 # P2 citation spans that are really test data: protecting them would leave
 # the fixture on the source owner while the assertion beside it is
 # substituted. Both files get the plain substitution instead.

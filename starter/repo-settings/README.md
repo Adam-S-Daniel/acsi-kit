@@ -101,7 +101,9 @@ configured, the workflow **skips itself** (guarded on
 1. **Create a GitHub App** (github.com → Settings → Developer settings → GitHub
    Apps → New). Repository permissions: **Administration: Read & write**,
    **Actions: Read & write**, **Issues: Read & write** (the `labels` surface
-   creates and edits labels), **Metadata: Read-only**. No webhook. The
+   creates and edits labels), **Metadata: Read-only**, and **Secrets: Read &
+   write** only if you declare a `secrets` fan-out ("Secrets fan-out" below).
+   No webhook. The
    example-adopter-two installation's permissions were read directly; the
    example-adopter one is inferred from the
    [2026-10-23 apply run](https://github.com/Adam-S-Daniel/repo-settings/actions/runs/39945750183)'s
@@ -165,7 +167,8 @@ configured, the workflow **skips itself** (guarded on
 6. **A read-only App for the plan and the pull-request drift preview**
    (`repo-settings-drift-read`). The `plan` job and the pull-request `drift`
    job never get the admin key; they mint from a second App with only
-   Administration: Read, Actions: Read, Issues: Read and Metadata: Read,
+   Administration: Read, Actions: Read, Issues: Read and Metadata: Read
+   (and Secrets: Read if you declare a `secrets` fan-out),
    installed on all repos in **both** accounts (each owner's mint fails until
    it is installed there). In this repo, set variable
    `REPO_SETTINGS_READ_APP_CLIENT_ID` and secret
@@ -173,6 +176,42 @@ configured, the workflow **skips itself** (guarded on
    exists, `drift` is skipped, and `plan` fails, which withholds the apply
    except on the weekly schedule, where a failed plan still asks for it. Reads that need write come back as skips,
    never drift.
+
+### Secrets fan-out
+
+The `secrets` surface can copy a privacy denylist into every repo as the
+Actions secret `PRIVACY_DENYLIST`, because a personal account has no
+organization secrets. The adoption kit's `fleet.yml` declares no fan-out,
+and its plan jobs do not ask for Secrets: Read, because only your skills
+registry reads that secret and the kit's bootstrap stores it there. To fan
+it out, add `secrets: [{name: PRIVACY_DENYLIST}]` under `defaults` in
+`fleet.yml`; in `.github/workflows/repo-settings.yml`, add
+`permission-secrets: read` to the three read-only token steps, the
+`PRIVACY_DENYLIST` secret to the two apply steps' `env`, and the
+`PRIVACY_DENYLIST_UPDATED_AT` variable to the workflow's `env`; then
+follow these steps
+([ADR 0020](docs/decisions/0020-fan-the-privacy-denylist-out-as-a-secrets-surface.md),
+[#231](https://github.com/Adam-S-Daniel/repo-settings/issues/231)).
+
+1. **Grant the permission (owner action).** Add **Secrets: Read & write** to
+   the admin App and **Secrets: Read** to the read-only App, and accept the
+   new permission on both installations. Until then each repo's
+   `fanout[PRIVACY_DENYLIST]` record is an `error` naming the HTTP failure.
+2. **Store the source** from the owner's machine, with `gh` signed in as an
+   admin of this repo and the denylist outside every git work tree:
+
+   ```bash
+   python3 scripts/set_privacy_denylist.py --repo <owner>/repo-settings --file ~/.config/privacy-denylist.txt
+   ```
+
+   It writes `PRIVACY_DENYLIST` to the `fleet-apply` and `fleet-apply-auto`
+   environments and the repo variable `PRIVACY_DENYLIST_UPDATED_AT`. It prints
+   environment names and a timestamp, never a pattern. Run it again after
+   every change to the file.
+3. The next run reports a repo as drifted when its secret is missing or
+   older than that timestamp, and `apply-auto` rewrites it. Only the two
+   apply steps receive the value. The example-site-platform-managed repos
+   (`manage: ["labels"]`) are not covered.
 
 After that, every push to `main` (config/script changes), weekly schedule and
 manual dispatch first runs the `plan` job, with no approval: `diff` per owner

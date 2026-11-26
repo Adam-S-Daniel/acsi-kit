@@ -60,7 +60,8 @@ def _cases(root: Path, lib) -> None:
 # The run log and the id tests list the checks the kit ships. The pre-push
 # test refused a push to the default branch, a check the kit does not ship;
 # it now pushes a feature branch whose commit the core secret-file check
-# refuses, which still shows the pre-push event in the log.
+# refuses, which still shows the pre-push event in the log (with the core
+# privacy check, re-pin round 23, which every pushed ref runs).
 LANE_EDITS = [
     ('''        self.assertEqual(entry["checks"], expected_checks(["rules-dir", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], [])''',
@@ -78,7 +79,7 @@ LANE_EDITS = [
         [entry] = self.entries()
         self.assertEqual(entry["event"], "pre-push")
         self.assertEqual(entry["checks"], expected_checks(
-            ["staged-index", "push-to-default", "persistent-delete", "bump-branch-push", "rules-dir", "secret-file", "skill-shell"], declared_lessons()))
+            ["staged-index", "push-to-default", "persistent-delete", "bump-branch-push", "privacy", "rules-dir", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], ["push-to-default"])''',
      '''    def test_refused_pre_push_is_logged_as_pre_push(self):
         self.commit(self.repo, {".env": "A=1\\n"})
@@ -89,7 +90,7 @@ LANE_EDITS = [
         self.assertIn("agent-checks: .env: looks like a secret", out.stderr)
         [entry] = self.entries()
         self.assertEqual(entry["event"], "pre-push")
-        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell"], declared_lessons()))
+        self.assertEqual(entry["checks"], expected_checks(["privacy", "secret-file", "skill-shell"], declared_lessons()))
         self.assertEqual(entry["failed"], ["secret-file"])'''),
     ('''        self.assertEqual(entry["checks"], expected_checks(["rules-dir", "secret-file", "skill-shell", "repo-local"], declared_lessons()))''',
      '''        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell", "repo-local"], declared_lessons()))'''),
@@ -100,8 +101,8 @@ LANE_EDITS = [
         self.assertGreaterEqual(len(calls), 5)'''),
     ('''        self.assertLessEqual({"rules-dir", "secret-file", "skill-shell", "staged-index", "push-to-default", "persistent-delete",
                               "bump-branch-push",
-                              "repo-local", "pr-tldr", "local-identity"}, ids)''',
-     '''        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)'''),
+                              "repo-local", "pr-tldr", "local-identity", "privacy"}, ids)''',
+     '''        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity", "privacy"}, ids)'''),
 ]
 
 # What the rules-dir library item puts back in the same file.
@@ -116,8 +117,8 @@ LANE_RULES_DIR_OPS = [
      "old": '        self.assertEqual(entry["checks"], expected_checks(["secret-file", "skill-shell", "repo-local"], declared_lessons()))\n',
      "new": '        self.assertEqual(entry["checks"], expected_checks(["rules-dir", "secret-file", "skill-shell", "repo-local"], declared_lessons()))\n'},
     {"op": "replace", "file": "test/test_agent_check_lane.py",
-     "old": '        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)\n',
-     "new": '        self.assertLessEqual({"rules-dir", "secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity"}, ids)\n'},
+     "old": '        self.assertLessEqual({"secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity", "privacy"}, ids)\n',
+     "new": '        self.assertLessEqual({"rules-dir", "secret-file", "skill-shell", "repo-local", "pr-tldr", "local-identity", "privacy"}, ids)\n'},
 ]
 
 

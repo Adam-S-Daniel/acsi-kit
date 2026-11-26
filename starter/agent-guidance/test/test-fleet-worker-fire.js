@@ -166,6 +166,21 @@ test('an unconfigured URL or bearer fails naming it, and fires nothing', () => {
   }
 });
 
+test('a fire URL of none is not set up yet for either worker: exit 0, a notice naming the step, nothing fired', () => {
+  for (const [role, extra, name, step] of [['fleet', {}, 'FLEET_WORKER_FIRE_URL', 27],
+    ['loop', { line: '20 6,18 * * *' }, 'LOOP_WORKER_FIRE_URL', 41]]) {
+    for (const bearer of [undefined, '']) {
+      const over = { role, url: 'none', ...extra, ...(bearer === undefined ? {} : { bearer }) };
+      const { result, curl, git } = runFire(over);
+      assert.equal(result.status, 0, JSON.stringify(over) + result.stdout + result.stderr);
+      assert.equal(curl.length, 0);
+      assert.equal(git.length, 0, 'nothing is cloned');
+      assert.ok(result.stdout.includes(`::notice::not set up yet: variable ${name} is none`), result.stdout);
+      assert.ok(result.stdout.includes(`Step ${step} of the kit`), result.stdout);
+    }
+  }
+});
+
 test('a failed fire fails the run with the status code only', () => {
   const { result } = runFire({ status: 401 });
   assert.equal(result.status, 1);
