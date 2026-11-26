@@ -29,8 +29,9 @@ readonly bootstrap_sha256='00000000000000000000000000000000000000000000000000000
 #   git rev-parse origin/main
 #   git show origin/main:.claude/hooks/fleet-memory.sh | sha256sum
 # These placeholders fail closed: the download 404s or the digest mismatches,
-# and setup fails. Set both from your _agent-guidance main (commands above) before the
-# first sync.
+# and setup fails. Before the first sync, set both from your _agent-guidance
+# main: the adoption kit's bootstrap/regenerate.sh codex-pin does it, with the
+# commands above.
 readonly fleet_pin_commit='1111111111111111111111111111111111111111'
 readonly fleet_pin_sha256='1111111111111111111111111111111111111111111111111111111111111111'
 
