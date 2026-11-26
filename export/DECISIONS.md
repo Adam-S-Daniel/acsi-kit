@@ -2959,6 +2959,7 @@ Both rules now spell the name one letter class at a time (`[Xx][Yy]...`), so the
 The source still uses the name in those identifiers at the `skills-evals` pin; renaming them there is a separate `skills-evals` pull request, and until the kit's pin moves past it, this rule is what keeps the shipped copy clean.
 
 Reverse: restore the word-bounded regex rule and the case-sensitive `leak_scan` entry, remove the `regex` + `forms` branch from `compile_rules`, delete the new test file and the two `test_no_leaks.py` tests, and re-run the export.
+
 ## The adopter's own time zone (2026-11-25)
 
 `_agent-guidance`'s `scripts/base-md-merge-window.yml` shipped the owner's `timezone: America/New_York` and a comment calling it the "Owner's rule", so every adopter silently inherited a Monday noon to 2 PM Eastern window. Both parsers (`base-md-merge-window.js`, and skills-evals' `guidance_merge_window.py`, which fetches the same file) already fail on a missing or invalid zone, so only the silent default was wrong.
