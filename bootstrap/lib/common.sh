@@ -548,6 +548,9 @@ REGEN_TASKS=(skills-locks hook-pin run-health-sha codex-pin actions-lock evals-f
 # Format: repo|environment (- = repository level)|kind (secret|variable)|name|source
 OTHER_VALUES=(
   "acsi-agentskills|-|secret|PRIVACY_DENYLIST|file"
+  "_agent-guidance|-|secret|PRIVACY_DENYLIST|file"
+  "repo-settings|-|secret|PRIVACY_DENYLIST|file"
+  "wsl-automation|-|secret|PRIVACY_DENYLIST|file"
   "skills-evals|routine-fire|secret|EVAL_ROUTINE_FIRE_BEARER|prompt"
   "skills-evals|routine-fire|variable|ROUTINE_TRIGGER_ID|prompt"
 )

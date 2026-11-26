@@ -41,8 +41,8 @@
 #
 # Before it writes anything it checks, and reports all at once with the command
 # that fixes each (exit 1, nothing written), what a run needs: flock and
-# timeout (or gtimeout), found the way run-task.sh finds them; for the waiting
-# feed, a date that reads `-d @0`; for systemd, a reachable user bus. The
+# timeout (or gtimeout), found the way run-task.sh finds them; for systemd, a
+# reachable user bus. The
 # waiting feed reads ~/.claude/.credentials.json, which Claude Code on macOS
 # keeps in the Keychain instead, so on macOS the waiting-feed job is skipped
 # (the other jobs install). launchd's login-session check cannot run first:
@@ -146,24 +146,14 @@ if [[ $os == Darwin ]]; then
     fi
 fi
 
-# job -> needs a date that reads "-d @epoch" (GNU date).
-job_needs_gnu_date() {
-    case $1 in
-        waiting-feed) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
 # Collect every missing piece, then refuse once, before anything is written.
 missing=()
 if [[ $os == Darwin ]]; then
     flock_hint='brew install flock coreutils'
     timeout_hint='brew install coreutils'
-    date_hint='brew install coreutils'
 else
     flock_hint='install the util-linux package (for example: sudo apt install util-linux)'
     timeout_hint='install the coreutils package (for example: sudo apt install coreutils)'
-    date_hint='install the coreutils package (for example: sudo apt install coreutils)'
 fi
 if [[ -z $(unix_find_flock) ]]; then
     missing+=("flock is missing; run-task.sh refuses to start a job without it: $flock_hint")
@@ -171,12 +161,6 @@ fi
 if [[ -z $(unix_find_timeout) ]]; then
     missing+=("timeout (or gtimeout) is missing; run-task.sh refuses to start a job without it: $timeout_hint")
 fi
-for job in "${job_list[@]}"; do
-    if job_needs_gnu_date "$job" && ! unix_date_reads_epoch; then
-        missing+=("$job needs a date that accepts -d @0 (GNU date), and this one does not: $date_hint")
-        break
-    fi
-done
 if [[ $target == systemd ]] && ! "${INSTALL_SCHEDULE_SYSTEMCTL:-systemctl}" --user show-environment >/dev/null 2>&1; then
     # shellcheck disable=SC2016 # the commands are printed for the reader to run
     missing+=('no systemd user bus (systemctl --user show-environment fails). On WSL, add to /etc/wsl.conf: [boot] then systemd=true, run wsl.exe --shutdown from Windows, and reopen the distro; in a container or without systemd, use the cron mode: bash scripts/unix/install-schedule.sh cron')
