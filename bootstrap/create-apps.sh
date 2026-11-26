@@ -242,5 +242,5 @@ for entry in "${APPS[@]}"; do
   fi
   create_one "$app" "$perms" "$installed" "$r" "$idspec" "$env" "$sec" "$key"
 done
-log "Then run create-environments.sh again: it copies GUIDANCE_SYNC_APP_ID (and, once the roster App exists, ROSTER_WRITER_APP_ID) into repo-settings' variables."
+log "Then run create-environments.sh again when the quick start says so (step 8 on the base; on the evals track step 37, after step 41 has set the Loop worker's fire URL, since that run flips EVALS_REPO): it copies GUIDANCE_SYNC_APP_ID (and, once the roster App exists, ROSTER_WRITER_APP_ID) into repo-settings' variables."
 finish

@@ -87,7 +87,12 @@ is in `docs/quick-start.md`.
    `bash bootstrap/status.sh --track base` again (and
    `bash bootstrap/verify.sh --only <groups>` for the detail) until it
    reads done. The browser steps that create or install the Apps (6, 7)
-   are `verify` steps.
+   are `verify` steps. One exception, like an `ask` step: gh's own sign-in
+   cannot read App installations (GitHub answers HTTP 403), so when
+   verify.sh says step 7 must be checked by hand, have the user open
+   https://github.com/settings/installations, confirm each App it names has
+   access to the repos it names, and then run
+   `bash bootstrap/status.sh --mark 7`.
 4. When a script fails, read the error, find the cause in the script or the
    docs, and help fix it. Then run the step again, dry run first.
 5. At the end of each sitting, name the next step and its time estimate, so
@@ -110,6 +115,20 @@ is in `docs/quick-start.md`.
 - **Steps 14 to 18** (`regenerate.sh`) need the starter pull requests
   merged first; `regenerate.sh --check <task>` says what is still to do.
   `skills-locks` runs twice: once for the registry, then for the rest.
+- **Step 27** (the Fleet worker): one task only, the maintenance role, with
+  `FLEET_WORKER_FIRE_URL` and `FLEET_WORKER_FIRE_BEARER`. Do not create the Loop
+  worker or set `LOOP_WORKER_*`: it serves the eval loop, and the evals track
+  (`/adopt-evals`, step 41) creates it. `create-environments.sh` has set
+  `EVALS_REPO` to `none`, so the workflow skips the Loop worker's fire and
+  stays green. The step's check is `verify` (`verify.sh --only
+  fleet-worker`): done once both values are set on `_agent-guidance`.
+- **Expected red runs** are listed once, in `docs/settings-and-apps.md`
+  ("Merging the starter pull requests"): the push `plan` from merging
+  `repo-settings`' starter (step 4) until step 6, `skills-lock-bump.yml`
+  from step 10 until step 12, and on a base-only setup the daily
+  `dependabot-config-health.yml` until a kit update. Everything else that
+  waits for a later step skips with a "not set up yet" notice; any other
+  failure email is real: read the run with the user.
 - **Step 30** (memory curation): for the machine task, ask which system
   holds that machine's Claude Code sessions. On macOS, or on Windows with
   Claude Code running natively, offer a Claude desktop app scheduled task
@@ -123,14 +142,17 @@ is in `docs/quick-start.md`.
   `fleet.yml` that doesn't declare it yet. Every check runs on the base
   track (`status.sh --track base` passes it to `verify.sh`), so none asks
   for that repo. Don't create it here, even if a script mentions it, because
-  `/adopt-evals` does that. Leave out step 22's usage census, which only
-  evals read: on Linux or macOS, pass `--jobs session-miner`.
+  `/adopt-evals` does that.
 - **Step 22** (machine jobs): before registering anything, have the user
   copy `config/settings.env.example` to
   `~/.config/wsl-automation/settings.env` in the distro (or on Linux or
   macOS) and check each repository in it. No job has a built-in repository:
-  one whose key is missing exits 2 naming it. The session miner's
-  `LESSONS_CLONE` is in the same file (docs/machine.md).
+  one whose key is missing exits 2 naming it. Leave `SKILLS_EVALS_URL=none`
+  as it ships: the session miner and the usage census run code from
+  `skills-evals`, so they skip and exit 0 (the evals track's step 42 turns
+  them on). On Windows, register the tasks. On Linux or macOS there is
+  nothing to schedule for the base: tell the user so and mark the step done,
+  unless they use the optional waiting feed (`--jobs waiting-feed`).
 
 ## The content step
 

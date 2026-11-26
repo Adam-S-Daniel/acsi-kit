@@ -272,4 +272,14 @@ assert_match "$out" 'GitHub CLI \(gh\) is not installed; install it from https:/
 pass
 assert_match "$(tail -n 1 "$log_file")" ' exit=1 usage census: the GitHub CLI' 'a missing gh is logged'
 
+# --- SKILLS_EVALS_URL=none turns the census off (the kit's base track) ------
+rc=0
+before=$(wc -l <"$log_file" | tr -d ' ')
+out=$(SKILLS_EVALS_URL=none bash "$script" 2>&1) || rc=$?
+assert_eq "$rc" 0 'SKILLS_EVALS_URL=none exits 0'
+assert_eq "$out" 'usage census: skipped: SKILLS_EVALS_URL is none, so there is no skills-evals to publish to' 'SKILLS_EVALS_URL=none says it skipped'
+assert_eq "$(wc -l <"$log_file" | tr -d ' ')" "$((before + 1))" 'SKILLS_EVALS_URL=none logs one line'
+assert_match "$(tail -n 1 "$log_file")" ' exit=0 usage census: skipped: SKILLS_EVALS_URL is none' 'the skip is logged with exit 0'
+assert_match "$(grep '^SKILLS_EVALS_URL=' "$repository_root/config/settings.env.example")" '^SKILLS_EVALS_URL=none$' 'the settings example starts with the census and miner off'
+
 printf 'PASS: %s assertions\n' "$passed"
