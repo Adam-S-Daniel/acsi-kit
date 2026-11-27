@@ -581,6 +581,9 @@ jobs:
           owner: ${{ matrix.owner }}
           repositories: ${{ steps.cms_label_repos.outputs.repos }}
           permission-issues: write
+          # The secrets fan-out (ADR 0020 addendum, #241): these repos take
+          # PRIVACY_DENYLIST, and a secret write needs `secrets: write`.
+          permission-secrets: write
 
       - name: Apply labels to the example-site-platform repos
         id: apply_labels
@@ -813,8 +816,9 @@ jobs:
         run: python scripts/repo_settings.py apply --config repo-settings/fleet.yml --owner "$OWNER" --cms-label-only skip
 
       # Least privilege for the example-site-platform-managed repos (docs/decisions/0016).
-      # They are labels-only, so their writes run under a token minted with
-      # only `issues: write`, narrowed to those repos: an engine bug cannot
+      # They take only labels and the secrets fan-out (ADR 0020 addendum), so
+      # their writes run under a token minted with only `issues: write` and
+      # `secrets: write`, narrowed to those repos: an engine bug cannot
       # make an Administration write there. The App key itself can mint
       # anything, so this narrows the engine's reach, not the job's.
       #
@@ -832,7 +836,7 @@ jobs:
           repos=$(python scripts/repo_settings.py cms-label-repos --config repo-settings/fleet.yml --owner "$OWNER")
           echo "repos=$repos" >> "$GITHUB_OUTPUT"
 
-      # Only `permission-issues: write` (see the least-privilege note above).
+      # Only `issues: write` and `secrets: write` (see the least-privilege note above).
       - name: Mint labels-only GitHub App token for ${{ matrix.owner }}
         id: token_labels
         if: ${{ !cancelled() && steps.environment_gate.outcome == 'success' && steps.cms_label_repos.outputs.repos != '' }}
@@ -843,6 +847,9 @@ jobs:
           owner: ${{ matrix.owner }}
           repositories: ${{ steps.cms_label_repos.outputs.repos }}
           permission-issues: write
+          # The secrets fan-out (ADR 0020 addendum, #241): these repos take
+          # PRIVACY_DENYLIST, and a secret write needs `secrets: write`.
+          permission-secrets: write
 
       - name: Apply labels to the example-site-platform repos
         if: ${{ !cancelled() && steps.environment_gate.outcome == 'success' && steps.cms_label_repos.outputs.repos != '' }}
