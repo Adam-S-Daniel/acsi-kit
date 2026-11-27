@@ -3398,3 +3398,13 @@ The real walk on GitHub Free (PR #139) left four kit behaviors documented as exp
 - `export/tests/test_vendor_notes.py` covers the patch and holds the committed starter to empty notes and a README-only drafts folder.
 
 Reverse: delete the patch, its manifest entry and its test file, and re-run the export.
+
+### First starter pull requests pass the diff gates
+
+The gates that judge a pull request by comparing it with its base branch were red on the kit's own starter and regenerate pull requests, where the base holds only the README `create-repos.sh` wrote or settings not applied yet. Each now passes in that case, with a line saying why, and judges every later pull request as the source does. None of the three has a path filter added; the two in required checks (`checks`/`test` and `pytest`) still run and report success.
+
+- **`_agent-guidance`'s touch gate** (`scripts/check-guidance-touch.js`, in `checks`): `export/patches/_agent-guidance/first_starter_pr.py` makes it exit 0 when neither the merge-base nor the base tip has `agents-md/eval-coverage.yml` and the merge-base has no `agents-md/base.md`. A base with either file goes through the source's logic, B1's pre-manifest fallback included. A case in `test/run-tests.sh` (GROUP_self_hosted) covers the first copy and an edit on top of it, which still fails.
+- **The registry's skill gates** (`scripts/check_skill_gates.py`, in `pytest`): `export/patches/agentskills/first_starter_pr.py` makes `run()` return 0 when the merge-base has no SKILL.md or PURPOSE.md under `plugins/` and no `docs/skill-impact.md`. Three tests in `scripts/test_check_skill_gates.py`: the first copy passes, an edit after it fails, a base with only the impact file is judged.
+- **`repo-settings`' `drift` job** (advisory, not required): before step 20 applies `fleet.yml`, every repo differs from it, so every `repo-settings` pull request was red (sha pinning, vulnerability alerts, security fixes, the `agent-authored` label on the walk). An `edits` entry in `export/manifests/repo-settings.yml` makes the "Drift report" step also plan the base branch's `fleet.yml` (fetched by `BASE_SHA` from `env`) and run `scripts/drift_this_pr.py` (overlay), which fails only on drift the base's plan would not make; an advisory never fails, as in `diff`. A base with no `fleet.yml` passes with a notice. A base that cannot be fetched or planned fails on every drift, as before. The job's summary step still shows every change. `tests/test_drift_this_pr.py` (overlay) runs the script and the step's own script from the parsed workflow with `diff` stubbed and a real base commit.
+
+Reverse: delete the two patches and their manifest entries, the `edits` entry and the two overlay files, and re-run the export.

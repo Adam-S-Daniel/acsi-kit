@@ -16227,6 +16227,34 @@ untouched body
     assert_touch "$event1" "$dir1" 1 'section "heading-one" changed but has no new entry' \
         "guidance touch: an edited extent with no entry fails, naming the id"
 
+    # 1k. The adoption kit's first copy: the base holds only a README, the
+    #     head adds the whole guidance tree with no impact entries. Nothing
+    #     to judge (exit 0). An edit on top of that merged tree, with no
+    #     entry, still fails like case 1.
+    local dirk="$root/first_copy" basek headk nextk eventk
+    rm -rf "$dirk"
+    mkdir -p "$dirk/agents-md/sections" "$dirk/docs"
+    git -C "$dirk" init -q >/dev/null
+    printf '# repo\n' > "$dirk/README.md"
+    git -C "$dirk" -c user.name=test -c user.email=test@localhost add README.md
+    git -C "$dirk" -c user.name=test -c user.email=test@localhost commit -q -m readme
+    basek=$(git -C "$dirk" rev-parse HEAD)
+    printf '%s' "$impact_stub" > "$dirk/docs/guidance-impact.md"
+    headk=$(touch_commit "$dirk" starter "$base_body" "$base_manifest")
+    eventk="$TEST_DIR/touch-event-first-copy.json"
+    write_event "$basek" "$headk" "$eventk"
+    assert_touch "$eventk" "$dirk" 0 'the base branch has no guidance yet' \
+        "guidance touch: the first copy into a README-only repo passes"
+    nextk=$(touch_commit "$dirk" edit '## Heading One
+CHANGED body
+
+## Heading Two
+untouched body
+' "$base_manifest")
+    write_event "$headk" "$nextk" "$eventk"
+    assert_touch "$eventk" "$dirk" 1 'section "heading-one" changed but has no new entry' \
+        "guidance touch: an edit after the first copy is judged as usual"
+
     # 2. An entry whose Eval: line is "none" while the manifest row is
     #    "gap" — legal, per the entry format's own rule.
     local dir2="$root/none_gap" base2 head2 event2

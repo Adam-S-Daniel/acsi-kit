@@ -458,6 +458,12 @@ patches:
       owner shipped, so an adopter adding a library skill later failed the
       one-way-door check and the draft lane refused those names; it keeps
       the skills this registry ships and the removals its impact log records.
+  - file: first_starter_pr.py
+    why: >-
+      "First starter pull requests pass the diff gates" (DECISIONS). The skill
+      gates pass a pull request whose base has no skills and no impact file
+      (the README-only repo the kit's starter pull request targets), with
+      tests; any base with either is judged as before.
 
 # P3 and the files the sync delivers.
 regenerate:

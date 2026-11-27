@@ -1185,6 +1185,12 @@ patches:
       keep their format and template with no entries, the drafts folder keeps
       a README, and the two tests that asserted the owner's entries assert an
       empty file instead.
+  - file: first_starter_pr.py
+    why: >-
+      "First starter pull requests pass the diff gates" (DECISIONS). The
+      guidance touch gate passes a pull request whose base has no guidance at
+      all (the README-only repo the kit's starter pull request targets), with
+      a test; any base with guidance is judged as before.
 
 # P3: generated files rebuilt from the edited sources, in this order.
 regenerate:

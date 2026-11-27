@@ -903,11 +903,39 @@ jobs:
           permission-issues: read
           permission-metadata: read
 
+      # The adoption kit: drift the base branch's own fleet.yml would bring
+      # too (settings not applied yet, as on every repo before the kit's
+      # first apply) is not this pull request's, so it is listed and does
+      # not fail; scripts/drift_this_pr.py compares the two plans. A base
+      # with no fleet.yml (the kit's first starter pull request) has
+      # nothing to compare against. When the base cannot be fetched or
+      # planned, every drift fails, as before.
       - name: Drift report
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           OWNER: ${{ matrix.owner }}
-        run: python scripts/repo_settings.py diff --config repo-settings/fleet.yml --owner "$OWNER" --changes-json changes.json
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          rc=0
+          python scripts/repo_settings.py diff --config repo-settings/fleet.yml --owner "$OWNER" --changes-json changes.json || rc=$?
+          [ "$rc" = 1 ] || exit "$rc"
+          if ! git fetch --no-tags --quiet --depth 1 origin "$BASE_SHA"; then
+            echo "::warning title=drift::could not fetch the base commit; reporting every drift as this pull request's"
+            exit 1
+          fi
+          if ! git cat-file -e "FETCH_HEAD:repo-settings/fleet.yml" 2>/dev/null; then
+            echo "::notice title=drift::the base branch has no repo-settings/fleet.yml yet, so there is nothing to compare against; this report does not fail"
+            exit 0
+          fi
+          git show "FETCH_HEAD:repo-settings/fleet.yml" > "$RUNNER_TEMP/base-fleet.yml"
+          brc=0
+          python scripts/repo_settings.py diff --config "$RUNNER_TEMP/base-fleet.yml" --owner "$OWNER" \
+            --changes-json "$RUNNER_TEMP/base-changes.json" > /dev/null || brc=$?
+          if [ "$brc" -gt 1 ]; then
+            echo "::warning title=drift::could not plan the base branch's fleet.yml (exit $brc); reporting every drift as this pull request's"
+            exit 1
+          fi
+          python scripts/drift_this_pr.py changes.json "$RUNNER_TEMP/base-changes.json"
 
       # The same summary and notices the plan job writes, so a PR shows what
       # merging it would ask the reviewer to approve. Runs after a red drift

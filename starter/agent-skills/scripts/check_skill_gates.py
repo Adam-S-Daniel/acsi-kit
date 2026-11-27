@@ -521,6 +521,14 @@ def run(base: str, head: str, census_source: str) -> Tuple[int, List[str]]:
     out: List[str] = []
     point = merge_base(base, head)
     base_blobs, head_blobs = tree_blobs(point), tree_blobs(head)
+    # The adoption kit's first copy: the base branch holds no registry at all
+    # (only the README the kit's create-repos.sh wrote), so this pull request
+    # adds every skill at once and there is no change to judge. Every later
+    # pull request diffs against the merged registry as usual.
+    if not base_blobs and blob_id(point, IMPACT_FILE) is None:
+        return 0, ["skill-gates: the base branch has no skills and no "
+                   f"{IMPACT_FILE} yet — this pull request adds the registry, "
+                   "so there is no change to judge"]
     created, removed, touched, moves = skill_changes(base_blobs, head_blobs)
     impact_changed = blob_id(point, IMPACT_FILE) != blob_id(head, IMPACT_FILE)
     rep = Report()
