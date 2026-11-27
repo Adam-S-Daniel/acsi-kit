@@ -469,6 +469,9 @@ assert "the author pair alone still warns" grep -q '^WARN: git has no user.name 
 pf "${envid[@]:0:3}" "GIT_COMMITTER_EMAIL=river@example.net" -- --config "$PFCFG"
 assert "a committer email that is not noreply warns" grep -q '^WARN: git commits as an email that is not a GitHub noreply address' "$OUT"
 assert_not "without printing it" grep -qF 'river@example.net' "$OUT"
+pf "${envid[@]:0:1}" "GIT_AUTHOR_EMAIL=river@example.net" "${envid[@]:2:2}" -- --config "$PFCFG"
+assert "an author email that is not noreply warns, beside a noreply committer" grep -q '^WARN: git commits as an email that is not a GitHub noreply address (GIT_AUTHOR_EMAIL or GIT_COMMITTER_EMAIL)' "$OUT"
+assert "its fix names the variables, not git config" grep -qF 'set GIT_AUTHOR_NAME and GIT_COMMITTER_NAME' "$OUT"
 { cat "$T/pf-gitconfig"; printf '[user]\n\tname = River Quinn\n\temail = river@example.net\n'; } > "$T/pf-gitconfig-real"
 pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-real" -- --config "$PFCFG"; rc=$?
 assert_eq "an email that is not a noreply address is only a warning" "$rc" 0

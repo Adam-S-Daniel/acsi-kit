@@ -75,5 +75,6 @@ for t in "${trees[@]}"; do
     log "  (never a push to its default branch) that adds the starter/$t files listed above, with"
     log "  your names as copy-starter.sh writes them; when acsi-agentskills changes, run"
     log "  bootstrap/regenerate.sh$(config_arg) skills-locks after it merges."
+    [ "$t" != agent-skills ] || log "  copy-starter.sh dropped scripts/skills_waivers.yml entries for skills that copy lacked: add back any starter/$t entry whose path is a skill you just added."
   done
 done
