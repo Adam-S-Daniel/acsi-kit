@@ -539,13 +539,10 @@ TARGET_MARKETPLACES = {
 # With every plugin from them disabled they deliver nothing; removing them is
 # the manual migration step ADR 0013 names (`claude plugin marketplace
 # remove`).
-RETIRED_PLUGINS = (
-    "acsi@retired-agentskills",
-    "acsi-local@retired-agentskills",
-    "fastmail@retired-agentskills",
-    "acsi-personal@retired-agentskills",
-    "acsi-private@retired-agentskills-private",
-)
+# The adoption kit ships this list EMPTY: an adopter never had the source
+# owner's retired registry, so its plugin names are not written to an
+# adopter's settings at all. A registry you retire yourself goes here.
+RETIRED_PLUGINS = ()
 TARGET_ENABLED_PLUGINS = {
     "acsi-anything-anywhere@acsi-agentskills": True,
     "acsi-coding-anywhere@acsi-agentskills": True,

@@ -3408,3 +3408,14 @@ The gates that judge a pull request by comparing it with its base branch were re
 - **`repo-settings`' `drift` job** (advisory, not required): before step 20 applies `fleet.yml`, every repo differs from it, so every `repo-settings` pull request was red (sha pinning, vulnerability alerts, security fixes, the `agent-authored` label on the walk). An `edits` entry in `export/manifests/repo-settings.yml` makes the "Drift report" step also plan the base branch's `fleet.yml` (fetched by `BASE_SHA` from `env`) and run `scripts/drift_this_pr.py` (overlay), which fails only on drift the base's plan would not make; an advisory never fails, as in `diff`. A base with no `fleet.yml` passes with a notice. A base that cannot be fetched or planned fails on every drift, as before. The job's summary step still shows every change. `tests/test_drift_this_pr.py` (overlay) runs the script and the step's own script from the parsed workflow with `diff` stubbed and a real base commit.
 
 Reverse: delete the two patches and their manifest entries, the `edits` entry and the two overlay files, and re-run the export.
+
+### No retired plugin names in an adopter's settings
+
+The registry's `setup.sh --owner-machine` writes `false` for each plugin of the registry the source owner retired (`RETIRED_PLUGINS`, the registry's ADR 0013), so a machine converged under the old names never loads each skill twice. An adopter never had that registry, and on the walk their `~/.claude/settings.json` got five entries for `@retired-agentskills` and `@retired-agentskills-private` plugins that never existed for them.
+
+- `export/patches/agentskills/no_retired_plugins.py` reads the tuple from the convergence block's AST and ships it empty, with a comment saying why. Which names are retired is the source's own list, so a re-pin that adds a name empties it too, and a source without the list stops the export.
+- The two tests that asserted the names are written become two that assert none is written and that an entry a machine already has is left alone (found by name in the test file's AST).
+- The `@synced` and the Linux `acsi-non-coding-local` `false` entries stay: they switch off copies of the adopter's own plugins (the claude.ai account's synced copy, and the per-OS policy), not the source owner's history.
+- `export/tests/test_no_retired_plugins.py` covers the patch and holds the committed `setup.sh` to an empty list.
+
+Reverse: delete the patch, its manifest entry and its test file, and re-run the export.
