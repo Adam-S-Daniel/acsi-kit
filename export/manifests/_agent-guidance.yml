@@ -1177,6 +1177,26 @@ patches:
     why: >-
       C12. A handoff note's numeric ruleset id and two fixtures' real Claude
       Code session id become a description and an invented uuid.
+  - file: vendor_notes.py
+    why: >-
+      "Vendor notes ship empty" (DECISIONS). The owner's Claude Code and Codex
+      discrepancy entries and vendor issue drafts would open the owner's
+      follow-ups as issues in the adopter's repo on the first merge; the files
+      keep their format and template with no entries, the drafts folder keeps
+      a README, and the two tests that asserted the owner's entries assert an
+      empty file instead.
+  - file: first_starter_pr.py
+    why: >-
+      "First starter pull requests pass the diff gates" (DECISIONS). The
+      guidance touch gate passes a pull request whose base has no guidance at
+      all (the README-only repo the kit's starter pull request targets), with
+      a test; any base with guidance is judged as before.
+  - file: unfilled_repos.py
+    why: >-
+      "The sync waits for an unfilled repo" (DECISIONS). sync.sh skips a repo
+      whose README.md still ends with the marker line the kit's
+      create-repos.sh writes, so it never delivers files that copy-starter.sh
+      would then refuse to overwrite; with a test.
 
 # P3: generated files rebuilt from the edited sources, in this order.
 regenerate:

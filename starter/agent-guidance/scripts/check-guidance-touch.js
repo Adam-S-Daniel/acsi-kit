@@ -1024,6 +1024,23 @@ function main() {
   const { baseSha, headSha } = readEvent();
   const mergeBaseSha = gitMergeBase(repoRoot, baseSha, headSha);
 
+  // The adoption kit's first copy: the base branch holds no guidance at all
+  // (only the README the kit's create-repos.sh wrote), so this pull request
+  // adds the whole guidance tree and there is no change to judge. Every
+  // later pull request diffs against the merged tree as usual. A base with
+  // either file is judged below, which keeps B1's fallback as it is.
+  if (
+    gitShow(repoRoot, mergeBaseSha, "agents-md/base.md") === null &&
+    gitShow(repoRoot, mergeBaseSha, "agents-md/eval-coverage.yml") === null &&
+    gitShow(repoRoot, baseSha, "agents-md/eval-coverage.yml") === null
+  ) {
+    console.log(
+      "check-guidance-touch: the base branch has no guidance yet (no agents-md/base.md or " +
+        "agents-md/eval-coverage.yml) — this pull request adds it all, so there is no change to judge",
+    );
+    return;
+  }
+
   // headGuidance/baseGuidance come first: loadManifestWithFallback's B1
   // fallback needs headGuidance/baseGuidance to resolve a base-tip row's
   // heading text against what actually exists at that sha.

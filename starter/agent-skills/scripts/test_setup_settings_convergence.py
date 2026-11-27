@@ -631,29 +631,20 @@ RETIRED = ["acsi@retired-agentskills", "acsi-local@retired-agentskills", "fastma
            "acsi-personal@retired-agentskills", "acsi-private@retired-agentskills-private"]
 
 
-def test_the_retired_registrys_plugins_end_disabled(tmp_path):
-    """A machine converged under the old names has those plugins ON, and they
-    carry the same skills as the new ones — so each would load twice."""
-    old_marketplaces = {
-        "retired-agentskills": {"source": {"source": "github", "repo": "example-adopter/retired-agentskills"}},
-        "retired-agentskills-private": {"source": {"source": "github",
-                                           "repo": "example-adopter/retired-agentskills-private"}},
-    }
-    settings = converge(tmp_path, {
-        "extraKnownMarketplaces": old_marketplaces,
-        "enabledPlugins": {name: True for name in RETIRED},
-    })
-    for name in RETIRED:
-        assert settings["enabledPlugins"][name] is False, name
-    # Left in place on purpose (see setup.sh): nothing here deletes a key.
-    for name, entry in old_marketplaces.items():
-        assert settings["extraKnownMarketplaces"][name] == entry
-
-
-def test_a_fresh_machine_gets_the_retired_names_as_inert_falses(tmp_path):
+def test_the_kit_writes_no_retired_registry_names(tmp_path):
+    """The adoption kit ships RETIRED_PLUGINS empty: an adopter never had the
+    source owner's retired registry, so no entry for its plugins is written."""
     settings = converge(tmp_path)
-    assert all(settings["enabledPlugins"][name] is False for name in RETIRED)
-    assert not {"retired-agentskills", "retired-agentskills-private"} & set(settings["extraKnownMarketplaces"])
+    marketplaces = {name.split("@", 1)[1] for name in RETIRED}
+    assert not [k for k in settings["enabledPlugins"] if k.split("@", 1)[-1] in marketplaces]
+    assert not marketplaces & set(settings["extraKnownMarketplaces"])
+
+
+def test_retired_entries_a_machine_already_has_are_left_alone(tmp_path):
+    """Nothing here deletes or flips a key it does not write."""
+    settings = converge(tmp_path, {"enabledPlugins": {name: True for name in RETIRED}})
+    for name in RETIRED:
+        assert settings["enabledPlugins"][name] is True, name
 
 
 # --- the owner-machine gate ----------------------------------------------------

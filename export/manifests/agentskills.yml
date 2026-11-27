@@ -458,6 +458,18 @@ patches:
       owner shipped, so an adopter adding a library skill later failed the
       one-way-door check and the draft lane refused those names; it keeps
       the skills this registry ships and the removals its impact log records.
+  - file: first_starter_pr.py
+    why: >-
+      "First starter pull requests pass the diff gates" (DECISIONS). The skill
+      gates pass a pull request whose base has no skills and no impact file
+      (the README-only repo the kit's starter pull request targets), with
+      tests; any base with either is judged as before.
+  - file: no_retired_plugins.py
+    why: >-
+      "No retired plugin names in an adopter's settings" (DECISIONS). setup.sh's
+      RETIRED_PLUGINS, read from its AST, ships empty, so an adopter's
+      settings.json gets no entries for the source owner's retired registry;
+      the two tests that asserted those names assert none is written.
 
 # P3 and the files the sync delivers.
 regenerate:
