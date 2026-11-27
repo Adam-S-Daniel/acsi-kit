@@ -3369,6 +3369,23 @@ By hand, once the sources had merged (MAINTAINING.md, "By hand": `npm ci` in the
 
 Reverse: re-pin each source to its "Before" sha, restore the three "Third pass" date edits in `export/manifests/repo-settings.yml` (two) and `agentskills.yml` (one), re-run the export, and put `privacy` back in the registry's row of `docs/settings-and-apps.md`.
 
+## Re-pin round 26 (2026-11-27): the label-only repos take the secrets fan-out
+
+Held back by the daily re-sync (`repo-settings` broke the export and its starter tests); fixed by the re-sync fix routine, only `repo-settings` moved.
+
+- `repo-settings` (`c2bbdaf` → `50b56e5`): the three example-site-platform repos in `fleet.yml` now say `manage: ["labels", "secrets"]` instead of `["labels"]`, and the engine accepts no other surface for them (ADR 0020 addendum, #241). The workflow's two label-leg token mints gain `permission-secrets: write`, and both label apply steps get `PRIVACY_DENYLIST`, so four apply steps hold the value, not two. Ships as exported.
+- The kit's patch `export/patches/repo-settings/kit_config.py` follows: the test anchor for `by_value` and its replacement use `("labels", "secrets")`; the fan-out value cut now expects four steps (`FANOUT_VALUE_COUNT`), the same value the kit still passes to none; a new test edit has `test_the_cms_apply_step_gets_the_fanned_out_value` assert the kit's label-only step has no `PRIVACY_DENYLIST`.
+- The manifest's `repo-settings.yml` test edits that selected the label-only rows by `manage == ["labels"]` select `["labels", "secrets"]`, and one new edit has `test_real_fleet_resolves_and_only_three_repos_are_label_only` expect the `labels` surface alone in `effective`, since the kit's `fleet.yml` declares no default secret.
+- The other sources stay. No shipped `.ps1` changed, so no Pester run was needed. No new skill or guidance section.
+- **Pages to review** (`doc_review.py --base HEAD`): `docs/traps.md` and `docs/week-to-week.md` name the changed `fleet.yml` and workflow only generally; no statement on them became wrong, so neither changed.
+
+| Source | Before | After |
+|---|---|---|
+| repo-settings | `c2bbdaff3f0e` | `50b56e5790b7` |
+| others | unchanged | unchanged |
+
+Reverse: re-pin `repo-settings` to its "Before" sha, restore the `("labels",)` text in `kit_config.py`, `FANOUT_VALUE_COUNT = 2`, drop the two new test edits, put `[\"labels\"]` back in the manifest's test edits, and re-run the export.
+
 ## Walk 3: an outside adopter's own identity and the printed commands (2026-11-26)
 
 A third walk as an outside adopter (Free plan, Claude Pro, base track) reached every base step (`verify.sh --track base`: 56 passed, 2 skipped, as expected on Free). Each finding below was confirmed on main first; none was dropped.
