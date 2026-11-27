@@ -3419,3 +3419,14 @@ The registry's `setup.sh --owner-machine` writes `false` for each plugin of the 
 - `export/tests/test_no_retired_plugins.py` covers the patch and holds the committed `setup.sh` to an empty list.
 
 Reverse: delete the patch, its manifest entry and its test file, and re-run the export.
+
+### The sync waits for an unfilled repo
+
+`create-repos.sh` makes each fleet repo with one README ending in a marker line, and `copy-starter.sh` replaces that README while it is unchanged but refuses to overwrite any other file that differs on the default branch. Step 10 merges `_agent-guidance` before steps 12 and 13 copy the registries and `wsl-automation`, so the sync's first runs reach repos that hold only that README. Once the `guidance-sync` App has `workflows: write` (PR #139) the sync could deliver there first (AGENTS.md, CLAUDE.md, the agent-checks workflow and more), and the copy step would then refuse those files. Not yet seen on a real account; the walk's sync failed for want of the permission before it could.
+
+- `export/patches/_agent-guidance/unfilled_repos.py` makes `scripts/sync.sh` skip a repo, right after cloning it, while its `README.md` carries the marker line (`grep -qxF`, a whole-line match), counted as skipped with a line naming the copy step, in a real run and a dry run alike. The marker is the kit's own, so the source owner's fleet is unaffected.
+- `test/run-tests.sh` (GROUP_sync) gains `test_sync_skips_unfilled_kit_repo`: an unfilled and a filled repo side by side; the unfilled one's refs do not move, the filled one gets AGENTS.md, and the run reports "1 synced, 1 skipped, 0 failed". It failed 4 of its 8 assertions against the source's `sync.sh`.
+- `export/tests/test_unfilled_repos.py` holds the marker equal to `bootstrap/lib/common.sh`'s `GENERATED_README_MARKER`.
+- An `_agent-guidance` copied from an older kit has the old sync; `docs/settings-and-apps.md` keeps the `--force` advice for that case.
+
+Reverse: delete the patch, its manifest entry and its test file, and re-run the export.

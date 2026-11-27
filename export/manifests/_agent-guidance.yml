@@ -1191,6 +1191,12 @@ patches:
       guidance touch gate passes a pull request whose base has no guidance at
       all (the README-only repo the kit's starter pull request targets), with
       a test; any base with guidance is judged as before.
+  - file: unfilled_repos.py
+    why: >-
+      "The sync waits for an unfilled repo" (DECISIONS). sync.sh skips a repo
+      whose README.md still ends with the marker line the kit's
+      create-repos.sh writes, so it never delivers files that copy-starter.sh
+      would then refuse to overwrite; with a test.
 
 # P3: generated files rebuilt from the edited sources, in this order.
 regenerate:
