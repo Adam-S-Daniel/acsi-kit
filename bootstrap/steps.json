@@ -156,7 +156,7 @@
     {
       "id": "9",
       "title": "Drop the example repos from fleet.yml",
-      "run": "In a pull request on `<you>/repo-settings`, remove the three `example-site-*` entries from `repo-settings/fleet.yml` (unless you have those repos); the tests read that file, so none needs changing",
+      "run": "In a pull request on `<you>/repo-settings`, remove the three `example-site-*` entries from `repo-settings/fleet.yml` (unless you have those repos); the tests read that file, so none needs changing. Start the pull request's description with a `## TLDR` heading, or its agent-checks fail",
       "kind": "manual",
       "part": "settings",
       "track": "base",
@@ -192,7 +192,7 @@
     {
       "id": "11",
       "title": "Drop the example repos from repos.yml",
-      "run": "In a pull request on `<you>/_agent-guidance`, remove the `example-site-*` names from `repos.yml` `cron_coverage.fleet` and `skills_bootstrap.repos` (unless you have those repos), and `skills-evals` too if an older kit's copy lists it before you have that repo. This step's check is that both lists name only repos one of your owners has",
+      "run": "In a pull request on `<you>/_agent-guidance`, remove the `example-site-*` names from `repos.yml` `cron_coverage.fleet` and `skills_bootstrap.repos` (unless you have those repos), and `skills-evals` too if an older kit's copy lists it before you have that repo. This step's check is that both lists name only repos one of your owners has. Start the pull request's description with a `## TLDR` heading, or its agent-checks fail",
       "kind": "manual",
       "part": "guidance",
       "track": "base",
@@ -282,7 +282,7 @@
     {
       "id": "16",
       "title": "Pin the scheduled-run-health reusable",
-      "run": "`bootstrap/regenerate.sh run-health-sha`, then merge the three pull requests; the one in `acsi-agentskills` also sets the `_agent-guidance` commit that cloud sessions install the guidance from and that its CI checks out",
+      "run": "`bootstrap/regenerate.sh run-health-sha`, then merge the three pull requests; the one in `acsi-agentskills` also sets the `_agent-guidance` commit that cloud sessions install the guidance from and that its CI checks out, so it waits for your approval in the `plugin-runtime-review` environment: read it and approve it on the waiting job's page",
       "kind": "script",
       "part": "generated files",
       "track": "base",

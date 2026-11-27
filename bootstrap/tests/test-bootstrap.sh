@@ -75,6 +75,8 @@ export GH_STUB_APP_USER_TOKEN=1
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$T/gitconfig"
 export BOOTSTRAP_GIT_BASE="file://$T/remotes"
 export GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z
+# A caller's identity variables would hide the config-based identity cases.
+unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
 unset GH_TOKEN GITHUB_TOKEN CLAUDE_CONFIG_DIR ADOPT_STATE_FILE XDG_STATE_HOME GH_STUB_GIT_REMOTES PRIVACY_DENYLIST PRIVACY_DENYLIST_FILE
 touch "$GH_LOG"
 git config --global user.name "Test User"
@@ -128,7 +130,7 @@ for s in "${SCRIPTS[@]}"; do
   assert "$s uses set -euo pipefail" grep -qx 'set -euo pipefail' "$B/$s"
   assert "$s --help prints its usage" bash -c '"$1" "$2" --help | grep -qF "$3"' _ bash "$B/$s" "$s ["
 done
-for p in lib/substitute.py lib/plan_sizing.py lib/time_zone.py lib/repin.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
+for p in lib/substitute.py lib/plan_sizing.py lib/time_zone.py lib/repin.py lib/staged_generated.py lib/content.py lib/fleet_fragment.py render-quickstart.py tests/check-refs.py tests/check-steps.py tests/check-links.py \
          tests/check-catalog.py tests/check-guide-lists.py tests/check-branch-prefixes.py tests/check-one-owner.py tests/check-evals-refs.py tests/mdlinks.py tests/stubs/gh_stub.py; do
   assert "$p parses" python3 -I -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())' "$B/$p"
 done
@@ -455,6 +457,21 @@ pf -- --config "$PFCFG"; rc=$?
 assert_eq "no git identity is only a warning" "$rc" 0
 assert "no git identity warns" grep -q '^WARN: git has no user.name or user.email' "$OUT"
 assert "its fix names OWNER_NAME and the account's noreply address" grep -qF "      fix: git config --global user.name 'Acme Example' && git config --global user.email '$uidpf+acme-example@users.noreply.github.com'" "$OUT"
+# GIT_AUTHOR_* and GIT_COMMITTER_* (all four) win over the config for every
+# commit, as walk.sh sets them; one pair alone still leaves git asking.
+envid=("GIT_AUTHOR_NAME=Acme Example" "GIT_AUTHOR_EMAIL=$uidpf+acme-example@users.noreply.github.com"
+       "GIT_COMMITTER_NAME=Acme Example" "GIT_COMMITTER_EMAIL=$uidpf+acme-example@users.noreply.github.com")
+pf "${envid[@]}" -- --config "$PFCFG"
+assert "an identity in the four environment variables passes" grep -q '^PASS: git commits as a GitHub noreply address' "$OUT"
+assert_not "and does not warn about the global config" grep -q '^WARN: git has no user.name or user.email' "$OUT"
+pf "${envid[@]:0:2}" -- --config "$PFCFG"
+assert "the author pair alone still warns" grep -q '^WARN: git has no user.name or user.email' "$OUT"
+pf "${envid[@]:0:3}" "GIT_COMMITTER_EMAIL=river@example.net" -- --config "$PFCFG"
+assert "a committer email that is not noreply warns" grep -q '^WARN: git commits as an email that is not a GitHub noreply address' "$OUT"
+assert_not "without printing it" grep -qF 'river@example.net' "$OUT"
+pf "${envid[@]:0:1}" "GIT_AUTHOR_EMAIL=river@example.net" "${envid[@]:2:2}" -- --config "$PFCFG"
+assert "an author email that is not noreply warns, beside a noreply committer" grep -q '^WARN: git commits as an email that is not a GitHub noreply address (GIT_AUTHOR_EMAIL or GIT_COMMITTER_EMAIL)' "$OUT"
+assert "its fix names the variables, not git config" grep -qF 'set GIT_AUTHOR_NAME and GIT_COMMITTER_NAME' "$OUT"
 { cat "$T/pf-gitconfig"; printf '[user]\n\tname = River Quinn\n\temail = river@example.net\n'; } > "$T/pf-gitconfig-real"
 pf GIT_CONFIG_GLOBAL="$T/pf-gitconfig-real" -- --config "$PFCFG"; rc=$?
 assert_eq "an email that is not a noreply address is only a warning" "$rc" 0
@@ -644,6 +661,83 @@ cp "$rw/b/scripts/cloud-env-setup.sh" "$rw/b.before"
 run python3 -I "$RP" "$rw/b"; rc=$?
 assert_eq "repin fails when any row fails" "$rc" 1
 assert "and writes none of them" cmp -s "$rw/b/scripts/cloud-env-setup.sh" "$rw/b.before"
+
+# ======================================================== lib/staged_generated.py
+# After substitute.py: eval-coverage.yml's section bytes follow the tree, and a
+# registry waiver whose skill is not in the copy is dropped (the census fails
+# on a stale waiver).
+SG="$B/lib/staged_generated.py" sw="$T/tmp/staged"
+rm -rf "$sw" && mkdir -p "$sw/empty" "$sw/g/agents-md" "$sw/r/scripts" "$sw/r/plugins/p/skills/kept"
+run python3 -I "$SG" "$sw/empty" --repo-name acsi-agentskills; rc=$?
+assert_eq "staged_generated leaves a tree with neither file alone" "$rc" 0
+assert_eq "and prints nothing for it" "$(cat "$OUT")" ""
+printf '# Title\n\n## One\nshort-owner here\n\n```\n## not a heading\n```\n## Two\nlast\n' > "$sw/g/agents-md/base.md"
+printf '# rows\n- id: one\n  heading: One\n  file: agents-md/base.md\n  bytes: 1\n\n- id: two\n  heading: Two\n  file: agents-md/base.md\n  bytes: 12\n' > "$sw/g/agents-md/eval-coverage.yml"
+run python3 -I "$SG" "$sw/g" --repo-name _agent-guidance; rc=$?
+assert_eq "it exits 0 on agent-guidance's coverage" "$rc" 0
+assert "it says it refreshed one row" has "$OUT" "refreshed: agents-md/eval-coverage.yml (1 row(s) of bytes)"
+assert_eq "a section runs to the next real heading, past a fenced ## line" "$(sed -n '5p' "$sw/g/agents-md/eval-coverage.yml")" "  bytes: $(printf '## One\nshort-owner here\n\n```\n## not a heading\n```\n' | wc -c | tr -d ' ')"
+assert_eq "the row already right stays" "$(sed -n '10p' "$sw/g/agents-md/eval-coverage.yml")" "  bytes: 12"
+run python3 -I "$SG" "$sw/g" --repo-name _agent-guidance
+assert "a second run says unchanged" has "$OUT" "unchanged: agents-md/eval-coverage.yml"
+printf -- '- id: gone\n  heading: Gone\n  file: agents-md/base.md\n  bytes: 3\n' >> "$sw/g/agents-md/eval-coverage.yml"
+cp "$sw/g/agents-md/eval-coverage.yml" "$sw/g.before"
+run python3 -I "$SG" "$sw/g" --repo-name _agent-guidance; rc=$?
+assert_eq "a row with no section fails" "$rc" 1
+assert "it names the row" has "$ERR" "rows with no section in their file: gone"
+assert "and writes nothing" cmp -s "$sw/g/agents-md/eval-coverage.yml" "$sw/g.before"
+touch "$sw/r/plugins/p/skills/kept/SKILL.md"
+cat > "$sw/r/scripts/skills_waivers.yml" <<'YAML'
+# header comment
+waivers:
+  - klass: length-limit
+    registry: acsi-agentskills
+    path: plugins/p/skills/absent/SKILL.md
+    reason: >-
+      folded
+      reason
+    issue: https://example.com/1
+  # a comment about the kept one
+  - klass: length-limit
+    registry: acsi-agentskills
+    path: plugins/p/skills/kept/SKILL.md
+    reason: kept
+  - klass: length-limit
+    registry: other-registry
+    path: plugins/p/skills/elsewhere/SKILL.md
+    reason: another registry's
+  - klass: length-limit
+    registry: acsi-agentskills
+    path: plugins/p/skills/absent-too/SKILL.md
+    reason: last
+YAML
+run python3 -I "$SG" "$sw/r" --repo-name acsi-agentskills; rc=$?
+assert_eq "it exits 0 on the registry's waivers" "$rc" 0
+assert "it names each dropped waiver" has "$OUT" "dropped waiver: scripts/skills_waivers.yml plugins/p/skills/absent/SKILL.md (not in this copy)"
+assert "including the last one" has "$OUT" "plugins/p/skills/absent-too/SKILL.md (not in this copy)"
+assert_eq "the kept waivers and the comments stay, nothing else" "$(cat "$sw/r/scripts/skills_waivers.yml")" "$(cat <<'YAML'
+# header comment
+waivers:
+  # a comment about the kept one
+  - klass: length-limit
+    registry: acsi-agentskills
+    path: plugins/p/skills/kept/SKILL.md
+    reason: kept
+  - klass: length-limit
+    registry: other-registry
+    path: plugins/p/skills/elsewhere/SKILL.md
+    reason: another registry's
+YAML
+)"
+run python3 -I "$SG" "$sw/r" --repo-name acsi-agentskills
+assert "a second run says unchanged" has "$OUT" "unchanged: scripts/skills_waivers.yml"
+printf 'waivers:\n  - klass: x\n    registry: acsi-agentskills\n    path: nope/SKILL.md\n' > "$sw/r/scripts/skills_waivers.yml"
+run python3 -I "$SG" "$sw/r" --repo-name acsi-agentskills; rc=$?
+assert_eq "dropping every waiver exits 0" "$rc" 0
+assert_eq "and leaves an empty list" "$(cat "$sw/r/scripts/skills_waivers.yml")" "waivers: []"
+printf 'waivers:\n  - klass: x\n    registry: acsi-agentskills\n    path: ../escape/SKILL.md\n' > "$sw/r/scripts/skills_waivers.yml"
+run python3 -I "$SG" "$sw/r" --repo-name acsi-agentskills; rc=$?
+assert_eq "a waiver path that leaves the tree fails" "$rc" 1
 run python3 -I "$RP" "$rw/no-such-dir"; rc=$?
 assert_eq "repin refuses a path that is not a directory" "$rc" 2
 run python3 -I "$RP"; rc=$?

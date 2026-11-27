@@ -701,7 +701,7 @@ LABELS=(
 # the credentials|client id kind:name|key environment (- = repository level)|
 # key secret|config key|optional (yes|no)
 APPS=(
-  'guidance-sync|{"contents":"write","pull_requests":"write","metadata":"read","actions":"read","checks":"read","issues":"write"}|fleet|_agent-guidance|variable:APP_CLIENT_ID|-|APP_PRIVATE_KEY|GUIDANCE_SYNC_APP_ID|no'
+  'guidance-sync|{"contents":"write","pull_requests":"write","metadata":"read","actions":"read","checks":"read","issues":"write","workflows":"write"}|fleet|_agent-guidance|variable:APP_CLIENT_ID|-|APP_PRIVATE_KEY|GUIDANCE_SYNC_APP_ID|no'
   'settings-admin|{"administration":"write","actions":"write","issues":"write","metadata":"read"}|fleet|repo-settings|variable:REPO_SETTINGS_APP_CLIENT_ID|fleet-apply|REPO_SETTINGS_APP_PRIVATE_KEY|SETTINGS_ADMIN_APP_ID|no'
   'settings-read|{"administration":"read","actions":"read","issues":"read","metadata":"read"}|fleet|repo-settings|variable:REPO_SETTINGS_READ_APP_CLIENT_ID|-|REPO_SETTINGS_READ_APP_PRIVATE_KEY|SETTINGS_READ_APP_ID|no'
   'eval-improve|{"contents":"write","pull_requests":"write"}|acsi-agentskills _agent-guidance|skills-evals|secret:EVAL_IMPROVE_APP_CLIENT_ID|-|EVAL_IMPROVE_APP_PEM|EVAL_IMPROVE_APP_ID|no'

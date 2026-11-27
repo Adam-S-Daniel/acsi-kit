@@ -27,7 +27,12 @@
 #      the repo's CI fails when they differ from a build, so for skills-evals
 #      it then rebuilds them (npm ci and node build.js in explorer/, which
 #      needs node and npm) unless TIME_ZONE is UTC;
-#   2d. re-pins, with lib/repin.py, each sha256 that names a file of the same
+#   2d. refreshes, with lib/staged_generated.py, agent-guidance's
+#      eval-coverage.yml section bytes (a name of another length changes a
+#      section's size, and that repo's CI checks them) and drops the
+#      registry's skills_waivers.yml entries for skills not in this copy
+#      (the census fails on a waiver that matches nothing);
+#   2e. re-pins, with lib/repin.py, each sha256 that names a file of the same
 #      tree, because step 2 changed that file's bytes (the digest of the
 #      bundled fleet-memory.sh in agent-skills' scripts/cloud-env-setup.sh,
 #      and the one docs/codex-cloud.md pins in agent-guidance). It stays the
@@ -131,6 +136,11 @@ if [ -f "$W/stage/explorer/display.json" ] && [ "$CFG_TIME_ZONE" != UTC ]; then
   rm -rf "$W/stage/explorer/node_modules"
   log "rebuilt the explorer pages for TIME_ZONE=$CFG_TIME_ZONE"
 fi
+# The generated values the names above can change: eval-coverage.yml's section
+# bytes (agent-guidance's CI checks them) and the registry's waivers for
+# skills this copy does not have (its conformance census fails a stale one).
+python3 -I "$HERE/lib/staged_generated.py" "$W/stage" --repo-name "${REPO#*/}" \
+  || die "could not refresh the starter's generated values (see above)"
 # Last of the steps that change the staged tree: a pin is the digest of the
 # file as every step above left it.
 python3 -I "$HERE/lib/repin.py" "$W/stage" \
