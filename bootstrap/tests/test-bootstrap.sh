@@ -327,6 +327,29 @@ for v in empty absent; do
   assert "every copy step done, TIME_ZONE $v: step 0 stays done" grep -qE '^done +0 ' "$OUT"
   assert_not "and it says nothing about TIME_ZONE" grep -qi 'TIME_ZONE' "$OUT" "$ERR"
 done
+# A renamed repo leaves a redirect from its old name, and gh follows it: with
+# the adopter's own repo-settings renamed to repo-settings-fork (public, step
+# 4's files on main), repos/acme-example/repo-settings answers 200 for the
+# fork. The kit must read that name as absent: status.sh leaves step 4 not
+# done, and create-repos.sh creates the private repo instead of refusing the
+# public one and labeling the fork.
+jq '.repos |= with_entries(if .key == "acme-example/repo-settings"
+      then .key = "acme-example/repo-settings-fork" | .value.full_name = .key | .value.name = "repo-settings-fork" else . end)' \
+  "$T/tz-gh-copied.json" > "$T/rn-gh.json"
+cp "$T/rn-gh.json" "$T/rn-gh-start.json"
+rn() { run env -u GH_STUB_GIT_REMOTES GH_LOG="$T/rn-gh.log" GH_STUB_STATE="$T/rn-gh.json" GH_STUB_RENAMED=acme-example/repo-settings=acme-example/repo-settings-fork "$@"; }
+rn bash "$B/status.sh" --config "$T/tz-valid.env" --track base; rc=$?
+assert_eq "status.sh exits 0 beside a renamed repo-settings" "$rc" 0
+assert_not "the fork's files do not mark step 4 done" grep -qE '^done +4 ' "$OUT"
+assert "the other copy steps still read done" bash -c 'for i in 10 12 13; do grep -qE "^done +$i " "$1" || exit 1; done' _ "$OUT"
+rn bash "$B/create-repos.sh" --config "$T/tz-valid.env" --dry-run repo-settings; rc=$?
+assert_eq "create-repos dry run exits 0 beside a renamed repo-settings" "$rc" 0
+assert "it would create the private repo-settings" has "$OUT" "DRY-RUN: gh repo create acme-example/repo-settings --private"
+assert_not "it does not call the fork public" has "$OUT$(cat "$ERR")" "is public"
+rn bash "$B/create-repos.sh" --config "$T/tz-valid.env" repo-settings; rc=$?
+assert_eq "create-repos exits 0 beside a renamed repo-settings" "$rc" 0
+assert_eq "it created the private repo-settings" "$(jq -r '.repos["acme-example/repo-settings"].visibility' "$T/rn-gh.json")" private
+assert_eq "the fork is untouched" "$(jq -c '.repos["acme-example/repo-settings-fork"]' "$T/rn-gh.json")" "$(jq -c '.repos["acme-example/repo-settings-fork"]' "$T/rn-gh-start.json")"
 tz_status valid none
 assert "TIME_ZONE set, copies not done: step 0 is done" grep -qE '^done +0 ' "$OUT"
 assert_not "and it says nothing about TIME_ZONE" grep -qi 'TIME_ZONE' "$OUT" "$ERR"

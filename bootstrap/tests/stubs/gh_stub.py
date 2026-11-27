@@ -20,6 +20,10 @@ Knobs: GH_STUB_DRIFT=1 makes a ruleset read-back drop its last rule.
 GH_STUB_ENV_LIST_STATUS=<code> makes every environment secret/variable list
 fail with that HTTP status. GH_STUB_REPO_STATUS=<owner>/<repo>=<code> makes a
 read of that one repo answer that status.
+GH_STUB_RENAMED=<owner>/<old>=<owner>/<new> answers every repos/<old>[/...]
+call as repos/<new> (GitHub's redirect after a rename, which gh follows),
+until a repo named <old> is created. --jq '.full_name // ""' on a repo read
+prints just its full_name.
 GH_STUB_GIT_REMOTES=<dir> answers a contents read from the bare repo
 <dir>/<owner>/<repo>.git's default branch, so a test's merge is what GitHub sees.
 GH_STUB_FAKE_PEM and GH_STUB_CLIENT_SECRET are what a manifest conversion
@@ -177,11 +181,20 @@ def api(args):
     if not m:
         return err(404, "Not Found")
     full, rest = m.group(1), (m.group(2) or "")
+    renamed = os.environ.get("GH_STUB_RENAMED", "")
+    if renamed:
+        old_name, new_name = renamed.split("=", 1)
+        if full == old_name and old_name not in st["repos"]:
+            full = new_name   # GitHub's redirect, which gh follows
     r = st["repos"].get(full)
     if r is None:
         return err(404, "Not Found")
 
     if rest == "":
+        if method == "GET" and jq == '.full_name // ""':
+            print(r["full_name"])
+            save()
+            sys.exit(0)
         if method == "GET":
             return out(repo_view(r))
         if method == "PATCH":

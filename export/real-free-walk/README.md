@@ -42,7 +42,10 @@ steps 27 and 28 are checked against real routines, so they stay red
 6. **Name clashes.** `create-repos.sh` wants `repo-settings` and
    `acsi-agentskills-private` private. A public fork with either name on the
    test account cannot be made private: rename it first (Settings, General),
-   and rename it back at teardown.
+   and rename it back at teardown. GitHub keeps a redirect from the old name,
+   so `gh api repos/<login>/repo-settings` still answers 200 for the renamed
+   fork; the kit reads a repo whose answer names another repo as absent, and
+   `create-repos.sh` then creates the private one, which replaces the redirect.
 
 ## Setup
 
