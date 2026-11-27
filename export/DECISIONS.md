@@ -3400,3 +3400,50 @@ A third walk as an outside adopter (Free plan, Claude Pro, base track) reached e
 - **Smaller ones.** status.sh's "Run:" line fills `<you>` with `OWNER`. `update-kit.sh --dry-run` counted the save of `starter/` it listed. `docs/routines.md` gave memory curation's project task as Monday 14:00 UTC, the source owner's time, while the spec the kit ships says Monday morning in `TIME_ZONE` (the export edit in "An adopter's own cloud allowlist, zone and Codex pin"); the page now says the same. The settings example's `WSL_AUTOMATION_AGENT_OWNER_ROOTS=~/src` is the source's value, while `install-machine.sh` clones into `~/repos` (as `LESSONS_CLONE` in the same file says), so a new `edits` entry in `export/manifests/wsl-automation.yml` makes it `~/repos`, and a second one makes the README's prose example agree. `docs/guidance.md` gave the guidance merge window as Monday 17:00 to 19:00 UTC, the source owner's; the shipped `scripts/base-md-merge-window.yml` takes the adopter's `TIME_ZONE` (noon to 2 PM), and the page now says so.
 
 Reverse: drop the two `edits` entries, restore the two modes, and revert `bootstrap/lib/pr.sh`, `bootstrap/lib/common.sh` (`kit_git_identity`, `track_arg`, `RUN_OUT`), `create-repos.sh`, `preflight.sh`, `set-secrets.sh`, `install-machine.sh`, `status.sh`, `verify.sh`, `update-kit.sh`, the two skills, step 3's run text, and the pages, then remove the two tests and their bash assertions.
+
+## Free walk follow-ups (2026-11-27, after acsi-kit PR #139)
+
+The real walk on GitHub Free (PR #139) left four kit behaviors documented as expected. Each is fixed here so a later adopter does not hit it.
+
+### Vendor notes ship empty
+
+`_agent-guidance`'s `docs/reference/agent-claude-code.DISCREPANCIES.md` and `agent-codex.DISCREPANCIES.md` hold the source owner's findings on Claude Code and Codex, and `docs/reference/vendor-issue-drafts/` the owner's drafts of vendor issues. Merging the starter pull request (step 10) ran `vendor-discrepancy-alert.yml`, which opened one "Vendor discrepancy" or "Vendor issue draft ready" issue per entry in the adopter's repo (three on the walk): the owner's follow-ups, not the adopter's.
+
+- `export/patches/_agent-guidance/vendor_notes.py` keeps each DISCREPANCIES.md through its `## Entries` heading (the title, "How to add an entry" and the fenced template, which the alert script never reads as an entry) and adds "None yet." It removes every draft and writes a `README.md` in the drafts folder, which the alert script skips by name, so the folder the process doc names still exists.
+- A link elsewhere to an entry's anchor loses the anchor and gains a note that the entry is in the source repo's copy (`docs/evidence/codex-memory-129.md` linked the `/import` entry; its sentence stays as the owner's history). A link to a removed draft stops the export.
+- `test/test-discrepancy-alert.js`'s two "regression — the real ..." tests asserted the owner's entries; they become one test that the shipped files keep their heading and template and parse to no entries. The patch finds them by their title prefix, so a new owner entry does not hold back a re-pin.
+- `export/tests/test_vendor_notes.py` covers the patch and holds the committed starter to empty notes and a README-only drafts folder.
+
+Reverse: delete the patch, its manifest entry and its test file, and re-run the export.
+
+### First starter pull requests pass the diff gates
+
+The gates that judge a pull request by comparing it with its base branch were red on the kit's own starter and regenerate pull requests, where the base holds only the README `create-repos.sh` wrote or settings not applied yet. Each now passes in that case, with a line saying why, and judges every later pull request as the source does. None of the three has a path filter added; the two in required checks (`checks`/`test` and `pytest`) still run and report success.
+
+- **`_agent-guidance`'s touch gate** (`scripts/check-guidance-touch.js`, in `checks`): `export/patches/_agent-guidance/first_starter_pr.py` makes it exit 0 when neither the merge-base nor the base tip has `agents-md/eval-coverage.yml` and the merge-base has no `agents-md/base.md`. A base with either file goes through the source's logic, B1's pre-manifest fallback included. A case in `test/run-tests.sh` (GROUP_self_hosted) covers the first copy and an edit on top of it, which still fails.
+- **The registry's skill gates** (`scripts/check_skill_gates.py`, in `pytest`): `export/patches/agentskills/first_starter_pr.py` makes `run()` return 0 when neither the merge-base nor the base tip has a SKILL.md or PURPOSE.md under `plugins/` or a `docs/skill-impact.md`. The tip check (like the touch gate's) keeps a branch cut from the README-only base before the starter merged, and opened after, under the gates. Four tests in `scripts/test_check_skill_gates.py`: the first copy passes, an edit after it fails, a base with only the impact file is judged, and so is that stale branch.
+- **`repo-settings`' `drift` job** (advisory, not required): before step 20 applies `fleet.yml`, every repo differs from it, so every `repo-settings` pull request was red (sha pinning, vulnerability alerts, security fixes, the `agent-authored` label on the walk). An `edits` entry in `export/manifests/repo-settings.yml` makes the "Drift report" step also plan the base branch's `fleet.yml` (fetched by `BASE_SHA` from `env`) and run `scripts/drift_this_pr.py` (overlay), which fails only on drift the base's plan would not make; an advisory never fails, as in `diff`. A base with no `fleet.yml` passes with a notice. The base is planned with the base's own `scripts/repo_settings.py`, so drift that an engine change brings counts as the pull request's (a review found that planning both with the head's engine hid it). A base that cannot be fetched, has no engine, or cannot be planned fails on every drift, as before. A second edit fixes the summary step's comment, which said drift is always red there. The job's summary step still shows every change. `tests/test_drift_this_pr.py` (overlay) runs the script and the step's own script from the parsed workflow with `diff` stubbed and a real base commit.
+
+Reverse: delete the two patches and their manifest entries, the `edits` entry and the two overlay files, and re-run the export.
+
+### No retired plugin names in an adopter's settings
+
+The registry's `setup.sh --owner-machine` writes `false` for each plugin of the registry the source owner retired (`RETIRED_PLUGINS`, the registry's ADR 0013), so a machine converged under the old names never loads each skill twice. An adopter never had that registry, and on the walk their `~/.claude/settings.json` got five entries for `@retired-agentskills` and `@retired-agentskills-private` plugins that never existed for them.
+
+- `export/patches/agentskills/no_retired_plugins.py` reads the tuple from the convergence block's AST and ships it empty, with a comment saying why. Which names are retired is the source's own list, so a re-pin that adds a name empties it too, and a source without the list stops the export.
+- The two tests that asserted the names are written become two that assert none is written and that an entry a machine already has is left alone (found by name in the test file's AST).
+- The `@synced` and the Linux `acsi-non-coding-local` `false` entries stay: they switch off copies of the adopter's own plugins (the claude.ai account's synced copy, and the per-OS policy), not the source owner's history.
+- `export/tests/test_no_retired_plugins.py` covers the patch and holds the committed `setup.sh` to an empty list.
+
+Reverse: delete the patch, its manifest entry and its test file, and re-run the export.
+
+### The sync waits for an unfilled repo
+
+`create-repos.sh` makes each fleet repo with one README ending in a marker line, and `copy-starter.sh` replaces that README while it is unchanged but refuses to overwrite any other file that differs on the default branch. Step 10 merges `_agent-guidance` before steps 12 and 13 copy the registries and `wsl-automation`, so the sync's first runs reach repos that hold only that README. Once the `guidance-sync` App has `workflows: write` (PR #139) the sync could deliver there first (AGENTS.md, CLAUDE.md, the agent-checks workflow and more), and the copy step would then refuse those files. Not yet seen on a real account; the walk's sync failed for want of the permission before it could.
+
+- `export/patches/_agent-guidance/unfilled_repos.py` makes `scripts/sync.sh` skip a repo, right after cloning it, while its `README.md` carries the marker line (`grep -qxF`, a whole-line match), counted as skipped with a line naming the copy step, and saying to delete the line from a repo set up by hand or with no starter (the optional `waiting-feed`, which is not a fleet repo the App is installed on), in a real run and a dry run alike. The marker is the kit's own, so the source owner's fleet is unaffected.
+- `test/run-tests.sh` (GROUP_sync) gains `test_sync_skips_unfilled_kit_repo`: an unfilled and a filled repo side by side; the unfilled one's refs do not move, the filled one gets AGENTS.md, and the run reports "1 synced, 1 skipped, 0 failed". It failed 4 of its 8 assertions against the source's `sync.sh`.
+- `export/tests/test_unfilled_repos.py` holds the marker equal to `bootstrap/lib/common.sh`'s `GENERATED_README_MARKER`.
+- An `_agent-guidance` copied from an older kit has the old sync; `docs/settings-and-apps.md` keeps the `--force` advice for that case.
+
+Reverse: delete the patch, its manifest entry and its test file, and re-run the export.

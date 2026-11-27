@@ -147,6 +147,73 @@ def touch(repo: Path, eval_text: str, kind: str = "edit", skill_for_entry: str =
 # basics
 # ---------------------------------------------------------------------------
 
+def first_copy_repo(tmp_path: Path) -> Path:
+    """The adoption kit's first copy: main holds only a README; `pr` adds a
+    whole registry (two skills, the impact file with no entries)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    _write(repo / "README.md", "# repo\n")
+    commit(repo, "readme")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    for skill in (SKILL, OTHER):
+        _write(skill_dir(repo, PLUGIN, skill) / "SKILL.md", f"# {skill}\n\nv1\n")
+    impact(repo)
+    commit(repo, "starter")
+    return repo
+
+
+def test_first_copy_into_a_readme_only_repo_passes(tmp_path):
+    repo = first_copy_repo(tmp_path)
+    code, out = gate(repo)
+    assert code == 0, out
+    assert "the base branch has no skills and no docs/skill-impact.md yet" in out
+
+
+def test_an_edit_after_the_first_copy_is_judged(tmp_path):
+    repo = first_copy_repo(tmp_path)
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--ff-only", "pr")
+    _git(repo, "checkout", "-q", "-b", "next")
+    edit_skill(repo)
+    commit(repo)
+    code, out = gate(repo, head="next")
+    assert code == 1, out
+    assert "no change to judge" not in out
+    assert SKILL in out
+
+
+def test_a_base_with_only_the_impact_file_is_judged(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    impact(repo)
+    commit(repo, "impact only")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    _write(skill_dir(repo, PLUGIN, SKILL) / "SKILL.md", f"# {SKILL}\n\nv1\n")
+    commit(repo)
+    code, out = gate(repo)
+    assert code == 1, out
+    assert "no change to judge" not in out
+
+
+def test_a_branch_cut_before_the_starter_merged_is_judged(tmp_path):
+    repo = first_copy_repo(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "stale", "main")
+    _write(skill_dir(repo, PLUGIN, "late-skill") / "SKILL.md", "# late-skill\n\nv1\n")
+    commit(repo, "late")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--ff-only", "pr")
+    code, out = gate(repo, head="stale")
+    assert code == 1, out
+    assert "no change to judge" not in out
+    assert "late-skill" in out
+
+
 def test_no_skill_change_passes(tmp_path):
     repo = make_repo(tmp_path)
     _write(repo / "README.md", "hi\n")
