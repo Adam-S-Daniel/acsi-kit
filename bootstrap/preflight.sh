@@ -189,11 +189,19 @@ check_gh() {
 # hand. The local denylist is read as the pre-push privacy check and the
 # write-marker hook read it: PRIVACY_DENYLIST_FILE, else
 # ~/.config/privacy-denylist.txt. Neither a pattern nor the identity is printed.
+# GIT_AUTHOR_NAME/EMAIL and GIT_COMMITTER_NAME/EMAIL, when all four are set,
+# win over the config for every commit, so they are the identity checked.
 check_git_identity() {
   local name email login="" id="" noreply handle fixline list shown hits
   have git || { skp "git identity: git is not installed"; return 0; }
-  name=$(git config --global --get user.name 2>/dev/null || true)
-  email=$(git config --global --get user.email 2>/dev/null || true)
+  if [ -n "${GIT_AUTHOR_NAME:-}" ] && [ -n "${GIT_AUTHOR_EMAIL:-}" ] \
+      && [ -n "${GIT_COMMITTER_NAME:-}" ] && [ -n "${GIT_COMMITTER_EMAIL:-}" ]; then
+    name=$GIT_AUTHOR_NAME email=$GIT_AUTHOR_EMAIL
+    [ "$GIT_COMMITTER_EMAIL" = "$GIT_AUTHOR_EMAIL" ] || email=$GIT_COMMITTER_EMAIL
+  else
+    name=$(git config --global --get user.name 2>/dev/null || true)
+    email=$(git config --global --get user.email 2>/dev/null || true)
+  fi
   if have "$GH" && "$GH" auth status >/dev/null 2>&1; then
     login=$("$GH" api user --jq .login 2>/dev/null) || login=""
     id=$("$GH" api user --jq .id 2>/dev/null) || id=""
@@ -206,7 +214,7 @@ check_git_identity() {
   if [ "$CONFIG_STATE" = ok ]; then handle=$CFG_OWNER_NAME; else handle="<OWNER_NAME, a public handle>"; fi
   fixline="git config --global user.name '$handle' && git config --global user.email '$noreply'   (or set both without --global in each clone of these repos; this check reads only the global ones)"
   if [ -z "$name" ] || [ -z "$email" ]; then
-    warn_ "git has no user.name or user.email in its global config; a commit you make by hand needs both, and public history keeps them for good, so use a public handle and your GitHub noreply address"
+    warn_ "git has no user.name or user.email in its global config (or in GIT_AUTHOR_* and GIT_COMMITTER_*); a commit you make by hand needs both, and public history keeps them for good, so use a public handle and your GitHub noreply address"
     fix "$fixline"
   elif [[ ! $email =~ ^([0-9]+\+)?[A-Za-z0-9-]+@users\.noreply\.github\.com$ ]]; then
     warn_ "git commits as an email that is not a GitHub noreply address (git's global user.email), so a commit you make by hand in these repos publishes it for good (the kit's own commits use OWNER_NAME and your noreply address)"

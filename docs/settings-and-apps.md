@@ -161,9 +161,16 @@ site. The script records the App id in `fleet.env` first, then stores the
 client id and private key where the workflows read them, on stdin and never
 printed.
 
+GitHub may ask for your password ("Confirm access") when you click Create.
+After you confirm, it can drop the manifest and show an empty "Register new
+GitHub App" form: don't fill that in. Open `app-manifests/<app>.html` again
+and click Create; the script is still waiting for the code. A browser
+extension or assistant may hide the `?code=` part of the redirect, so copy
+the URL from the address bar yourself.
+
 | App | Permissions | Installed on | Client id | Private key |
 |---|---|---|---|---|
-| `guidance-sync` | contents, pull requests, issues: write; actions, checks, metadata: read | every fleet repo | variable `APP_CLIENT_ID` in `_agent-guidance` | secret `APP_PRIVATE_KEY` in `_agent-guidance` |
+| `guidance-sync` | contents, pull requests, issues, workflows: write; actions, checks, metadata: read | every fleet repo | variable `APP_CLIENT_ID` in `_agent-guidance` | secret `APP_PRIVATE_KEY` in `_agent-guidance` |
 | `settings-admin` | administration, actions, issues: write; metadata: read | every fleet repo | variable `REPO_SETTINGS_APP_CLIENT_ID` in `repo-settings` | secret `REPO_SETTINGS_APP_PRIVATE_KEY` in `fleet-apply` |
 | `settings-read` | administration, actions, issues, metadata: read | every fleet repo | variable `REPO_SETTINGS_READ_APP_CLIENT_ID` in `repo-settings` | secret `REPO_SETTINGS_READ_APP_PRIVATE_KEY` in `repo-settings` |
 | `eval-improve` | contents, pull requests: write | `acsi-agentskills`, `_agent-guidance` | secret `EVAL_IMPROVE_APP_CLIENT_ID` in `skills-evals` | secret `EVAL_IMPROVE_APP_PEM` in `skills-evals` |
@@ -183,6 +190,13 @@ their credentials in `skills-evals`. `/adopt-evals` creates and installs
 them in steps 33 and 34, once `skills-evals` exists, and `create-apps.sh`
 skips them until then.
 
+An older `guidance-sync` made before the kit asked for workflows: write
+fails the sync's first delivery to a repo whose workflow files it creates
+("refusing to allow a GitHub App to create or update workflow ... without
+`workflows` permission"). On the App's settings page, Permissions, set
+Repository permissions, Workflows to "Read and write", save, and accept the
+new permission on its installation (Settings, Applications, Configure).
+
 A lost private key can't be recovered. Generate a new one on the App's
 settings page and store it with the `gh secret set` command `create-apps.sh`
 prints for a missing key.
@@ -192,7 +206,9 @@ prints for a missing key.
 Installing happens in the browser. Open each
 `https://github.com/apps/<slug>/installations/new` link `create-apps.sh`
 printed, choose "Only select repositories", and pick the repos it names
-under the link. For the fleet-wide Apps, that is the five base repos the kit
+under the link (the picker closes after each pick, so it takes one round per
+repo). If the browser is signed in to two GitHub accounts, the page first
+asks which one to install for: pick the owner. For the fleet-wide Apps, that is the five base repos the kit
 created, the same list `verify.sh` names for step 7 (not the repos
 `fleet.yml` lists, which still include the example repos until step 9). Add
 a repo of your own when you list it in `fleet.yml` or `repos.yml`. Once the evals track
@@ -261,9 +277,20 @@ workflow isn't on the base branch yet:
   `_agent-guidance`'s reusable workflow at a sha that ships as forty zeros,
   so the run fails at startup until step 38 pins it. The base repos' copies
   ship with no schedule; step 16 pins the sha and adds the daily schedule in
-  the same pull request, so they never run at the placeholder.
+  the same pull request, so they never run at the placeholder;
+- the gates that judge a pull request by what it changes against the base
+  branch: `_agent-guidance`'s "Guidance touch gate" (in `checks`) and
+  `acsi-agentskills`' skill gates (in `pytest`). The base branch holds only
+  the README, so the starter pull request "adds" every guidance section and
+  every skill at once, without the impact-log entries or eval lines a real
+  addition carries. Later pull requests are judged against the merged
+  starter and pass;
+- `repo-settings`' `drift` job on its pull requests: the repos really do
+  differ from `fleet.yml` until step 20 applies it.
 
-Nothing is protected before step 20, so these don't block the merge.
+Nothing is protected before step 20, so these don't block the merge. Merge
+the starter and regenerate pull requests (steps 4 to 18) before step 20, or
+their red checks block them once the repos are protected.
 
 These wait for a later step without failing, each with a "not set up yet"
 or "skipped" notice on its run: `repo-settings`' weekly `plan` plans nothing
@@ -277,6 +304,14 @@ until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
 scheduled runs that read `skills-evals` skip while `EVALS_REPO` is `none`
 ([routines](routines.md#fleet-worker)).
 
+Merging `_agent-guidance`'s starter pull request (step 10) also opens
+"Vendor discrepancy" and "Vendor issue draft ready" issues there: the
+export ships the owner's notes on Claude Code and Codex
+(`docs/reference/agent-*.DISCREPANCIES.md` and
+`docs/reference/vendor-issue-drafts/`), and `vendor-discrepancy-alert.yml`
+files one per entry. Read them as the owner's findings, not yours, and close
+the ones you don't want to follow up.
+
 One issue is expected on the evals track, and no run fails for it. Between
 step 35, which creates `skills-evals`, and step 40, which lists it in
 `repos.yml`'s `cron_coverage.fleet`, `_agent-guidance`'s daily
@@ -288,8 +323,17 @@ These are expected to fail until a later step or a kit update, and nothing
 else is:
 
 - merging `repo-settings`' starter pull request (step 4) runs its `plan`,
-  which fails at the token mint until step 6 creates the settings-read App
-  (a re-run after step 6 is green);
+  which fails at the token mint until step 6 creates the settings-read App,
+  and then at the label read until step 9 drops the example repos from
+  `fleet.yml` (a re-run after step 9 is green);
+- `_agent-guidance`'s `sync.yml` on each merge from step 10 until steps 12
+  and 13 copy `acsi-agentskills`, `acsi-agentskills-private` and
+  `wsl-automation`: a repo that holds only its README lacks files the sync
+  expects, and the run reports it (an App made before the kit asked for
+  workflows: write also fails there; see [GitHub Apps](#github-apps)). If
+  the sync does deliver files there first and `copy-starter.sh` then refuses
+  one, check the two differ only in what the starter adds and run it again
+  with `--force`;
 - `_agent-guidance`'s `skills-lock-bump.yml`, four times a day from step 10
   until step 12 copies `acsi-agentskills` (until then that repo holds only
   its first README). A later kit update fixes this one;

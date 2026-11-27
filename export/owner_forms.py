@@ -18,7 +18,8 @@ For `one` and `two` it runs bootstrap/lib/substitute.py, plan_sizing.py
 (`--plan pro`), time_zone.py (a zone that is not the export's UTC, ZONES),
 the explorer page rebuild for a tree with explorer/display.json (npm ci and
 node build.js, then build.js --check, as copy-starter.sh step 2c does: the
-pages embed the zone), and repin.py in that order, as copy-starter.sh does;
+pages embed the zone), staged_generated.py and repin.py in that order, as
+copy-starter.sh does;
 repin.py is last, because a pin is the digest of a file as the steps before it
 left it. Form `two` then
 removes the example repos' rows:
@@ -44,6 +45,10 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parent.parent
 BOOTSTRAP_LIB = KIT / "bootstrap" / "lib"
+# starter folder -> the repo it becomes (bootstrap/lib/common.sh's kit_tree,
+# the other way round); staged_generated.py matches waivers by repo name.
+REPO_NAMES = {"agent-guidance": "_agent-guidance", "agent-skills": "acsi-agentskills",
+              "agent-skills-private": "acsi-agentskills-private"}
 
 # form -> (owner, owner-two, name, noreply). `invented` is not staged.
 FORMS = {
@@ -221,6 +226,7 @@ def stage(tree: Path, kit_name: str, form: str, env=None) -> None:
     _run([str(BOOTSTRAP_LIB / "plan_sizing.py"), str(tree), "--plan", "pro"], env)
     _run([str(BOOTSTRAP_LIB / "time_zone.py"), str(tree), "--zone", ZONES[form]], env)
     rebuild_explorer(tree, env)
+    _run([str(BOOTSTRAP_LIB / "staged_generated.py"), str(tree), "--repo-name", REPO_NAMES.get(kit_name, kit_name)], env)
     _run([str(BOOTSTRAP_LIB / "repin.py"), str(tree)], env)
     if form == "two":
         drop_example_repos(tree, kit_name)

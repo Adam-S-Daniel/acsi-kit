@@ -5,9 +5,10 @@
 # in lib/common.sh), with the permissions the owner's own Apps have, through
 # GitHub's App manifest flow (an App cannot be created by API alone):
 #
-#   guidance-sync   contents, pull requests, issues: write; actions, checks,
-#                   metadata: read. _agent-guidance's sync, Dependabot sweep
-#                   and fleet reads. Variable APP_CLIENT_ID, secret
+#   guidance-sync   contents, pull requests, issues, workflows: write;
+#                   actions, checks, metadata: read. _agent-guidance's sync
+#                   (it delivers workflow files, which GitHub refuses from an
+#                   App without workflows), Dependabot sweep and fleet reads. Variable APP_CLIENT_ID, secret
 #                   APP_PRIVATE_KEY, in _agent-guidance. Installed fleet-wide.
 #   settings-admin  administration, actions, issues: write; metadata: read.
 #                   repo-settings' apply. Variable REPO_SETTINGS_APP_CLIENT_ID
