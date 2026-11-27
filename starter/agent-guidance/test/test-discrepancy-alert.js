@@ -141,30 +141,13 @@ test("parseEntries: two entries, both returned in document order with correct so
   assert.ok(!entries[1].source.includes("must never be mistaken"));
 });
 
-test("parseEntries: regression — the real agent-claude-code.DISCREPANCIES.md parses to its dated entries, not the template", () => {
-  const p = path.join(__dirname, "..", "docs", "reference", "agent-claude-code.DISCREPANCIES.md");
-  const text = fs.readFileSync(p, "utf8");
-  const entries = parseEntries(text);
-  assert.ok(entries.length >= 1);
-  assert.equal(entries[0].heading, "2026-11-08 — A repo's own skills never load after `cd` into it from a multi-repo parent folder");
-  for (const e of entries) {
-    assert.match(e.heading, /^\d{4}-\d{2}-\d{2} — /, `entry heading ${e.heading}`);
-    assert.ok(!e.heading.includes("YYYY"), "the template inside the code fence is not an entry");
-    for (const field of ["Kind", "Status", "Changelog says", "Vendor issues", "Vendor proposal"]) {
-      assert.ok(e.source.includes(`**${field}:**`), `entry contains ${field}`);
-    }
-  }
-});
-
-test("parseEntries: regression — the real agent-codex.DISCREPANCIES.md contains the import session availability entry", () => {
-  const p = path.join(__dirname, "..", "docs", "reference", "agent-codex.DISCREPANCIES.md");
-  const text = fs.readFileSync(p, "utf8");
-  const entries = parseEntries(text);
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].heading, "2026-10-06 — `/import` session availability: docs disagree with release notes");
-  assert.ok(entries[0].source.includes("Made `/import` available in remote sessions and local background-server sessions. (#47317)"));
-  for (const field of ["Docs say", "Evidence", "Vendor issues", "Vendor proposal"]) {
-    assert.ok(entries[0].source.includes(`**${field}:**`), `entry contains ${field}`);
+test("parseEntries: the shipped DISCREPANCIES.md files keep their template and hold no entries yet", () => {
+  for (const agent of ["claude-code", "codex"]) {
+    const p = path.join(__dirname, "..", "docs", "reference", `agent-${agent}.DISCREPANCIES.md`);
+    const text = fs.readFileSync(p, "utf8");
+    assert.ok(text.includes("\n## Entries\n"), `${agent}: keeps its Entries heading`);
+    assert.ok(text.includes("### YYYY-MM-DD — "), `${agent}: keeps its entry template`);
+    assert.deepEqual(parseEntries(text), [], `${agent}: the template is not an entry, and there are none`);
   }
 });
 

@@ -1177,6 +1177,14 @@ patches:
     why: >-
       C12. A handoff note's numeric ruleset id and two fixtures' real Claude
       Code session id become a description and an invented uuid.
+  - file: vendor_notes.py
+    why: >-
+      "Vendor notes ship empty" (DECISIONS). The owner's Claude Code and Codex
+      discrepancy entries and vendor issue drafts would open the owner's
+      follow-ups as issues in the adopter's repo on the first merge; the files
+      keep their format and template with no entries, the drafts folder keeps
+      a README, and the two tests that asserted the owner's entries assert an
+      empty file instead.
 
 # P3: generated files rebuilt from the edited sources, in this order.
 regenerate:

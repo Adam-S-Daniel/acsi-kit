@@ -3383,3 +3383,18 @@ A third walk as an outside adopter (Free plan, Claude Pro, base track) reached e
 - **Smaller ones.** status.sh's "Run:" line fills `<you>` with `OWNER`. `update-kit.sh --dry-run` counted the save of `starter/` it listed. `docs/routines.md` gave memory curation's project task as Monday 14:00 UTC, the source owner's time, while the spec the kit ships says Monday morning in `TIME_ZONE` (the export edit in "An adopter's own cloud allowlist, zone and Codex pin"); the page now says the same. The settings example's `WSL_AUTOMATION_AGENT_OWNER_ROOTS=~/src` is the source's value, while `install-machine.sh` clones into `~/repos` (as `LESSONS_CLONE` in the same file says), so a new `edits` entry in `export/manifests/wsl-automation.yml` makes it `~/repos`, and a second one makes the README's prose example agree. `docs/guidance.md` gave the guidance merge window as Monday 17:00 to 19:00 UTC, the source owner's; the shipped `scripts/base-md-merge-window.yml` takes the adopter's `TIME_ZONE` (noon to 2 PM), and the page now says so.
 
 Reverse: drop the two `edits` entries, restore the two modes, and revert `bootstrap/lib/pr.sh`, `bootstrap/lib/common.sh` (`kit_git_identity`, `track_arg`, `RUN_OUT`), `create-repos.sh`, `preflight.sh`, `set-secrets.sh`, `install-machine.sh`, `status.sh`, `verify.sh`, `update-kit.sh`, the two skills, step 3's run text, and the pages, then remove the two tests and their bash assertions.
+
+## Free walk follow-ups (2026-11-27, after acsi-kit PR #139)
+
+The real walk on GitHub Free (PR #139) left four kit behaviors documented as expected. Each is fixed here so a later adopter does not hit it.
+
+### Vendor notes ship empty
+
+`_agent-guidance`'s `docs/reference/agent-claude-code.DISCREPANCIES.md` and `agent-codex.DISCREPANCIES.md` hold the source owner's findings on Claude Code and Codex, and `docs/reference/vendor-issue-drafts/` the owner's drafts of vendor issues. Merging the starter pull request (step 10) ran `vendor-discrepancy-alert.yml`, which opened one "Vendor discrepancy" or "Vendor issue draft ready" issue per entry in the adopter's repo (three on the walk): the owner's follow-ups, not the adopter's.
+
+- `export/patches/_agent-guidance/vendor_notes.py` keeps each DISCREPANCIES.md through its `## Entries` heading (the title, "How to add an entry" and the fenced template, which the alert script never reads as an entry) and adds "None yet." It removes every draft and writes a `README.md` in the drafts folder, which the alert script skips by name, so the folder the process doc names still exists.
+- A link elsewhere to an entry's anchor loses the anchor (`docs/evidence/codex-memory-129.md` linked the `/import` entry; it now links the file, and its sentence stays as the owner's history). A link to a removed draft stops the export.
+- `test/test-discrepancy-alert.js`'s two "regression — the real ..." tests asserted the owner's entries; they become one test that the shipped files keep their heading and template and parse to no entries. The patch finds them by their title prefix, so a new owner entry does not hold back a re-pin.
+- `export/tests/test_vendor_notes.py` covers the patch and holds the committed starter to empty notes and a README-only drafts folder.
+
+Reverse: delete the patch, its manifest entry and its test file, and re-run the export.
