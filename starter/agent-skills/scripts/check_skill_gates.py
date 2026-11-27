@@ -524,8 +524,11 @@ def run(base: str, head: str, census_source: str) -> Tuple[int, List[str]]:
     # The adoption kit's first copy: the base branch holds no registry at all
     # (only the README the kit's create-repos.sh wrote), so this pull request
     # adds every skill at once and there is no change to judge. Every later
-    # pull request diffs against the merged registry as usual.
-    if not base_blobs and blob_id(point, IMPACT_FILE) is None:
+    # pull request diffs against the merged registry as usual. The base tip
+    # must be empty too: a branch cut before the starter merged and opened
+    # after it is judged.
+    if (not base_blobs and blob_id(point, IMPACT_FILE) is None
+            and not tree_blobs(base) and blob_id(base, IMPACT_FILE) is None):
         return 0, ["skill-gates: the base branch has no skills and no "
                    f"{IMPACT_FILE} yet — this pull request adds the registry, "
                    "so there is no change to judge"]

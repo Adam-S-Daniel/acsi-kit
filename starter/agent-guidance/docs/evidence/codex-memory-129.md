@@ -439,7 +439,7 @@ copied raw notes; it does not establish later consolidation behavior. The
 2026-10-06, maps Claude Code project memories to Memories but gives no
 `metadata.home` preservation guarantee.
 
-The [session-availability discrepancy](../reference/agent-codex.DISCREPANCIES.md)
+The [session-availability discrepancy](../reference/agent-codex.DISCREPANCIES.md) (an entry in the source repo's copy; the kit ships this file with no entries)
 records conflicting current documentation and 0.157.0 release notes, with
 0.160.1 source reads suggesting the release-note path remains implemented.
 Remote behavior has not been reproduced. Use a local TUI for the planned

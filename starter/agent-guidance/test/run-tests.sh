@@ -7597,7 +7597,7 @@ test_sync_skips_unfilled_kit_repo() {
     rc=0; run_kit_sync --dry-run > "$out-dry.log" 2>&1 || rc=$?
     [[ $rc -eq 0 ]] && pass "unfilled kit repo (dry run): exits 0" || fail "unfilled kit repo (dry run): exits 0 (rc=$rc)"
     repo_section "$out-dry.log" "=== kitorg/repo-unfilled ===" > "$out-dry-unfilled"
-    assert_contains "$out-dry-unfilled" "Not set up yet: README.md is still the one bootstrap/create-repos.sh wrote" \
+    assert_contains "$out-dry-unfilled" "Not set up yet: README.md still carries the line bootstrap/create-repos.sh wrote" \
         "unfilled kit repo (dry run): named as not set up yet"
     assert_not_contains "$out-dry-unfilled" "[DRY RUN] Would" "unfilled kit repo (dry run): nothing offered"
     rc=0; run_kit_sync > "$out.log" 2>&1 || rc=$?

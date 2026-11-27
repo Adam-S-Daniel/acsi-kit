@@ -84,7 +84,7 @@ def test_an_anchor_into_a_gone_entry_is_dropped(tmp_path):
     root = tree(tmp_path)
     vendor_notes.apply(root, {})
     assert (root / "docs/evidence/e.md").read_text() == (
-        "See [it](../reference/agent-x.DISCREPANCIES.md) and "
+        "See [it](../reference/agent-x.DISCREPANCIES.md)" + vendor_notes.GONE_NOTE + " and "
         "[the file](../reference/agent-x.DISCREPANCIES.md).\n")
 
 

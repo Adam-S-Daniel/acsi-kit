@@ -304,9 +304,10 @@ until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
 `LOOP_WORKER_FIRE_URL` until step 41; and the
 scheduled runs that read `skills-evals` skip while `EVALS_REPO` is `none`
 ([routines](routines.md#fleet-worker)); and `_agent-guidance`'s `sync.yml`
-skips each repo whose README is still the one `create-repos.sh` wrote ("Not
-set up yet") until steps 12 and 13 merge its starter, so nothing lands there
-before `copy-starter.sh` does.
+skips each repo whose README still carries the last line `create-repos.sh`
+wrote ("Not set up yet") until steps 12 and 13 merge its starter, so nothing
+lands there before `copy-starter.sh` does. For a repo you set up by hand,
+delete that line.
 
 `_agent-guidance`'s vendor notes (`docs/reference/agent-*.DISCREPANCIES.md`
 and `docs/reference/vendor-issue-drafts/`) ship with no entries, so merging
@@ -332,10 +333,11 @@ else is:
 - `_agent-guidance`'s `sync.yml` with a `guidance-sync` App made before the
   kit asked for workflows: write: its first delivery of workflow files to a
   repo fails (see [GitHub Apps](#github-apps)). An `_agent-guidance` copied
-  from a kit older than 2026-11-27 also delivers to repos that hold only
-  their README; if `copy-starter.sh` then refuses a file the sync put there,
-  check the two differ only in what the starter adds and run it again with
-  `--force`;
+  from a kit older than 2026-11-27 also syncs repos that hold only their
+  README, from step 10 until steps 12 and 13: the run reports the files the
+  sync expects there and doesn't find. If it delivers files there first and
+  `copy-starter.sh` then refuses one, check the two differ only in what the
+  starter adds and run it again with `--force`;
 - `_agent-guidance`'s `skills-lock-bump.yml`, four times a day from step 10
   until step 12 copies `acsi-agentskills` (until then that repo holds only
   its first README). A later kit update fixes this one;

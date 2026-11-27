@@ -10,7 +10,10 @@ convergence block's AST, ships the tuple empty with a comment saying why,
 and replaces the two tests that asserted its names with two that assert none
 is written and that an entry a machine already has is left alone. Nothing is
 hard-coded here: a re-pin that adds a name to the source's list empties it
-too, and a source that drops the list stops the export.
+too, and a source that drops the list stops the export. The test file's own
+`RETIRED` list stays as the source has it: the new tests use it as the names
+that must not appear, so a name the source adds to setup.sh but not there is
+not checked by them (the kit test of the committed setup.sh still is).
 
 Runs on the substituted tree.
 """

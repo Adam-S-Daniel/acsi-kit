@@ -201,6 +201,19 @@ def test_a_base_with_only_the_impact_file_is_judged(tmp_path):
     assert "no change to judge" not in out
 
 
+def test_a_branch_cut_before_the_starter_merged_is_judged(tmp_path):
+    repo = first_copy_repo(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "stale", "main")
+    _write(skill_dir(repo, PLUGIN, "late-skill") / "SKILL.md", "# late-skill\n\nv1\n")
+    commit(repo, "late")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--ff-only", "pr")
+    code, out = gate(repo, head="stale")
+    assert code == 1, out
+    assert "no change to judge" not in out
+    assert "late-skill" in out
+
+
 def test_no_skill_change_passes(tmp_path):
     repo = make_repo(tmp_path)
     _write(repo / "README.md", "hi\n")

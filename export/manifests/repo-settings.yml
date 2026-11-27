@@ -274,8 +274,12 @@ edits:
             # first apply) is not this pull request's, so it is listed and does
             # not fail; scripts/drift_this_pr.py compares the two plans. A base
             # with no fleet.yml (the kit's first starter pull request) has
-            # nothing to compare against. When the base cannot be fetched or
-            # planned, every drift fails, as before.
+            # nothing to compare against. The base is planned with the base's
+            # own engine, so drift that a change to scripts/repo_settings.py
+            # brings is this pull request's too. When the base cannot be
+            # fetched or planned, every drift fails, as before. The fetch uses
+            # the checkout's persisted credentials: with persist-credentials:
+            # false it fails, and so does the job.
             - name: Drift report
               env:
                 GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -289,13 +293,18 @@ edits:
                   echo "::warning title=drift::could not fetch the base commit; reporting every drift as this pull request's"
                   exit 1
                 fi
-                if ! git cat-file -e "FETCH_HEAD:repo-settings/fleet.yml" 2>/dev/null; then
+                entry=$(git ls-tree FETCH_HEAD -- repo-settings/fleet.yml)
+                if [ -z "$entry" ]; then
                   echo "::notice title=drift::the base branch has no repo-settings/fleet.yml yet, so there is nothing to compare against; this report does not fail"
                   exit 0
                 fi
                 git show "FETCH_HEAD:repo-settings/fleet.yml" > "$RUNNER_TEMP/base-fleet.yml"
+                if ! git show "FETCH_HEAD:scripts/repo_settings.py" > "$RUNNER_TEMP/base-repo_settings.py"; then
+                  echo "::warning title=drift::the base branch has no scripts/repo_settings.py to plan it with; reporting every drift as this pull request's"
+                  exit 1
+                fi
                 brc=0
-                python scripts/repo_settings.py diff --config "$RUNNER_TEMP/base-fleet.yml" --owner "$OWNER" \
+                python "$RUNNER_TEMP/base-repo_settings.py" diff --config "$RUNNER_TEMP/base-fleet.yml" --owner "$OWNER" \
                   --changes-json "$RUNNER_TEMP/base-changes.json" > /dev/null || brc=$?
                 if [ "$brc" -gt 1 ]; then
                   echo "::warning title=drift::could not plan the base branch's fleet.yml (exit $brc); reporting every drift as this pull request's"
@@ -307,6 +316,18 @@ edits:
       drift job fails on any drift, and before the first apply every repo
       differs from fleet.yml, so every repo-settings pull request was red
       until step 20. It now fails only on drift the pull request brings.
+  - path: .github/workflows/repo-settings.yml
+    stage: output
+    old: |2
+            # merging it would ask the reviewer to approve. Runs after a red drift
+            # report (drift is red by design here) and may not fail the job.
+    new: |2
+            # merging it would ask the reviewer to approve. Runs after a red drift
+            # report (red when the pull request brings drift) and may not fail the job.
+    why: >-
+      First starter pull requests pass the diff gates (DECISIONS). The source's
+      comment said drift is always red here; with the edit above it is red only
+      on drift the pull request brings.
 
 patches:
   - file: kit_config.py

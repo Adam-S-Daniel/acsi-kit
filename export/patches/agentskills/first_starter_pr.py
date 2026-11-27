@@ -9,11 +9,13 @@ failures on the real walk on GitHub Free, acsi-kit PR #139). A skill the
 starter adds is not a change to judge: the adopter's later pull requests diff
 against the merged starter, and the gates apply to them as before.
 
-`run()` now passes, with a line saying why, when the merge-base has no
-SKILL.md or PURPOSE.md under `plugins/` and no `docs/skill-impact.md`: a base
-with no registry at all. A base with either is judged as before. Tests in
-`scripts/test_check_skill_gates.py` cover the first copy, a later edit on top
-of it (still a failure) and a base with only the impact file.
+`run()` now passes, with a line saying why, when neither the merge-base nor
+the base branch's tip has a SKILL.md or PURPOSE.md under `plugins/` or a
+`docs/skill-impact.md`: a base with no registry at all. A base with either is
+judged as before, and so is a branch cut from the README-only base before the
+starter merged and opened after it. Tests in `scripts/test_check_skill_gates.py`
+cover the first copy, a later edit on top of it (still a failure), a base
+with only the impact file, and that stale branch.
 
 Runs on the substituted tree.
 """
@@ -28,8 +30,11 @@ GATE = (
     "    # The adoption kit's first copy: the base branch holds no registry at all\n"
     "    # (only the README the kit's create-repos.sh wrote), so this pull request\n"
     "    # adds every skill at once and there is no change to judge. Every later\n"
-    "    # pull request diffs against the merged registry as usual.\n"
-    "    if not base_blobs and blob_id(point, IMPACT_FILE) is None:\n"
+    "    # pull request diffs against the merged registry as usual. The base tip\n"
+    "    # must be empty too: a branch cut before the starter merged and opened\n"
+    "    # after it is judged.\n"
+    "    if (not base_blobs and blob_id(point, IMPACT_FILE) is None\n"
+    "            and not tree_blobs(base) and blob_id(base, IMPACT_FILE) is None):\n"
     "        return 0, [\"skill-gates: the base branch has no skills and no \"\n"
     "                   f\"{IMPACT_FILE} yet — this pull request adds the registry, \"\n"
     "                   \"so there is no change to judge\"]\n",
@@ -89,6 +94,19 @@ def test_a_base_with_only_the_impact_file_is_judged(tmp_path):
     code, out = gate(repo)
     assert code == 1, out
     assert "no change to judge" not in out
+
+
+def test_a_branch_cut_before_the_starter_merged_is_judged(tmp_path):
+    repo = first_copy_repo(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "stale", "main")
+    _write(skill_dir(repo, PLUGIN, "late-skill") / "SKILL.md", "# late-skill\\n\\nv1\\n")
+    commit(repo, "late")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--ff-only", "pr")
+    code, out = gate(repo, head="stale")
+    assert code == 1, out
+    assert "no change to judge" not in out
+    assert "late-skill" in out
 
 
 def test_no_skill_change_passes(tmp_path):

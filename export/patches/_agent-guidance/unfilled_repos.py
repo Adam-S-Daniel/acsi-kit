@@ -12,7 +12,9 @@ branch first, and copy-starter.sh would then refuse those files.
 
 So `scripts/sync.sh` skips a repo, right after cloning it, while its README.md
 still carries that marker line (counted as skipped, with a log line naming
-the step that fills it), in a real run and a dry run alike. The marker is the
+the step that fills it, and saying to delete the line from a repo set up by
+hand or with no starter, such as the optional `waiting-feed`), in a real run
+and a dry run alike. The marker is the
 kit's own and never appears in the source owner's fleet, so their sync is
 unchanged. `export/tests/test_unfilled_repos.py` holds the marker equal to
 `bootstrap/lib/common.sh`'s GENERATED_README_MARKER, and a test in
@@ -48,7 +50,7 @@ SKIP = (
     "    # put files on its default branch that copy-starter.sh then refuses to\n"
     "    # overwrite, so the sync waits until the starter is merged.\n"
     '    if [[ -f README.md ]] && grep -qxF -- "$KIT_UNFILLED_MARKER" README.md; then\n'
-    '        log "Not set up yet: README.md is still the one bootstrap/create-repos.sh wrote. Copy its starter with bootstrap/copy-starter.sh and merge it; the next sync delivers here. Skipping."\n'
+    '        log "Not set up yet: README.md still carries the line bootstrap/create-repos.sh wrote. Copy its starter with bootstrap/copy-starter.sh and merge it; for a repo with no starter, or one you set up by hand, delete that line from README.md. The next sync delivers here. Skipping."\n'
     "        ((SKIP_COUNT++)) || true\n"
     '        cd "$REPO_ROOT"\n'
     "        continue\n"
@@ -105,7 +107,7 @@ TEST = (
     '    rc=0; run_kit_sync --dry-run > "$out-dry.log" 2>&1 || rc=$?\n'
     '    [[ $rc -eq 0 ]] && pass "unfilled kit repo (dry run): exits 0" || fail "unfilled kit repo (dry run): exits 0 (rc=$rc)"\n'
     '    repo_section "$out-dry.log" "=== kitorg/repo-unfilled ===" > "$out-dry-unfilled"\n'
-    '    assert_contains "$out-dry-unfilled" "Not set up yet: README.md is still the one bootstrap/create-repos.sh wrote" \\\n'
+    '    assert_contains "$out-dry-unfilled" "Not set up yet: README.md still carries the line bootstrap/create-repos.sh wrote" \\\n'
     '        "unfilled kit repo (dry run): named as not set up yet"\n'
     '    assert_not_contains "$out-dry-unfilled" "[DRY RUN] Would" "unfilled kit repo (dry run): nothing offered"\n'
     '    rc=0; run_kit_sync > "$out.log" 2>&1 || rc=$?\n'

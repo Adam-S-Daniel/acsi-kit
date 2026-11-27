@@ -15,8 +15,8 @@ follow-ups, not the adopter's. So:
   the alert script skips by name) says what goes there, so the folder the
   process doc names still exists;
 - a link elsewhere into one of those files' entries loses its anchor (the
-  entry is gone; the file is still there), and a link to a removed draft is
-  an error;
+  entry is gone; the file is still there) and gains a note saying so, and a
+  link to a removed draft is an error;
 - test-discrepancy-alert.js's two "regression — the real ..." tests, which
   asserted the owner's entries, become one test that the shipped files keep
   their `## Entries` heading and template and parse to no entries.
@@ -50,6 +50,10 @@ new draft opens a "Vendor issue draft ready" issue in this repo
 The adoption kit ships no drafts: the ones in the source repo were its
 owner's.
 """
+
+# Follows a link whose anchor named a gone entry, so the sentence around it
+# still reads true.
+GONE_NOTE = " (an entry in the source repo's copy; the kit ships this file with no entries)"
 
 REGRESSION_START = 'test("parseEntries: regression — the real agent-'
 
@@ -116,7 +120,7 @@ def apply(root: Path, ctx) -> None:
         if md.is_symlink() or "node_modules" in md.parts:
             continue
         text = md.read_text(encoding="utf-8")
-        new = _ANCHORED.sub(r"\1)", text)
+        new = _ANCHORED.sub(r"\1)" + GONE_NOTE, text)
         rel = md.relative_to(root)
         if _DRAFT_LINK.search(new):
             raise SystemExit(f"vendor_notes: {rel} links a vendor issue draft the kit does not ship")

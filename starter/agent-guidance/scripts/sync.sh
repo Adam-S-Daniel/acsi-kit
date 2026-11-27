@@ -1197,7 +1197,7 @@ for repo_name in "${REPOS[@]}"; do
     # put files on its default branch that copy-starter.sh then refuses to
     # overwrite, so the sync waits until the starter is merged.
     if [[ -f README.md ]] && grep -qxF -- "$KIT_UNFILLED_MARKER" README.md; then
-        log "Not set up yet: README.md is still the one bootstrap/create-repos.sh wrote. Copy its starter with bootstrap/copy-starter.sh and merge it; the next sync delivers here. Skipping."
+        log "Not set up yet: README.md still carries the line bootstrap/create-repos.sh wrote. Copy its starter with bootstrap/copy-starter.sh and merge it; for a repo with no starter, or one you set up by hand, delete that line from README.md. The next sync delivers here. Skipping."
         ((SKIP_COUNT++)) || true
         cd "$REPO_ROOT"
         continue
