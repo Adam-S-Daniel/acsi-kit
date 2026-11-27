@@ -277,20 +277,21 @@ workflow isn't on the base branch yet:
   `_agent-guidance`'s reusable workflow at a sha that ships as forty zeros,
   so the run fails at startup until step 38 pins it. The base repos' copies
   ship with no schedule; step 16 pins the sha and adds the daily schedule in
-  the same pull request, so they never run at the placeholder;
-- the gates that judge a pull request by what it changes against the base
-  branch: `_agent-guidance`'s "Guidance touch gate" (in `checks`) and
-  `acsi-agentskills`' skill gates (in `pytest`). The base branch holds only
-  the README, so the starter pull request "adds" every guidance section and
-  every skill at once, without the impact-log entries or eval lines a real
-  addition carries. Later pull requests are judged against the merged
-  starter and pass;
-- `repo-settings`' `drift` job on its pull requests: the repos really do
-  differ from `fleet.yml` until step 20 applies it.
+  the same pull request, so they never run at the placeholder.
 
 Nothing is protected before step 20, so these don't block the merge. Merge
 the starter and regenerate pull requests (steps 4 to 18) before step 20, or
 their red checks block them once the repos are protected.
+
+The gates that judge a pull request by what it changes against the base
+branch pass on a starter pull request: `_agent-guidance`'s "Guidance touch
+gate" (in `checks`) and `acsi-agentskills`' skill gates (in `pytest`) find no
+guidance or skills on a base that holds only the README, and say there is
+nothing to judge. `repo-settings`' `drift` job fails only on drift the pull
+request itself brings, not on settings step 20 has yet to apply. Later pull
+requests are judged as usual. A repo copied from a kit older than these
+fixes (2026-11-27) still shows them red on its starter and `repo-settings`
+pull requests; merge them anyway before step 20.
 
 These wait for a later step without failing, each with a "not set up yet"
 or "skipped" notice on its run: `repo-settings`' weekly `plan` plans nothing
@@ -302,15 +303,17 @@ until step 27 sets the routine's URL (`verify.sh --only fleet-worker`, step
 27's check, reports it until then), and the same for the Loop worker's
 `LOOP_WORKER_FIRE_URL` until step 41; and the
 scheduled runs that read `skills-evals` skip while `EVALS_REPO` is `none`
-([routines](routines.md#fleet-worker)).
+([routines](routines.md#fleet-worker)); and `_agent-guidance`'s `sync.yml`
+skips each repo whose README is still the one `create-repos.sh` wrote ("Not
+set up yet") until steps 12 and 13 merge its starter, so nothing lands there
+before `copy-starter.sh` does.
 
-Merging `_agent-guidance`'s starter pull request (step 10) also opens
-"Vendor discrepancy" and "Vendor issue draft ready" issues there: the
-export ships the owner's notes on Claude Code and Codex
-(`docs/reference/agent-*.DISCREPANCIES.md` and
-`docs/reference/vendor-issue-drafts/`), and `vendor-discrepancy-alert.yml`
-files one per entry. Read them as the owner's findings, not yours, and close
-the ones you don't want to follow up.
+`_agent-guidance`'s vendor notes (`docs/reference/agent-*.DISCREPANCIES.md`
+and `docs/reference/vendor-issue-drafts/`) ship with no entries, so merging
+its starter opens no "Vendor discrepancy" issue. A copy from an older kit
+shipped the source owner's notes, and `vendor-discrepancy-alert.yml` opened
+one issue per entry: those are the owner's findings, not yours, so close
+them.
 
 One issue is expected on the evals track, and no run fails for it. Between
 step 35, which creates `skills-evals`, and step 40, which lists it in
@@ -326,14 +329,13 @@ else is:
   which fails at the token mint until step 6 creates the settings-read App,
   and then at the label read until step 9 drops the example repos from
   `fleet.yml` (a re-run after step 9 is green);
-- `_agent-guidance`'s `sync.yml` on each merge from step 10 until steps 12
-  and 13 copy `acsi-agentskills`, `acsi-agentskills-private` and
-  `wsl-automation`: a repo that holds only its README lacks files the sync
-  expects, and the run reports it (an App made before the kit asked for
-  workflows: write also fails there; see [GitHub Apps](#github-apps)). If
-  the sync does deliver files there first and `copy-starter.sh` then refuses
-  one, check the two differ only in what the starter adds and run it again
-  with `--force`;
+- `_agent-guidance`'s `sync.yml` with a `guidance-sync` App made before the
+  kit asked for workflows: write: its first delivery of workflow files to a
+  repo fails (see [GitHub Apps](#github-apps)). An `_agent-guidance` copied
+  from a kit older than 2026-11-27 also delivers to repos that hold only
+  their README; if `copy-starter.sh` then refuses a file the sync put there,
+  check the two differ only in what the starter adds and run it again with
+  `--force`;
 - `_agent-guidance`'s `skills-lock-bump.yml`, four times a day from step 10
   until step 12 copies `acsi-agentskills` (until then that repo holds only
   its first README). A later kit update fixes this one;
