@@ -3447,3 +3447,20 @@ Reverse: delete the patch, its manifest entry and its test file, and re-run the 
 - An `_agent-guidance` copied from an older kit has the old sync; `docs/settings-and-apps.md` keeps the `--force` advice for that case.
 
 Reverse: delete the patch, its manifest entry and its test file, and re-run the export.
+
+## Re-pin round 27 (2026-11-27): round 26 by hand, both held sources to their heads
+
+The re-sync after #143 closed round 26's pull request (#140) as stale, because `repo-settings` had moved past its pin, and held back `_agent-guidance` too; the fix routine opened no new pull request (its branch name was #140's). This round, by hand, carries round 26's commit and moves both sources to their current heads.
+
+- `repo-settings` (`50b56e5` → `82c810d`) and `_agent-guidance` (`e227092` → `cc29768`): each source's only change is Dependabot's bump of `actions/create-github-app-token` from `v3.3.0` to `v3.4.0`, in its workflows and `actions.lock`. Ships as exported.
+- The kit's anchors follow: `_agent-guidance.yml`'s `actions.lock` edit (the left-out parity workflow's entry, P3) names `v3.4.0`, and `repo-settings.yml`'s four base-only-track edits of the plan job's mints name `v3.4.0`.
+- `docs/generated-files.md`, "Example repos in fleet.yml", names the rows as `manage: ["labels", "secrets"]` (round 26's `fleet.yml`). The other pages `doc_review.py --base origin/main` listed name the changed workflows, `fleet.yml` and the engine only generally; no statement on them became wrong.
+- The other sources stay. No shipped `.ps1` changed. No new skill or guidance section.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `e2270923ab44` | `cc2976802320` |
+| repo-settings | `c2bbdaff3f0e` (main) | `82c810d5e674` |
+| others | unchanged | unchanged |
+
+Reverse: revert this round's commit and round 26's, and re-run the export.

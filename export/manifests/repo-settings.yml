@@ -8,7 +8,7 @@
 repo: repo-settings
 kit_name: repo-settings
 source: repo-settings
-source_sha: 50b56e5790b79e1ed49ebf1b8ff1baada97b58e6
+source_sha: 82c810d5e67453e3b47b56a0195c5474255e0be7
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror)
 # are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -62,7 +62,7 @@ edits:
     old: |2
             - name: Mint read-only GitHub App token for example-adopter
               id: token_example_adopter
-              uses: actions/create-github-app-token@v3.3.0
+              uses: actions/create-github-app-token@v3.4.0
     new: |2
             # Not set up yet, on the weekly schedule only: until create-apps.sh
             # has made the settings-read App and set its client id, a scheduled
@@ -85,7 +85,7 @@ edits:
             - name: Mint read-only GitHub App token for example-adopter
               id: token_example_adopter
               if: steps.read_app.outputs.ready == 'true'
-              uses: actions/create-github-app-token@v3.3.0
+              uses: actions/create-github-app-token@v3.4.0
     why: 'kit departure: base-only track. The weekly plan minted from the settings-read App with no gate, so it was red every Monday from the starter merge (step 4) until create-apps.sh set the App up. Only the schedule skips with a notice; a push or dispatch keeps the source''s failure at the mint, so a deleted variable cannot make a settings change read as no drift.'
   - path: .github/workflows/repo-settings.yml
     stage: output
@@ -105,12 +105,12 @@ edits:
     old: |2
             - name: Mint read-only GitHub App token for example-adopter-two
               id: token_example_adopter_two
-              uses: actions/create-github-app-token@v3.3.0
+              uses: actions/create-github-app-token@v3.4.0
     new: |2
             - name: Mint read-only GitHub App token for example-adopter-two
               id: token_example_adopter_two
               if: steps.read_app.outputs.ready == 'true'
-              uses: actions/create-github-app-token@v3.3.0
+              uses: actions/create-github-app-token@v3.4.0
     why: 'kit departure: base-only track. Gated like the first owner''s mint.'
   - path: .github/workflows/repo-settings.yml
     stage: output
