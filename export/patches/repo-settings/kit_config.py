@@ -152,11 +152,11 @@ FANOUT_CUT = ("  # why: the fleet's privacy denylist has to reach every repo's C
               "  # Prerequisite for the Dependabot unattended-merge path")
 SECRETS_READ = "          permission-secrets: read\n"
 SECRETS_READ_COUNT = 3
-# The two apply steps' copy of the value; no kit repo-settings secret holds it
+# The four apply steps' copy of the value; no kit repo-settings secret holds it
 # (bootstrap/tests/check-refs.py requires each secret a workflow reads to be
 # one a bootstrap script stores there).
 FANOUT_VALUE = "          PRIVACY_DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}\n"
-FANOUT_VALUE_COUNT = 2
+FANOUT_VALUE_COUNT = 4
 
 FANOUT_TEST_EDITS = {
     "tests/test_repo_settings_workflow_token.py": [
@@ -164,6 +164,12 @@ FANOUT_TEST_EDITS = {
     "permission-secrets",
 }''', '''    "permission-metadata",
 }'''),
+        # The kit's workflow passes no value to any apply step (FANOUT_VALUE).
+        ('''        only = self._apply_steps()["only"]
+        self.assertEqual(only["env"]["PRIVACY_DENYLIST"], "${{ secrets.PRIVACY_DENYLIST }}")''',
+         '''        # The adoption kit's re-pin round 24: no kit secret holds the value.
+        only = self._apply_steps()["only"]
+        self.assertNotIn("PRIVACY_DENYLIST", only["env"])'''),
     ],
     "tests/test_secrets_surface.py": [
         ('''    def test_fleet_yml_declares_it_for_every_repo(self):
@@ -322,16 +328,16 @@ TEST_EDITS = {
     }''',
          '''    # None in the kit's fleet (DECISIONS C11 dropped them).
     WERE_FALSE: set = set()'''),
-        ('''        self.assertEqual(set(by_value), {("all",), (), ("labels",)})
+        ('''        self.assertEqual(set(by_value), {("all",), (), ("labels", "secrets")})
         self.assertEqual(by_value[()], self.WERE_FALSE)
-        self.assertEqual(by_value[("labels",)], self.LABELS_ONLY)
+        self.assertEqual(by_value[("labels", "secrets")], self.LABELS_ONLY)
         self.assertEqual(len(by_value[("all",)]), 21)''',
          '''        # The adopter drops the example repos, the only label-only rows, so a
         # file with none is as valid as one with three.
-        self.assertLessEqual(set(by_value), {("all",), ("labels",)})
+        self.assertLessEqual(set(by_value), {("all",), ("labels", "secrets")})
         self.assertIn(("all",), by_value)
         self.assertEqual(by_value.get((), set()), self.WERE_FALSE)
-        self.assertEqual(by_value.get(("labels",), set()), self.LABELS_ONLY)
+        self.assertEqual(by_value.get(("labels", "secrets"), set()), self.LABELS_ONLY)
         # What the engine guards as label-only must be marked so in the file.
         for name in {e["name"] for e in cfg["repos"]}:
             if rs.is_cms_label_only(name):

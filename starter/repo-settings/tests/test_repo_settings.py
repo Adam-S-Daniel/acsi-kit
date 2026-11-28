@@ -4019,11 +4019,11 @@ class MigrationLeavesDiffUnchangedTests(unittest.TestCase):
     # None in the kit's fleet (DECISIONS C11 dropped them).
     WERE_FALSE: set = set()
     # Since issue #88 these manage `labels` only, not nothing: whatever the
-    # fleet file marks `manage: ["labels"]` (the kit's three example repos,
+    # fleet file marks `manage: ["labels", "secrets"]` (the kit's three example repos,
     # until the adopter drops them).
     LABELS_ONLY = {
         e["name"] for e in rs.load_config(str(FLEET))["repos"]
-        if e["manage"] == ["labels"]
+        if e["manage"] == ["labels", "secrets"]
     }
 
     @staticmethod
@@ -4068,7 +4068,7 @@ class MigrationLeavesDiffUnchangedTests(unittest.TestCase):
                 settings["labels"] = rs.merge_labels(
                     defaults["labels"], (entry.get("overrides") or {}).get("labels"))
             if entry["name"] in self.LABELS_ONLY:
-                settings = {"labels": settings["labels"]}
+                settings = {k: settings[k] for k in ("labels", "secrets") if k in settings}
             targets.append({"repo": entry["name"], "settings": settings,
                             "manage": entry["manage"] != []})
         return targets
@@ -4087,10 +4087,10 @@ class MigrationLeavesDiffUnchangedTests(unittest.TestCase):
             by_value.setdefault(tuple(entry["manage"]), set()).add(entry["name"])
         # The adopter drops the example repos, the only label-only rows, so a
         # file with none is as valid as one with three.
-        self.assertLessEqual(set(by_value), {("all",), ("labels",)})
+        self.assertLessEqual(set(by_value), {("all",), ("labels", "secrets")})
         self.assertIn(("all",), by_value)
         self.assertEqual(by_value.get((), set()), self.WERE_FALSE)
-        self.assertEqual(by_value.get(("labels",), set()), self.LABELS_ONLY)
+        self.assertEqual(by_value.get(("labels", "secrets"), set()), self.LABELS_ONLY)
         # What the engine guards as label-only must be marked so in the file.
         for name in {e["name"] for e in cfg["repos"]}:
             if rs.is_cms_label_only(name):
@@ -4112,7 +4112,7 @@ class MigrationLeavesDiffUnchangedTests(unittest.TestCase):
             .replace("excluded (manage: false)", "excluded (manage: [])")
         )
         actual = new.getvalue()
-        for scope in ("all", "labels"):
+        for scope in ("all", "labels, secrets"):
             actual = actual.replace(f"\n  {rs.DIM}managed: {scope}{rs.RESET}", "")
         self.assertEqual(actual, expected)
         self.assertEqual(new_calls, legacy_calls)
@@ -4157,16 +4157,18 @@ class CmsLabelOnlyTests(unittest.TestCase):
         # The engine guards three named repos; the file may name all of them
         # or, once the adopter drops the example repos, none. The ones it
         # names must be exactly the ones the engine treats as label-only,
-        # and every `manage: ["labels"]` row must pass its rules.
+        # and every `manage: ["labels", "secrets"]` row must pass its rules.
         listed = {r.casefold() for r in rs.CMS_LABEL_ONLY_REPOS}
         self.assertEqual({t["repo"].casefold() for t in cms},
                          {t["repo"].casefold() for t in targets} & listed)
         for t in targets:
-            if t["manage"] == ["labels"]:
+            if t["manage"] == ["labels", "secrets"]:
                 rs.check_cms_label_only(t)
         for t in cms:
-            self.assertEqual(t["manage"], ["labels"])
-            self.assertEqual(list(t["effective"]), ["labels"])
+            self.assertEqual(t["manage"], ["labels", "secrets"])
+            # The kit's fleet.yml declares no fan-out (it is the adopter's to add), so the
+            # secrets surface is managed but names no secret.
+            self.assertEqual(sorted(t["effective"]), ["labels"])
             self.assertEqual([l["name"] for l in t["effective"]["labels"]],
                              ["agent-authored"])
 
@@ -4202,11 +4204,18 @@ class CmsLabelOnlyTests(unittest.TestCase):
         self.assertIn("'cms/ready'", msg)
 
     def test_other_manage_values_are_refused(self):
-        for manage in (["all"], ["labels", "security"]):
+        for manage in (["all"], ["labels", "security"], ["secrets", "security"]):
             with self.subTest(manage=manage):
                 with self.assertRaises(rs.ConfigError) as cm:
                     self._resolve(defaults_labels=[self.AGENT], manage=manage)
-                self.assertIn('[] or ["labels"]', str(cm.exception))
+                self.assertIn('[], ["labels"], ["secrets"], ["labels", "secrets"]',
+                              str(cm.exception))
+
+    def test_secrets_manage_values_are_accepted(self):
+        for manage in (["secrets"], ["labels", "secrets"]):
+            with self.subTest(manage=manage):
+                t = self._resolve(defaults_labels=[self.AGENT], manage=manage)
+                self.assertEqual(t[0]["manage"], manage)
 
     def test_manage_empty_checks_no_labels(self):
         t = self._resolve(defaults_labels=[{"name": "ci", "color": "ffffff"}], manage=[])
@@ -4236,7 +4245,7 @@ class CmsLabelOnlyTests(unittest.TestCase):
     def test_cms_label_repos_on_the_real_fleet(self):
         # One line per owner the file names, whatever their number. The
         # expectation is this test's own list of the three example sites, cut
-        # to the rows the file still marks `manage: ["labels"]`, and never
+        # to the rows the file still marks `manage: ["labels", "secrets"]`, and never
         # the engine's list: a one-owner fleet has one line holding all
         # three, and a fleet without the example repos has empty lines.
         sites = ("example-adopter/example-site-a", "example-adopter/example-site-platform",
@@ -4249,7 +4258,7 @@ class CmsLabelOnlyTests(unittest.TestCase):
             want = ",".join(sorted(
                 s.split("/", 1)[1] for s in sites
                 if s.casefold().split("/", 1)[0] == owner
-                and rows.get(s.casefold()) == ["labels"]))
+                and rows.get(s.casefold()) == ["labels", "secrets"]))
             with self.subTest(owner=owner):
                 rc, out = self._run("cms-label-repos", "--config", str(self.FLEET),
                                     "--owner", owner)

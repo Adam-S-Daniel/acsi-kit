@@ -8,7 +8,7 @@
 repo: repo-settings
 kit_name: repo-settings
 source: repo-settings
-source_sha: c2bbdaff3f0ed60498656c76773f7983f499d5d8
+source_sha: 82c810d5e67453e3b47b56a0195c5474255e0be7
 # Its sync-delivered files (AGENTS.md managed half, the fleet payload mirror)
 # are rebuilt from the exported _agent-guidance.
 after: [_agent-guidance]
@@ -62,7 +62,7 @@ edits:
     old: |2
             - name: Mint read-only GitHub App token for example-adopter
               id: token_example_adopter
-              uses: actions/create-github-app-token@v3.3.0
+              uses: actions/create-github-app-token@v3.4.0
     new: |2
             # Not set up yet, on the weekly schedule only: until create-apps.sh
             # has made the settings-read App and set its client id, a scheduled
@@ -85,7 +85,7 @@ edits:
             - name: Mint read-only GitHub App token for example-adopter
               id: token_example_adopter
               if: steps.read_app.outputs.ready == 'true'
-              uses: actions/create-github-app-token@v3.3.0
+              uses: actions/create-github-app-token@v3.4.0
     why: 'kit departure: base-only track. The weekly plan minted from the settings-read App with no gate, so it was red every Monday from the starter merge (step 4) until create-apps.sh set the App up. Only the schedule skips with a notice; a push or dispatch keeps the source''s failure at the mint, so a deleted variable cannot make a settings change read as no drift.'
   - path: .github/workflows/repo-settings.yml
     stage: output
@@ -105,12 +105,12 @@ edits:
     old: |2
             - name: Mint read-only GitHub App token for example-adopter-two
               id: token_example_adopter_two
-              uses: actions/create-github-app-token@v3.3.0
+              uses: actions/create-github-app-token@v3.4.0
     new: |2
             - name: Mint read-only GitHub App token for example-adopter-two
               id: token_example_adopter_two
               if: steps.read_app.outputs.ready == 'true'
-              uses: actions/create-github-app-token@v3.3.0
+              uses: actions/create-github-app-token@v3.4.0
     why: 'kit departure: base-only track. Gated like the first owner''s mint.'
   - path: .github/workflows/repo-settings.yml
     stage: output
@@ -194,19 +194,25 @@ edits:
   - path: tests/test_repo_settings.py
     stage: output
     old: "# Since issue #88 these manage `labels` only, not nothing.\n    LABELS_ONLY = {\n        \"example-adopter/example-site-platform\", \"example-adopter/example-site-a\",\n        \"example-adopter-two/example-site-b\",\n    }\n"
-    new: "# Since issue #88 these manage `labels` only, not nothing: whatever the\n    # fleet file marks `manage: [\"labels\"]` (the kit's three example repos,\n    # until the adopter drops them).\n    LABELS_ONLY = {\n        e[\"name\"] for e in rs.load_config(str(FLEET))[\"repos\"]\n        if e[\"manage\"] == [\"labels\"]\n    }\n"
+    new: "# Since issue #88 these manage `labels` only, not nothing: whatever the\n    # fleet file marks `manage: [\"labels\", \"secrets\"]` (the kit's three example repos,\n    # until the adopter drops them).\n    LABELS_ONLY = {\n        e[\"name\"] for e in rs.load_config(str(FLEET))[\"repos\"]\n        if e[\"manage\"] == [\"labels\", \"secrets\"]\n    }\n"
     why: >-
       The label-only repos are the file's own rows, so dropping the example repos (docs/generated-files.md) leaves the test valid.
   - path: tests/test_repo_settings.py
     stage: output
     old: "targets = rs.resolve_targets(rs.load_config(str(self.FLEET)), None)\n        cms = [t for t in targets if rs.is_cms_label_only(t[\"repo\"])]\n        self.assertEqual({t[\"repo\"] for t in cms}, set(rs.CMS_LABEL_ONLY_REPOS))\n"
-    new: "targets = rs.resolve_targets(rs.load_config(str(self.FLEET)), None)\n        cms = [t for t in targets if rs.is_cms_label_only(t[\"repo\"])]\n        # The engine guards three named repos; the file may name all of them\n        # or, once the adopter drops the example repos, none. The ones it\n        # names must be exactly the ones the engine treats as label-only,\n        # and every `manage: [\"labels\"]` row must pass its rules.\n        listed = {r.casefold() for r in rs.CMS_LABEL_ONLY_REPOS}\n        self.assertEqual({t[\"repo\"].casefold() for t in cms},\n                         {t[\"repo\"].casefold() for t in targets} & listed)\n        for t in targets:\n            if t[\"manage\"] == [\"labels\"]:\n                rs.check_cms_label_only(t)\n"
+    new: "targets = rs.resolve_targets(rs.load_config(str(self.FLEET)), None)\n        cms = [t for t in targets if rs.is_cms_label_only(t[\"repo\"])]\n        # The engine guards three named repos; the file may name all of them\n        # or, once the adopter drops the example repos, none. The ones it\n        # names must be exactly the ones the engine treats as label-only,\n        # and every `manage: [\"labels\", \"secrets\"]` row must pass its rules.\n        listed = {r.casefold() for r in rs.CMS_LABEL_ONLY_REPOS}\n        self.assertEqual({t[\"repo\"].casefold() for t in cms},\n                         {t[\"repo\"].casefold() for t in targets} & listed)\n        for t in targets:\n            if t[\"manage\"] == [\"labels\", \"secrets\"]:\n                rs.check_cms_label_only(t)\n"
     why: >-
       Every adopter drops the three example repos, which this pinned to the shipped file. The label-only set is what the file marks and the engine guards, and each such repo must still pass the engine's label-only rules.
   - path: tests/test_repo_settings.py
     stage: output
+    old: "self.assertEqual(sorted(t[\"effective\"]), [\"labels\", \"secrets\"])\n            self.assertEqual(t[\"effective\"][\"secrets\"], [{\"name\": \"PRIVACY_DENYLIST\"}])\n"
+    new: "# The kit's fleet.yml declares no fan-out (it is the adopter's to add), so the\n            # secrets surface is managed but names no secret.\n            self.assertEqual(sorted(t[\"effective\"]), [\"labels\"])\n"
+    why: >-
+      The kit ships no default secrets fan-out, so the label-only repos manage the secrets surface but carry no secret to write.
+  - path: tests/test_repo_settings.py
+    stage: output
     old: "for owner, want in ((\"example-adopter\", \"example-site-a,example-site-platform\"),\n                            (\"example-adopter-two\", \"example-site-b\")):\n            with self.subTest(owner=owner):\n"
-    new: "# One line per owner the file names, whatever their number. The\n        # expectation is this test's own list of the three example sites, cut\n        # to the rows the file still marks `manage: [\"labels\"]`, and never\n        # the engine's list: a one-owner fleet has one line holding all\n        # three, and a fleet without the example repos has empty lines.\n        sites = (\"example-adopter/example-site-a\", \"example-adopter/example-site-platform\",\n                 \"example-adopter-two/example-site-b\")\n        rows = {e[\"name\"].casefold(): e[\"manage\"]\n                for e in rs.load_config(str(self.FLEET))[\"repos\"]}\n        owners = {name.split(\"/\", 1)[0] for name in rows}\n        self.assertTrue(owners)\n        for owner in sorted(owners):\n            want = \",\".join(sorted(\n                s.split(\"/\", 1)[1] for s in sites\n                if s.casefold().split(\"/\", 1)[0] == owner\n                and rows.get(s.casefold()) == [\"labels\"]))\n            with self.subTest(owner=owner):\n"
+    new: "# One line per owner the file names, whatever their number. The\n        # expectation is this test's own list of the three example sites, cut\n        # to the rows the file still marks `manage: [\"labels\", \"secrets\"]`, and never\n        # the engine's list: a one-owner fleet has one line holding all\n        # three, and a fleet without the example repos has empty lines.\n        sites = (\"example-adopter/example-site-a\", \"example-adopter/example-site-platform\",\n                 \"example-adopter-two/example-site-b\")\n        rows = {e[\"name\"].casefold(): e[\"manage\"]\n                for e in rs.load_config(str(self.FLEET))[\"repos\"]}\n        owners = {name.split(\"/\", 1)[0] for name in rows}\n        self.assertTrue(owners)\n        for owner in sorted(owners):\n            want = \",\".join(sorted(\n                s.split(\"/\", 1)[1] for s in sites\n                if s.casefold().split(\"/\", 1)[0] == owner\n                and rows.get(s.casefold()) == [\"labels\", \"secrets\"]))\n            with self.subTest(owner=owner):\n"
     why: >-
       The expected per-owner split named the two invented owners, so a one-owner fleet (one owner holding all three repos) and a fleet without the example repos failed. It keeps its own list of the three example sites and cuts it to the rows the file still has, so an engine that lists the wrong repos still fails.
 

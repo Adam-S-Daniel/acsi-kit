@@ -3369,6 +3369,23 @@ By hand, once the sources had merged (MAINTAINING.md, "By hand": `npm ci` in the
 
 Reverse: re-pin each source to its "Before" sha, restore the three "Third pass" date edits in `export/manifests/repo-settings.yml` (two) and `agentskills.yml` (one), re-run the export, and put `privacy` back in the registry's row of `docs/settings-and-apps.md`.
 
+## Re-pin round 26 (2026-11-27): the label-only repos take the secrets fan-out
+
+Held back by the daily re-sync (`repo-settings` broke the export and its starter tests); fixed by the re-sync fix routine, only `repo-settings` moved.
+
+- `repo-settings` (`c2bbdaf` → `50b56e5`): the three example-site-platform repos in `fleet.yml` now say `manage: ["labels", "secrets"]` instead of `["labels"]`, and the engine accepts no other surface for them (ADR 0020 addendum, #241). The workflow's two label-leg token mints gain `permission-secrets: write`, and both label apply steps get `PRIVACY_DENYLIST`, so four apply steps hold the value, not two. Ships as exported.
+- The kit's patch `export/patches/repo-settings/kit_config.py` follows: the test anchor for `by_value` and its replacement use `("labels", "secrets")`; the fan-out value cut now expects four steps (`FANOUT_VALUE_COUNT`), the same value the kit still passes to none; a new test edit has `test_the_cms_apply_step_gets_the_fanned_out_value` assert the kit's label-only step has no `PRIVACY_DENYLIST`.
+- The manifest's `repo-settings.yml` test edits that selected the label-only rows by `manage == ["labels"]` select `["labels", "secrets"]`, and one new edit has `test_real_fleet_resolves_and_only_three_repos_are_label_only` expect the `labels` surface alone in `effective`, since the kit's `fleet.yml` declares no default secret.
+- The other sources stay. No shipped `.ps1` changed, so no Pester run was needed. No new skill or guidance section.
+- **Pages to review** (`doc_review.py --base HEAD`): `docs/traps.md` and `docs/week-to-week.md` name the changed `fleet.yml` and workflow only generally; no statement on them became wrong, so neither changed.
+
+| Source | Before | After |
+|---|---|---|
+| repo-settings | `c2bbdaff3f0e` | `50b56e5790b7` |
+| others | unchanged | unchanged |
+
+Reverse: re-pin `repo-settings` to its "Before" sha, restore the `("labels",)` text in `kit_config.py`, `FANOUT_VALUE_COUNT = 2`, drop the two new test edits, put `[\"labels\"]` back in the manifest's test edits, and re-run the export.
+
 ## Walk 3: an outside adopter's own identity and the printed commands (2026-11-26)
 
 A third walk as an outside adopter (Free plan, Claude Pro, base track) reached every base step (`verify.sh --track base`: 56 passed, 2 skipped, as expected on Free). Each finding below was confirmed on main first; none was dropped.
@@ -3430,3 +3447,20 @@ Reverse: delete the patch, its manifest entry and its test file, and re-run the 
 - An `_agent-guidance` copied from an older kit has the old sync; `docs/settings-and-apps.md` keeps the `--force` advice for that case.
 
 Reverse: delete the patch, its manifest entry and its test file, and re-run the export.
+
+## Re-pin round 27 (2026-11-27): round 26 by hand, both held sources to their heads
+
+The re-sync after #143 closed round 26's pull request (#140) as stale, because `repo-settings` had moved past its pin, and held back `_agent-guidance` too; the fix routine opened no new pull request (its branch name was #140's). This round, by hand, carries round 26's commit and moves both sources to their current heads.
+
+- `repo-settings` (`50b56e5` → `82c810d`) and `_agent-guidance` (`e227092` → `cc29768`): each source's only change is Dependabot's bump of `actions/create-github-app-token` from `v3.3.0` to `v3.4.0`, in its workflows and `actions.lock`. Ships as exported.
+- The kit's anchors follow: `_agent-guidance.yml`'s `actions.lock` edit (the left-out parity workflow's entry, P3) names `v3.4.0`, and `repo-settings.yml`'s four base-only-track edits of the plan job's mints name `v3.4.0`.
+- `docs/generated-files.md`, "Example repos in fleet.yml", names the rows as `manage: ["labels", "secrets"]` (round 26's `fleet.yml`). The other pages `doc_review.py --base origin/main` listed name the changed workflows, `fleet.yml` and the engine only generally; no statement on them became wrong.
+- The other sources stay. No shipped `.ps1` changed. No new skill or guidance section.
+
+| Source | Before | After |
+|---|---|---|
+| _agent-guidance | `e2270923ab44` | `cc2976802320` |
+| repo-settings | `c2bbdaff3f0e` (main; round 26 moved it to `50b56e5`) | `82c810d5e674` |
+| others | unchanged | unchanged |
+
+Reverse: revert this round's commit and round 26's, and re-run the export.

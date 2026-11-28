@@ -196,10 +196,11 @@ The owner's fleet includes a site platform and two sites. So
 `example-site-a`, and `<OWNER_TWO>/example-site-b`, and `_agent-guidance`'s
 `repos.yml` lists them under `cron_coverage.fleet` and
 `skills_bootstrap.repos`. Unless you have those repos, remove them in a pull
-request on each repo before the first apply: the three `manage: ["labels"]`
-rows in `fleet.yml`, and the three names in each of the two lists in
-`repos.yml`. The tests read those files, so none of them needs an edit; they
-pass with the example repos or without them, and with one owner or two.
+request on each repo before the first apply: the three
+`manage: ["labels", "secrets"]` rows in `fleet.yml`, and the three names in
+each of the two lists in `repos.yml`. The tests read those files, so none of
+them needs an edit; they pass with the example repos or without them, and
+with one owner or two.
 `apply-settings.sh` refuses while `fleet.yml` names a repo that doesn't exist,
 and a missing `cron_coverage.fleet` repo is an error for the coverage check.
 Add your own consumers the same way later.

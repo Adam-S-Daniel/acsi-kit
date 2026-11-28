@@ -6,7 +6,7 @@
 repo: _agent-guidance
 kit_name: agent-guidance
 source: _agent-guidance
-source_sha: e2270923ab4444b54e17bedbc703871cb5b59bc1
+source_sha: cc29768023202daf6f1453e4f02cd396069af959
 
 exclude:
   - path: docs/reference/adopt-the-whole-system.md
@@ -184,7 +184,7 @@ edits:
     old: |2
           '.github/workflows/health-reusable-parity.yml':
               - 'actions/checkout@v7.0.1'
-              - 'actions/create-github-app-token@v3.3.0'
+              - 'actions/create-github-app-token@v3.4.0'
               - 'actions/setup-node@v7.1.0'
     new: ""
     why: >-
