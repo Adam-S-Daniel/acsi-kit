@@ -3460,7 +3460,7 @@ The re-sync after #143 closed round 26's pull request (#140) as stale, because `
 | Source | Before | After |
 |---|---|---|
 | _agent-guidance | `e2270923ab44` | `cc2976802320` |
-| repo-settings | `c2bbdaff3f0e` (main) | `82c810d5e674` |
+| repo-settings | `c2bbdaff3f0e` (main; round 26 moved it to `50b56e5`) | `82c810d5e674` |
 | others | unchanged | unchanged |
 
 Reverse: revert this round's commit and round 26's, and re-run the export.
